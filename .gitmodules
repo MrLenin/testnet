@@ -1,6 +1,7 @@
 [submodule "x3"]
 	path = x3
 	url = git@github.com:evilnet/x3.git
+	branch = rubin-add_docker
 [submodule "nefarious"]
 	path = nefarious
 	url = https://github.com/evilnet/nefarious2.git
