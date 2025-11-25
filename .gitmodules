@@ -4,4 +4,4 @@
 	branch = rubin-add_docker
 [submodule "nefarious"]
 	path = nefarious
-	url = https://github.com/evilnet/nefarious2.git
+	url = git@github.com:evilnet/nefarious2.git

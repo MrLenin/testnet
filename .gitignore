@@ -1,0 +1,9 @@
+# Local environment overrides
+.env.local
+
+# Data directories
+data/
+x3_data/
+
+# Node modules
+node_modules/

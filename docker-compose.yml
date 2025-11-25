@@ -3,33 +3,52 @@ services:
   nefarious:
     container_name: nefarious
     build:
-        context: ./docker/nefarious
+        context: ./nefarious
         dockerfile: Dockerfile
     privileged: true
-    networks:
-      test_net:
-        ipv6_address: fec0:3200::99
+#    networks:
+#      test_net:
+#        ipv6_address: fec0:3200::99
     volumes:
-      - ./data/nefarious/ircd_local.conf:/home/nefarious/ircd/local.conf
+      - ./data/local.conf:/home/nefarious/ircd/local.conf
+#      - ./data/:/home/nefarious/data
     ports:
       - 6667:6667
       - 4497:4497
       - 9998:9998
-    environment:
-      - NET_PREFIX=fec0:3201:42:42::1/64
-      - NET_VIA=fec0:3200::92
-      - IRCD_GENERAL_NAME=testnet.loxxin.net
-      - IRCD_GENERAL_DESCRIPTION=TestNet Server
-      - IRCD_GENERAL_NUMERIC=99
-      - IRCD_ADMIN_LOCATION=us
-      - IRCD_ADMIN_CONTACT=support@afternet.org
+    env_file:
+      - .env
+      - .env.local
+    healthcheck:
+      test: ["CMD", "pgrep", "-x", "ircd"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
-networks:
-  test_net:
-    enable_ipv6: true
-    driver: bridge
-    ipam:
-      driver: default
-      config:
-        - subnet: 10.1.2.0/24
-        - subnet: fec0:3200::1/64
+  x3:
+    container_name: x3
+    build:
+      context: ./x3
+      dockerfile: Dockerfile
+    depends_on:
+      nefarious:
+        condition: service_healthy
+    env_file:
+      - .env
+      - .env.local
+    volumes:
+      - x3_data:/x3/data
+
+volumes:
+  x3_data:
+
+#networks:
+#  test_net:
+#    enable_ipv6: true
+#    driver: bridge
+#    ipam:
+#      driver: default
+#      config:
+#        - subnet: 10.1.2.0/24
+#        - subnet: fec0:3200::1/64

@@ -72,3 +72,4 @@ Key config files:
 ## Project Status
 
 Work in progress - recently converted to git submodules. The `archive/` directory contains pre-submodule versions (can be ignored). X3 tracks a custom fork branch (`rubin-add_docker`) with Docker enhancements.
+- dont build the containers yourself, it eats too much tokens watching make go by
