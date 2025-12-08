@@ -5,7 +5,6 @@
 .vscode/
 
 # Data directories
-data/
 x3_data/
 
 # Node modules
