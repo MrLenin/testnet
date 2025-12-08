@@ -25,11 +25,12 @@ git submodule update --init --recursive
 
 ### 2. Configuration
 
-The environment uses these configuration files:
+Configuration files are stored in `data/` and mounted directly into containers:
 
-- `.env` - Environment variables for X3 configuration
-- `docker-compose.yml` - Docker service definitions
-- `data/nefarious/ircd_local.conf` - Nefarious local configuration (mounted as volume)
+- `data/local.conf` - Nefarious IRCd configuration (mounted to container)
+- `data/x3.conf` - X3 services configuration (mounted to container)
+- `.env` - Environment variables (mostly unused; configs are hardcoded in the above files)
+- `.env.local` - Local overrides (not committed to repo)
 
 ### 3. Build and Run
 
@@ -56,12 +57,13 @@ Once running, you can connect to the IRC server:
 ```
 testnet/
 ├── docker-compose.yml    # Docker orchestration
-├── .env                  # Environment variables
+├── .env                  # Environment variables (mostly unused)
 ├── nefarious/            # Nefarious IRCd (git submodule)
 ├── x3/                   # X3 Services (git submodule)
-└── data/                 # Runtime configuration data
-    └── nefarious/
-        └── ircd_local.conf
+├── data/                 # Configuration files (committed)
+│   ├── local.conf        # Nefarious IRCd config
+│   └── x3.conf           # X3 services config
+└── tests/                # Integration tests
 ```
 
 ## Submodules
@@ -80,14 +82,6 @@ To pull the latest changes from upstream:
 ```bash
 git submodule update --remote --merge
 ```
-
-## Network Configuration
-
-The Docker network is configured with both IPv4 and IPv6:
-
-- **IPv4 subnet:** `10.1.2.0/24`
-- **IPv6 subnet:** `fec0:3200::1/64`
-- **Nefarious IPv6:** `fec0:3200::99`
 
 ## Exposed Ports
 
