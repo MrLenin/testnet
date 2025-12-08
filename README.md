@@ -88,8 +88,8 @@ git submodule update --remote --merge
 | Port | Service |
 |------|---------|
 | 6667 | IRC (plain) |
-| 4497 | IRC (SSL) |
-| 9998 | Services link |
+| 9998 | IRC (SSL) |
+| 4497 | Services link |
 
 ## Troubleshooting
 
