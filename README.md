@@ -13,7 +13,7 @@ A Docker-based test environment for running [Nefarious IRCd](https://github.com/
 ### 1. Clone the Repository
 
 ```bash
-git clone --recurse-submodules git@github.com:YOUR_ORG/testnet.git
+git clone --recurse-submodules git@github.com:evilnet/testnet.git
 cd testnet
 ```
 
