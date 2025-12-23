@@ -64,6 +64,7 @@ The numeric is derived from the server's position in the network and uses a base
 | `SJ` | SVSJOIN | Force channel join |
 | `SP` | SVSPART | Force channel part |
 | `SX` | SVSQUIT | Force quit |
+| `SE` | SETNAME | Change user realname (GECOS) |
 
 ### Administrative
 | Token | Full Command | Purpose |
@@ -247,6 +248,44 @@ struct SASLSession {
     int flags;                  // SDFLAG_STALE etc.
 };
 ```
+
+## SETNAME (SE) P10 Command
+
+The SETNAME command allows users to change their realname (GECOS field) mid-session.
+
+### P10 Message Format
+```
+[USER_NUMERIC] SE :[NEW_REALNAME]
+```
+
+### Example
+```
+ABAAB SE :This is my new realname
+```
+
+### Direction
+- **Client→Server**: User sends `SETNAME :newname` command
+- **Server→Server**: Propagated via P10 `SE` token
+- **Server→Client**: Sent to channel members with `setname` capability
+
+### Client Protocol (IRCv3)
+```
+Client: SETNAME :New Real Name
+Server: :nick!user@host SETNAME :New Real Name
+```
+
+The client-facing SETNAME is only sent to users who have negotiated the `setname` capability.
+
+### Implementation Notes
+1. Realname is truncated to REALLEN (50 characters) if too long
+2. Message is only propagated if realname actually changed
+3. Local clients receive notification via `sendcmdto_common_channels_capab_butone()`
+4. Feature flag: `FEAT_CAP_setname` (default: TRUE)
+
+### Services (X3) Handling
+X3 does not currently need to handle SETNAME for channel services purposes, but should parse and ignore unknown commands gracefully. The realname change is informational only.
+
+---
 
 ## Validation Rules for P10 Changes
 

@@ -378,16 +378,40 @@ The invite-notify capability is purely client-facing notification.
 
 ---
 
-### Phase 13: Setname (Next)
+### Phase 13: Setname ✅ COMPLETE
 
-**Goal**: Realname change notifications
+**Goal**: Allow users to change their realname (GECOS) mid-session
 
-**setname** - Realname change notifications
-```c
-:nick!u@h SETNAME :New Real Name
+**IRCv3 Spec**: https://ircv3.net/specs/extensions/setname
+
+**Client Format**: `:nick!user@host SETNAME :New Real Name`
+
+**P10 Token**: `SE` (note: `SN` was already taken by SVSNICK)
+
+**Files modified**:
+- `nefarious/include/capab.h` - Added CAP_SETNAME
+- `nefarious/include/ircd_features.h` - Added FEAT_CAP_setname
+- `nefarious/ircd/ircd_features.c` - Registered feature (default: TRUE)
+- `nefarious/ircd/m_cap.c` - Added setname to capability list
+- `nefarious/include/msg.h` - Added MSG_SETNAME, TOK_SETNAME ("SE")
+- `nefarious/include/handlers.h` - Added m_setname, ms_setname declarations
+- `nefarious/ircd/m_setname.c` - New file: command handlers
+- `nefarious/ircd/parse.c` - Registered SETNAME command in msgtab
+- `nefarious/ircd/Makefile.in` - Added m_setname.c to build
+
+**P10 Protocol**:
+```
+[USER_NUMERIC] SE :[NEW_REALNAME]
 ```
 
-**Note**: Requires new P10 command (SN) for S2S propagation.
+**Implementation details**:
+1. Client sends `SETNAME :new realname` to local server
+2. Server validates length (max REALLEN = 50 chars)
+3. Server updates `cli_info(sptr)` with new realname
+4. Server propagates `SE :[realname]` to all other servers via P10
+5. Server notifies channel members who have `setname` capability
+
+**Feature flag**: `FEAT_CAP_setname` (default: TRUE)
 
 ---
 
@@ -560,13 +584,13 @@ Client                Nefarious              X3                  Keycloak
 
 ### Features Needing New P10 Commands
 
-**SETNAME** - New command required:
+**SETNAME** - ✅ Implemented:
 ```
-[SERVER] SN [USER_NUMERIC] :[NEW_REALNAME]
+[USER_NUMERIC] SE :[NEW_REALNAME]
 ```
-- Currently realname is only sent in initial NICK
-- No way to change mid-session
-- Requires: msg.h definition, parse.c handler, proto-p10.c sender
+- Token: `SE` (not `SN` which is SVSNICK)
+- Propagated S2S when user changes realname
+- X3 can safely ignore (informational only)
 
 **BATCH** - New command required:
 ```
@@ -628,7 +652,7 @@ These require NO P10 changes:
 |------|---------|-------------|--------|--------|
 | 10 | labeled-response | **None** (client-side) | Medium | ✅ Done |
 | 11 | batch | **None** (client-side) | Medium | ✅ Done |
-| 12 | setname | New SN command | Medium | Pending |
+| 12 | setname | New SE command | Medium | ✅ Done |
 | 13 | message-tags S2S | **Major format change** | Very High | Future |
 
 ---
