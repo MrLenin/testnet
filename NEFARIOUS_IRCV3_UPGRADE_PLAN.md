@@ -183,13 +183,35 @@ void sendcmdto_one_tags(..., struct MessageTag* tags, ...);
 
 ---
 
-### Phase 5: Echo-Message
+### Phase 5: Echo-Message ✅ COMPLETE
 
 **Goal**: Let clients receive their own sent messages back
 
-**Files to modify**:
-- `nefarious/include/capab.h` - Add CAP_ECHOMSG
-- `nefarious/ircd/m_privmsg.c` - Echo back to sender
+**Files modified**:
+- `nefarious/include/capab.h` - Add CAP_ECHOMSG ✅
+- `nefarious/include/ircd_features.h` - Add FEAT_CAP_echo_message ✅
+- `nefarious/ircd/ircd_features.c` - Register feature ✅
+- `nefarious/ircd/m_cap.c` - Add echo-message to capability list ✅
+- `nefarious/ircd/ircd_relay.c` - Echo PRIVMSG/NOTICE back to sender ✅
+
+**Implementation**:
+1. Added `CAP_ECHOMSG` capability and `FEAT_CAP_echo_message` feature flag
+
+2. Modified relay functions to echo messages back to sender:
+   - `relay_channel_message()` - Echo channel PRIVMSG
+   - `relay_channel_notice()` - Echo channel NOTICE
+   - `relay_private_message()` - Echo private PRIVMSG (with sptr != acptr check)
+   - `relay_private_notice()` - Echo private NOTICE (with sptr != acptr check)
+
+3. Each function checks:
+   ```c
+   if (feature_bool(FEAT_CAP_echo_message) && CapActive(sptr, CAP_ECHOMSG))
+       sendcmdto_one(sptr, CMD_PRIVATE/NOTICE, sptr, ...);
+   ```
+
+4. For private messages, added `sptr != acptr` check to avoid duplicate when messaging self
+
+**Feature flag**: `FEAT_CAP_echo_message` (default: TRUE)
 
 ---
 
@@ -474,7 +496,7 @@ These require NO P10 changes:
 | Step | Feature | P10 Changes | Effort | Status |
 |------|---------|-------------|--------|--------|
 | 5 | server-time | None | Low | ✅ Done |
-| 6 | echo-message | None | Low | |
+| 6 | echo-message | None | Low | ✅ Done |
 | 7 | account-tag | None | Low | |
 | - | chghost | **Already done** (FA) | None | ✅ Done |
 | 8 | invite-notify | None | Low | |
