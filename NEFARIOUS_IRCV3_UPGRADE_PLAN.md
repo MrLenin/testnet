@@ -347,7 +347,38 @@ The invite-notify capability is purely client-facing notification.
 
 ---
 
-### Phase 11: Setname (Future)
+### Phase 11: Labeled-Response ✅ COMPLETE
+
+**Goal**: Allow clients to correlate commands with server responses using `@label` tag
+
+**Files modified**:
+- `nefarious/include/client.h` - Added `con_label[64]` field
+- `nefarious/ircd/parse.c` - Parse `@label=` from client input
+- `nefarious/ircd/send.c` - Added `format_message_tags_for()` and `sendcmdto_one_tags()`
+- `nefarious/ircd/ircd_reply.c` - Modified `send_reply()` for label tags
+- `nefarious/ircd/ircd_relay.c` - Updated echo-message to use tags
+- `nefarious/include/capab.h` - Added CAP_LABELEDRESP
+
+**Feature flag**: `FEAT_CAP_labeled_response` (default: TRUE)
+
+---
+
+### Phase 12: Batch ✅ COMPLETE
+
+**Goal**: Group related server responses for client processing
+
+**Files modified**:
+- `nefarious/include/client.h` - Added `con_batch_id[16]` and `con_batch_seq`
+- `nefarious/include/msg.h` - Added MSG_BATCH
+- `nefarious/ircd/send.c` - Added `send_batch_start()`, `send_batch_end()`
+- `nefarious/ircd/ircd_reply.c` - Updated for @batch tag support
+- `nefarious/include/capab.h` - Added CAP_BATCH
+
+**Feature flag**: `FEAT_CAP_batch` (default: TRUE)
+
+---
+
+### Phase 13: Setname (Next)
 
 **Goal**: Realname change notifications
 
@@ -592,13 +623,13 @@ These require NO P10 changes:
 | 8 | chghost | None (FA exists) | Low | ✅ Done |
 | 9 | invite-notify | None | Low | ✅ Done |
 
-### Tier 3: P10 Infrastructure Required
-| Step | Feature | P10 Changes | Effort |
-|------|---------|-------------|--------|
-| 9 | message-tags S2S | **Major format change** | Very High |
-| 10 | labeled-response | Needs tags | High |
-| 11 | batch | New BT command + tags | High |
-| 12 | setname | New SN command | Medium |
+### Tier 3: Client-Side First, Then P10
+| Step | Feature | P10 Changes | Effort | Status |
+|------|---------|-------------|--------|--------|
+| 10 | labeled-response | **None** (client-side) | Medium | ✅ Done |
+| 11 | batch | **None** (client-side) | Medium | ✅ Done |
+| 12 | setname | New SN command | Medium | Pending |
+| 13 | message-tags S2S | **Major format change** | Very High | Future |
 
 ---
 
