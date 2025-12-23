@@ -82,32 +82,29 @@ Upgrade Nefarious IRCd from IRCv3.0/3.1 to full IRCv3.2+ compliance, including S
 
 ### Phase 2: SASL 3.2 Enhancements
 
-**Goal**: Enable OAUTHBEARER token refresh via REAUTHENTICATE
+**Goal**: Enable OAUTHBEARER token refresh via post-registration AUTHENTICATE
 
 **Files to modify**:
-- `nefarious/include/capab.h` - Add CAP_CAPNOTIFY
-- `nefarious/ircd/m_cap.c` - Add cap-notify, mechanism values
-- `nefarious/ircd/m_authenticate.c` - Add REAUTHENTICATE handler
-- `nefarious/ircd/parse.c` - Register REAUTHENTICATE command
+- `nefarious/include/capab.h` - Add CAP_CAPNOTIFY ✅
+- `nefarious/ircd/m_cap.c` - Add cap-notify, mechanism values ✅
+- `nefarious/ircd/m_authenticate.c` - Allow AUTHENTICATE after registration
+- `nefarious/ircd/m_sasl.c` - Send AC after successful reauth
 
 **Changes**:
 
-1. Add `cap-notify` capability:
-   ```c
-   #define CAP_CAPNOTIFY  0x0080
-   ```
+1. Add `cap-notify` capability: ✅ (for future CAP NEW/DEL, not required for reauth)
 
-2. SASL mechanism advertisement in CAP value:
-   - Query services for mechanism list
+2. SASL mechanism advertisement in CAP value: ✅
    - Output `sasl=PLAIN,EXTERNAL,OAUTHBEARER` for CAP 302
 
-3. Implement REAUTHENTICATE command:
-   - Only for registered clients with cap-notify
-   - Preserve existing auth until success
-   - On success: update account, send ACCOUNT notification
-   - On failure: keep existing auth state
+3. Allow post-registration AUTHENTICATE:
+   - Remove `IsSASLComplete` blocker in m_authenticate.c
+   - Reset SASL state, generate new cookie
+   - Reuse existing `S` subcmd - no P10 changes needed
 
-4. CAP NEW/DEL notifications for cap-notify clients
+4. Send AC after successful reauth:
+   - In m_sasl.c `L` handler, detect if user already registered
+   - Send `AC` command to propagate account change network-wide
 
 ---
 
@@ -242,78 +239,74 @@ SASL <target> <server>!<fd>.<cookie> <subcmd> <data> [ext]
 
 ### Existing Subcmd Codes
 
-| Code | Direction | Meaning |
-|------|-----------|---------|
-| `S` | Nef→X3 | Start (mechanism selection) |
-| `H` | Nef→X3 | Host info (`user@host:ip`) |
-| `C` | Both | Continue (auth data) |
-| `D` | X3→Nef | Done (`S`=success, `F`=fail, `A`=abort) |
-| `L` | X3→Nef | Login (`handle timestamp`) |
-| `M` | X3→Nef | Mechanisms list |
-| `I` | X3→Nef | Impersonation |
+| Code | Direction | Meaning | Nefarious Handler |
+|------|-----------|---------|-------------------|
+| `S` | Nef→X3 | Start (mechanism selection) | Outbound only |
+| `H` | Nef→X3 | Host info (`user@host:ip`) | Outbound only |
+| `C` | Both | Continue (auth data) | ✅ m_sasl.c:178 |
+| `D` | X3→Nef | Done (`S`=success, `F`=fail, `A`=abort) | ✅ m_sasl.c:197 |
+| `L` | X3→Nef | Login (`handle timestamp`) | ✅ m_sasl.c:181 |
+| `M` | X3→Nef | Mechanisms list | ✅ m_sasl.c:212 |
 
-### New Code for REAUTHENTICATE: `R`
+**Note**: X3 sends `I` (Impersonation) but Nefarious does not handle it - silently ignored.
 
-**Purpose**: Allow re-authentication after initial SASL success (token refresh)
+### REAUTHENTICATE: Backwards-Compatible Approach
 
-**Direction**: Nef→X3 (client-initiated via new REAUTHENTICATE command)
+**Key Design Decision**: No new P10 subcmd needed. Reuse existing `S` (Start) subcmd.
 
-**Format**:
-```
-SASL <target> <server>!<fd>.<cookie> R <mechanism>
-```
+The existing SASL P10 flow works for both pre-registration and post-registration auth.
+The only difference is what happens after success:
+- Pre-registration: Client completes registration normally
+- Post-registration: Nefarious sends `AC` to propagate account change network-wide
 
 ### Nefarious Changes Required
 
 **File**: `nefarious/ircd/m_authenticate.c`
 
-Current blocker (line ~121):
+Current blocker (line ~120):
 ```c
 if (IsSASLComplete(cptr))
     return send_reply(cptr, ERR_SASLALREADY);
 ```
 
 Changes needed:
-1. Add `m_reauthenticate()` handler that bypasses `IsSASLComplete` check
-2. Clear SASL state but preserve account until new auth succeeds
-3. Send `R` subcmd instead of `S` to signal reauth to services
+1. Remove or modify the `IsSASLComplete` check to allow re-authentication
+2. Reset SASL state for new auth attempt (clear cookie, generate new one)
+3. Continue using `S` subcmd - no P10 protocol changes needed
 
 **File**: `nefarious/ircd/m_sasl.c`
 
-Changes needed:
-1. Handle `R` response from services (mirror of `S` but for reauth)
-2. On reauth success: update account, send ACCOUNT notification to channel members
+Changes needed (in `L` handler, around line 181):
+1. Detect if client is already registered (has been introduced via `N`)
+2. If registered and account changed, send `AC` command network-wide:
+   ```c
+   if (IsUser(acptr) && strcmp(old_account, new_account)) {
+       sendcmdto_serv_butone(&me, CMD_ACCOUNT, cptr, "%C %s %Tu",
+                             acptr, cli_user(acptr)->account, cli_user(acptr)->acc_create);
+   }
+   ```
 
 ### X3 Changes Required
 
-**File**: `x3/src/nickserv.c` (`handle_sasl_input()` and `sasl_packet()`)
+**File**: `x3/src/nickserv.c`
 
-Changes needed:
-1. Handle `R` subcmd in `handle_sasl_input()`
-2. Track reauth state in `SASLSession` struct:
-   ```c
-   struct SASLSession {
-       // ... existing fields ...
-       int is_reauth;           // Flag for reauthentication
-       char* old_account;       // Preserve until success
-   };
-   ```
-3. On reauth success:
-   - Compare old vs new account
-   - Send `L` with new account info
-   - Send `D S` for success
-4. On reauth failure:
-   - Keep old account active
-   - Send `D F`
+Minimal changes - X3 already handles `S` subcmd correctly. The flow is:
+1. Receive `S` with mechanism
+2. Process auth (same as pre-registration)
+3. Send `L` with account info
+4. Send `D S` for success
+
+X3 doesn't need to know if this is initial auth or reauth - the protocol is identical.
 
 ### REAUTHENTICATE Flow (End-to-End)
 
 ```
 Client                Nefarious              X3                  Keycloak
    |                      |                   |                      |
-   +--REAUTHENTICATE----->|                   |                      |
+   +--AUTHENTICATE------->|                   |                      |
    |  OAUTHBEARER         |                   |                      |
-   |                      |-SASL R OAUTHBEARER|                      |
+   |                      |-SASL S OAUTHBEARER|  (reuses S subcmd)   |
+   |                      |-SASL H user@host  |                      |
    |                      |                   |                      |
    |<--AUTHENTICATE +-----|<--SASL C +--------|                      |
    |                      |                   |                      |
@@ -328,15 +321,17 @@ Client                Nefarious              X3                  Keycloak
    |<--904 LOGGEDIN-------|                   |                      |
    |<--903 SASLSUCCESS----|                   |                      |
    |                      |                   |                      |
-   |                      |--ACCOUNT nick acc-| (to channel members) |
+   |                      |==AC user account==|  (broadcast if user  |
+   |                      |                   |   already registered)|
 ```
 
 ### Key Implementation Details
 
-1. **Session Preservation**: During reauth, old session cookie is reused
-2. **Account Continuity**: Old account remains valid until new auth succeeds
-3. **Failure Handling**: On reauth failure, client stays logged in with old account
-4. **ACCOUNT Notification**: After successful reauth, notify channel members if account changed
+1. **No New P10 Subcmd**: Reuse existing `S` - fully backwards compatible
+2. **Session Reset**: Generate new cookie for each auth attempt
+3. **Account Propagation**: Send `AC` after successful reauth for registered users
+4. **Failure Handling**: On failure, client keeps existing account (if any)
+5. **cap-notify NOT required**: REAUTHENTICATE works independently of cap-notify
 
 ---
 
@@ -346,7 +341,7 @@ Client                Nefarious              X3                  Keycloak
 
 | Feature | P10 Changes | Complexity | Notes |
 |---------|-------------|------------|-------|
-| REAUTHENTICATE | New `R` subcmd | Medium | See above |
+| REAUTHENTICATE | **None** | Low | Reuse existing `S` subcmd + send `AC` after |
 | Message Tags | **Major redesign** | Very High | Fundamental format change |
 | Account-tag | None | Low | Account already flows via `AC` |
 | Server-time | None | Low | Timestamps exist in protocol |
@@ -427,12 +422,12 @@ These require NO P10 changes:
 ## Revised Implementation Priority
 
 ### Tier 1: OAUTHBEARER Token Refresh (Primary Goal)
-| Step | Feature | P10 Changes | Effort |
-|------|---------|-------------|--------|
-| 1 | CAP LS 302 with values | None | Low |
-| 2 | cap-notify capability | None | Low |
-| 3 | SASL mechanism advertisement | None | Low |
-| 4 | REAUTHENTICATE command | New `R` subcmd | Medium |
+| Step | Feature | P10 Changes | Effort | Status |
+|------|---------|-------------|--------|--------|
+| 1 | CAP LS 302 with values | None | Low | ✅ Done |
+| 2 | cap-notify capability | None | Low | ✅ Done |
+| 3 | SASL mechanism advertisement | None | Low | ✅ Done |
+| 4 | REAUTHENTICATE command | **None** (reuse `S`) | Low | 🔄 In Progress |
 
 ### Tier 2: Quick Wins (No P10 Changes)
 | Step | Feature | P10 Changes | Effort |
@@ -458,7 +453,7 @@ These require NO P10 changes:
 1. **CAP negotiation**: Test `CAP LS 302` response includes values
 2. **SASL mechanisms**: Verify `sasl=PLAIN,EXTERNAL,OAUTHBEARER`
 3. **REAUTHENTICATE**: Test mid-session token refresh with Keycloak
-4. **P10 flow**: Verify SASL `R` subcmd flows correctly Nef↔X3
+4. **P10 flow**: Verify existing `S` subcmd works for reauth, `AC` sent after
 5. **Message tags**: Verify @time, @account formatting (client-side)
 6. **Client compatibility**: Test with IRCCloud, The Lounge, WeeChat
 
@@ -468,7 +463,8 @@ These require NO P10 changes:
 
 - All features are opt-in via CAP negotiation
 - Legacy clients (no CAP 302) get existing behavior
-- P10 `R` subcmd for REAUTHENTICATE is additive (backward compatible)
+- **REAUTHENTICATE requires NO P10 changes** - reuses existing `S` subcmd
+- `AC` command already exists for account propagation
 - Message tags S2S can be deferred - implement client-side first
 - Feature flags in ircd_features.h control each capability
 - X3 keycloak-integration branch already has OAUTHBEARER support
