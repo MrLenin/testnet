@@ -171,15 +171,25 @@ void sendcmdto_one_tags(..., struct MessageTag* tags, ...);
 
 ---
 
-### Phase 4: Server-Time
+### Phase 4: Server-Time ✅ COMPLETE
 
 **Goal**: Timestamp all messages for clients that request it
 
-**Files to modify**:
-- `nefarious/include/capab.h` - Add CAP_SERVERTIME
-- `nefarious/ircd/send.c` - Add @time tag to messages
+**Files modified**:
+- `nefarious/include/capab.h` - Add CAP_SERVERTIME ✅
+- `nefarious/include/ircd_features.h` - Add FEAT_CAP_server_time ✅
+- `nefarious/ircd/ircd_features.c` - Register feature ✅
+- `nefarious/ircd/m_cap.c` - Add server-time to capability list ✅
+- `nefarious/ircd/send.c` - Add @time tag to messages ✅
 
-**Format**: `@time=2025-12-23T12:30:00.000Z`
+**Implementation**:
+1. Added `CAP_SERVERTIME` capability and `FEAT_CAP_server_time` feature flag
+2. Modified send.c to add `@time=YYYY-MM-DDTHH:MM:SS.sssZ` tag to messages
+3. Uses `gettimeofday()` and `gmtime_r()` for ISO 8601 format timestamps
+
+**Format**: `@time=2025-12-23T12:30:00.123Z`
+
+**Feature flag**: `FEAT_CAP_server_time` (default: TRUE)
 
 ---
 
@@ -304,17 +314,49 @@ The chghost capability is purely client-facing notification.
 
 ---
 
-### Phase 10: Invite-Notify
+### Phase 10: Invite-Notify ✅ COMPLETE
 
-**invite-notify** - Notify ops of channel invitations
-```c
-:inviter!u@h INVITE invited #channel
-```
+**Goal**: Notify channel members when someone is invited to the channel
+
+**Files modified**:
+- `nefarious/include/capab.h` - Add CAP_INVITENOTIFY ✅
+- `nefarious/include/ircd_features.h` - Add FEAT_CAP_invite_notify ✅
+- `nefarious/ircd/ircd_features.c` - Register feature ✅
+- `nefarious/ircd/m_cap.c` - Add invite-notify to capability list ✅
+- `nefarious/ircd/m_invite.c` - Send INVITE to channel members with capability ✅
+
+**Implementation**:
+1. Added `CAP_INVITENOTIFY` capability and `FEAT_CAP_invite_notify` feature flag
+
+2. Modified `m_invite()` (local client handler) to notify channel members:
+   ```c
+   if (feature_bool(FEAT_CAP_invite_notify))
+     sendcmdto_channel_capab_butserv_butone(sptr, CMD_INVITE, chptr, sptr, 0,
+                                            CAP_INVITENOTIFY, CAP_NONE,
+                                            "%C %H", acptr, chptr);
+   ```
+
+3. Modified `ms_invite()` (server message handler) with same notification
+
+**Format**: `:inviter!user@host INVITE invitee #channel`
+
+**Feature flag**: `FEAT_CAP_invite_notify` (default: TRUE)
+
+**Note**: The P10 INVITE (I) command already exists for S2S propagation.
+The invite-notify capability is purely client-facing notification.
+
+---
+
+### Phase 11: Setname (Future)
+
+**Goal**: Realname change notifications
 
 **setname** - Realname change notifications
 ```c
 :nick!u@h SETNAME :New Real Name
 ```
+
+**Note**: Requires new P10 command (SN) for S2S propagation.
 
 ---
 
@@ -541,14 +583,14 @@ These require NO P10 changes:
 | 3 | SASL mechanism advertisement | None | Low | ✅ Done |
 | 4 | Post-registration AUTHENTICATE | **None** (reuse `S`) | Low | ✅ Done |
 
-### Tier 2: Quick Wins (No P10 Changes)
+### Tier 2: Quick Wins (No P10 Changes) ✅ COMPLETE
 | Step | Feature | P10 Changes | Effort | Status |
 |------|---------|-------------|--------|--------|
 | 5 | server-time | None | Low | ✅ Done |
 | 6 | echo-message | None | Low | ✅ Done |
 | 7 | account-tag | None | Low | ✅ Done |
 | 8 | chghost | None (FA exists) | Low | ✅ Done |
-| 9 | invite-notify | None | Low | |
+| 9 | invite-notify | None | Low | ✅ Done |
 
 ### Tier 3: P10 Infrastructure Required
 | Step | Feature | P10 Changes | Effort |
