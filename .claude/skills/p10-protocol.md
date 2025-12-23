@@ -278,3 +278,207 @@ When reviewing P10 protocol changes:
 3. **Single Server Test**: Test with one Nefarious + one X3 first
 4. **Multi-Server Test**: Verify `AC` propagation across multiple servers
 5. **Error Cases**: Test auth failure, timeout, abort scenarios
+
+---
+
+## Feature Flags Affecting P10 Protocol
+
+Many Nefarious feature flags change P10 message formats or behavior. When writing P10-related code, always check for these feature flags.
+
+### FEAT_EXTENDED_ACCOUNTS
+
+**Default**: TRUE
+
+Affects the ACCOUNT (AC) command format.
+
+| Setting | Format | Example |
+|---------|--------|---------|
+| FALSE | `AC <user> <account> [timestamp]` | `AB AC ABAAB myaccount 1703345678` |
+| TRUE | `AC <user> <subtype> <account> [timestamp]` | `AB AC ABAAB R myaccount 1703345678` |
+
+**Subtypes for extended format**:
+- `R` - Register (first login)
+- `M` - Modify (account change)
+- `U` - Unregister (logout)
+- `C` - LOC request
+- `H` - LOC request with host info
+- `S` - LOC request with host + SSL fingerprint
+- `A` - LOC accepted
+- `D` - LOC denied
+
+**Code pattern**:
+```c
+if (feature_bool(FEAT_EXTENDED_ACCOUNTS)) {
+    sendcmdto_serv_butone(&me, CMD_ACCOUNT, NULL, "%C %c %s %Tu",
+                          acptr, type, account, timestamp);
+} else {
+    sendcmdto_serv_butone(&me, CMD_ACCOUNT, NULL, "%C %s %Tu",
+                          acptr, account, timestamp);
+}
+```
+
+### FEAT_SASL_SENDHOST
+
+**Default**: TRUE
+
+When enabled, Nefarious sends the `H` (host info) subcmd after `S` in SASL flow.
+
+```
+SASL target source!fd.cookie H :user@host:ip
+```
+
+**Code pattern**:
+```c
+if (feature_bool(FEAT_SASL_SENDHOST))
+    sendcmdto_one(&me, CMD_SASL, acptr, "%C %C!%u.%u H :%s@%s:%s",
+                  acptr, &me, cli_fd(cptr), cli_saslcookie(cptr),
+                  cli_username(cptr), realhost, cli_sock_ip(cptr));
+```
+
+### FEAT_LOC_SENDHOST / FEAT_LOC_SENDSSLFP
+
+**Defaults**: FALSE / FALSE
+
+Controls Login-On-Connect (LOC) message format.
+
+| LOC_SENDHOST | LOC_SENDSSLFP | AC Subcmd | Format |
+|--------------|---------------|-----------|--------|
+| FALSE | - | `C` | `AC target C .fd.cookie account :password` |
+| TRUE | FALSE | `H` | `AC target H .fd.cookie user@host:ip account :password` |
+| TRUE | TRUE | `S` | `AC target S .fd.cookie user@host:ip sslfingerprint account :password` |
+
+### FEAT_OPLEVELS
+
+**Default**: FALSE
+
+Enables channel operator levels (+A/+U passwords, numeric op levels).
+
+Affects BURST message user list format:
+```
+# Without oplevels:
+B #chan 1234567890 +nt ABAAB,ABAAC:o,ABAAD:v
+
+# With oplevels (op level number after mode chars):
+B #chan 1234567890 +nt ABAAB,ABAAC:o999,ABAAD:v
+```
+
+**Server flag**: Servers with oplevels support include `o` in their SERVER flags.
+
+### FEAT_HALFOPS
+
+**Default**: FALSE
+
+Enables half-operator mode (+h).
+
+Affects:
+- MODE messages: `+h` / `-h` user modes
+- BURST user list: `:h` membership mode
+
+```
+# BURST with halfops:
+B #chan 1234567890 +nt ABAAB:h,ABAAC:o,ABAAD:oh
+```
+
+**Note**: Server accepts halfops from other servers even if disabled locally (prevents desync).
+
+### FEAT_EXCEPTS
+
+**Default**: FALSE
+
+Enables ban exceptions (+e mode).
+
+Affects BURST message format - exception list follows bans, prefixed with `~`:
+```
+# BURST with exceptions:
+B #chan 1234567890 +nt ABAAB :%*!*@banned.host ~ *!*@excepted.host
+```
+
+**Warning**: Breaks services that don't parse the extended BURST format.
+
+### FEAT_EXTBANS
+
+**Default**: FALSE
+
+Enables extended ban syntax (e.g., `~a:account`, `~c:#channel`).
+
+Only controls client ability to set extended bans; server still accepts them from network.
+
+### FEAT_HOST_HIDING_STYLE
+
+**Default**: 1
+
+Affects hidden host format in NICK messages and FAKEHOST.
+
+| Value | Format | Example |
+|-------|--------|---------|
+| 1 | `account.network.tld` | `myaccount.users.afternet.org` |
+| 2 | `Prefix-HASH.host.tld` | `Nefarious-554F4C88D.isp.com` |
+| 3 | Hybrid (both styles) | Either format |
+
+Affects umode `+x` behavior and `FA` (FAKEHOST) command generation.
+
+### FEAT_SASL_AUTOHIDEHOST
+
+**Default**: TRUE
+
+Automatically sets `+x` (hidden host) on successful SASL authentication.
+
+Requires `HOST_HIDING_STYLE` = 1 or 3.
+
+```c
+if (((feature_int(FEAT_HOST_HIDING_STYLE) == 1) ||
+     (feature_int(FEAT_HOST_HIDING_STYLE) == 3)) &&
+    feature_bool(FEAT_SASL_AUTOHIDEHOST)) {
+  SetHiddenHost(acptr);
+}
+```
+
+### FEAT_SASL_SERVER
+
+**Default**: "*"
+
+Specifies SASL provider server.
+
+| Value | Behavior |
+|-------|----------|
+| `*` | Broadcast SASL to all servers, first responder wins |
+| `services.*` | Send directly to matching server |
+
+### FEAT_SASL_TIMEOUT
+
+**Default**: 8 (seconds)
+
+SASL authentication timeout. After expiry, sends `D A` (abort) to services.
+
+### FEAT_LOC_TIMEOUT
+
+**Default**: 3 (seconds)
+
+Login-On-Connect timeout.
+
+---
+
+## NICK Message Mode Parameters
+
+The NICK (N) message for user introduction includes optional mode parameters. These modes have parameters that MUST appear in a specific order for backward compatibility:
+
+```
+N <nick> <hops> <TS> <user> <host> [+modes [mode_params...]] <IP> <numeric> :<realname>
+```
+
+### Mode Parameter Order (CRITICAL)
+
+When modes have parameters, they must appear in this exact sequence:
+
+1. `+r` - Account name (if logged in)
+2. `+h` - Virtual user@host (sethost)
+3. `+f` - Fake host
+4. `+C` - Cloaked host
+5. `+c` - Cloaked IP
+
+**Example**:
+```
+AB N TestUser 1 1703345678 user host.com +rxf accountname user@vhost.net AAAAAB ABAAB :Real Name
+```
+
+**Warning**: Many services break parsing if this order isn't followed, especially when `+h` is present but they don't support it.
