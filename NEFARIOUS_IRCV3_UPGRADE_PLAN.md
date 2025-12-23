@@ -80,15 +80,16 @@ Upgrade Nefarious IRCd from IRCv3.0/3.1 to full IRCv3.2+ compliance, including S
 
 ---
 
-### Phase 2: SASL 3.2 Enhancements
+### Phase 2: SASL 3.2 Enhancements ✅ COMPLETE
 
 **Goal**: Enable OAUTHBEARER token refresh via post-registration AUTHENTICATE
 
-**Files to modify**:
+**Files modified**:
 - `nefarious/include/capab.h` - Add CAP_CAPNOTIFY ✅
 - `nefarious/ircd/m_cap.c` - Add cap-notify, mechanism values ✅
-- `nefarious/ircd/m_authenticate.c` - Allow AUTHENTICATE after registration
-- `nefarious/ircd/m_sasl.c` - Send AC after successful reauth
+- `nefarious/ircd/m_authenticate.c` - Allow AUTHENTICATE after registration ✅
+- `nefarious/ircd/m_sasl.c` - Send AC after successful reauth ✅
+- `nefarious/include/client.h` - Add ClearSASLComplete macro ✅
 
 **Changes**:
 
@@ -97,14 +98,16 @@ Upgrade Nefarious IRCd from IRCv3.0/3.1 to full IRCv3.2+ compliance, including S
 2. SASL mechanism advertisement in CAP value: ✅
    - Output `sasl=PLAIN,EXTERNAL,OAUTHBEARER` for CAP 302
 
-3. Allow post-registration AUTHENTICATE:
+3. Allow post-registration AUTHENTICATE: ✅
    - Remove `IsSASLComplete` blocker in m_authenticate.c
-   - Reset SASL state, generate new cookie
+   - Reset SASL state (agent, cookie, timer) for new auth attempt
+   - Add `ClearSASLComplete` macro to client.h
    - Reuse existing `S` subcmd - no P10 changes needed
 
-4. Send AC after successful reauth:
-   - In m_sasl.c `L` handler, detect if user already registered
+4. Send AC after successful reauth: ✅
+   - In m_sasl.c `D` handler success path, detect if user already registered
    - Send `AC` command to propagate account change network-wide
+   - Uses correct format based on `FEAT_EXTENDED_ACCOUNTS` setting
 
 ---
 
@@ -276,13 +279,19 @@ Changes needed:
 
 **File**: `nefarious/ircd/m_sasl.c`
 
-Changes needed (in `L` handler, around line 181):
+Changes needed (in `D` handler success path):
 1. Detect if client is already registered (has been introduced via `N`)
-2. If registered and account changed, send `AC` command network-wide:
+2. If registered and account changed, send `AC` command network-wide
+3. **Must check `FEAT_EXTENDED_ACCOUNTS`** to use correct format:
    ```c
-   if (IsUser(acptr) && strcmp(old_account, new_account)) {
-       sendcmdto_serv_butone(&me, CMD_ACCOUNT, cptr, "%C %s %Tu",
-                             acptr, cli_user(acptr)->account, cli_user(acptr)->acc_create);
+   if (feature_bool(FEAT_EXTENDED_ACCOUNTS)) {
+       // Extended: AC <user> <R|M> <account> [timestamp]
+       sendcmdto_serv_butone(&me, CMD_ACCOUNT, NULL, "%C %c %s %Tu",
+                             acptr, type, account, timestamp);
+   } else {
+       // Non-extended: AC <user> <account> [timestamp]
+       sendcmdto_serv_butone(&me, CMD_ACCOUNT, NULL, "%C %s %Tu",
+                             acptr, account, timestamp);
    }
    ```
 
@@ -427,7 +436,7 @@ These require NO P10 changes:
 | 1 | CAP LS 302 with values | None | Low | ✅ Done |
 | 2 | cap-notify capability | None | Low | ✅ Done |
 | 3 | SASL mechanism advertisement | None | Low | ✅ Done |
-| 4 | REAUTHENTICATE command | **None** (reuse `S`) | Low | 🔄 In Progress |
+| 4 | Post-registration AUTHENTICATE | **None** (reuse `S`) | Low | ✅ Done |
 
 ### Tier 2: Quick Wins (No P10 Changes)
 | Step | Feature | P10 Changes | Effort |

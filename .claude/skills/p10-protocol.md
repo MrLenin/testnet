@@ -163,27 +163,41 @@ Client              Nefarious                    X3
 
 ## ACCOUNT (AC) Command
 
-### Format
+The AC command has two formats depending on the `FEAT_EXTENDED_ACCOUNTS` setting.
+
+### Non-Extended Format (FEAT_EXTENDED_ACCOUNTS = FALSE)
 ```
-[SERVER] AC [USER_NUMERIC] [ACCOUNT_NAME] [TIMESTAMP] [SUBTYPE]
+[SERVER] AC [USER_NUMERIC] [ACCOUNT_NAME] [TIMESTAMP]
 ```
 
-### Subtypes
+Example:
+```
+AB AC ABAAB accountname 1703345678
+```
+
+### Extended Format (FEAT_EXTENDED_ACCOUNTS = TRUE)
+```
+[SERVER] AC [USER_NUMERIC] [SUBTYPE] [ACCOUNT_NAME] [TIMESTAMP]
+```
+
+#### Subtypes
 | Code | Meaning |
 |------|---------|
 | `R` | Register (new account login) |
 | `U` | Unregister (logout) |
 | `M` | Modify (account change) |
 
+Example:
+```
+AB AC ABAAB R accountname 1703345678
+```
+
 ### When to Send AC
 - After successful SASL for a **registered** user (already introduced via `N`)
 - When user logs in via NickServ IDENTIFY
 - When user's account changes for any reason
 
-### Example
-```
-AB AC ABAAB accountname 1703345678 R
-```
+**Important**: Always check `feature_bool(FEAT_EXTENDED_ACCOUNTS)` to determine which format to use.
 
 ## FAKEHOST (FA) Command
 
