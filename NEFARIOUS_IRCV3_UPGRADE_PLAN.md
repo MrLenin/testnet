@@ -111,9 +111,41 @@ Upgrade Nefarious IRCd from IRCv3.0/3.1 to full IRCv3.2+ compliance, including S
 
 ---
 
+### Phase 2.5: Server-Time Capability ✅ COMPLETE
+
+**Goal**: Add ISO 8601 timestamps to messages for clients that request it
+
+**Files modified**:
+- `nefarious/include/capab.h` - Add CAP_SERVERTIME ✅
+- `nefarious/include/ircd_features.h` - Add FEAT_CAP_server_time ✅
+- `nefarious/ircd/ircd_features.c` - Register feature ✅
+- `nefarious/ircd/m_cap.c` - Add server-time to capability list ✅
+- `nefarious/ircd/send.c` - Add @time tag to channel messages ✅
+
+**Implementation**:
+1. Added `format_server_time()` helper function that outputs ISO 8601 timestamps:
+   ```c
+   @time=2025-12-23T12:30:00.123Z
+   ```
+
+2. Modified key send functions to build two message buffers:
+   - One with `@time=` prefix for CAP_SERVERTIME clients
+   - One without for legacy clients
+
+3. Functions updated:
+   - `sendcmdto_channel_butserv_butone()` - Channel messages (MODE, KICK, etc.)
+   - `sendcmdto_channel_capab_butserv_butone()` - Capability-filtered channel messages
+   - `sendcmdto_common_channels_butone()` - Common channel notifications (QUIT, NICK)
+   - `sendcmdto_common_channels_capab_butone()` - Capability-filtered common channels
+   - `sendcmdto_channel_butone()` - PRIVMSG/NOTICE to channels
+
+**Feature flag**: `FEAT_CAP_server_time` (default: TRUE)
+
+---
+
 ### Phase 3: Message Tags Infrastructure
 
-**Goal**: Foundation for server-time, account-tag, echo-message, etc.
+**Goal**: Foundation for account-tag, echo-message, labeled-response (server-time implemented standalone)
 
 **Files to modify**:
 - `nefarious/include/capab.h` - Add CAP_MESSAGETAGS
@@ -439,13 +471,13 @@ These require NO P10 changes:
 | 4 | Post-registration AUTHENTICATE | **None** (reuse `S`) | Low | ✅ Done |
 
 ### Tier 2: Quick Wins (No P10 Changes)
-| Step | Feature | P10 Changes | Effort |
-|------|---------|-------------|--------|
-| 5 | server-time | None | Low |
-| 6 | echo-message | None | Low |
-| 7 | account-tag | None | Low |
-| - | chghost | **Already done** (FA) | None |
-| 8 | invite-notify | None | Low |
+| Step | Feature | P10 Changes | Effort | Status |
+|------|---------|-------------|--------|--------|
+| 5 | server-time | None | Low | ✅ Done |
+| 6 | echo-message | None | Low | |
+| 7 | account-tag | None | Low | |
+| - | chghost | **Already done** (FA) | None | ✅ Done |
+| 8 | invite-notify | None | Low | |
 
 ### Tier 3: P10 Infrastructure Required
 | Step | Feature | P10 Changes | Effort |
