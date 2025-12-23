@@ -215,13 +215,35 @@ void sendcmdto_one_tags(..., struct MessageTag* tags, ...);
 
 ---
 
-### Phase 6: Account-Tag
+### Phase 6: Account-Tag ✅ COMPLETE
 
 **Goal**: Include sender's account in messages
 
-**Files to modify**:
-- `nefarious/include/capab.h` - Add CAP_ACCOUNTTAG
-- `nefarious/ircd/send.c` - Add @account tag
+**Files modified**:
+- `nefarious/include/capab.h` - Add CAP_ACCOUNTTAG ✅
+- `nefarious/include/ircd_features.h` - Add FEAT_CAP_account_tag ✅
+- `nefarious/ircd/ircd_features.c` - Register feature ✅
+- `nefarious/ircd/m_cap.c` - Add account-tag to capability list ✅
+- `nefarious/ircd/send.c` - Add @account tag support ✅
+
+**Implementation**:
+1. Added `CAP_ACCOUNTTAG` capability and `FEAT_CAP_account_tag` feature flag
+
+2. Refactored send.c tag handling:
+   - Created `format_message_tags()` function that builds combined tag string
+   - Created `wants_message_tags()` helper to check if client wants any tags
+   - Renamed `mb_st` to `mb_tags` throughout for clarity
+
+3. Tag format: `@time=...;account=accountname ` or `@time=...;account=* ` (not logged in)
+
+4. Modified 5 send functions to use combined tags:
+   - `sendcmdto_common_channels_butone()`
+   - `sendcmdto_common_channels_capab_butone()`
+   - `sendcmdto_channel_butserv_butone()`
+   - `sendcmdto_channel_capab_butserv_butone()`
+   - `sendcmdto_channel_butone()`
+
+**Feature flag**: `FEAT_CAP_account_tag` (default: TRUE)
 
 ---
 
@@ -497,7 +519,7 @@ These require NO P10 changes:
 |------|---------|-------------|--------|--------|
 | 5 | server-time | None | Low | ✅ Done |
 | 6 | echo-message | None | Low | ✅ Done |
-| 7 | account-tag | None | Low | |
+| 7 | account-tag | None | Low | ✅ Done |
 | - | chghost | **Already done** (FA) | None | ✅ Done |
 | 8 | invite-notify | None | Low | |
 
