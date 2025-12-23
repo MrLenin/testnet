@@ -272,12 +272,39 @@ void sendcmdto_one_tags(..., struct MessageTag* tags, ...);
 
 ---
 
-### Phase 9: Additional Capabilities
+### Phase 9: Chghost ✅ COMPLETE
 
-**chghost** - Host/ident change notifications
-```c
-:old!user@old.host CHGHOST newuser new.host
-```
+**Goal**: Notify clients when a user's host/username changes
+
+**Files modified**:
+- `nefarious/include/capab.h` - Add CAP_CHGHOST ✅
+- `nefarious/include/ircd_features.h` - Add FEAT_CAP_chghost ✅
+- `nefarious/ircd/ircd_features.c` - Register feature ✅
+- `nefarious/ircd/m_cap.c` - Add chghost to capability list ✅
+- `nefarious/include/msg.h` - Add CMD_CHGHOST ✅
+- `nefarious/include/send.h` - Add SKIP_CHGHOST flag ✅
+- `nefarious/ircd/send.c` - Handle SKIP_CHGHOST in send functions ✅
+- `nefarious/ircd/s_user.c` - Send CHGHOST from hide_hostmask/unhide_hostmask ✅
+
+**Implementation**:
+1. Added `CAP_CHGHOST` capability and `FEAT_CAP_chghost` feature flag
+2. Added `CMD_CHGHOST` to msg.h for the CHGHOST command
+3. Added `SKIP_CHGHOST` flag to send.h for skipping clients with chghost capability
+4. Modified `hide_hostmask()` and `unhide_hostmask()` in s_user.c:
+   - Save old user/host before change
+   - Send CHGHOST to clients with chghost capability
+   - Skip CHGHOST clients when doing QUIT+JOIN workaround
+
+**Format**: `:nick!olduser@old.host CHGHOST newuser new.host`
+
+**Feature flag**: `FEAT_CAP_chghost` (default: TRUE)
+
+**Note**: The P10 FAKEHOST (FA) command already exists for S2S host propagation.
+The chghost capability is purely client-facing notification.
+
+---
+
+### Phase 10: Invite-Notify
 
 **invite-notify** - Notify ops of channel invitations
 ```c
@@ -520,8 +547,8 @@ These require NO P10 changes:
 | 5 | server-time | None | Low | ✅ Done |
 | 6 | echo-message | None | Low | ✅ Done |
 | 7 | account-tag | None | Low | ✅ Done |
-| - | chghost | **Already done** (FA) | None | ✅ Done |
-| 8 | invite-notify | None | Low | |
+| 8 | chghost | None (FA exists) | Low | ✅ Done |
+| 9 | invite-notify | None | Low | |
 
 ### Tier 3: P10 Infrastructure Required
 | Step | Feature | P10 Changes | Effort |
