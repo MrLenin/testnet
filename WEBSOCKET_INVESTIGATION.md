@@ -1,12 +1,61 @@
 # IRCv3 WebSocket Extension Investigation
 
-## Status: HIGH PRIORITY (Draft Specification)
+## Status: IMPLEMENTED (Draft Specification)
 
 **Specification**: https://ircv3.net/specs/extensions/websocket
 
 **Capability**: None (transport layer, not IRC capability)
 
 **Priority**: HIGH - Native WebSocket support is standard in modern IRC servers
+
+**Feature Flag**: `FEAT_DRAFT_WEBSOCKET` (enabled by default)
+
+---
+
+## Implementation Status
+
+Native WebSocket support has been implemented in Nefarious, achieving feature parity with other major IRC servers.
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `include/client.h` | Added `FLAG_WEBSOCKET`, `FLAG_WSNEEDHANDSHAKE` flags |
+| `include/listener.h` | Added `LISTEN_WEBSOCKET` flag |
+| `include/websocket.h` | New header for WebSocket functions |
+| `include/ircd_features.h` | Added `FEAT_DRAFT_WEBSOCKET` |
+| `ircd/websocket.c` | New WebSocket implementation (~400 lines) |
+| `ircd/s_bsd.c` | WebSocket connection accept, frame wrap/unwrap |
+| `ircd/packet.c` | WebSocket handshake handling |
+| `ircd/ircd_parser.y` | WebSocket listener configuration |
+| `ircd/ircd_lexer.l` | WEBSOCKET token |
+| `ircd/ircd_features.c` | Feature registration |
+| `ircd/Makefile.in` | Added websocket.c to build |
+
+### Configuration
+
+```
+Port {
+    port = 8080;
+    websocket = yes;
+    ssl = yes;  /* Recommended for browser clients */
+};
+```
+
+To disable WebSocket support:
+```
+features {
+    "DRAFT_WEBSOCKET" = "FALSE";
+};
+```
+
+### Implementation Details
+
+- **No external library required** - Uses OpenSSL (already linked) for SHA1/Base64
+- **Integrated with event loop** - No threading, uses existing poll/epoll/kqueue
+- **RFC 6455 compliant** - Full WebSocket protocol support
+- **IRCv3 subprotocols** - Supports `binary.ircv3.net` and `text.ircv3.net`
+- **SSL support** - Works with existing TLS infrastructure
 
 ---
 
@@ -16,8 +65,7 @@ Native WebSocket support is implemented in all major modern IRC servers:
 - **Ergo** - Native WebSocket
 - **InspIRCd** - Native WebSocket
 - **UnrealIRCd** - Native WebSocket
-
-Nefarious is notably missing this feature, which limits its appeal for modern deployments where browser-based clients are increasingly common.
+- **Nefarious** - ✅ Native WebSocket (now implemented)
 
 ---
 
@@ -34,13 +82,10 @@ The WebSocket extension defines how IRC can be transported over WebSocket connec
 
 ## WebSocket Subprotocols
 
-| Subprotocol | Description |
-|-------------|-------------|
-| `binary.ircv3.net` | Carries arbitrary bytes (required) |
-| `text.ircv3.net` | UTF-8 only messages (recommended) |
-
-Servers MUST support `binary.ircv3.net`.
-Servers SHOULD support `text.ircv3.net`.
+| Subprotocol | Description | Status |
+|-------------|-------------|--------|
+| `binary.ircv3.net` | Carries arbitrary bytes (required) | ✅ Supported |
+| `text.ircv3.net` | UTF-8 only messages (recommended) | ✅ Supported |
 
 ---
 
@@ -109,11 +154,11 @@ All bytes are valid; no conversion needed.
 
 ---
 
-## Implementation Architecture
+## Architecture
 
-### Option A: Native WebSocket in Nefarious
+### Native Implementation (Current)
 
-Add WebSocket listener directly to Nefarious:
+WebSocket is implemented directly in Nefarious:
 
 ```
 Client <--WebSocket--> Nefarious
@@ -121,138 +166,18 @@ Client <--WebSocket--> Nefarious
                     +--TCP--> Other Servers
 ```
 
-**Pros**: Single process, lowest latency
-**Cons**: Significant C code changes, library dependency
+**Pros**: Single process, lowest latency, no dependencies
+**Implementation**: Custom RFC 6455 implementation using OpenSSL for crypto
 
-### Option B: WebSocket Proxy
+### Alternative: WebSocket Proxy
 
-Run a separate WebSocket-to-TCP proxy:
+For deployments preferring a proxy:
 
 ```
 Client <--WebSocket--> ws-proxy <--TCP--> Nefarious
 ```
 
-**Pros**: No IRCd changes, reusable
-**Cons**: Extra hop, more deployment complexity
-
-### Option C: HTTP Server Integration
-
-Use existing HTTP server with WebSocket support:
-
-```
-Client <--WebSocket--> nginx/caddy <--TCP--> Nefarious
-```
-
-**Pros**: Mature WebSocket implementation
-**Cons**: Configuration complexity
-
----
-
-## Option A: Native Implementation
-
-### Library Options
-
-| Library | License | Notes |
-|---------|---------|-------|
-| libwebsockets | MIT | Full-featured, complex |
-| wslay | MIT | Lightweight, callback-based |
-| mongoose | GPL | Embedded web server |
-
-### Files to Modify (Nefarious)
-
-| File | Changes |
-|------|---------|
-| `ircd/s_bsd.c` | Add WebSocket listener |
-| `ircd/packet.c` | WebSocket frame parsing |
-| `ircd/send.c` | WebSocket frame encoding |
-| `include/listener.h` | WebSocket listener type |
-| `ircd/ircd.c` | WebSocket initialization |
-| `configure.in` | WebSocket library detection |
-
-### Listener Configuration
-
-```
-listener {
-    host = "0.0.0.0";
-    port = 8080;
-    websocket = yes;
-    ssl = yes;
-};
-```
-
----
-
-## Option B: WebSocket Proxy
-
-### Existing Solutions
-
-| Proxy | Language | Notes |
-|-------|----------|-------|
-| webircgateway | Go | Feature-rich, production-ready |
-| websockify | Python | Generic WebSocket-to-TCP |
-| KiwiIRC | Node.js | IRC-specific |
-
-### webircgateway Configuration
-
-```yaml
-servers:
-  - bind: "0.0.0.0:8080"
-    ssl: true
-    upstream: "127.0.0.1:6667"
-    webirc_password: "secret"
-```
-
----
-
-## WEBIRC Support
-
-WebSocket proxies typically use WEBIRC to pass client IP:
-
-```
-WEBIRC <password> <gateway> <hostname> <ip>
-```
-
-**Example**:
-```
-WEBIRC secret webircgateway client.example.com 192.168.1.100
-```
-
-Nefarious already supports WEBIRC (`CMD_WEBIRC`).
-
----
-
-## Implementation Phases
-
-### Phase 1: Proxy-Based (Recommended First)
-
-1. Deploy webircgateway alongside Nefarious
-2. Configure WEBIRC password
-3. Test with web clients
-
-**Effort**: Low (4-8 hours ops work, no code changes)
-
-### Phase 2: Native Integration (Optional)
-
-1. Add libwebsockets dependency
-2. Implement WebSocket listener
-3. Handle frame parsing/encoding
-4. Add configuration options
-
-**Effort**: Very High (80-120 hours)
-
----
-
-## Configuration Options (Option A)
-
-```
-features {
-    "WEBSOCKET_ENABLE" = "TRUE";
-    "WEBSOCKET_PORT" = "8080";
-    "WEBSOCKET_SSL" = "TRUE";
-    "WEBSOCKET_ORIGIN" = "*";  /* CORS origin */
-    "WEBSOCKET_SUBPROTOCOL" = "binary.ircv3.net";
-};
-```
+Options: webircgateway, websockify, etc.
 
 ---
 
@@ -260,63 +185,43 @@ features {
 
 1. **Origin validation**: Restrict to trusted web origins
 2. **SSL/TLS**: Always use wss:// in production
-3. **Rate limiting**: WebSocket connections may need different limits
-4. **WEBIRC trust**: Only accept from trusted proxies
-5. **DoS protection**: WebSocket ping/pong, frame limits
+3. **Rate limiting**: WebSocket connections use existing flood protection
+4. **DoS protection**: Frame size limits, ping/pong handling
+5. **Masking verification**: Client frames must be masked per RFC 6455
 
 ---
 
-## CORS and Origin
+## Implementation Details
 
-For browser clients, servers may need to validate Origin header:
+### websocket.c Functions
 
-```c
-/* Validate Origin in WebSocket handshake */
-const char *origin = get_header("Origin");
-if (!is_allowed_origin(origin))
-    return reject_connection();
-```
+| Function | Purpose |
+|----------|---------|
+| `websocket_handshake()` | Handles HTTP Upgrade handshake |
+| `websocket_decode_frame()` | Parses incoming WebSocket frames |
+| `websocket_encode_frame()` | Creates outgoing WebSocket frames |
+| `websocket_handle_control()` | Handles PING/PONG/CLOSE frames |
 
----
+### Frame Processing
 
-## Message Size Limits
+**Incoming (s_bsd.c read_packet)**:
+1. Read raw data from socket
+2. For WebSocket clients, decode frame
+3. Extract IRC message from payload
+4. Process as normal IRC command
 
-WebSocket frames can be large. Consider:
-- Maximum frame size
-- Maximum message size
-- Fragmentation handling
+**Outgoing (s_bsd.c deliver_it)**:
+1. Collect data from message queue
+2. For WebSocket clients, encode as frame
+3. Send frame (with SSL_write if TLS)
 
-IRC messages are typically < 512 bytes, so limits can be conservative.
+### Control Frames
 
----
-
-## Complexity Assessment
-
-| Component | Effort | Risk |
-|-----------|--------|------|
-| Proxy deployment | Low | Low |
-| WEBIRC configuration | Low | Low |
-| Native WebSocket | Very High | High |
-| SSL integration | Medium | Medium |
-| UTF-8 handling | Low | Low |
-
-**Total**:
-- Proxy approach: Low effort (4-8 hours ops)
-- Native approach: Very High effort (80-120 hours dev)
-
----
-
-## Recommendation
-
-### Short-term
-1. **Deploy webircgateway** for immediate WebSocket support
-2. **Configure WEBIRC** to pass real client IPs
-3. **Use SSL/TLS** - Required for browser security
-
-### Long-term
-1. **Implement native WebSocket** - Parity with Ergo/UnrealIRCd/InspIRCd
-2. **Use libwebsockets** - MIT licensed, well-maintained
-3. **Integrate with existing SSL** - Reuse OpenSSL infrastructure
+| Opcode | Handling |
+|--------|----------|
+| PING (0x9) | Reply with PONG |
+| PONG (0xA) | Acknowledged, no action |
+| CLOSE (0x8) | Close connection gracefully |
 
 ---
 
@@ -338,33 +243,12 @@ IRC messages are typically < 512 bytes, so limits can be conservative.
 | Ergo | Yes |
 | InspIRCd | Yes |
 | UnrealIRCd | Yes |
-| Nefarious | No (proxy only) |
-
----
-
-## webircgateway Deployment
-
-### Docker Example
-
-```yaml
-services:
-  webircgateway:
-    image: prawnsalad/webircgateway
-    ports:
-      - "8080:80"
-    environment:
-      - GATEWAY_LISTEN=0.0.0.0:80
-      - GATEWAY_UPSTREAM=nefarious:6667
-      - GATEWAY_WEBIRC_PASSWORD=secret
-    depends_on:
-      - nefarious
-```
+| Nefarious | ✅ Yes |
 
 ---
 
 ## References
 
 - **Spec**: https://ircv3.net/specs/extensions/websocket
-- **webircgateway**: https://github.com/kiwiirc/webircgateway
 - **WebSocket RFC**: RFC 6455
 - **WEBIRC**: https://ircv3.net/specs/extensions/webirc
