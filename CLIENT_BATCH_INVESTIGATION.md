@@ -1,10 +1,22 @@
 # IRCv3 Client-Initiated Batch Extension Investigation
 
-## Status: INVESTIGATING (Draft Specification)
+## Status: IMPLEMENTED (via multiline)
 
 **Specification**: https://ircv3.net/specs/extensions/client-batch
 
 **Capability**: None (framework for other specifications)
+
+**Note**: The client-batch framework was implemented as part of the `draft/multiline` implementation. See [MULTILINE_INVESTIGATION.md](MULTILINE_INVESTIGATION.md) for details.
+
+### Implementation Notes
+
+The client-batch framework is implemented in:
+- `ircd/m_batch.c` - Handles `BATCH +id type` and `BATCH -id` from clients
+- `ircd/parse.c` - Parses `@batch=` tags on incoming messages
+- `include/client.h` - Batch state tracking per connection
+
+### TODO
+- **Batch timeout**: Currently incomplete batches persist until a new batch starts. Should timeout after ~30 seconds per spec.
 
 ---
 
