@@ -1,10 +1,23 @@
 # IRCv3 Pre-Away Extension Investigation
 
-## Status: INVESTIGATING (Draft Specification)
+## Status: QUICK WIN - LOW EFFORT
 
 **Specification**: https://ircv3.net/specs/extensions/pre-away
 
 **Capability**: `draft/pre-away`
+
+**Effort**: ~24-36 hours
+
+**Priority**: Tier 1 - Small modification to existing m_away.c
+
+---
+
+## Why Low Effort?
+
+- **Existing infrastructure**: AWAY command already implemented
+- **Small change**: Allow AWAY before registration if capability negotiated
+- **Store and apply**: Store pre-away state, apply after registration completes
+- **Useful for bouncers**: Enables soju-style background connections
 
 ---
 

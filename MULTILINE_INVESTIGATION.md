@@ -1,20 +1,34 @@
 # IRCv3 Multiline Messages Extension Investigation
 
-## Status: INVESTIGATING (Draft Specification)
+## Status: HIGH PRIORITY (Draft Specification)
 
 **Specification**: https://ircv3.net/specs/extensions/multiline
 
 **Capability**: `draft/multiline`
+
+**Priority**: HIGH - User retention issue; users expect this from modern chat platforms
+
+---
+
+## Why High Priority?
+
+The lack of multiline support is frequently cited as a reason users leave IRC for Discord/Slack/Matrix:
+
+- **Code pasting**: Developers can't paste code snippets without flood protection kicking in
+- **User expectations**: Modern chat platforms all support multi-line messages
+- **Workflow disruption**: Having to use pastebins for simple multi-line content is friction
+
+This is a key UX gap between IRC and modern chat platforms.
 
 ---
 
 ## Specification Summary
 
 The multiline extension allows clients to send messages that span multiple lines without splitting them into separate PRIVMSG commands. This enables:
-- Pasting code blocks
-- Multi-paragraph messages
+- Pasting code blocks without flood triggers
+- Multi-paragraph messages as single units
 - Preserving formatting from other applications
-- Better chat experience for longer messages
+- Better chat experience matching Discord/Slack/Matrix
 
 ---
 
@@ -342,10 +356,11 @@ Convert to individual messages for S2S:
 
 ## Recommendation
 
-1. **Medium priority**: Useful for modern chat UX
+1. **HIGH PRIORITY**: Key feature for user retention from Discord/Slack/Matrix
 2. **Implement after client-batch**: Shared infrastructure
-3. **Start with Phase 1-2**: Core functionality
-4. **Conservative limits**: Small max-lines initially
+3. **Start with Phase 1-2**: Core functionality first
+4. **Conservative limits initially**: Small max-lines, can increase later
+5. **Focus on code pasting use case**: Primary pain point for developer users
 
 ---
 

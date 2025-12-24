@@ -1,20 +1,34 @@
 # IRCv3 WebSocket Extension Investigation
 
-## Status: INVESTIGATING (Draft Specification)
+## Status: HIGH PRIORITY (Draft Specification)
 
 **Specification**: https://ircv3.net/specs/extensions/websocket
 
 **Capability**: None (transport layer, not IRC capability)
+
+**Priority**: HIGH - Native WebSocket support is standard in modern IRC servers
+
+---
+
+## Why High Priority?
+
+Native WebSocket support is implemented in all major modern IRC servers:
+- **Ergo** - Native WebSocket
+- **InspIRCd** - Native WebSocket
+- **UnrealIRCd** - Native WebSocket
+
+Nefarious is notably missing this feature, which limits its appeal for modern deployments where browser-based clients are increasingly common.
 
 ---
 
 ## Specification Summary
 
 The WebSocket extension defines how IRC can be transported over WebSocket connections instead of raw TCP. This enables:
-- Browser-based IRC clients
+- Browser-based IRC clients (The Lounge, Kiwi IRC, gamja)
 - Firewall traversal (port 80/443)
 - Modern web application integration
 - Mobile hybrid apps
+- Single-port deployment (IRC + Web on 443)
 
 ---
 
@@ -294,10 +308,15 @@ IRC messages are typically < 512 bytes, so limits can be conservative.
 
 ## Recommendation
 
-1. **Use proxy approach**: Deploy webircgateway
-2. **Defer native implementation**: High effort, low priority
-3. **Ensure WEBIRC is configured**: Pass real client IPs
-4. **Use SSL/TLS**: Required for browser security
+### Short-term
+1. **Deploy webircgateway** for immediate WebSocket support
+2. **Configure WEBIRC** to pass real client IPs
+3. **Use SSL/TLS** - Required for browser security
+
+### Long-term
+1. **Implement native WebSocket** - Parity with Ergo/UnrealIRCd/InspIRCd
+2. **Use libwebsockets** - MIT licensed, well-maintained
+3. **Integrate with existing SSL** - Reuse OpenSSL infrastructure
 
 ---
 
