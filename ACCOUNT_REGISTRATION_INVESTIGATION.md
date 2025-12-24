@@ -1,10 +1,58 @@
 # IRCv3 Account Registration Extension Investigation
 
-## Status: INVESTIGATING (Draft Specification)
+## Status: PARTIALLY IMPLEMENTED (Draft Specification)
 
 **Specification**: https://ircv3.net/specs/extensions/account-registration
 
 **Capability**: `draft/account-registration`
+
+**Feature Flag**: `FEAT_CAP_draft_account_registration` (disabled by default - draft spec)
+
+---
+
+## Implementation Status
+
+The protocol scaffolding has been implemented in both Nefarious and X3:
+
+### Nefarious Side (Complete)
+
+| File | Changes |
+|------|---------|
+| `include/capab.h` | Added `CAP_DRAFT_ACCOUNTREG` capability |
+| `include/ircd_features.h` | Added `FEAT_CAP_draft_account_registration` |
+| `ircd/ircd_features.c` | Feature registration (default: FALSE) |
+| `ircd/m_cap.c` | `draft/account-registration` capability |
+| `include/msg.h` | `MSG_REGISTER`, `MSG_VERIFY`, `MSG_REGREPLY` + tokens (RG, VF, RR) |
+| `include/handlers.h` | Handler declarations |
+| `ircd/m_register.c` | New file: REGISTER/VERIFY handlers using RG/VF P10 tokens |
+| `ircd/parse.c` | Command registration |
+| `ircd/Makefile.in` | Added m_register.c |
+
+### X3 Side (Stub Handlers)
+
+| File | Changes |
+|------|---------|
+| `src/proto-p10.c` | CMD_REGISTER_ACCT, CMD_VERIFY_ACCT, CMD_REGREPLY definitions |
+| `src/proto-p10.c` | TOK_REGISTER_ACCT (RG), TOK_VERIFY_ACCT (VF), TOK_REGREPLY (RR) |
+| `src/proto-p10.c` | `cmd_register_acct`, `cmd_verify_acct` - RG/VF P10 handlers |
+| `src/proto-p10.c` | `irc_regreply` - sends REGREPLY (RR) to user |
+
+### TODO: NickServ Integration
+
+The X3 handlers currently return "not yet implemented" responses. To complete:
+1. Integrate with `nickserv.c` registration logic
+2. Call actual account creation functions
+3. Handle email verification if configured
+4. Return proper success/failure codes
+
+### Configuration
+
+To enable account-registration (disabled by default):
+```
+features {
+    "CAP_draft_account_registration" = "TRUE";  /* Enable capability */
+};
+```
 
 ---
 
