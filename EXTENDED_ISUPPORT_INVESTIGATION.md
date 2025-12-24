@@ -209,9 +209,9 @@ Limited adoption currently.
 
 ---
 
-## Future Enhancement: Batch Wrapping
+## Batch Wrapping ✅ IMPLEMENTED
 
-When both `batch` and `draft/extended-isupport` are enabled, the spec allows wrapping ISUPPORT in a batch:
+When both `batch` and `draft/extended-isupport` are enabled, ISUPPORT is wrapped in a batch:
 
 ```
 S: BATCH +abc draft/isupport
@@ -220,7 +220,10 @@ S: @batch=abc :server 005 * KEY3=value3 KEY4=value4 :are supported
 S: BATCH -abc
 ```
 
-This is not implemented in the current version but could be added later.
+Implementation details:
+- Added `send_supported_batched()` function in s_user.c
+- m_isupport.c calls this instead of plain `send_supported()`
+- If client lacks batch capability, falls back to unbatched ISUPPORT
 
 ---
 

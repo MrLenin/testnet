@@ -32,11 +32,22 @@ Full implementation in Nefarious with P10 propagation and capability-aware fallb
 | `include/channel.h` | Added `rename_channel()` declaration |
 | `ircd/channel.c` | Added `rename_channel()` function |
 
+### X3 Files Modified
+
+| File | Changes |
+|------|---------|
+| `src/hash.h` | Added `RenameChannel()` declaration, `rename_channel_func_t` callback |
+| `src/hash.c` | Added `RenameChannel()` function and `reg_rename_channel_func()` |
+| `src/proto-p10.c` | Added `CMD_RENAME`/`TOK_RENAME` and `cmd_rename()` P10 handler |
+| `src/chanserv.c` | Added `handle_rename_channel()` callback for channel_info updates |
+
 ### Features Implemented
 
 - RENAME command for channel operators
 - Preserves all channel state (members, modes, topic, bans)
 - P10 propagation to other servers via "RN" token
+- X3 handles RN token and updates internal channel structures
+- ChanServ channel registrations follow the renamed channel
 - Fallback for non-supporting clients (PART/JOIN + state resend)
 - standard-replies error handling
 - Restriction: new name must not be longer than old name (memory allocation constraint)
@@ -290,13 +301,14 @@ static void handle_rename(struct userNode *source,
 
 **Effort**: Medium (8-16 hours)
 
-### Phase 4: X3 Integration
+### Phase 4: X3 Integration ✅ COMPLETE
 
-1. Handle RN in X3
-2. Update ChanServ registrations
-3. Maintain ban/access lists
+1. ✅ Handle RN in X3 - Added `cmd_rename()` P10 handler
+2. ✅ Update ChanServ registrations - Via `handle_rename_channel()` callback
+3. ✅ Maintain ban/access lists - `RenameChannel()` moves all channel data
 
-**Effort**: High (16-24 hours)
+**Implementation**: Uses callback pattern (`reg_rename_channel_func`) allowing ChanServ
+to update the `channel_info->channel` back-pointer when the underlying chanNode is replaced.
 
 ---
 
