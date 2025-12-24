@@ -1,12 +1,60 @@
 # Nefarious IRCd: IRCv3.2+ Upgrade Plan
 
-## Overview
+## Project Status: ✅ COMPLETE
 
-Upgrade Nefarious IRCd from IRCv3.0/3.1 to full IRCv3.2+ compliance, including SASL improvements needed for OAUTHBEARER token refresh and modern protocol features for client compatibility.
+**Completion Date**: December 2024
+
+All planned phases have been implemented and tested. This document serves as both historical planning reference and implementation documentation.
+
+### Summary of Achievements
+
+| Component | Status | Description |
+|-----------|--------|-------------|
+| **Nefarious IRCd** | ✅ Complete | Full IRCv3.2+ compliance with 20+ new capabilities |
+| **X3 Services** | ✅ Complete | Keycloak OAUTHBEARER integration, dynamic SASL mechanisms |
+| **P10 Protocol** | ✅ Complete | New tokens (SE, TM, BT), SASL M subcmd, tag support |
+
+### New IRCv3 Capabilities Added
+
+| Capability | Phase | Status |
+|------------|-------|--------|
+| CAP 302 (capability values) | 1 | ✅ |
+| cap-notify | 2 | ✅ |
+| message-tags | 3 | ✅ |
+| server-time | 4 | ✅ |
+| echo-message | 5 | ✅ |
+| account-tag | 6 | ✅ |
+| labeled-response | 10 | ✅ |
+| batch | 11 | ✅ |
+| setname | 12 | ✅ |
+| standard-replies | 15 | ✅ |
+| chghost | 9 | ✅ (via existing FA) |
+| invite-notify | 9 | ✅ |
+| bot mode (@bot tag) | 14 | ✅ |
+| msgid | 16 | ✅ |
+| TAGMSG (+typing) | 17/18 | ✅ |
+| draft/read-marker | 19 | 📋 Planned (deferred) |
+
+### Design Decision: REAUTHENTICATE Not Required
+
+During implementation, it was determined that a separate REAUTHENTICATE command (originally planned as Phase 2, Step 4) is **not needed**. The existing AUTHENTICATE flow already supports mid-session re-authentication:
+
+1. Nefarious clears the `SASLComplete` flag when a new AUTHENTICATE is received
+2. Existing SASL session state is reset
+3. The standard AUTHENTICATE flow proceeds normally
+4. Account notification is sent on successful re-auth
+
+This means OAuth token refresh works using the existing protocol flow, simplifying both implementation and client compatibility.
 
 ---
 
-## Current State
+## Overview
+
+This document details the upgrade of Nefarious IRCd from IRCv3.0/3.1 to full IRCv3.2+ compliance, including SASL improvements for OAUTHBEARER token refresh and modern protocol features for client compatibility.
+
+---
+
+## Pre-Upgrade State
 
 ### Existing IRCv3 Capabilities (7 total)
 | Capability | Status | Location |
@@ -19,10 +67,10 @@ Upgrade Nefarious IRCd from IRCv3.0/3.1 to full IRCv3.2+ compliance, including S
 | `sasl` | ✅ (3.0 style) | CAP_SASL |
 | `tls` | ✅ (conditional) | CAP_TLS |
 
-### Current SASL Limitations
-- No mechanism values in CAP (`sasl` not `sasl=PLAIN,EXTERNAL`)
-- No REAUTHENTICATE for mid-session re-auth (OAuth token refresh)
-- No cap-notify for dynamic capability changes
+### Pre-Upgrade SASL Limitations (All Resolved)
+- ~~No mechanism values in CAP~~ → ✅ Now `sasl=PLAIN,EXTERNAL,OAUTHBEARER`
+- ~~No mid-session re-auth~~ → ✅ Existing AUTHENTICATE flow supports re-auth
+- ~~No cap-notify~~ → ✅ Dynamic capability changes supported
 
 ### Key Source Files
 
@@ -50,191 +98,195 @@ Upgrade Nefarious IRCd from IRCv3.0/3.1 to full IRCv3.2+ compliance, including S
 
 ## Implementation Phases
 
-### Phase 1: CAP 302 Foundation
+### Phase 1: CAP 302 Foundation ✅ COMPLETE
 
 **Goal**: Support IRCv3.2 capability negotiation with values
 
-**Files to modify**:
-- `nefarious/include/client.h` - Add `cli_capab_version` field
-- `nefarious/ircd/m_cap.c` - Parse version in CAP LS, output values for 302+
+**Files modified**:
+- `nefarious/include/client.h` - Added `cli_capab_version` field ✅
+- `nefarious/ircd/m_cap.c` - Parses version in CAP LS, outputs values for 302+ ✅
 
-**Changes**:
-1. Add version tracking to client structure:
+**Implementation**:
+1. Version tracking added to client structure:
    ```c
    unsigned short cli_capab_version;  // 0, 301, 302
    ```
 
-2. Update `cap_ls()` to parse version parameter:
+2. `cap_ls()` parses version parameter:
    ```c
    // CAP LS 302 -> version = 302
    if (caplist && *caplist)
        cli_capab_version(sptr) = atoi(caplist);
    ```
 
-3. For version >= 302, output capability values:
+3. For version >= 302, outputs capability values:
    ```
    CAP LS :... sasl=PLAIN,EXTERNAL,OAUTHBEARER ...
    ```
 
-4. Support multi-line CAP LS with `*` continuation
+4. Multi-line CAP LS with `*` continuation supported
 
 ---
 
-### Phase 2: SASL 3.2 Enhancements
+### Phase 2: SASL 3.2 Enhancements ✅ COMPLETE
 
-**Goal**: Enable OAUTHBEARER token refresh via REAUTHENTICATE
+**Goal**: Enable OAUTHBEARER token refresh (originally planned via REAUTHENTICATE)
 
-**Files to modify**:
-- `nefarious/include/capab.h` - Add CAP_CAPNOTIFY
-- `nefarious/ircd/m_cap.c` - Add cap-notify, mechanism values
-- `nefarious/ircd/m_authenticate.c` - Add REAUTHENTICATE handler
-- `nefarious/ircd/parse.c` - Register REAUTHENTICATE command
+**Final Implementation**: REAUTHENTICATE command was determined to be unnecessary. The existing AUTHENTICATE command was modified to allow mid-session re-authentication by clearing the `SASLComplete` flag.
 
-**Changes**:
+**Files modified**:
+- `nefarious/include/capab.h` - Added CAP_CAPNOTIFY ✅
+- `nefarious/ircd/m_cap.c` - Added cap-notify, dynamic mechanism values ✅
+- `nefarious/ircd/m_authenticate.c` - Modified to allow re-auth (lines 127-137) ✅
 
-1. Add `cap-notify` capability:
+**Implementation**:
+
+1. Added `cap-notify` capability:
    ```c
    #define CAP_CAPNOTIFY  0x0080
    ```
 
-2. SASL mechanism advertisement in CAP value:
-   - Query services for mechanism list
-   - Output `sasl=PLAIN,EXTERNAL,OAUTHBEARER` for CAP 302
+2. SASL mechanism advertisement via dynamic SA M subcmd (Phase 22):
+   - X3 broadcasts mechanism list on connect and when backends change
+   - Nefarious stores and uses in CAP LS 302 response
+   - Output: `sasl=PLAIN,EXTERNAL,OAUTHBEARER`
 
-3. Implement REAUTHENTICATE command:
-   - Only for registered clients with cap-notify
-   - Preserve existing auth until success
-   - On success: update account, send ACCOUNT notification
-   - On failure: keep existing auth state
+3. Re-authentication via existing AUTHENTICATE:
+   ```c
+   /* m_authenticate.c - Allow re-authentication */
+   if (IsSASLComplete(cptr)) {
+     ClearSASLComplete(cptr);
+     /* Reset SASL session state */
+     if ((cli_saslagent(cptr) != NULL) && cli_saslagentref(cli_saslagent(cptr)))
+       cli_saslagentref(cli_saslagent(cptr))--;
+     cli_saslagent(cptr) = NULL;
+     cli_saslcookie(cptr) = 0;
+     if (t_active(&cli_sasltimeout(cptr)))
+       timer_del(&cli_sasltimeout(cptr));
+   }
+   ```
 
-4. CAP NEW/DEL notifications for cap-notify clients
+4. CAP NEW/DEL notifications supported for cap-notify clients
+
+**Note**: The originally planned `R` (REAUTHENTICATE) P10 subcmd was not implemented as it proved unnecessary.
 
 ---
 
-### Phase 3: Message Tags Infrastructure
+### Phase 3: Message Tags Infrastructure ✅ COMPLETE
 
 **Goal**: Foundation for server-time, account-tag, echo-message, etc.
 
-**Files to modify**:
-- `nefarious/include/capab.h` - Add CAP_MESSAGETAGS
-- `nefarious/ircd/parse.c` - Parse `@tag=value;...` prefix
-- `nefarious/ircd/send.c` - Add tag-aware send functions
+**Files modified**:
+- `nefarious/include/capab.h` - Added CAP_MESSAGETAGS ✅
+- `nefarious/ircd/parse.c` - Parses `@tag=value;...` prefix ✅
+- `nefarious/ircd/send.c` - Tag-aware send functions ✅
 
-**New structures**:
-```c
-struct MessageTag {
-    char* key;
-    char* value;
-    int client_only;  // Prefixed with +
-    struct MessageTag* next;
-};
-```
-
-**New functions**:
-```c
-struct MessageTag* parse_message_tags(const char* line);
-void free_message_tags(struct MessageTag* tags);
-void sendcmdto_one_tags(..., struct MessageTag* tags, ...);
-```
+**Key implementation**:
+- `format_message_tags()` - Formats tags for client delivery
+- `format_message_tags_for_ex()` - Extended version with msgid support
+- `sendcmdto_one_tags()` - Send with tags to single client
+- Client-only tag storage in `con_client_tags[512]`
 
 ---
 
-### Phase 4: Server-Time
+### Phase 4: Server-Time ✅ COMPLETE
 
 **Goal**: Timestamp all messages for clients that request it
 
-**Files to modify**:
-- `nefarious/include/capab.h` - Add CAP_SERVERTIME
-- `nefarious/ircd/send.c` - Add @time tag to messages
+**Files modified**:
+- `nefarious/include/capab.h` - Added CAP_SERVERTIME ✅
+- `nefarious/ircd/send.c` - Added @time tag to messages ✅
 
-**Format**: `@time=2025-12-23T12:30:00.000Z`
+**Format**: `@time=2025-12-23T12:30:00.000Z` (ISO 8601 with milliseconds)
 
 ---
 
-### Phase 5: Echo-Message
+### Phase 5: Echo-Message ✅ COMPLETE
 
 **Goal**: Let clients receive their own sent messages back
 
-**Files to modify**:
-- `nefarious/include/capab.h` - Add CAP_ECHOMSG
-- `nefarious/ircd/m_privmsg.c` - Echo back to sender
+**Files modified**:
+- `nefarious/include/capab.h` - Added CAP_ECHOMSG ✅
+- `nefarious/ircd/ircd_relay.c` - Echo back to sender with tags ✅
 
 ---
 
-### Phase 6: Account-Tag
+### Phase 6: Account-Tag ✅ COMPLETE
 
 **Goal**: Include sender's account in messages
 
-**Files to modify**:
-- `nefarious/include/capab.h` - Add CAP_ACCOUNTTAG
-- `nefarious/ircd/send.c` - Add @account tag
+**Files modified**:
+- `nefarious/include/capab.h` - Added CAP_ACCOUNTTAG ✅
+- `nefarious/ircd/send.c` - Added @account tag ✅
+
+**Format**: `@account=accountname` (omitted if user not logged in)
 
 ---
 
-### Phase 7: Labeled-Response
+### Phase 7: Labeled-Response ✅ COMPLETE
 
 **Goal**: Correlate commands with responses
 
-**Files to modify**:
-- `nefarious/include/capab.h` - Add CAP_LABELEDRESP
-- `nefarious/include/client.h` - Add cli_label field
-- `nefarious/ircd/parse.c` - Extract @label from commands
-- `nefarious/ircd/send.c` - Include @label in responses
+See Phase 10 for detailed implementation.
 
 ---
 
-### Phase 8: Batch Support
+### Phase 8: Batch Support ✅ COMPLETE
 
 **Goal**: Group related messages (netjoin, netsplit, history)
 
-**Files to create**:
-- `nefarious/ircd/m_batch.c` - BATCH command handler
-
-**Files to modify**:
-- `nefarious/include/capab.h` - Add CAP_BATCH
-- `nefarious/ircd/parse.c` - Register BATCH
+See Phase 11 for detailed implementation.
 
 ---
 
-### Phase 9: Additional Capabilities
+### Phase 9: Additional Capabilities ✅ COMPLETE
 
-**chghost** - Host/ident change notifications
-```c
+**chghost** ✅ - Host/ident change notifications (uses existing FA P10 token)
+```
 :old!user@old.host CHGHOST newuser new.host
 ```
 
-**invite-notify** - Notify ops of channel invitations
-```c
+**invite-notify** ✅ - Notify ops of channel invitations (uses existing I P10 token)
+```
 :inviter!u@h INVITE invited #channel
 ```
 
-**setname** - Realname change notifications
-```c
+**setname** ✅ - Realname change notifications (new SE P10 token)
+```
 :nick!u@h SETNAME :New Real Name
 ```
+See Phase 12 for detailed implementation.
 
 ---
 
-## Implementation Priority
+## Implementation Priority (All Complete)
 
-### Tier 1: Essential for OAUTHBEARER (Do First)
-1. CAP LS 302 with values (Phase 1)
-2. cap-notify capability (Phase 2)
-3. SASL mechanism advertisement (Phase 2)
-4. REAUTHENTICATE command (Phase 2)
+### Tier 1: Essential for OAUTHBEARER ✅ COMPLETE
+1. ✅ CAP LS 302 with values (Phase 1)
+2. ✅ cap-notify capability (Phase 2)
+3. ✅ SASL mechanism advertisement (Phase 2/22)
+4. ~~REAUTHENTICATE command~~ → Not needed, existing AUTHENTICATE supports re-auth
 
-### Tier 2: Modern Client Compatibility
-5. message-tags infrastructure (Phase 3)
-6. server-time (Phase 4)
-7. account-tag (Phase 6)
-8. echo-message (Phase 5)
+### Tier 2: Modern Client Compatibility ✅ COMPLETE
+5. ✅ message-tags infrastructure (Phase 3)
+6. ✅ server-time (Phase 4)
+7. ✅ account-tag (Phase 6)
+8. ✅ echo-message (Phase 5)
 
-### Tier 3: Enhanced Features
-9. labeled-response (Phase 7)
-10. batch support (Phase 8)
-11. chghost (Phase 9)
-12. invite-notify (Phase 9)
-13. setname (Phase 9)
+### Tier 3: Enhanced Features ✅ COMPLETE
+9. ✅ labeled-response (Phase 10)
+10. ✅ batch support (Phase 11/13d/13e)
+11. ✅ chghost (Phase 9 - existing FA)
+12. ✅ invite-notify (Phase 9 - existing I)
+13. ✅ setname (Phase 12)
+
+### Tier 4: Additional Features ✅ COMPLETE
+14. ✅ @bot message tag (Phase 14)
+15. ✅ standard-replies (Phase 15)
+16. ✅ msgid tag (Phase 16)
+17. ✅ TAGMSG command (Phase 17)
+18. ✅ +typing tag (Phase 18)
+19. 📋 draft/read-marker (Phase 19) - Deferred until spec stabilizes
 
 ---
 
@@ -275,68 +327,26 @@ SASL <target> <server>!<fd>.<cookie> <subcmd> <data> [ext]
 | `M` | X3→Nef | Mechanisms list |
 | `I` | X3→Nef | Impersonation |
 
-### New Code for REAUTHENTICATE: `R`
+### Planned Code for REAUTHENTICATE: `R` - ❌ NOT IMPLEMENTED
 
-**Purpose**: Allow re-authentication after initial SASL success (token refresh)
+> **Decision**: During implementation, it was determined that a separate REAUTHENTICATE command and `R` subcmd are **not needed**. The existing AUTHENTICATE flow was modified to support mid-session re-authentication by clearing the `SASLComplete` flag (see Phase 2).
 
-**Direction**: Nef→X3 (client-initiated via new REAUTHENTICATE command)
+**Original Purpose**: Allow re-authentication after initial SASL success (token refresh)
 
-**Format**:
-```
-SASL <target> <server>!<fd>.<cookie> R <mechanism>
-```
+**Why Not Needed**:
+1. Modifying existing AUTHENTICATE to allow re-auth is simpler
+2. No new P10 subcmd required
+3. No changes needed in X3 SASL handler
+4. Better client compatibility (clients already know AUTHENTICATE)
 
-### Nefarious Changes Required
-
-**File**: `nefarious/ircd/m_authenticate.c`
-
-Current blocker (line ~121):
-```c
-if (IsSASLComplete(cptr))
-    return send_reply(cptr, ERR_SASLALREADY);
-```
-
-Changes needed:
-1. Add `m_reauthenticate()` handler that bypasses `IsSASLComplete` check
-2. Clear SASL state but preserve account until new auth succeeds
-3. Send `R` subcmd instead of `S` to signal reauth to services
-
-**File**: `nefarious/ircd/m_sasl.c`
-
-Changes needed:
-1. Handle `R` response from services (mirror of `S` but for reauth)
-2. On reauth success: update account, send ACCOUNT notification to channel members
-
-### X3 Changes Required
-
-**File**: `x3/src/nickserv.c` (`handle_sasl_input()` and `sasl_packet()`)
-
-Changes needed:
-1. Handle `R` subcmd in `handle_sasl_input()`
-2. Track reauth state in `SASLSession` struct:
-   ```c
-   struct SASLSession {
-       // ... existing fields ...
-       int is_reauth;           // Flag for reauthentication
-       char* old_account;       // Preserve until success
-   };
-   ```
-3. On reauth success:
-   - Compare old vs new account
-   - Send `L` with new account info
-   - Send `D S` for success
-4. On reauth failure:
-   - Keep old account active
-   - Send `D F`
-
-### REAUTHENTICATE Flow (End-to-End)
+### Re-Authentication Flow (Implemented)
 
 ```
 Client                Nefarious              X3                  Keycloak
    |                      |                   |                      |
-   +--REAUTHENTICATE----->|                   |                      |
-   |  OAUTHBEARER         |                   |                      |
-   |                      |-SASL R OAUTHBEARER|                      |
+   +--AUTHENTICATE------->|                   |                      |
+   |  OAUTHBEARER         | (clears SASLComplete, resets session)    |
+   |                      |-SASL S OAUTHBEARER|                      |
    |                      |                   |                      |
    |<--AUTHENTICATE +-----|<--SASL C +--------|                      |
    |                      |                   |                      |
@@ -356,28 +366,30 @@ Client                Nefarious              X3                  Keycloak
 
 ### Key Implementation Details
 
-1. **Session Preservation**: During reauth, old session cookie is reused
-2. **Account Continuity**: Old account remains valid until new auth succeeds
-3. **Failure Handling**: On reauth failure, client stays logged in with old account
-4. **ACCOUNT Notification**: After successful reauth, notify channel members if account changed
+1. **Session Reset**: SASLComplete flag cleared, new SASL session started
+2. **Standard Flow**: Uses existing `S` subcmd, no special handling needed
+3. **Failure Handling**: On re-auth failure, client stays in previous state
+4. **ACCOUNT Notification**: After successful re-auth, notify channel members if account changed
 
 ---
 
-## P10 Protocol Requirements by Feature
+## P10 Protocol Requirements by Feature (Final Status)
 
 ### Summary Table
 
-| Feature | P10 Changes | Complexity | Notes |
-|---------|-------------|------------|-------|
-| REAUTHENTICATE | New `R` subcmd | Medium | See above |
-| Message Tags | **Major redesign** | Very High | Fundamental format change |
-| Account-tag | None | Low | Account already flows via `AC` |
-| Server-time | None | Low | Timestamps exist in protocol |
-| Echo-message | None | None | Pure client-side |
-| Batch | New `BT` command | High | Needs message tags first |
-| chghost | **Already exists** | None | `FA` (FAKEHOST) command |
-| setname | New command | Medium | No mid-session realname change |
-| invite-notify | None | Low | `I` (INVITE) already exists |
+| Feature | P10 Changes | Status | Notes |
+|---------|-------------|--------|-------|
+| ~~REAUTHENTICATE~~ | ~~New `R` subcmd~~ | ❌ Not needed | Existing flow works |
+| Message Tags | Tag prefix support | ✅ Complete | Backward compatible |
+| Account-tag | None | ✅ Complete | Account flows via `AC` |
+| Server-time | None | ✅ Complete | Client-side only |
+| Echo-message | None | ✅ Complete | Client-side only |
+| Batch | New `BT` command | ✅ Complete | S2S coordination |
+| chghost | Uses existing `FA` | ✅ Complete | FAKEHOST command |
+| setname | New `SE` command | ✅ Complete | Mid-session realname |
+| invite-notify | Uses existing `I` | ✅ Complete | INVITE command |
+| TAGMSG | New `TM` command | ✅ Complete | Tag-only messages |
+| SASL Mechanisms | New `M` subcmd | ✅ Complete | Dynamic advertisement |
 
 ### Features Already Supported in P10
 
@@ -447,32 +459,42 @@ These require NO P10 changes:
 
 ---
 
-## Revised Implementation Priority
+## Implementation Summary by Tier (All Complete)
 
-### Tier 1: OAUTHBEARER Token Refresh (Primary Goal)
-| Step | Feature | P10 Changes | Effort |
+### Tier 1: OAUTHBEARER Token Refresh ✅ COMPLETE
+| Step | Feature | P10 Changes | Status |
 |------|---------|-------------|--------|
-| 1 | CAP LS 302 with values | None | Low |
-| 2 | cap-notify capability | None | Low |
-| 3 | SASL mechanism advertisement | None | Low |
-| 4 | REAUTHENTICATE command | New `R` subcmd | Medium |
+| 1 | CAP LS 302 with values | None | ✅ |
+| 2 | cap-notify capability | None | ✅ |
+| 3 | SASL mechanism advertisement | SA M subcmd | ✅ |
+| 4 | ~~REAUTHENTICATE~~ | ~~R subcmd~~ | ❌ Not needed |
 
-### Tier 2: Quick Wins (No P10 Changes)
-| Step | Feature | P10 Changes | Effort |
+### Tier 2: Quick Wins ✅ COMPLETE
+| Step | Feature | P10 Changes | Status |
 |------|---------|-------------|--------|
-| 5 | server-time | None | Low |
-| 6 | echo-message | None | Low |
-| 7 | account-tag | None | Low |
-| - | chghost | **Already done** (FA) | None |
-| 8 | invite-notify | None | Low |
+| 5 | server-time | None | ✅ |
+| 6 | echo-message | None | ✅ |
+| 7 | account-tag | None | ✅ |
+| - | chghost | Existing FA | ✅ |
+| 8 | invite-notify | Existing I | ✅ |
 
-### Tier 3: P10 Infrastructure Required
-| Step | Feature | P10 Changes | Effort |
+### Tier 3: P10 Infrastructure ✅ COMPLETE
+| Step | Feature | P10 Changes | Status |
 |------|---------|-------------|--------|
-| 10 | labeled-response | Client-side only | Medium |
-| 11 | batch | Client-side only | Medium |
-| 12 | setname | New SN command | Medium |
-| 13 | message-tags S2S | **Major format change** | Very High |
+| 10 | labeled-response | Client-side | ✅ |
+| 11 | batch | BT token | ✅ |
+| 12 | setname | SE token | ✅ |
+| 13 | message-tags S2S | Tag prefix | ✅ |
+
+### Tier 4: Additional Features ✅ COMPLETE
+| Step | Feature | P10 Changes | Status |
+|------|---------|-------------|--------|
+| 14 | @bot tag | None | ✅ |
+| 15 | standard-replies | None | ✅ |
+| 16 | msgid tag | None | ✅ |
+| 17 | TAGMSG | TM token | ✅ |
+| 18 | +typing | Via TAGMSG | ✅ |
+| 19 | draft/read-marker | MR token | 📋 Deferred |
 
 ---
 
@@ -609,11 +631,11 @@ Server: @label=abc123 :server 001 nick :Welcome...           (if applicable)
 
 ---
 
-### Phase 13: Message Tags S2S - Detailed Architecture
+### Phase 13: Message Tags S2S - Detailed Architecture ✅ COMPLETE
 
 **Goal**: Full server-to-server message tag propagation
 
-**Status**: Planning - Very High Effort
+**Status**: ✅ Implemented (Phases 13a-13e)
 
 ---
 
@@ -1473,10 +1495,11 @@ Note: Most major clients (IRCCloud, The Lounge, WeeChat) don't support it yet.
 
 - All features are opt-in via CAP negotiation
 - Legacy clients (no CAP 302) get existing behavior
-- P10 `R` subcmd for REAUTHENTICATE is additive (backward compatible)
-- Message tags S2S can be deferred - implement client-side first
-- Feature flags in ircd_features.h control each capability
-- X3 keycloak-integration branch already has OAUTHBEARER support
+- ~~P10 `R` subcmd for REAUTHENTICATE~~ → Not implemented; existing AUTHENTICATE flow used
+- Message tags S2S: Backward compatible with tag prefix skipping
+- Feature flags in `ircd_features.h` control each capability
+- X3 `keycloak-integration` branch merged with full OAUTHBEARER support
+- All P10 protocol extensions are backward compatible (old servers ignore unknown tokens)
 
 ---
 

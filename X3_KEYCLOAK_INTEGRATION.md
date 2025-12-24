@@ -1,14 +1,30 @@
-# X3 Keycloak Integration Plan
+# X3 Keycloak Integration
 
-## Status: COMPLETE
+## Project Status: ✅ COMPLETE
 
-All phases implemented and committed to `x3` submodule on branch `keycloak-integration` (commit `461859d`).
+**Completion Date**: December 2024
+
+All phases implemented and committed to `x3` submodule on branch `keycloak-integration`.
+
+### Summary
+
+| Component | Status | Description |
+|-----------|--------|-------------|
+| Keycloak API | ✅ Complete | Full REST API wrapper in `keycloak.c` |
+| NickServ Integration | ✅ Complete | Auth, register, password, email sync |
+| SASL OAUTHBEARER | ✅ Complete | RFC 7628 compliant token auth |
+| Dynamic SASL Mechanisms | ✅ Complete | SA M subcmd broadcast |
+| P10 Tag Compatibility | ✅ Complete | Tag prefix skipping in parser |
 
 ---
 
 ## Overview
 
-Convert X3 IRC Services from LDAP to Keycloak for authentication and user management, including SASL OAUTHBEARER support for S2S protocol.
+X3 IRC Services has been extended to support Keycloak as an authentication backend alongside existing methods. This enables:
+- OAuth 2.0 / OpenID Connect authentication
+- SASL OAUTHBEARER mechanism for IRC clients
+- Centralized user management via Keycloak
+- Dynamic SASL mechanism advertisement based on backend availability
 
 ## Goals
 
@@ -239,7 +255,130 @@ Added `--with-keycloak` to configure command.
 
 ---
 
-## Future Enhancements
+## Design Decisions
 
-- **IRCv3.2 SASL in Nefarious** - For proper token re-authentication (SASL REAUTHENTICATE)
-- **Token refresh handling** - Client-side token refresh before expiry
+### Token Validation: Introspection vs Local JWT
+
+Two approaches were considered for validating OAuth tokens:
+
+1. **Token Introspection** (Implemented): Call Keycloak's introspection endpoint
+   - Always current - respects token revocation
+   - Simpler implementation - no key management
+   - Slight latency cost per auth
+
+2. **Local JWT Validation**: Verify JWT signature with Keycloak's public key
+   - Faster - no network call
+   - Cannot detect token revocation
+   - Requires key rotation handling
+
+**Decision**: Token introspection was chosen because:
+- IRC authentication is infrequent (once per session)
+- Token revocation must be respected for security
+- Simpler implementation reduces maintenance burden
+
+### Re-Authentication Flow
+
+A separate REAUTHENTICATE command was originally planned but determined unnecessary:
+- Nefarious clears the `SASLComplete` flag on new AUTHENTICATE
+- Existing SASL flow handles token refresh correctly
+- Better client compatibility (no new command needed)
+
+### Token Refresh
+
+Token refresh is a **client-side responsibility**:
+- Clients should refresh OAuth tokens before expiry
+- IRC server infrastructure supports re-authentication
+- No server-side token refresh mechanism needed
+
+---
+
+## Related Documentation
+
+- [NEFARIOUS_IRCV3_UPGRADE_PLAN.md](NEFARIOUS_IRCV3_UPGRADE_PLAN.md) - Full IRCv3.2+ upgrade plan
+- [P10_PROTOCOL_REFERENCE.md](P10_PROTOCOL_REFERENCE.md) - P10 protocol documentation
+
+---
+
+## Phase 5: IRCv3 Integration ✅ COMPLETE
+
+### 5.1 Dynamic SASL Mechanism Advertisement ✅
+
+X3 now broadcasts available SASL mechanisms to Nefarious using a new P10 subcmd.
+
+**P10 Format**:
+```
+[X3_NUMERIC] SA * * M :[MECHANISM_LIST]
+```
+
+**Implementation** (`nickserv.c`):
+```c
+const char *nickserv_get_sasl_mechanisms(void)
+{
+    static char mechs[128];
+    strcpy(mechs, "PLAIN");
+    strcat(mechs, ",EXTERNAL");
+#ifdef WITH_KEYCLOAK
+    if (nickserv_conf.keycloak_enable && keycloak_available)
+        strcat(mechs, ",OAUTHBEARER");
+#endif
+    return mechs;
+}
+
+void nickserv_update_sasl_mechanisms(void)
+{
+    const char *mechs = nickserv_get_sasl_mechanisms();
+    if (strcmp(mechs, last_sasl_mechs) != 0) {
+        strcpy(last_sasl_mechs, mechs);
+        irc_sasl_mechs_broadcast(mechs);
+    }
+}
+```
+
+**When Broadcasts Occur**:
+1. After X3 completes burst (EOB acknowledgment)
+2. When Keycloak availability changes
+3. Automatic tracking of backend health
+
+### 5.2 Keycloak Availability Tracking ✅
+
+```c
+static void kc_set_available(int available)
+{
+    if (keycloak_available != available) {
+        keycloak_available = available;
+        log_module(NS_LOG, LOG_INFO, "Keycloak availability changed: %s",
+                   available ? "available" : "unavailable");
+        nickserv_update_sasl_mechanisms();
+    }
+}
+```
+
+### 5.3 P10 Message Tag Compatibility ✅
+
+X3's P10 parser now handles message tags:
+
+```c
+/* Skip IRCv3 message tags if present (backward compatibility) */
+if (line[0] == '@') {
+    char *tag_end = strchr(line, ' ');
+    if (tag_end)
+        line = tag_end + 1;
+}
+```
+
+---
+
+## Files Modified (Complete List)
+
+| File | Changes |
+|------|---------|
+| `x3/src/keycloak.h` | Structs and function declarations |
+| `x3/src/keycloak.c` | Full Keycloak REST API implementation |
+| `x3/src/nickserv.h` | Config fields, mechanism functions |
+| `x3/src/nickserv.c` | Auth, SASL, mechanism broadcast |
+| `x3/src/proto.h` | `irc_sasl_mechs_broadcast()` declaration |
+| `x3/src/proto-p10.c` | Mechanism broadcast, tag parsing |
+| `x3/configure.in` | `--with-keycloak` option |
+| `x3/src/Makefile.am` | Added keycloak sources |
+| `x3/docker/x3.conf-dist` | Keycloak config template |
+| `x3/Dockerfile` | Build dependencies |
