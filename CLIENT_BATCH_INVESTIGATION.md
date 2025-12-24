@@ -1,6 +1,6 @@
 # IRCv3 Client-Initiated Batch Extension Investigation
 
-## Status: IMPLEMENTED (via multiline)
+## Status: IMPLEMENTED
 
 **Specification**: https://ircv3.net/specs/extensions/client-batch
 
@@ -13,10 +13,23 @@
 The client-batch framework is implemented in:
 - `ircd/m_batch.c` - Handles `BATCH +id type` and `BATCH -id` from clients
 - `ircd/parse.c` - Parses `@batch=` tags on incoming messages
-- `include/client.h` - Batch state tracking per connection
+- `include/client.h` - Batch state tracking per connection (including `con_ml_batch_start` for timeout)
+- `ircd/ircd.c` - Periodic timeout check in `check_pings()` via `check_client_batch_timeout()`
 
-### TODO
-- **Batch timeout**: Currently incomplete batches persist until a new batch starts. Should timeout after ~30 seconds per spec.
+### Configuration
+
+```
+features {
+    "CLIENT_BATCH_TIMEOUT" = "30";  /* seconds (default: 30) */
+};
+```
+
+### Timeout Behavior
+
+When a client opens a batch (e.g., `BATCH +abc draft/multiline #channel`) and doesn't close it within the configured timeout, the server:
+1. Sends `FAIL BATCH TIMEOUT <batch-id> :Batch timed out`
+2. Discards all collected batch messages
+3. Clears the batch state
 
 ---
 

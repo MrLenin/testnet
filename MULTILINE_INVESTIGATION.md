@@ -165,8 +165,9 @@ All dependencies were already implemented.
 ## Limitations
 
 - S2S propagation not implemented (multiline is client-to-server only)
-- No batch timeout implemented (incomplete batches persist until new batch starts)
 - Max 24 lines and 4096 bytes by default
+
+Note: Batch timeout is now implemented via `CLIENT_BATCH_TIMEOUT` (default 30 seconds).
 
 ---
 
