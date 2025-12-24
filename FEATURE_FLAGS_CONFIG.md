@@ -67,8 +67,12 @@ Feature flags are configured in the `features {}` block of the IRCd config file.
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `FEAT_CHATHISTORY_MAX` | 500 | Maximum messages returned per request |
-| `FEAT_CHATHISTORY_DEFAULT` | 50 | Default messages if no limit specified |
+| `FEAT_CHATHISTORY_MAX` | 100 | Maximum messages returned per request |
+| `FEAT_CHATHISTORY_DB` | "history" | LMDB database directory path |
+| `FEAT_CHATHISTORY_RETENTION` | 7 | Days to keep messages (0 = disable purge) |
+| `FEAT_CHATHISTORY_PRIVATE` | FALSE | Enable private message (DM) history |
+
+**Retention Purge**: Messages older than `CHATHISTORY_RETENTION` days are automatically deleted via an hourly timer (`history_purge_callback`). Set to 0 to disable automatic purging.
 
 ### Example Configuration
 
@@ -97,7 +101,10 @@ features {
     # Limits
     "MULTILINE_MAX_BYTES" = "4096";
     "MULTILINE_MAX_LINES" = "100";
-    "CHATHISTORY_MAX" = "500";
+    "CHATHISTORY_MAX" = "100";
+    "CHATHISTORY_DB" = "history";
+    "CHATHISTORY_RETENTION" = "7";
+    "CHATHISTORY_PRIVATE" = "FALSE";
 };
 ```
 
