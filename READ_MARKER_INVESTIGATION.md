@@ -1,12 +1,56 @@
 # IRCv3 Read Marker Extension Investigation
 
-## Status: DEFERRED (Draft Specification)
+## Status: IMPLEMENTED (Draft Specification)
 
 **Specification**: https://ircv3.net/specs/extensions/read-marker
 
 **Capability**: `draft/read-marker`
 
-**Decision**: Defer implementation until specification stabilizes
+**Feature Flag**: `FEAT_CAP_draft_read_marker` (disabled by default - draft spec)
+
+---
+
+## Implementation Status
+
+Full implementation in Nefarious using the existing LMDB infrastructure from chathistory:
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `include/capab.h` | Added `CAP_DRAFT_READMARKER` capability |
+| `include/ircd_features.h` | Added `FEAT_CAP_draft_read_marker` |
+| `ircd/ircd_features.c` | Feature registration (default: FALSE) |
+| `ircd/m_cap.c` | `draft/read-marker` capability |
+| `include/msg.h` | `MSG_MARKREAD`, `TOK_MARKREAD` ("MR") |
+| `include/handlers.h` | `m_markread`, `send_markread_on_join` declarations |
+| `ircd/m_markread.c` | New file: MARKREAD command handler |
+| `ircd/parse.c` | Command registration |
+| `ircd/Makefile.in` | Added m_markread.c |
+| `ircd/m_join.c` | Calls `send_markread_on_join()` before NAMES |
+| `include/history.h` | Added `readmarker_get()`, `readmarker_set()` API |
+| `ircd/history.c` | LMDB readmarkers database, get/set implementations |
+
+### Features Implemented
+
+- MARKREAD command for get/set operations
+- Persistence via LMDB (same database as chathistory)
+- Per-account + per-target storage
+- Automatic MARKREAD on JOIN (before RPL_ENDOFNAMES)
+- Multi-client broadcast (updates all connections with same account)
+- Timestamps only increase (older timestamps rejected)
+- standard-replies error handling
+
+### Configuration
+
+To enable read-marker (disabled by default):
+```
+features {
+    "CAP_draft_read_marker" = "TRUE";  /* Enable capability */
+};
+```
+
+Note: Requires LMDB/chathistory to be enabled for persistence.
 
 ---
 
@@ -43,14 +87,28 @@ Notifies client of the last read timestamp. Timestamp can be `*` if unknown.
 
 ## Server Behavior Requirements
 
-1. **On JOIN**: After sending JOIN to client, MUST send MARKREAD for that channel BEFORE RPL_ENDOFNAMES (366)
+1. **On JOIN**: After sending JOIN to client, MUST send MARKREAD for that channel BEFORE RPL_ENDOFNAMES (366) ✅
 2. **On MARKREAD from client**:
-   - Validate timestamp format
-   - Only accept if timestamp > stored timestamp (timestamps only increase)
-   - Broadcast updated timestamp to ALL of user's connected clients
-   - If client sends older timestamp, respond with current stored value
-3. **Privacy**: MUST NOT disclose read markers to other users without explicit opt-in
-4. **Persistence**: Should persist across reconnects (requires storage)
+   - Validate timestamp format ✅
+   - Only accept if timestamp > stored timestamp (timestamps only increase) ✅
+   - Broadcast updated timestamp to ALL of user's connected clients ✅
+   - If client sends older timestamp, respond with current stored value ✅
+3. **Privacy**: MUST NOT disclose read markers to other users without explicit opt-in ✅
+4. **Persistence**: Should persist across reconnects (requires storage) ✅
+
+---
+
+## Storage Architecture
+
+Read markers are stored in the existing LMDB environment alongside chathistory:
+
+**Database**: `readmarkers` (5th database in LMDB env)
+
+**Key**: `account\0target` (e.g., `myaccount\0#channel`)
+
+**Value**: ISO 8601 timestamp (e.g., `2025-01-01T00:00:00.000Z`)
+
+This reuses the chathistory infrastructure with minimal additional code.
 
 ---
 
@@ -58,75 +116,58 @@ Notifies client of the last read timestamp. Timestamp can be `*` if unknown.
 
 | Error Code | Condition | Response |
 |------------|-----------|----------|
+| `ACCOUNT_REQUIRED` | Not logged in | `FAIL MARKREAD ACCOUNT_REQUIRED :You must be logged in` |
 | `NEED_MORE_PARAMS` | Missing target | `FAIL MARKREAD NEED_MORE_PARAMS :Missing target` |
-| `INVALID_PARAMS` | Invalid target | `FAIL MARKREAD INVALID_PARAMS <target> :Invalid target` |
-| `INVALID_PARAMS` | Bad timestamp format | `FAIL MARKREAD INVALID_PARAMS <target> :Invalid timestamp` |
+| `TEMPORARILY_UNAVAILABLE` | Storage unavailable | `FAIL MARKREAD TEMPORARILY_UNAVAILABLE <target> :Storage not available` |
 | `INTERNAL_ERROR` | Storage failure | `FAIL MARKREAD INTERNAL_ERROR <target> :Could not save` |
 
 ---
 
-## Implementation Architecture Options
+## Example Flow
 
-### Option A: In-Memory Only (Simplest)
-- Store read markers in user's Client struct
-- Lost on disconnect/restart
-- Suitable for single-server, non-bouncer use
-
-### Option B: X3 Services Integration (Recommended)
-- Store read markers in X3's database (or linked SQL)
-- Persist across reconnects
-- Requires new P10 command for sync
-
-### Option C: File-based Persistence
-- Write to disk periodically
-- Moderate complexity
-- No X3 changes needed
-
----
-
-## Why Defer?
-
-1. **Spec is draft**: May change before ratification
-2. **Limited client support**: Only Halloy, gamja, Goguma, soju, Ergo currently support it
-3. **Requires chathistory**: Most useful in combination with chathistory
-4. **Storage complexity**: Proper implementation needs persistence
-
----
-
-## Relationship to Chathistory
-
-Read-marker and chathistory are complementary:
-- **chathistory**: Retrieve missed messages
-- **read-marker**: Track which messages have been seen
-
-Implementing chathistory first makes read-marker more useful.
-
----
-
-## Files That Would Be Modified
-
-| File | Changes |
-|------|---------|
-| `include/capab.h` | Add `CAP_READMARKER` |
-| `include/ircd_features.h` | Add `FEAT_CAP_read_marker` |
-| `ircd/ircd_features.c` | Register feature (default: FALSE) |
-| `ircd/m_cap.c` | Add `draft/read-marker` to capability list |
-| `include/msg.h` | Add `MSG_MARKREAD`, `TOK_MARKREAD` |
-| `include/handlers.h` | Add `m_markread` declaration |
-| `ircd/m_markread.c` | New file: MARKREAD command handler |
-| `ircd/parse.c` | Register MARKREAD command |
-| `ircd/m_join.c` | Send MARKREAD after JOIN, before 366 |
-
----
-
-## P10 Protocol (If X3 Integration)
-
-**New Token**: `MR` (MARKREAD)
-
-**Format**:
 ```
-[USER_NUMERIC] MR <target> <timestamp>
+C: CAP LS 302
+S: CAP * LS :... draft/read-marker ...
+C: CAP REQ :draft/read-marker
+S: CAP * ACK :draft/read-marker
+C: AUTHENTICATE PLAIN
+S: 900 ... (authenticated as myaccount)
+C: JOIN #channel
+S: :nick!user@host JOIN #channel
+S: MARKREAD #channel timestamp=2025-01-01T12:00:00.000Z
+S: 353 nick = #channel :@nick
+S: 366 nick #channel :End of /NAMES list.
+
+C: MARKREAD #channel timestamp=2025-01-01T15:00:00.000Z
+S: MARKREAD #channel timestamp=2025-01-01T15:00:00.000Z  (broadcast to all user's clients)
+
+C: MARKREAD #channel
+S: MARKREAD #channel timestamp=2025-01-01T15:00:00.000Z
 ```
+
+---
+
+## Dependencies
+
+| Dependency | Status |
+|------------|--------|
+| `standard-replies` | Complete |
+| SASL/account system | Complete |
+| LMDB (history.c) | Complete |
+| chathistory | Complete |
+
+---
+
+## Client Support
+
+| Software | Type | Support |
+|----------|------|---------|
+| Ergo | Server | Yes |
+| soju | Bouncer | Yes |
+| Halloy | Client | Yes |
+| gamja | Client | Yes |
+| Goguma | Client | Yes |
+| **Nefarious** | **Server** | **Yes (NEW)** |
 
 ---
 
@@ -134,5 +175,5 @@ Implementing chathistory first makes read-marker more useful.
 
 - **Spec**: https://ircv3.net/specs/extensions/read-marker
 - **Related**: chathistory extension
-- **Supporting servers**: Ergo, soju
+- **Supporting servers**: Ergo, soju, Nefarious
 - **Supporting clients**: Halloy, gamja, Goguma
