@@ -20,7 +20,7 @@ Draft IRCv3 extensions under investigation are documented in separate files:
 | **channel-rename** | [CHANNEL_RENAME_INVESTIGATION.md](CHANNEL_RENAME_INVESTIGATION.md) | Investigating | High |
 | **message-redaction** | [MESSAGE_REDACTION_INVESTIGATION.md](MESSAGE_REDACTION_INVESTIGATION.md) | Investigating | Medium |
 | **pre-away** | [PRE_AWAY_INVESTIGATION.md](PRE_AWAY_INVESTIGATION.md) | Investigating | Low-Medium |
-| **extended-isupport** | [EXTENDED_ISUPPORT_INVESTIGATION.md](EXTENDED_ISUPPORT_INVESTIGATION.md) | Investigating | Low |
+| **extended-isupport** | [EXTENDED_ISUPPORT_INVESTIGATION.md](EXTENDED_ISUPPORT_INVESTIGATION.md) | ✅ Implemented | Low |
 | **no-implicit-names** | [NO_IMPLICIT_NAMES_INVESTIGATION.md](NO_IMPLICIT_NAMES_INVESTIGATION.md) | ✅ Implemented | Very Low |
 | **metadata-2** | [METADATA_INVESTIGATION.md](METADATA_INVESTIGATION.md) | Investigating | Very High |
 | **multiline** | [MULTILINE_INVESTIGATION.md](MULTILINE_INVESTIGATION.md) | Investigating | High (user retention issue) |
@@ -67,7 +67,7 @@ These are trivial to implement and provide immediate value:
 | Extension | Effort | Status |
 |-----------|--------|--------|
 | **no-implicit-names** | ~2-4 hours | ✅ Implemented |
-| **extended-isupport** | ~16-28 hours | Pending |
+| **extended-isupport** | ~16-28 hours | ✅ Implemented |
 | **pre-away** | ~24-36 hours | Pending |
 
 ### Tier 2: High Priority (User Retention)

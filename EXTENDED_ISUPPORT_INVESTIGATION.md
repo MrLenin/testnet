@@ -1,6 +1,6 @@
 # IRCv3 Extended-ISUPPORT Extension Investigation
 
-## Status: QUICK WIN - LOW EFFORT
+## Status: ✅ IMPLEMENTED
 
 **Specification**: https://ircv3.net/specs/extensions/extended-isupport
 
@@ -42,19 +42,10 @@ Requests the server to send RPL_ISUPPORT (005) messages.
 
 ### Server Response
 
-One or more RPL_ISUPPORT messages, optionally wrapped in a batch:
+One or more RPL_ISUPPORT messages:
 
 ```
 :server 005 * KEY1=value1 KEY2=value2 :are supported by this server
-```
-
-When both `batch` and `draft/extended-isupport` are enabled:
-
-```
-:server BATCH +abc draft/isupport
-@batch=abc :server 005 * KEY1=value1 KEY2=value2 :are supported
-@batch=abc :server 005 * KEY3=value3 KEY4=value4 :are supported
-:server BATCH -abc
 ```
 
 ---
@@ -63,8 +54,7 @@ When both `batch` and `draft/extended-isupport` are enabled:
 
 When capability is negotiated:
 1. Server MUST accept `ISUPPORT` command before registration
-2. Server MAY send subset of tokens pre-registration
-3. Server MUST send any omitted tokens after registration completes
+2. Server sends full ISUPPORT tokens
 
 ---
 
@@ -77,171 +67,99 @@ When capability is negotiated:
 
 ---
 
-## Batch Type
+## Implementation Details
 
-**Type**: `draft/isupport`
+### Files Modified
 
-Used to group multiple RPL_ISUPPORT messages.
+| File | Changes |
+|------|---------|
+| `include/capab.h` | Added `CAP_DRAFT_EXTISUPPORT` enum value |
+| `include/ircd_features.h` | Added `FEAT_CAP_draft_extended_isupport` |
+| `ircd/ircd_features.c` | Registered feature (default: TRUE) |
+| `ircd/m_cap.c` | Added `draft/extended-isupport` to capability list |
+| `include/msg.h` | Added `MSG_ISUPPORT`, `TOK_ISUPPORT`, `CMD_ISUPPORT` |
+| `include/handlers.h` | Added `m_isupport` declaration |
+| `ircd/m_isupport.c` | **New file**: ISUPPORT command handler |
+| `ircd/parse.c` | Registered ISUPPORT command with `MFLG_UNREG` |
+| `ircd/Makefile.in` | Added m_isupport.c |
+
+### capab.h
+
+```c
+/* Added to enum Capab */
+_CAP(DRAFT_EXTISUPPORT, 0, "draft/extended-isupport", 0),
+```
+
+### msg.h
+
+```c
+#define MSG_ISUPPORT            "ISUPPORT"
+#define TOK_ISUPPORT            "IS"
+#define CMD_ISUPPORT            MSG_ISUPPORT, TOK_ISUPPORT
+```
+
+### m_isupport.c (new file)
+
+```c
+int m_isupport(struct Client *cptr, struct Client *sptr, int parc, char *parv[])
+{
+  /* Check if capability negotiated */
+  if (!HasCap(sptr, CAP_DRAFT_EXTISUPPORT))
+    return send_reply(sptr, ERR_UNKNOWNCOMMAND, "ISUPPORT");
+
+  /* Send ISUPPORT - reuses existing infrastructure from s_user.c */
+  send_supported(sptr);
+
+  return 0;
+}
+```
+
+### parse.c
+
+```c
+{
+  MSG_ISUPPORT,
+  TOK_ISUPPORT,
+  0, MAXPARA, MFLG_SLOW | MFLG_UNREG, 0, NULL,
+  /* UNREG, CLIENT, SERVER, OPER, SERVICE */
+  { m_isupport, m_isupport, m_ignore, m_isupport, m_ignore },
+  "- Returns ISUPPORT tokens (requires draft/extended-isupport cap)"
+},
+```
 
 ---
 
-## Implementation Architecture
+## Configuration
 
-### Current ISUPPORT Handling
-
-ISUPPORT tokens are sent in `register_user()` after connection completes:
-
-```c
-/* In s_user.c register_user() */
-send_supported(sptr);  /* Sends RPL_ISUPPORT */
+```
+features {
+    "CAP_draft_extended_isupport" = "TRUE";  /* enabled by default */
+};
 ```
 
-### New Flow
+To disable:
+```
+features {
+    "CAP_draft_extended_isupport" = "FALSE";
+};
+```
+
+---
+
+## Example Flow
 
 ```
 C: CAP LS 302
 S: CAP * LS :... draft/extended-isupport batch ...
-C: CAP REQ :draft/extended-isupport batch
-S: CAP * ACK :draft/extended-isupport batch
-C: ISUPPORT                        <- NEW
-S: BATCH +abc draft/isupport
-S: @batch=abc :server 005 * NETWORK=Test CHANTYPES=#& :are supported
-S: @batch=abc :server 005 * NICKLEN=30 CHANNELLEN=50 :are supported
-S: BATCH -abc
+C: CAP REQ :draft/extended-isupport
+S: CAP * ACK :draft/extended-isupport
+C: ISUPPORT
+S: 005 * NETWORK=AfterNET NICKLEN=30 CHANNELLEN=50 ... :are supported by this server
+S: 005 * CHANTYPES=#& PREFIX=(ohv)@%+ ... :are supported by this server
 C: NICK user
-C: USER ...
+C: USER user 0 * :Real Name
 S: 001 ...
 ```
-
----
-
-## Files to Modify (Nefarious)
-
-| File | Changes |
-|------|---------|
-| `include/capab.h` | Add `CAP_EXTISUPPORT` |
-| `include/ircd_features.h` | Add `FEAT_CAP_extended_isupport` |
-| `ircd/ircd_features.c` | Register feature (default: FALSE) |
-| `ircd/m_cap.c` | Add `draft/extended-isupport` to capability list |
-| `include/msg.h` | Add `MSG_ISUPPORT` |
-| `include/handlers.h` | Add `m_isupport` declaration |
-| `ircd/m_isupport.c` | New file: ISUPPORT command handler |
-| `ircd/parse.c` | Register ISUPPORT command |
-| `ircd/Makefile.in` | Add m_isupport.c |
-| `ircd/supported.c` | Add batch-aware sending |
-
----
-
-## New Command Handler
-
-```c
-/* m_isupport.c */
-int m_isupport(struct Client *cptr, struct Client *sptr, int parc, char *parv[])
-{
-    /* Check if capability negotiated */
-    if (!HasCap(sptr, CAP_EXTISUPPORT))
-        return send_reply(sptr, ERR_UNKNOWNCOMMAND, "ISUPPORT");
-
-    /* Send ISUPPORT with batch wrapper if client has batch cap */
-    if (HasCap(sptr, CAP_BATCH)) {
-        char batchid[16];
-        generate_batch_id(batchid, sizeof(batchid));
-
-        /* Start batch */
-        sendcmdto_one(&me, CMD_BATCH, sptr, "+%s draft/isupport", batchid);
-
-        /* Send ISUPPORT with batch tag */
-        send_supported_batched(sptr, batchid);
-
-        /* End batch */
-        sendcmdto_one(&me, CMD_BATCH, sptr, "-%s", batchid);
-    } else {
-        /* Send without batch */
-        send_supported(sptr);
-    }
-
-    return 0;
-}
-```
-
----
-
-## Batch-Aware ISUPPORT
-
-Modify `supported.c` to support batch tags:
-
-```c
-void send_supported_batched(struct Client *cptr, const char *batchid)
-{
-    char buffer[512];
-    int pos = 0;
-    int count = 0;
-
-    for (int i = 0; isupport_tokens[i].name; i++) {
-        int len = format_token(&isupport_tokens[i], buffer + pos, sizeof(buffer) - pos);
-        pos += len;
-        count++;
-
-        if (count >= 13 || pos > 400) {
-            /* Send line with batch tag */
-            send_reply_batched(cptr, RPL_ISUPPORT, batchid, buffer);
-            pos = 0;
-            count = 0;
-        }
-    }
-
-    if (pos > 0) {
-        send_reply_batched(cptr, RPL_ISUPPORT, batchid, buffer);
-    }
-}
-```
-
----
-
-## Pre-Registration Token Subset
-
-Some tokens may not be available pre-registration:
-
-| Token | Available Pre-Reg |
-|-------|-------------------|
-| `NETWORK` | Yes |
-| `CHANTYPES` | Yes |
-| `NICKLEN` | Yes |
-| `CHANNELLEN` | Yes |
-| `PREFIX` | Yes |
-| `MODES` | Yes |
-| `MAXTARGETS` | Yes |
-| `draft/ICON` | Yes |
-| User-specific tokens | No |
-
----
-
-## Implementation Phases
-
-### Phase 1: Basic ISUPPORT Command
-
-1. Add capability and feature flag
-2. Implement `m_isupport.c`
-3. Allow pre-registration sending
-4. No batching initially
-
-**Effort**: Low (8-12 hours)
-
-### Phase 2: Batch Support
-
-1. Add `draft/isupport` batch type
-2. Wrap ISUPPORT in batch when client supports
-3. Add batch tag to 005 messages
-
-**Effort**: Low (4-8 hours)
-
-### Phase 3: Subset Handling
-
-1. Identify pre-reg vs post-reg tokens
-2. Send subset pre-registration
-3. Send remainder after registration
-
-**Effort**: Low (4-8 hours)
 
 ---
 
@@ -250,8 +168,6 @@ Some tokens may not be available pre-registration:
 ### Early Capability Discovery
 
 ```
-C: CAP LS 302
-S: CAP * LS :draft/extended-isupport
 C: CAP REQ :draft/extended-isupport
 S: CAP * ACK :draft/extended-isupport
 C: ISUPPORT
@@ -274,41 +190,11 @@ S: 005 * NETWORK=AfterNET draft/ICON=https://... :are supported
 
 ---
 
-## Configuration Options
+## Edge Cases
 
-```
-features {
-    "CAP_extended_isupport" = "TRUE";
-};
-```
-
----
-
-## Complexity Assessment
-
-| Component | Effort | Risk |
-|-----------|--------|------|
-| Capability negotiation | Low | Low |
-| ISUPPORT command | Low | Low |
-| Batch wrapping | Low | Low |
-| Token subset | Low | Low |
-
-**Total**: Low effort (16-28 hours)
-
----
-
-## Recommendation
-
-1. **Implement all phases**: Simple extension
-2. **Low priority**: Nice-to-have, not essential
-3. **Feature flag enabled by default**: Low risk
-
----
-
-## Related Extensions
-
-- **draft/ICON**: Network icon ISUPPORT token
-- **batch**: For grouping ISUPPORT messages
+1. **Without capability**: Returns ERR_UNKNOWNCOMMAND
+2. **After registration**: Works normally (same as pre-reg)
+3. **Multiple requests**: Each request sends full ISUPPORT
 
 ---
 
@@ -317,8 +203,24 @@ features {
 | Software | Support |
 |----------|---------|
 | UnrealIRCd | Server |
+| **Nefarious** | **Server (NEW)** |
 
 Limited adoption currently.
+
+---
+
+## Future Enhancement: Batch Wrapping
+
+When both `batch` and `draft/extended-isupport` are enabled, the spec allows wrapping ISUPPORT in a batch:
+
+```
+S: BATCH +abc draft/isupport
+S: @batch=abc :server 005 * KEY1=value1 KEY2=value2 :are supported
+S: @batch=abc :server 005 * KEY3=value3 KEY4=value4 :are supported
+S: BATCH -abc
+```
+
+This is not implemented in the current version but could be added later.
 
 ---
 
