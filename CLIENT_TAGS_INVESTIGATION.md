@@ -1,6 +1,6 @@
 # IRCv3 Client-Only Tags Investigation
 
-## Status: INVESTIGATING (Draft Specifications)
+## Status: IMPLEMENTED (via existing message-tags infrastructure)
 
 This document covers the draft client-only message tags:
 - `+draft/reply` - Message threading
