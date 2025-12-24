@@ -15,7 +15,7 @@ Draft IRCv3 extensions under investigation are documented in separate files:
 | Extension | File | Status | Effort |
 |-----------|------|--------|--------|
 | **chathistory** | [CHATHISTORY_INVESTIGATION.md](CHATHISTORY_INVESTIGATION.md) | Investigating | Very High |
-| **read-marker** | [READ_MARKER_INVESTIGATION.md](READ_MARKER_INVESTIGATION.md) | Deferred | High |
+| **read-marker** | [READ_MARKER_INVESTIGATION.md](READ_MARKER_INVESTIGATION.md) | Long-Term Goal | High |
 | **account-registration** | [ACCOUNT_REGISTRATION_INVESTIGATION.md](ACCOUNT_REGISTRATION_INVESTIGATION.md) | Investigating | High |
 | **channel-rename** | [CHANNEL_RENAME_INVESTIGATION.md](CHANNEL_RENAME_INVESTIGATION.md) | Investigating | High |
 | **message-redaction** | [MESSAGE_REDACTION_INVESTIGATION.md](MESSAGE_REDACTION_INVESTIGATION.md) | Investigating | Medium |
@@ -23,8 +23,9 @@ Draft IRCv3 extensions under investigation are documented in separate files:
 | **extended-isupport** | [EXTENDED_ISUPPORT_INVESTIGATION.md](EXTENDED_ISUPPORT_INVESTIGATION.md) | Investigating | Low |
 | **no-implicit-names** | [NO_IMPLICIT_NAMES_INVESTIGATION.md](NO_IMPLICIT_NAMES_INVESTIGATION.md) | Investigating | Very Low |
 | **metadata-2** | [METADATA_INVESTIGATION.md](METADATA_INVESTIGATION.md) | Investigating | Very High |
-| **multiline** | [MULTILINE_INVESTIGATION.md](MULTILINE_INVESTIGATION.md) | Investigating | Medium |
-| **websocket** | [WEBSOCKET_INVESTIGATION.md](WEBSOCKET_INVESTIGATION.md) | Investigating | Low (proxy) |
+| **multiline** | [MULTILINE_INVESTIGATION.md](MULTILINE_INVESTIGATION.md) | Investigating | High (user retention issue) |
+| **websocket** | [WEBSOCKET_INVESTIGATION.md](WEBSOCKET_INVESTIGATION.md) | Investigating | High (native supported by Ergo/UnrealIRCd/InspIRCd) |
+| **webpush** | [WEBPUSH_INVESTIGATION.md](WEBPUSH_INVESTIGATION.md) | Investigating | Low (bouncer) / Very High (native) |
 
 ### Client-Only Tags
 
@@ -40,28 +41,64 @@ Draft IRCv3 extensions under investigation are documented in separate files:
 
 ---
 
-### Quick Wins (Low Effort)
+## Implementation Priority
 
-1. **no-implicit-names** - ~2-4 hours, trivial change
-2. **extended-isupport** - ~16-28 hours, simple ISUPPORT command
-3. **pre-away** - ~24-36 hours, pre-registration AWAY
+### Draft Specification Naming Convention
 
-### Medium Priority
+All draft extensions MUST use feature flag names that clearly indicate draft status:
 
-1. **message-redaction** - ~32-48 hours, requires msgid (done)
-2. **multiline** - ~36-52 hours, requires client-batch framework
-3. **channel-rename** - ~48-80 hours, complex state management
+```
+features {
+    "CAP_draft_no_implicit_names" = "TRUE";   /* Not CAP_no_implicit_names */
+    "CAP_draft_multiline" = "TRUE";           /* Not CAP_multiline */
+    "CAP_draft_pre_away" = "TRUE";            /* Not CAP_pre_away */
+};
+```
 
-### High Priority (But Complex)
+**Rationale**: Draft specs may change before finalization. Using `draft_` prefix:
+- Signals to operators that behavior may change
+- Makes migration easier when specs are ratified (add new feature, deprecate old)
+- Matches capability names (`draft/multiline` → `CAP_draft_multiline`)
 
-1. **chathistory** - ~76-116 hours, requires SQLite integration
-2. **account-registration** - ~56-80 hours, requires X3 integration
+### Tier 1: Quick Wins (Do First)
 
-### Defer
+These are trivial to implement and provide immediate value:
 
-1. **read-marker** - Wait for spec stabilization
-2. **metadata-2** - Very complex, ~96-132 hours
-3. **websocket (native)** - Use proxy instead
+| Extension | Effort | Why |
+|-----------|--------|-----|
+| **no-implicit-names** | ~2-4 hours | Single if-statement change, reduces bandwidth for mobile clients |
+| **extended-isupport** | ~16-28 hours | Simple new command, enables pre-registration feature discovery |
+| **pre-away** | ~24-36 hours | Small m_away.c change, useful for bouncers |
+
+### Tier 2: High Priority (User Retention)
+
+Features users expect from modern chat platforms:
+
+| Extension | Effort | Why |
+|-----------|--------|-----|
+| **multiline** | ~36-52 hours | Key UX gap vs Discord/Slack/Matrix; code pasting without flood |
+| **websocket** | ~80-120 hours | Standard in Ergo/UnrealIRCd/InspIRCd; enables browser clients |
+| **chathistory** | ~76-116 hours | Message history retrieval; requires SQLite |
+
+### Tier 3: Medium Priority
+
+Useful features:
+
+| Extension | Effort | Why |
+|-----------|--------|-----|
+| **message-redaction** | ~32-48 hours | Delete sent messages; msgid dependency done |
+| **channel-rename** | ~48-80 hours | Complex state management |
+| **account-registration** | ~56-80 hours | In-client registration; requires X3 integration |
+
+### Tier 4: Long-Term Goals
+
+Complex but important for feature parity with modern platforms:
+
+| Extension | Effort | Why |
+|-----------|--------|-----|
+| **metadata-2** | ~96-132 hours | User profiles, avatars, rich presence - expected by modern users |
+| **read-marker** | ~64-88 hours | Per-channel read state sync; spec stabilizing |
+| **webpush (native)** | ~80-124 hours | Push notifications for mobile/web; true modern chat parity |
 
 ---
 

@@ -1,10 +1,24 @@
 # IRCv3 No-Implicit-Names Extension Investigation
 
-## Status: INVESTIGATING (Draft Specification)
+## Status: QUICK WIN - IMPLEMENT FIRST
 
 **Specification**: https://ircv3.net/specs/extensions/no-implicit-names
 
 **Capability**: `draft/no-implicit-names`
+
+**Effort**: ~2-4 hours (single if-statement change)
+
+**Priority**: Tier 1 - Trivial implementation, immediate value
+
+---
+
+## Why Implement First?
+
+This is the easiest IRCv3 extension to implement:
+- **One line of code**: Add capability check before `do_names()` call
+- **No new commands**: Just skip existing behavior
+- **No state management**: Stateless capability
+- **Low risk**: Cannot break anything
 
 ---
 

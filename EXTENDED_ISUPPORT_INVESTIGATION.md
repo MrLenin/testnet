@@ -1,10 +1,23 @@
 # IRCv3 Extended-ISUPPORT Extension Investigation
 
-## Status: INVESTIGATING (Draft Specification)
+## Status: QUICK WIN - LOW EFFORT
 
 **Specification**: https://ircv3.net/specs/extensions/extended-isupport
 
 **Capability**: `draft/extended-isupport`
+
+**Effort**: ~16-28 hours
+
+**Priority**: Tier 1 - Simple new command, reuses existing ISUPPORT infrastructure
+
+---
+
+## Why Low Effort?
+
+- **Reuses existing code**: `send_supported()` already generates ISUPPORT
+- **Simple command**: Just call existing function from new handler
+- **Batch support**: Already implemented in Nefarious
+- **No state management**: Stateless query/response
 
 ---
 
