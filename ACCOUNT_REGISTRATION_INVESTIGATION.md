@@ -1,6 +1,6 @@
 # IRCv3 Account Registration Extension Investigation
 
-## Status: PARTIALLY IMPLEMENTED (Draft Specification)
+## Status: IMPLEMENTED (Draft Specification)
 
 **Specification**: https://ircv3.net/specs/extensions/account-registration
 
@@ -12,7 +12,7 @@
 
 ## Implementation Status
 
-The protocol scaffolding has been implemented in both Nefarious and X3:
+Full implementation in both Nefarious and X3:
 
 ### Nefarious Side (Complete)
 
@@ -28,22 +28,29 @@ The protocol scaffolding has been implemented in both Nefarious and X3:
 | `ircd/parse.c` | Command registration |
 | `ircd/Makefile.in` | Added m_register.c |
 
-### X3 Side (Stub Handlers)
+### X3 Side (Complete)
 
 | File | Changes |
 |------|---------|
 | `src/proto-p10.c` | CMD_REGISTER_ACCT, CMD_VERIFY_ACCT, CMD_REGREPLY definitions |
 | `src/proto-p10.c` | TOK_REGISTER_ACCT (RG), TOK_VERIFY_ACCT (VF), TOK_REGREPLY (RR) |
-| `src/proto-p10.c` | `cmd_register_acct`, `cmd_verify_acct` - RG/VF P10 handlers |
+| `src/proto-p10.c` | `cmd_register_acct`, `cmd_verify_acct` - Full RG/VF P10 handlers |
 | `src/proto-p10.c` | `irc_regreply` - sends REGREPLY (RR) to user |
+| `src/nickserv.h` | Added `nickserv_ircv3_register()`, `nickserv_ircv3_verify()` API |
+| `src/nickserv.h` | Added `enum nickserv_register_result`, `enum nickserv_verify_result` |
+| `src/nickserv.c` | Implemented `nickserv_ircv3_register()` with full NickServ integration |
+| `src/nickserv.c` | Implemented `nickserv_ircv3_verify()` for cookie verification |
 
-### TODO: NickServ Integration
+### Features Implemented
 
-The X3 handlers currently return "not yet implemented" responses. To complete:
-1. Integrate with `nickserv.c` registration logic
-2. Call actual account creation functions
-3. Handle email verification if configured
-4. Return proper success/failure codes
+- Account registration with password strength validation
+- Email address validation and prohibited address checking
+- Email verification via activation cookies (when email enabled)
+- Immediate authentication for no-email registrations
+- LDAP integration (when WITH_LDAP compiled in)
+- Keycloak integration (when WITH_KEYCLOAK compiled in)
+- Handles per email limit enforcement
+- Nick registration for new accounts
 
 ### Configuration
 
