@@ -1,10 +1,25 @@
 # IRCv3 Metadata Extension Investigation
 
-## Status: IMPLEMENTED
+## Status: IMPLEMENTED (All Phases Complete)
 
 **Specification**: https://ircv3.net/specs/extensions/metadata
 
 **Capability**: `draft/metadata-2`
+
+---
+
+## Implementation Summary
+
+All six phases of the metadata-2 specification have been implemented:
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| Phase 1 | Basic GET/SET (In-Memory) | ✅ Complete |
+| Phase 2 | Subscriptions | ✅ Complete |
+| Phase 3 | Channel Metadata | ✅ Complete |
+| Phase 4 | Network Propagation | ✅ Complete |
+| Phase 5 | X3 Integration | ✅ Complete |
+| Phase 6 | Limits, Rate Limiting, Visibility | ✅ Complete |
 
 ---
 
@@ -15,8 +30,6 @@ The metadata extension provides a key-value store for users and channels. This e
 - Channel metadata (description, rules URL)
 - Real-time presence data (location, status)
 - Bot configuration and state
-
-This is a comprehensive extension with significant complexity.
 
 ---
 
@@ -43,16 +56,16 @@ METADATA <target> <subcommand> [params...]
 
 ### Subcommands
 
-| Subcommand | Syntax | Description |
-|------------|--------|-------------|
-| `GET` | `METADATA <target> GET <key> [key...]` | Retrieve specific keys |
-| `LIST` | `METADATA <target> LIST` | List all metadata for target |
-| `SET` | `METADATA <target> SET <key> [:<value>]` | Set/delete key |
-| `CLEAR` | `METADATA <target> CLEAR` | Remove all metadata |
-| `SUB` | `METADATA * SUB <key> [key...]` | Subscribe to key updates |
-| `UNSUB` | `METADATA * UNSUB <key> [key...]` | Unsubscribe from keys |
-| `SUBS` | `METADATA * SUBS` | List current subscriptions |
-| `SYNC` | `METADATA <target> SYNC` | Fetch subscribed keys for target |
+| Subcommand | Syntax | Description | Status |
+|------------|--------|-------------|--------|
+| `GET` | `METADATA <target> GET <key> [key...]` | Retrieve specific keys | ✅ |
+| `LIST` | `METADATA <target> LIST` | List all metadata for target | ✅ |
+| `SET` | `METADATA <target> SET <key> [visibility] [:<value>]` | Set/delete key | ✅ |
+| `CLEAR` | `METADATA <target> CLEAR` | Remove all metadata | ✅ |
+| `SUB` | `METADATA * SUB <key> [key...]` | Subscribe to key updates | ✅ |
+| `UNSUB` | `METADATA * UNSUB <key> [key...]` | Unsubscribe from keys | ✅ |
+| `SUBS` | `METADATA * SUBS` | List current subscriptions | ✅ |
+| `SYNC` | `METADATA <target> SYNC` | Fetch subscribed keys for target | ✅ |
 
 ---
 
@@ -68,20 +81,50 @@ METADATA <target> <key> <visibility> :<value>
 |-------|-------------|
 | `<target>` | User nick or channel name |
 | `<key>` | Metadata key name |
-| `<visibility>` | `*` for public, or visibility token |
+| `<visibility>` | `*` for public, `private` for private |
 | `<value>` | Key value (trailing parameter) |
 
 **Example**:
 ```
 :server METADATA nick avatar * :https://example.com/avatar.png
+:server METADATA nick secret private :my-secret-value
 :server METADATA #channel description * :Welcome to our channel
+```
+
+---
+
+## Visibility Support
+
+Metadata can be marked as public or private:
+
+| Visibility | Token | Who Can See |
+|------------|-------|-------------|
+| Public | `*` | Everyone |
+| Private | `private` | Owner only (and opers) |
+
+### SET with Visibility
+
+```
+METADATA SET * mykey * :public value
+METADATA SET * mykey private :private value
+METADATA SET * mykey :defaults to public
+```
+
+### P10 Visibility Propagation
+
+```
+# Public metadata
+[SOURCE] MD <target> <key> * :<value>
+
+# Private metadata
+[SOURCE] MD <target> <key> P :<value>
 ```
 
 ---
 
 ## Key Naming
 
-Valid characters: `a-z`, `0-9`, `_`, `.`, `/`, `-`
+Valid characters: `a-z`, `0-9`, `_`, `.`, `/`, `-`, `:`
 
 **Examples**:
 - `avatar` - User avatar URL
@@ -104,6 +147,35 @@ S: :server 770 nick :avatar pronouns
 S: :server METADATA user avatar * :https://new-avatar.png
 ```
 
+**Note**: Private metadata changes are NOT sent to subscribers.
+
+---
+
+## SYNC Subcommand
+
+The SYNC command fetches all subscribed metadata for a target using batch:
+
+```
+C: METADATA #channel SYNC
+S: @batch=abc123 BATCH +abc123 metadata
+S: @batch=abc123 :server METADATA #channel description * :Welcome
+S: @batch=abc123 :server METADATA nick1 avatar * :https://...
+S: @batch=abc123 :server METADATA nick2 avatar * :https://...
+S: BATCH -abc123
+```
+
+For channel targets, SYNC includes metadata for all channel members.
+
+---
+
+## Rate Limiting
+
+Configurable via `FEAT_METADATA_RATE_LIMIT` (default: 10 commands/second).
+
+- Applied per-client, per-second
+- Operators bypass rate limiting
+- Returns `RATE_LIMITED` error when exceeded
+
 ---
 
 ## Dependencies
@@ -122,11 +194,11 @@ S: :server METADATA user avatar * :https://new-avatar.png
 | 760 | `RPL_METADATAEND` | End of metadata list |
 | 761 | `RPL_KEYVALUE` | Key-value pair response |
 | 762 | `RPL_KEYSTATUS` | Key status (set confirmation) |
+| 763 | `RPL_KEYNOTSET` | Key not set |
 | 770 | `RPL_METADATASUBOK` | Subscription confirmed |
 | 771 | `RPL_METADATAUNSUBOK` | Unsubscription confirmed |
 | 772 | `RPL_METADATASUBS` | Subscription list |
 | 773 | `RPL_METADATASYNCLATER` | Sync postponed |
-| 774 | `RPL_METADATAEND` | End of batch |
 
 ---
 
@@ -142,151 +214,103 @@ S: :server METADATA user avatar * :https://new-avatar.png
 | `TOO_MANY_SUBS` | Maximum subscriptions exceeded |
 | `VALUE_INVALID` | Value doesn't meet requirements |
 | `INVALID_TARGET` | Target doesn't exist |
+| `INTERNAL_ERROR` | Server error |
 
 ---
 
 ## Implementation Architecture
 
-### Storage Options
+### Storage
 
-#### Option A: In-Memory (Simplest)
+- **In-memory**: Client and channel metadata linked lists
+- **LMDB**: Persistent storage for account-linked metadata
+- **Keycloak**: X3 stores metadata as user attributes with `metadata.` prefix
 
-```c
-struct MetadataEntry {
-    char key[64];
-    char value[1024];
-    int visibility;
-    struct MetadataEntry *next;
-};
+### Visibility Storage
 
-struct User {
-    /* ... existing ... */
-    struct MetadataEntry *metadata;
-};
-
-struct Channel {
-    /* ... existing ... */
-    struct MetadataEntry *metadata;
-};
-```
-
-**Pros**: Simple, no external dependencies
-**Cons**: Lost on restart, no persistence
-
-#### Option B: X3 Services (Recommended for Users)
-
-User metadata stored in X3 account database.
-
-```
-Client <--IRC--> Nefarious <--P10--> X3
-                              |
-                         Account DB
-```
-
-**Pros**: Persistent, account-linked
-**Cons**: P10 changes needed, X3 modifications
-
-#### Option C: Hybrid
-
-- User metadata: X3 (persistent)
-- Channel metadata: Nefarious (in-memory or file)
+Visibility is stored as a prefix in Keycloak attribute values:
+- Public: stored as-is (`value`)
+- Private: stored with prefix (`P:value`)
 
 ---
 
-## P10 Protocol Design
+## P10 Protocol
 
-### New Token: `MD` (METADATA)
+### Token: `MD` (METADATA)
 
-**Format**:
+**Set with visibility**:
 ```
-[USER_NUMERIC] MD <target> <key> :<value>
+[SOURCE] MD <target> <key> <visibility> :<value>
 ```
 
-**Example**:
+**Clear**:
 ```
-ABAAB MD ABAAB avatar :https://example.com/avatar.png
-ABAAB MD #channel description :Welcome
+[SOURCE] MD <target> <key>
+```
+
+**Visibility tokens**:
+- `*` = public
+- `P` = private
+
+**Examples**:
+```
+ABAAB MD ABAAB avatar * :https://example.com/avatar.png
+ABAAB MD ABAAB secret P :private-data
+ABAAB MD #channel description * :Welcome
 ```
 
 ### Sync on Connect
 
-When user connects, X3 sends stored metadata:
+When user authenticates, X3 sends stored metadata to IRCd:
 ```
-AZ MD ABAAB avatar :https://...
-AZ MD ABAAB pronouns :they/them
+AZ MD ABAAB avatar * :https://...
+AZ MD ABAAB pronouns * :they/them
+AZ MD ABAAB secret P :private-value
 ```
 
 ---
 
-## Files to Modify (Nefarious)
+## Files Modified
+
+### Nefarious
 
 | File | Changes |
 |------|---------|
-| `include/capab.h` | Add `CAP_METADATA` |
-| `include/ircd_features.h` | Add metadata features |
-| `ircd/ircd_features.c` | Register features |
-| `ircd/m_cap.c` | Add `draft/metadata-2` to capability list |
-| `include/msg.h` | Add `MSG_METADATA`, `TOK_METADATA` |
-| `include/handlers.h` | Add handler declarations |
-| `ircd/m_metadata.c` | New file: METADATA command handler |
-| `ircd/parse.c` | Register METADATA command |
-| `ircd/Makefile.in` | Add m_metadata.c |
-| `include/client.h` | Add metadata structures |
-| `include/channel.h` | Add channel metadata |
-| `ircd/numeric.h` | Add new numerics |
+| `include/capab.h` | Added `CAP_DRAFT_METADATA2` |
+| `include/ircd_features.h` | Added metadata feature flags |
+| `ircd/ircd_features.c` | Registered `FEAT_METADATA_*` features |
+| `ircd/m_cap.c` | Added `draft/metadata-2` capability, subscription cleanup |
+| `include/msg.h` | Added `MSG_METADATA`, `TOK_METADATA` ("MD") |
+| `include/handlers.h` | Added `m_metadata`, `ms_metadata` declarations |
+| `ircd/m_metadata.c` | **New file**: METADATA command handler |
+| `ircd/metadata.c` | **New file**: Metadata storage implementation |
+| `include/metadata.h` | **New file**: Metadata API declarations |
+| `ircd/parse.c` | Registered METADATA command |
+| `ircd/Makefile.in` | Added m_metadata.c, metadata.c |
+| `include/client.h` | Added metadata/subscription pointers, rate limit fields |
+| `include/channel.h` | Added channel metadata pointer |
+| `ircd/s_err.c` | Added RPL_KEYVALUE with visibility parameter |
+
+### X3
+
+| File | Changes |
+|------|---------|
+| `src/nickserv.h` | Added metadata API, visibility constants |
+| `src/nickserv.c` | Metadata get/set with visibility, Keycloak storage |
+| `src/proto.h` | Added `irc_metadata()` with visibility |
+| `src/proto-p10.c` | Added MD token handler with visibility parsing |
 
 ---
 
-## Implementation Phases
+## Feature Flags
 
-### Phase 1: Basic GET/SET (In-Memory)
-
-1. Add capability and feature flag
-2. Implement metadata storage structures
-3. Implement GET, SET, LIST subcommands
-4. In-memory only, no persistence
-
-**Effort**: High (24-32 hours)
-
-### Phase 2: Subscriptions
-
-1. Add subscription tracking per client
-2. Implement SUB, UNSUB, SUBS subcommands
-3. Send notifications on changes
-
-**Effort**: High (16-24 hours)
-
-### Phase 3: Channel Metadata
-
-1. Add metadata to channel structure
-2. Permission checks (chanop only)
-3. Propagate via P10
-
-**Effort**: Medium (12-16 hours)
-
-### Phase 4: Network Propagation
-
-1. Add P10 MD command
-2. Propagate user metadata changes
-3. Propagate channel metadata changes
-
-**Effort**: Medium (12-16 hours)
-
-### Phase 5: X3 Integration
-
-1. Store user metadata in X3
-2. Sync on connect
-3. Persist across reconnects
-
-**Effort**: High (24-32 hours)
-
-### Phase 6: Limits and Rate Limiting
-
-1. Enforce max-keys, max-value-bytes
-2. Add rate limiting
-3. Cleanup unused subscriptions
-
-**Effort**: Medium (8-12 hours)
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `FEAT_CAP_metadata` | TRUE | Enable draft/metadata-2 capability |
+| `FEAT_METADATA_MAX_KEYS` | 20 | Maximum keys per target |
+| `FEAT_METADATA_MAX_VALUE_BYTES` | 1000 | Maximum value size |
+| `FEAT_METADATA_MAX_SUBS` | 50 | Maximum subscriptions per client |
+| `FEAT_METADATA_RATE_LIMIT` | 10 | Commands per second (0 = disabled) |
 
 ---
 
@@ -315,46 +339,12 @@ AZ MD ABAAB pronouns :they/them
 
 ## Security Considerations
 
-1. **Visibility**: Public vs private metadata
-2. **Rate limiting**: Prevent spam
-3. **Size limits**: Prevent abuse
-4. **Key restrictions**: Reserved keys
-5. **Privacy**: Sensitive user information
-
----
-
-## Complexity Assessment
-
-| Component | Effort | Risk |
-|-----------|--------|------|
-| Capability negotiation | Low | Low |
-| Basic GET/SET | High | Medium |
-| Subscriptions | High | High |
-| Channel metadata | Medium | Medium |
-| P10 propagation | Medium | Medium |
-| X3 integration | High | High |
-| Rate limiting | Medium | Low |
-
-**Total**: Very High effort (96-132 hours)
-
----
-
-## Recommendation
-
-1. **Defer implementation**: Very complex specification
-2. **Wait for spec stabilization**: Still draft, may change
-3. **Consider simpler alternatives**: Bot-based metadata?
-4. **If implementing**: Start with Phase 1-2 only
-
----
-
-## Alternative: Bot-Based Metadata
-
-Instead of server-side metadata:
-1. Dedicated metadata bot
-2. Uses standard PRIVMSG
-3. Client-side rendering
-4. No server changes needed
+1. **Visibility**: Private metadata hidden from other users
+2. **Rate limiting**: Prevents spam/abuse (configurable)
+3. **Size limits**: Enforced max-keys and max-value-bytes
+4. **Key restrictions**: Validated key names
+5. **Privacy**: Private metadata not propagated to subscribers
+6. **Oper access**: Operators can see all metadata
 
 ---
 
@@ -365,8 +355,7 @@ Instead of server-side metadata:
 | Ergo | Server |
 | ObsidianIRC | Server |
 | soju | Bouncer |
-
-Limited adoption due to complexity.
+| Nefarious | **Complete** |
 
 ---
 
