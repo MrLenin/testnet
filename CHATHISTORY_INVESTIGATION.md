@@ -27,7 +27,8 @@
 | `ircd/ircd_features.c` | Feature registration |
 | `ircd/s_user.c` | ISUPPORT tokens (CHATHISTORY, MSGREFTYPES) |
 | `ircd/ircd_relay.c` | Message capture hooks |
-| `ircd/ircd.c` | History initialization |
+| `ircd/m_tagmsg.c` | TAGMSG history storage for event-playback |
+| `ircd/ircd.c` | History initialization and retention purge timer |
 | `ircd/parse.c` | CHATHISTORY command registration |
 | `include/msg.h` | MSG_CHATHISTORY, TOK_CHATHISTORY |
 | `include/handlers.h` | m_chathistory declaration |
@@ -41,11 +42,16 @@ features {
     "CAP_draft_chathistory" = "TRUE";     /* Enable capability */
     "CHATHISTORY_MAX" = "100";            /* Max messages per query */
     "CHATHISTORY_DB" = "history";         /* Database directory */
-    "CHATHISTORY_RETENTION" = "7";        /* Days to keep (TODO: implement purge) */
+    "CHATHISTORY_RETENTION" = "7";        /* Days to keep (0 = disable purge) */
     "CHATHISTORY_PRIVATE" = "FALSE";      /* Enable DM history (privacy option) */
-    "CAP_draft_event_playback" = "FALSE"; /* Event playback (not yet implemented) */
+    "CAP_draft_event_playback" = "TRUE";  /* Event playback (JOIN, PART, etc.) */
 };
 ```
+
+### Retention Purge
+
+Messages older than `CHATHISTORY_RETENTION` days are automatically purged. The purge
+runs hourly via `history_purge_callback()` in ircd.c. Set to 0 to disable purging.
 
 ### Build Requirements
 
