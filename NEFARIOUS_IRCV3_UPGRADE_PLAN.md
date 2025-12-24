@@ -16,7 +16,7 @@ Draft IRCv3 extensions under investigation are documented in separate files:
 |-----------|------|--------|--------|
 | **chathistory** | [CHATHISTORY_INVESTIGATION.md](CHATHISTORY_INVESTIGATION.md) | ✅ Implemented | Very High |
 | **read-marker** | [READ_MARKER_INVESTIGATION.md](READ_MARKER_INVESTIGATION.md) | Long-Term Goal | High |
-| **account-registration** | [ACCOUNT_REGISTRATION_INVESTIGATION.md](ACCOUNT_REGISTRATION_INVESTIGATION.md) | Investigating | High |
+| **account-registration** | [ACCOUNT_REGISTRATION_INVESTIGATION.md](ACCOUNT_REGISTRATION_INVESTIGATION.md) | ✅ Implemented | High |
 | **channel-rename** | [CHANNEL_RENAME_INVESTIGATION.md](CHANNEL_RENAME_INVESTIGATION.md) | Investigating | High |
 | **message-redaction** | [MESSAGE_REDACTION_INVESTIGATION.md](MESSAGE_REDACTION_INVESTIGATION.md) | ✅ Implemented | Medium |
 | **pre-away** | [PRE_AWAY_INVESTIGATION.md](PRE_AWAY_INVESTIGATION.md) | ✅ Implemented | Low-Medium |
@@ -31,13 +31,13 @@ Draft IRCv3 extensions under investigation are documented in separate files:
 
 | Extension | File | Status |
 |-----------|------|--------|
-| **+reply, +react, +channel-context** | [CLIENT_TAGS_INVESTIGATION.md](CLIENT_TAGS_INVESTIGATION.md) | Already Supported |
+| **+reply, +react, +channel-context** | [CLIENT_TAGS_INVESTIGATION.md](CLIENT_TAGS_INVESTIGATION.md) | ✅ Implemented |
 
 ### Framework Specs
 
 | Extension | File | Status |
 |-----------|------|--------|
-| **client-batch** | [CLIENT_BATCH_INVESTIGATION.md](CLIENT_BATCH_INVESTIGATION.md) | Investigating |
+| **client-batch** | [CLIENT_BATCH_INVESTIGATION.md](CLIENT_BATCH_INVESTIGATION.md) | ✅ Implemented |
 
 ---
 
@@ -88,7 +88,7 @@ Useful features:
 |-----------|--------|-----|
 | **message-redaction** | ~32-48 hours | ✅ Implemented - Delete messages with chathistory integration |
 | **channel-rename** | ~48-80 hours | Complex state management |
-| **account-registration** | ~56-80 hours | In-client registration; requires X3 integration |
+| **account-registration** | ~56-80 hours | ✅ Implemented - Full X3 NickServ integration |
 
 ### Tier 4: Long-Term Goals
 
