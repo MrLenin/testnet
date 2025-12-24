@@ -1,10 +1,54 @@
 # IRCv3 Channel Rename Extension Investigation
 
-## Status: INVESTIGATING (Draft Specification)
+## Status: IMPLEMENTED (Draft Specification)
 
 **Specification**: https://ircv3.net/specs/extensions/channel-rename
 
 **Capability**: `draft/channel-rename`
+
+**Feature Flag**: `FEAT_CAP_draft_channel_rename` (disabled by default - draft spec)
+
+---
+
+## Implementation Status
+
+Full implementation in Nefarious with P10 propagation and capability-aware fallback:
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `include/capab.h` | Added `CAP_DRAFT_CHANRENAME` capability |
+| `include/ircd_features.h` | Added `FEAT_CAP_draft_channel_rename` |
+| `ircd/ircd_features.c` | Feature registration (default: FALSE) |
+| `ircd/m_cap.c` | `draft/channel-rename` capability |
+| `include/msg.h` | `MSG_RENAME`, `TOK_RENAME` ("RN") |
+| `include/handlers.h` | `m_rename`, `ms_rename` declarations |
+| `ircd/m_rename.c` | New file: RENAME command handler |
+| `ircd/parse.c` | Command registration |
+| `ircd/Makefile.in` | Added m_rename.c |
+| `include/hash.h` | Added `hChangeChannel()` declaration |
+| `ircd/hash.c` | Added `hChangeChannel()` for hash table rename |
+| `include/channel.h` | Added `rename_channel()` declaration |
+| `ircd/channel.c` | Added `rename_channel()` function |
+
+### Features Implemented
+
+- RENAME command for channel operators
+- Preserves all channel state (members, modes, topic, bans)
+- P10 propagation to other servers via "RN" token
+- Fallback for non-supporting clients (PART/JOIN + state resend)
+- standard-replies error handling
+- Restriction: new name must not be longer than old name (memory allocation constraint)
+
+### Configuration
+
+To enable channel-rename (disabled by default):
+```
+features {
+    "CAP_draft_channel_rename" = "TRUE";  /* Enable capability */
+};
+```
 
 ---
 

@@ -6,7 +6,7 @@
 
 **Capability Names**:
 - `draft/chathistory` - Core chathistory functionality ✅ Implemented
-- `draft/event-playback` - Optional: Replay non-PRIVMSG/NOTICE events (JOIN, PART, etc.)
+- `draft/event-playback` - Optional: Replay non-PRIVMSG/NOTICE events (JOIN, PART, etc.) ✅ Implemented
 
 **Storage Backend**: LMDB (Lightning Memory-Mapped Database)
 
