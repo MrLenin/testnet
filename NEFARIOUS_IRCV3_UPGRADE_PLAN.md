@@ -18,7 +18,7 @@ Draft IRCv3 extensions under investigation are documented in separate files:
 | **read-marker** | [READ_MARKER_INVESTIGATION.md](READ_MARKER_INVESTIGATION.md) | Long-Term Goal | High |
 | **account-registration** | [ACCOUNT_REGISTRATION_INVESTIGATION.md](ACCOUNT_REGISTRATION_INVESTIGATION.md) | Investigating | High |
 | **channel-rename** | [CHANNEL_RENAME_INVESTIGATION.md](CHANNEL_RENAME_INVESTIGATION.md) | Investigating | High |
-| **message-redaction** | [MESSAGE_REDACTION_INVESTIGATION.md](MESSAGE_REDACTION_INVESTIGATION.md) | Investigating | Medium |
+| **message-redaction** | [MESSAGE_REDACTION_INVESTIGATION.md](MESSAGE_REDACTION_INVESTIGATION.md) | ✅ Implemented | Medium |
 | **pre-away** | [PRE_AWAY_INVESTIGATION.md](PRE_AWAY_INVESTIGATION.md) | ✅ Implemented | Low-Medium |
 | **extended-isupport** | [EXTENDED_ISUPPORT_INVESTIGATION.md](EXTENDED_ISUPPORT_INVESTIGATION.md) | ✅ Implemented | Low |
 | **no-implicit-names** | [NO_IMPLICIT_NAMES_INVESTIGATION.md](NO_IMPLICIT_NAMES_INVESTIGATION.md) | ✅ Implemented | Very Low |
@@ -86,7 +86,7 @@ Useful features:
 
 | Extension | Effort | Why |
 |-----------|--------|-----|
-| **message-redaction** | ~32-48 hours | Delete sent messages; msgid dependency done |
+| **message-redaction** | ~32-48 hours | ✅ Implemented - Delete messages with chathistory integration |
 | **channel-rename** | ~48-80 hours | Complex state management |
 | **account-registration** | ~56-80 hours | In-client registration; requires X3 integration |
 
