@@ -1,12 +1,64 @@
 # IRCv3 Chathistory Extension Investigation
 
-## Status: INVESTIGATING (Draft Specification)
+## Status: IMPLEMENTED (Draft Specification)
 
 **Specification**: https://ircv3.net/specs/extensions/chathistory
 
 **Capability Names**:
-- `draft/chathistory` - Core chathistory functionality
+- `draft/chathistory` - Core chathistory functionality ✅ Implemented
 - `draft/event-playback` - Optional: Replay non-PRIVMSG/NOTICE events (JOIN, PART, etc.)
+
+**Storage Backend**: LMDB (Lightning Memory-Mapped Database)
+
+---
+
+## Implementation Summary
+
+### Files Added/Modified
+
+| File | Description |
+|------|-------------|
+| `include/history.h` | Data structures and API declarations |
+| `ircd/history.c` | LMDB-based storage implementation |
+| `ircd/m_chathistory.c` | CHATHISTORY command handler |
+| `include/capab.h` | Added CAP_DRAFT_CHATHISTORY, CAP_DRAFT_EVENTPLAYBACK |
+| `ircd/m_cap.c` | Registered draft/chathistory capability |
+| `include/ircd_features.h` | Added FEAT_CAP_draft_chathistory, FEAT_CHATHISTORY_* |
+| `ircd/ircd_features.c` | Feature registration |
+| `ircd/s_user.c` | ISUPPORT tokens (CHATHISTORY, MSGREFTYPES) |
+| `ircd/ircd_relay.c` | Message capture hooks |
+| `ircd/ircd.c` | History initialization |
+| `ircd/parse.c` | CHATHISTORY command registration |
+| `include/msg.h` | MSG_CHATHISTORY, TOK_CHATHISTORY |
+| `include/handlers.h` | m_chathistory declaration |
+| `configure.in` | LMDB library detection |
+| `ircd/Makefile.in` | Build rules |
+
+### Configuration
+
+```
+features {
+    "CAP_draft_chathistory" = "TRUE";     /* Enable capability */
+    "CHATHISTORY_MAX" = "100";            /* Max messages per query */
+    "CHATHISTORY_DB" = "history";         /* Database directory */
+    "CHATHISTORY_RETENTION" = "7";        /* Days to keep (TODO: implement purge) */
+    "CHATHISTORY_PRIVATE" = "FALSE";      /* Enable DM history (privacy option) */
+    "CAP_draft_event_playback" = "FALSE"; /* Event playback (not yet implemented) */
+};
+```
+
+### Build Requirements
+
+```bash
+# Debian/Ubuntu
+apt-get install liblmdb-dev
+
+# Configure
+./configure --with-lmdb
+
+# Or disable
+./configure --disable-lmdb
+```
 
 ---
 
