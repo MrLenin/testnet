@@ -22,8 +22,8 @@ Draft IRCv3 extensions under investigation are documented in separate files:
 | **pre-away** | [PRE_AWAY_INVESTIGATION.md](PRE_AWAY_INVESTIGATION.md) | ✅ Implemented | Low-Medium |
 | **extended-isupport** | [EXTENDED_ISUPPORT_INVESTIGATION.md](EXTENDED_ISUPPORT_INVESTIGATION.md) | ✅ Implemented | Low |
 | **no-implicit-names** | [NO_IMPLICIT_NAMES_INVESTIGATION.md](NO_IMPLICIT_NAMES_INVESTIGATION.md) | ✅ Implemented | Very Low |
+| **multiline** | [MULTILINE_INVESTIGATION.md](MULTILINE_INVESTIGATION.md) | ✅ Implemented | High (user retention issue) |
 | **metadata-2** | [METADATA_INVESTIGATION.md](METADATA_INVESTIGATION.md) | Investigating | Very High |
-| **multiline** | [MULTILINE_INVESTIGATION.md](MULTILINE_INVESTIGATION.md) | Investigating | High (user retention issue) |
 | **websocket** | [WEBSOCKET_INVESTIGATION.md](WEBSOCKET_INVESTIGATION.md) | Investigating | High (native supported by Ergo/UnrealIRCd/InspIRCd) |
 | **webpush** | [WEBPUSH_INVESTIGATION.md](WEBPUSH_INVESTIGATION.md) | Investigating | Low (bouncer) / Very High (native) |
 
@@ -74,11 +74,11 @@ These are trivial to implement and provide immediate value:
 
 Features users expect from modern chat platforms:
 
-| Extension | Effort | Why |
-|-----------|--------|-----|
-| **multiline** | ~36-52 hours | Key UX gap vs Discord/Slack/Matrix; code pasting without flood |
-| **websocket** | ~80-120 hours | Standard in Ergo/UnrealIRCd/InspIRCd; enables browser clients |
-| **chathistory** | ~76-116 hours | Message history retrieval; requires SQLite |
+| Extension | Effort | Status |
+|-----------|--------|--------|
+| **multiline** | ~36-52 hours | ✅ Implemented (Phase 26) |
+| **websocket** | ~80-120 hours | Pending - Standard in Ergo/UnrealIRCd/InspIRCd; enables browser clients |
+| **chathistory** | ~76-116 hours | Pending - Message history retrieval; requires SQLite |
 
 ### Tier 3: Medium Priority
 
