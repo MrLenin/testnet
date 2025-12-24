@@ -14,7 +14,7 @@ Draft IRCv3 extensions under investigation are documented in separate files:
 
 | Extension | File | Status | Effort |
 |-----------|------|--------|--------|
-| **chathistory** | [CHATHISTORY_INVESTIGATION.md](CHATHISTORY_INVESTIGATION.md) | Investigating | Very High |
+| **chathistory** | [CHATHISTORY_INVESTIGATION.md](CHATHISTORY_INVESTIGATION.md) | ✅ Implemented | Very High |
 | **read-marker** | [READ_MARKER_INVESTIGATION.md](READ_MARKER_INVESTIGATION.md) | Long-Term Goal | High |
 | **account-registration** | [ACCOUNT_REGISTRATION_INVESTIGATION.md](ACCOUNT_REGISTRATION_INVESTIGATION.md) | Investigating | High |
 | **channel-rename** | [CHANNEL_RENAME_INVESTIGATION.md](CHANNEL_RENAME_INVESTIGATION.md) | Investigating | High |
@@ -24,7 +24,7 @@ Draft IRCv3 extensions under investigation are documented in separate files:
 | **no-implicit-names** | [NO_IMPLICIT_NAMES_INVESTIGATION.md](NO_IMPLICIT_NAMES_INVESTIGATION.md) | ✅ Implemented | Very Low |
 | **multiline** | [MULTILINE_INVESTIGATION.md](MULTILINE_INVESTIGATION.md) | ✅ Implemented | High (user retention issue) |
 | **metadata-2** | [METADATA_INVESTIGATION.md](METADATA_INVESTIGATION.md) | Investigating | Very High |
-| **websocket** | [WEBSOCKET_INVESTIGATION.md](WEBSOCKET_INVESTIGATION.md) | Investigating | High (native supported by Ergo/UnrealIRCd/InspIRCd) |
+| **websocket** | [WEBSOCKET_INVESTIGATION.md](WEBSOCKET_INVESTIGATION.md) | ✅ Implemented | High (native supported by Ergo/UnrealIRCd/InspIRCd) |
 | **webpush** | [WEBPUSH_INVESTIGATION.md](WEBPUSH_INVESTIGATION.md) | Investigating | Low (bouncer) / Very High (native) |
 
 ### Client-Only Tags
@@ -77,8 +77,8 @@ Features users expect from modern chat platforms:
 | Extension | Effort | Status |
 |-----------|--------|--------|
 | **multiline** | ~36-52 hours | ✅ Implemented (Phase 26) |
-| **websocket** | ~80-120 hours | Pending - Standard in Ergo/UnrealIRCd/InspIRCd; enables browser clients |
-| **chathistory** | ~76-116 hours | Pending - Message history retrieval; requires SQLite |
+| **websocket** | ~80-120 hours | ✅ Implemented - Native RFC 6455, no external library |
+| **chathistory** | ~76-116 hours | ✅ Implemented - LMDB backend, all subcommands |
 
 ### Tier 3: Medium Priority
 
@@ -102,12 +102,13 @@ Complex but important for feature parity with modern platforms:
 
 ---
 
-### Summary: Chathistory
+### Summary: Chathistory ✅ COMPLETE
 
 - **Spec**: https://ircv3.net/specs/extensions/chathistory
 - **Dependencies**: All met (batch, server-time, message-tags, msgid, standard-replies)
-- **Key challenge**: Message storage backend (SQLite recommended over SAXDB)
-- **Effort**: 76-116 hours
+- **Storage Backend**: LMDB (Lightning Memory-Mapped Database) for zero-copy reads
+- **Subcommands**: LATEST, BEFORE, AFTER, AROUND, BETWEEN, TARGETS
+- **Feature flags**: CAP_draft_chathistory, CHATHISTORY_MAX, CHATHISTORY_PRIVATE, CHATHISTORY_DB
 
 ### Summary: Read-Marker
 
