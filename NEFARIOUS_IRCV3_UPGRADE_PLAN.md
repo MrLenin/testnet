@@ -17,15 +17,15 @@ Draft IRCv3 extensions under investigation are documented in separate files:
 | **chathistory** | [CHATHISTORY_INVESTIGATION.md](CHATHISTORY_INVESTIGATION.md) | ✅ Implemented | Very High |
 | **read-marker** | [READ_MARKER_INVESTIGATION.md](READ_MARKER_INVESTIGATION.md) | ✅ Implemented | High |
 | **account-registration** | [ACCOUNT_REGISTRATION_INVESTIGATION.md](ACCOUNT_REGISTRATION_INVESTIGATION.md) | ✅ Implemented | High |
-| **channel-rename** | [CHANNEL_RENAME_INVESTIGATION.md](CHANNEL_RENAME_INVESTIGATION.md) | Investigating | High |
+| **channel-rename** | [CHANNEL_RENAME_INVESTIGATION.md](CHANNEL_RENAME_INVESTIGATION.md) | ✅ Implemented | High |
 | **message-redaction** | [MESSAGE_REDACTION_INVESTIGATION.md](MESSAGE_REDACTION_INVESTIGATION.md) | ✅ Implemented | Medium |
 | **pre-away** | [PRE_AWAY_INVESTIGATION.md](PRE_AWAY_INVESTIGATION.md) | ✅ Implemented | Low-Medium |
 | **extended-isupport** | [EXTENDED_ISUPPORT_INVESTIGATION.md](EXTENDED_ISUPPORT_INVESTIGATION.md) | ✅ Implemented | Low |
 | **no-implicit-names** | [NO_IMPLICIT_NAMES_INVESTIGATION.md](NO_IMPLICIT_NAMES_INVESTIGATION.md) | ✅ Implemented | Very Low |
 | **multiline** | [MULTILINE_INVESTIGATION.md](MULTILINE_INVESTIGATION.md) | ✅ Implemented | High (user retention issue) |
-| **metadata-2** | [METADATA_INVESTIGATION.md](METADATA_INVESTIGATION.md) | Investigating | Very High |
+| **metadata-2** | [METADATA_INVESTIGATION.md](METADATA_INVESTIGATION.md) | ✅ Implemented | Very High |
 | **websocket** | [WEBSOCKET_INVESTIGATION.md](WEBSOCKET_INVESTIGATION.md) | ✅ Implemented | High (native supported by Ergo/UnrealIRCd/InspIRCd) |
-| **webpush** | [WEBPUSH_INVESTIGATION.md](WEBPUSH_INVESTIGATION.md) | Investigating | Low (bouncer) / Very High (native) |
+| **webpush** | [WEBPUSH_INVESTIGATION.md](WEBPUSH_INVESTIGATION.md) | ✅ Implemented | High (X3 services integration) |
 
 ### Client-Only Tags
 
@@ -87,7 +87,7 @@ Useful features:
 | Extension | Effort | Why |
 |-----------|--------|-----|
 | **message-redaction** | ~32-48 hours | ✅ Implemented - Delete messages with chathistory integration |
-| **channel-rename** | ~48-80 hours | Complex state management |
+| **channel-rename** | ~48-80 hours | ✅ Implemented - RENAME command with P10 propagation |
 | **account-registration** | ~56-80 hours | ✅ Implemented - Full X3 NickServ integration |
 
 ### Tier 4: Long-Term Goals

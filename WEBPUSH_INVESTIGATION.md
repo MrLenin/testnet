@@ -1,6 +1,6 @@
 # IRCv3 Web Push Extension Investigation
 
-## Status: INVESTIGATING (Draft Specification)
+## Status: IMPLEMENTED (Option B - X3 Services Integration)
 
 **Specification**: https://github.com/ircv3/ircv3-specifications/pull/471
 
@@ -187,14 +187,14 @@ Server may need to truncate or drop tags to fit.
 | `message-tags` | Complete |
 | `msgid` | Complete |
 | `server-time` | Complete |
-| HTTP client library | Not present |
-| Crypto libraries (ECDH, AES-GCM) | Not present |
+| HTTP client library | X3 (libcurl via Keycloak) |
+| Crypto libraries (ECDH, AES-GCM) | X3 (OpenSSL 3.x) |
 
-### New Dependencies Required
+### Dependencies (Resolved)
 
-- **libcurl** or similar HTTP client
-- **OpenSSL** (already used for TLS, has ECDH/AES)
-- VAPID key generation and storage
+- **libcurl**: Provided via `--with-keycloak` configure option in X3
+- **OpenSSL 3.x**: Required for ECDH, HKDF, AES-128-GCM primitives
+- **VAPID keys**: Generated on X3 startup, broadcast to Nefarious
 
 ---
 
@@ -214,19 +214,22 @@ Nefarious IRCd
 **Pros**: Lowest latency, direct control
 **Cons**: Significant C code, HTTP client integration
 
-### Option B: X3 Services Integration
+### Option B: X3 Services Integration (IMPLEMENTED)
 
 ```
 Client <--IRC--> Nefarious <--P10--> X3 <--HTTP--> Push Services
 ```
 
 X3 handles:
-- Subscription storage (with accounts)
-- Push delivery
-- VAPID keys
+- Subscription storage (Keycloak `webpush.*` attributes)
+- RFC 8291 encryption (ECDH + AES-128-GCM + HKDF)
+- VAPID signing (ECDSA P-256)
+- HTTP POST delivery (libcurl)
 
-**Pros**: Account-linked, centralized
-**Cons**: P10 changes, X3 complexity
+**Implementation Details**:
+- Nefarious: `ircd/m_webpush.c` - WEBPUSH command handler
+- X3: `src/webpush.c` + `src/webpush.h` - Crypto and delivery
+- P10 token: `WP` with subcommands R/U/V/P/E
 
 ### Option C: External Push Daemon
 
@@ -257,43 +260,64 @@ Client <--IRC--> soju (bouncer) <--IRC--> Nefarious
 
 ---
 
-## P10 Protocol Design (Option B)
+## P10 Protocol Design (IMPLEMENTED)
 
-### New Token: `WP` (WEBPUSH)
+### Token: `WP` (WEBPUSH)
 
-**Registration**:
+**VAPID Broadcast** (X3 → Nefarious on connect):
 ```
-[USER_NUMERIC] WP R <endpoint> <p256dh> <auth>
-```
-
-**Unregistration**:
-```
-[USER_NUMERIC] WP U <endpoint>
+[SERVER] WP V :<vapid_pubkey_base64url>
 ```
 
-**Push Request** (X3 → Nefarious, for offline user):
+**Registration** (Nefarious → X3):
 ```
-[SERVER] WP P <user_account> <endpoint>
+[SERVER] WP R <user_numeric> <endpoint> <p256dh> <auth>
+```
+
+**Unregistration** (Nefarious → X3):
+```
+[SERVER] WP U <user_numeric> <endpoint>
+```
+
+**Push Request** (Nefarious → X3, for offline user):
+```
+[SERVER] WP P <account_name> :<message>
+```
+
+**Error Response** (X3 → Nefarious):
+```
+[SERVER] WP E <user_numeric> <code> :<message>
 ```
 
 ---
 
-## Files to Modify (Native Implementation)
+## Files Modified
+
+### Nefarious
 
 | File | Changes |
 |------|---------|
-| `include/capab.h` | Add `CAP_WEBPUSH` |
-| `include/ircd_features.h` | Add webpush features |
-| `ircd/ircd_features.c` | Register features |
-| `ircd/m_cap.c` | Add `draft/webpush` capability |
-| `include/msg.h` | Add `MSG_WEBPUSH` |
-| `include/handlers.h` | Add handler declarations |
+| `include/capab.h` | Added `CAP_DRAFT_WEBPUSH` |
+| `include/ircd.h` | Added VAPID key storage/getters |
+| `ircd/ircd.c` | Added `set_vapid_pubkey()`, `get_vapid_pubkey()` |
+| `ircd/m_cap.c` | Added `draft/webpush` capability with VAPID value |
+| `include/msg.h` | Added `MSG_WEBPUSH`, `TOK_WEBPUSH` ("WP") |
+| `include/handlers.h` | Added `m_webpush`, `ms_webpush` declarations |
 | `ircd/m_webpush.c` | New file: WEBPUSH command handler |
-| `ircd/parse.c` | Register WEBPUSH command |
-| `ircd/webpush.c` | New file: Push delivery, encryption |
-| `include/webpush.h` | Data structures, API |
-| `ircd/s_serv.c` | ISUPPORT VAPID token |
-| `configure.in` | libcurl detection |
+| `ircd/parse.c` | Registered WEBPUSH command |
+| `ircd/Makefile.in` | Added m_webpush.c to build |
+
+### X3
+
+| File | Changes |
+|------|---------|
+| `src/webpush.h` | New file: Web push API declarations |
+| `src/webpush.c` | New file: RFC 8291 encryption, VAPID, HTTP delivery |
+| `src/nickserv.h` | Added `nickserv_get_webpush_subscriptions()` |
+| `src/nickserv.c` | Added webpush subscription retrieval from Keycloak |
+| `src/proto.h` | Added `irc_vapid_broadcast()` |
+| `src/proto-p10.c` | Added WP token handler, VAPID broadcast |
+| `configure.in` | Fixed OpenSSL detection (libcrypto + libssl) |
 
 ---
 
@@ -473,7 +497,7 @@ Medium-High for mobile user experience, but:
 |--------|--------|
 | soju | Full support (bouncer) |
 | Ergo | Implementation exists |
-| Nefarious | Not implemented |
+| Nefarious | **Implemented** (via X3 services) |
 
 ---
 

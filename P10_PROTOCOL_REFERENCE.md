@@ -157,11 +157,20 @@ AB B #test 1703334400 +nt ABAAB,ABAAC:o :%ABAAD
 
 ### New IRCv3 Extension Tokens
 
-| Token | Command | Direction | Description | Phase |
-|-------|---------|-----------|-------------|-------|
-| `SE` | SETNAME | Both | Realname change | 12 |
-| `TM` | TAGMSG | Both | Tag-only message | 17 |
-| `BT` | BATCH | Both | Batch coordination | 13d |
+| Token | Command | Direction | Description |
+|-------|---------|-----------|-------------|
+| `SE` | SETNAME | Both | Realname change (Phase 12) |
+| `TM` | TAGMSG | Both | Tag-only message (Phase 17) |
+| `BT` | BATCH | Both | Batch coordination (Phase 13d) |
+| `CH` | CHATHISTORY | Both | Message history requests (Phase 23) |
+| `RD` | REDACT | Both | Message redaction (Phase 27) |
+| `RG` | REGISTER | Both | Account registration (Phase 24) |
+| `VF` | VERIFY | Both | Account verification (Phase 24) |
+| `RR` | REGREPLY | X3→Nef | Registration reply (Phase 24) |
+| `MR` | MARKREAD | Both | Read marker sync (Phase 25) |
+| `RN` | RENAME | Both | Channel rename (Phase 28) |
+| `MD` | METADATA | Both | User/channel metadata (Phase 29) |
+| `WP` | WEBPUSH | Both | Web push notifications (Phase 30) |
 
 ### SASL Tokens
 
@@ -368,6 +377,234 @@ Example: `AB1703334400` (server AB, timestamp-based)
 **Services (X3)**:
 - Ignores BT commands
 - Batch markers are for client display only
+
+---
+
+### CHATHISTORY (CH) - Phase 23
+
+**Purpose**: Request message history from services for playback to clients.
+
+**IRCv3 Spec**: https://ircv3.net/specs/extensions/chathistory
+
+#### P10 Format
+
+**Request** (Nefarious → X3):
+```
+[SERVER] CH [USER_NUMERIC] [SUBCOMMAND] [TARGET] [PARAMS...]
+```
+
+**Response** (X3 → Nefarious):
+```
+[X3] CH [TARGET_SERVER] [USER_NUMERIC] [MSGID] [TIMESTAMP] [SENDER] [TEXT]
+```
+
+#### Subcommands
+
+| Subcommand | Parameters | Description |
+|------------|------------|-------------|
+| `LATEST` | target [limit] | Latest messages |
+| `BEFORE` | target msgid/timestamp [limit] | Messages before reference |
+| `AFTER` | target msgid/timestamp [limit] | Messages after reference |
+| `AROUND` | target msgid/timestamp [limit] | Messages around reference |
+| `BETWEEN` | target start end [limit] | Messages in range |
+| `TARGETS` | timestamp limit | Recent conversation targets |
+
+---
+
+### REDACT (RD) - Phase 27
+
+**Purpose**: Request deletion of a previously sent message.
+
+**IRCv3 Spec**: https://ircv3.net/specs/extensions/message-redaction
+
+#### P10 Format
+
+```
+[USER_NUMERIC] RD [TARGET] [MSGID] :[REASON]
+```
+
+#### Example
+
+```
+ABAAB RD #channel AB-1703334400-123 :Removing inappropriate content
+```
+
+---
+
+### REGISTER (RG) - Phase 24
+
+**Purpose**: Account registration during IRC connection.
+
+**IRCv3 Spec**: https://ircv3.net/specs/extensions/account-registration
+
+#### P10 Format
+
+```
+[SERVER] RG [USER_NUMERIC] [ACCOUNT] [EMAIL] :[PASSWORD_HASH]
+```
+
+---
+
+### VERIFY (VF) - Phase 24
+
+**Purpose**: Account verification code submission.
+
+#### P10 Format
+
+```
+[SERVER] VF [USER_NUMERIC] [ACCOUNT] [CODE]
+```
+
+---
+
+### REGREPLY (RR) - Phase 24
+
+**Purpose**: Registration result from services.
+
+#### P10 Format
+
+```
+[X3] RR [TARGET_SERVER] [USER_NUMERIC] [RESULT] :[MESSAGE]
+```
+
+#### Result Codes
+
+| Code | Meaning |
+|------|---------|
+| `OK` | Registration successful |
+| `VERIFY` | Verification needed |
+| `FAIL` | Registration failed |
+
+---
+
+### MARKREAD (MR) - Phase 25
+
+**Purpose**: Synchronize read marker position across clients.
+
+**IRCv3 Spec**: https://ircv3.net/specs/extensions/read-marker
+
+#### P10 Format
+
+**Set Marker**:
+```
+[USER_NUMERIC] MR [TARGET] [TIMESTAMP]
+```
+
+**Sync Request** (Nefarious → X3):
+```
+[SERVER] MR S [USER_NUMERIC] [TARGET]
+```
+
+**Sync Response** (X3 → Nefarious):
+```
+[X3] MR R [TARGET_SERVER] [USER_NUMERIC] [TARGET] [TIMESTAMP]
+```
+
+---
+
+### RENAME (RN) - Phase 28
+
+**Purpose**: Channel rename operation.
+
+**IRCv3 Spec**: https://ircv3.net/specs/extensions/channel-rename
+
+#### P10 Format
+
+```
+[USER_NUMERIC] RN [OLD_CHANNEL] [NEW_CHANNEL] :[REASON]
+```
+
+#### Example
+
+```
+ABAAB RN #oldname #newname :Rebranding
+```
+
+---
+
+### METADATA (MD) - Phase 29
+
+**Purpose**: User and channel metadata synchronization.
+
+**IRCv3 Spec**: https://ircv3.net/specs/extensions/metadata
+
+#### P10 Format
+
+**Set Metadata**:
+```
+[SOURCE] MD [TARGET] [KEY] :[VALUE]
+```
+
+**Clear Metadata**:
+```
+[SOURCE] MD [TARGET] [KEY]
+```
+
+#### Examples
+
+```
+# Set user avatar
+ABAAB MD ABAAB avatar :https://example.com/avatar.png
+
+# Set channel description
+AB MD #channel description :Welcome to our channel
+
+# Clear metadata
+ABAAB MD ABAAB avatar
+```
+
+---
+
+### WEBPUSH (WP) - Phase 30
+
+**Purpose**: Web push notification support via X3 services.
+
+**IRCv3 Spec**: https://github.com/ircv3/ircv3-specifications/pull/471
+
+#### P10 Format
+
+**VAPID Key Broadcast** (X3 → Nefarious):
+```
+[X3] WP V :[VAPID_PUBKEY_BASE64URL]
+```
+
+**Register Subscription** (Nefarious → X3):
+```
+[SERVER] WP R [USER_NUMERIC] [ENDPOINT] [P256DH] [AUTH]
+```
+
+**Unregister Subscription** (Nefarious → X3):
+```
+[SERVER] WP U [USER_NUMERIC] [ENDPOINT]
+```
+
+**Push Request** (Nefarious → X3):
+```
+[SERVER] WP P [ACCOUNT_NAME] :[MESSAGE]
+```
+
+**Error Response** (X3 → Nefarious):
+```
+[X3] WP E [USER_NUMERIC] [CODE] :[MESSAGE]
+```
+
+#### Subcommand Codes
+
+| Code | Direction | Description |
+|------|-----------|-------------|
+| `V` | X3→Nef | VAPID public key broadcast |
+| `R` | Nef→X3 | Register push subscription |
+| `U` | Nef→X3 | Unregister push subscription |
+| `P` | Nef→X3 | Request push delivery |
+| `E` | X3→Nef | Error response to client |
+
+#### Security
+
+- Endpoints must be HTTPS
+- Internal/private IPs blocked (localhost, 10.x, 192.168.x, etc.)
+- Subscriptions stored in Keycloak as `webpush.*` attributes
+- RFC 8291 encryption (ECDH + AES-128-GCM)
+- RFC 8292 VAPID signing (ECDSA P-256)
 
 ---
 
@@ -586,12 +823,31 @@ New features are controlled by feature flags in `ircd_features.h`:
 | `SE` | `[NUMERIC] SE :[realname]` | Change realname |
 | `TM` | `[NUMERIC] TM @[tags] [target]` | Tag-only message |
 | `BT` | `[NUMERIC] BT +/-[id] [type] [params]` | Batch coordination |
+| `CH` | `[SERVER] CH [user] [subcmd] [target] [params]` | Chat history |
+| `RD` | `[NUMERIC] RD [target] [msgid] :[reason]` | Message redaction |
+| `RG` | `[SERVER] RG [user] [account] [email] :[pass]` | Account registration |
+| `VF` | `[SERVER] VF [user] [account] [code]` | Verification |
+| `RR` | `[X3] RR [server] [user] [result] :[msg]` | Registration reply |
+| `MR` | `[NUMERIC] MR [target] [timestamp]` | Read marker |
+| `RN` | `[NUMERIC] RN [old] [new] :[reason]` | Channel rename |
+| `MD` | `[SOURCE] MD [target] [key] :[value]` | Metadata |
+| `WP` | `[SOURCE] WP [subcmd] [params...]` | Web push |
 
 ### New SASL Subcmds
 
 | Subcmd | Format | Purpose |
 |--------|--------|---------|
 | `M` | `[X3] SA * * M :[mechanisms]` | Mechanism broadcast |
+
+### WEBPUSH Subcmds
+
+| Subcmd | Format | Purpose |
+|--------|--------|---------|
+| `V` | `[X3] WP V :[vapid_key]` | VAPID broadcast |
+| `R` | `[SERVER] WP R [user] [endpoint] [p256dh] [auth]` | Register |
+| `U` | `[SERVER] WP U [user] [endpoint]` | Unregister |
+| `P` | `[SERVER] WP P [account] :[message]` | Push request |
+| `E` | `[X3] WP E [user] [code] :[message]` | Error |
 
 ### Tag Propagation
 
@@ -618,18 +874,30 @@ New features are controlled by feature flags in `ircd_features.h`:
 | `ircd/m_batch.c` | BATCH command handler |
 | `ircd/m_sasl.c` | SASL protocol, M subcmd |
 | `ircd/m_cap.c` | CAP negotiation, mechanism list |
+| `ircd/m_chathistory.c` | CHATHISTORY command handler |
+| `ircd/m_redact.c` | REDACT command handler |
+| `ircd/m_register.c` | REGISTER/VERIFY command handlers |
+| `ircd/m_markread.c` | MARKREAD command handler |
+| `ircd/m_rename.c` | Channel RENAME command handler |
+| `ircd/m_metadata.c` | METADATA command handler |
+| `ircd/m_webpush.c` | WEBPUSH command handler |
 | `ircd/parse.c` | Tag parsing, command registration |
 | `ircd/send.c` | Tag-aware send functions |
 | `include/msg.h` | Token definitions |
 | `include/capab.h` | Capability flags |
 | `include/client.h` | Client tag storage |
+| `include/ircd.h` | VAPID key storage |
 
 ### X3 Services
 
 | File | Purpose |
 |------|---------|
-| `src/proto-p10.c` | P10 parser with tag support |
-| `src/nickserv.c` | SASL handler, mechanism broadcast |
+| `src/proto-p10.c` | P10 parser, all token handlers |
+| `src/nickserv.c` | SASL, registration, metadata |
+| `src/chanserv.c` | Channel metadata, rename |
+| `src/webpush.c` | RFC 8291 encryption, push delivery |
+| `src/webpush.h` | Web push API declarations |
+| `src/keycloak.c` | Metadata/subscription storage |
 
 ---
 
@@ -638,6 +906,7 @@ New features are controlled by feature flags in `ircd_features.h`:
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | December 2024 | Initial release with IRCv3.2+ extensions |
+| 1.1 | December 2024 | Added chathistory, redact, registration, read-marker, rename, metadata, webpush |
 
 ---
 
