@@ -1,10 +1,46 @@
 # IRCv3 Message Redaction Extension Investigation
 
-## Status: INVESTIGATING (Draft Specification)
+## Status: IMPLEMENTED (Draft Specification)
 
 **Specification**: https://ircv3.net/specs/extensions/message-redaction
 
 **Capability**: `draft/message-redaction`
+
+**Feature Flag**: `FEAT_CAP_draft_message_redaction` (disabled by default - draft spec)
+
+---
+
+## Implementation Status
+
+Message redaction has been fully implemented in Nefarious with chathistory integration.
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `include/capab.h` | Added `CAP_DRAFT_REDACT` capability |
+| `include/ircd_features.h` | Added `FEAT_CAP_draft_message_redaction`, `FEAT_REDACT_WINDOW`, `FEAT_REDACT_OPER_WINDOW`, `FEAT_REDACT_CHANOP_OTHERS` |
+| `ircd/ircd_features.c` | Feature registration with defaults |
+| `ircd/m_cap.c` | `draft/message-redaction` capability |
+| `include/msg.h` | `MSG_REDACT`, `TOK_REDACT` ("RD") |
+| `include/handlers.h` | `m_redact`, `ms_redact` declarations |
+| `ircd/m_redact.c` | New file: REDACT command handler |
+| `ircd/parse.c` | REDACT command registration |
+| `include/history.h` | `history_lookup_message()`, `history_delete_message()` |
+| `ircd/history.c` | Message lookup and deletion for LMDB |
+| `ircd/Makefile.in` | Added m_redact.c |
+
+### Configuration
+
+To enable message-redaction (disabled by default):
+```
+features {
+    "CAP_draft_message_redaction" = "TRUE";  /* Enable capability (default: FALSE) */
+    "REDACT_WINDOW" = "300";                 /* 5 min window for regular users */
+    "REDACT_OPER_WINDOW" = "0";              /* Unlimited for opers */
+    "REDACT_CHANOP_OTHERS" = "TRUE";         /* Chanops can redact others */
+};
+```
 
 ---
 
