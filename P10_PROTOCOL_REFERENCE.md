@@ -1,0 +1,644 @@
+# P10 Protocol Reference
+
+## Document Purpose
+
+This document provides a comprehensive reference for the P10 server-to-server protocol as implemented in Nefarious IRCd, including all extensions added during the IRCv3.2+ upgrade project (December 2024).
+
+**Target Audience**: IRC server developers, services developers, and anyone working with P10 protocol implementation.
+
+---
+
+## Table of Contents
+
+1. [Protocol Overview](#protocol-overview)
+2. [Message Format](#message-format)
+3. [Numeric System](#numeric-system)
+4. [Token Reference](#token-reference)
+5. [New IRCv3 Extensions](#new-ircv3-extensions)
+6. [SASL Protocol](#sasl-protocol)
+7. [Message Tags](#message-tags)
+8. [Backward Compatibility](#backward-compatibility)
+
+---
+
+## Protocol Overview
+
+P10 is the server-to-server protocol used by Undernet-derived IRC servers including Nefarious IRCd. It uses numeric identifiers for servers and users, and short tokens for commands to minimize bandwidth.
+
+### Key Characteristics
+
+- **Numeric-based**: Servers and users identified by short alphanumeric codes
+- **Token-based**: Commands use 1-2 character tokens (e.g., `P` for PRIVMSG)
+- **Stateful**: Maintains network state including users, channels, modes
+- **Burst model**: New server connections receive full network state
+
+### Server Numerics
+
+- 2-character base64 string (64 possible values per character)
+- Examples: `AB`, `Az`, `00`
+- Range: 0-4095 servers possible
+
+### User Numerics
+
+- 3-character base64 string appended to server numeric
+- Full format: `ABAAB` (server `AB`, user `AAB`)
+- Each server can have up to 262,144 users
+
+### Base64 Alphabet
+
+```
+ABCDEFGHIJKLMNOPQRSTUVWXYZ
+abcdefghijklmnopqrstuvwxyz
+0123456789[]
+```
+
+---
+
+## Message Format
+
+### Standard Format
+
+```
+[ORIGIN] [TOKEN] [PARAMETERS] :[TRAILING]
+```
+
+- **ORIGIN**: Server or user numeric
+- **TOKEN**: 1-2 character command identifier
+- **PARAMETERS**: Space-separated arguments
+- **TRAILING**: Final parameter (may contain spaces), prefixed with `:`
+
+### With Message Tags (IRCv3 Extension)
+
+```
+@tag1=value;tag2;+clienttag [ORIGIN] [TOKEN] [PARAMETERS] :[TRAILING]
+```
+
+Tags are optional and appear at the start of the line, prefixed with `@`.
+
+### Examples
+
+```
+# Server AB sends PING to server CD
+AB G !1703334400.123456 CD
+
+# User ABAAB sends PRIVMSG to #channel
+ABAAB P #channel :Hello world
+
+# User ABAAB sends PRIVMSG with tags
+@time=2024-12-23T12:00:00.000Z;msgid=AB-1703334400-1 ABAAB P #channel :Hello
+```
+
+---
+
+## Numeric System
+
+### Server Registration
+
+When servers connect, they exchange:
+
+```
+# Server introduces itself
+PASS :password
+SERVER servername 1 timestamp starttime numeric :description
+```
+
+### User Introduction
+
+```
+[SERVER] N nick 1 timestamp ident host +modes account B64IP :realname
+```
+
+Example:
+```
+AB N TestUser 1 1703334400 user example.com +i TestAccount AAAAAA :Test User
+```
+
+### Channel Introduction
+
+```
+[SERVER] B #channel timestamp mode [limit] [key] users :%voices
+```
+
+Example:
+```
+AB B #test 1703334400 +nt ABAAB,ABAAC:o :%ABAAD
+```
+
+---
+
+## Token Reference
+
+### Core Protocol Tokens
+
+| Token | Command | Direction | Description |
+|-------|---------|-----------|-------------|
+| `G` | PING | Both | Keepalive/lag check |
+| `Z` | PONG | Both | Response to PING |
+| `N` | NICK | Both | User introduction/nick change |
+| `Q` | QUIT | Both | User disconnect |
+| `B` | BURST | S→S | Channel state during burst |
+| `EB` | END_OF_BURST | S→S | Burst completion signal |
+| `EA` | EOB_ACK | S→S | Burst acknowledgment |
+| `SQ` | SQUIT | Both | Server disconnect |
+| `S` | SERVER | Both | Server introduction |
+| `J` | JOIN | Both | Channel join |
+| `L` | PART | Both | Channel part |
+| `K` | KICK | Both | Channel kick |
+| `M` | MODE | Both | Mode change |
+| `P` | PRIVMSG | Both | Private message |
+| `O` | NOTICE | Both | Notice message |
+| `T` | TOPIC | Both | Topic change |
+| `I` | INVITE | Both | Channel invitation |
+| `W` | WHOIS | Both | User query |
+| `X` | WHO | Both | Channel/user list |
+| `A` | AWAY | Both | Away status |
+| `AC` | ACCOUNT | Both | Account state change |
+| `FA` | FAKEHOST | Both | Virtual host change |
+
+### New IRCv3 Extension Tokens
+
+| Token | Command | Direction | Description | Phase |
+|-------|---------|-----------|-------------|-------|
+| `SE` | SETNAME | Both | Realname change | 12 |
+| `TM` | TAGMSG | Both | Tag-only message | 17 |
+| `BT` | BATCH | Both | Batch coordination | 13d |
+
+### SASL Tokens
+
+| Token | Command | Direction | Description |
+|-------|---------|-----------|-------------|
+| `SA` | SASL | Both | SASL authentication |
+
+---
+
+## New IRCv3 Extensions
+
+### SETNAME (SE) - Phase 12
+
+**Purpose**: Allow users to change their realname (GECOS) mid-session.
+
+**IRCv3 Spec**: https://ircv3.net/specs/extensions/setname
+
+#### P10 Format
+
+```
+[USER_NUMERIC] SE :[NEW_REALNAME]
+```
+
+#### Examples
+
+```
+# User ABAAB changes realname
+ABAAB SE :New Real Name
+
+# Maximum length: REALLEN (50 characters)
+```
+
+#### Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| USER_NUMERIC | String(5) | 5-character user numeric |
+| NEW_REALNAME | String(1-50) | New realname, truncated if too long |
+
+#### Processing
+
+**Sender (Nefarious)**:
+1. Client sends `SETNAME :new name`
+2. Validate length (max 50 chars)
+3. Update `cli_info(sptr)`
+4. Send `SE :[name]` to all servers
+5. Notify local channel members with `setname` capability
+
+**Receiver (Nefarious)**:
+1. Parse SE command from server
+2. Validate sender is not a server
+3. Update `cli_info(sptr)`
+4. Propagate to other servers
+5. Notify local channel members
+
+**Services (X3)**:
+- Can safely ignore SE commands
+- Realname changes are informational only
+
+---
+
+### TAGMSG (TM) - Phase 17
+
+**Purpose**: Send messages containing only tags (no text content). Used for typing indicators, reactions, and other metadata.
+
+**IRCv3 Spec**: https://ircv3.net/specs/extensions/message-tags
+
+#### P10 Format
+
+```
+[USER_NUMERIC] TM @[TAGS] [TARGET]
+```
+
+#### Examples
+
+```
+# Typing indicator to channel
+ABAAB TM @+typing=active #channel
+
+# Typing indicator to user
+ABAAB TM @+typing=paused BBAAC
+
+# Multiple tags
+ABAAB TM @+typing=active;+react=thumbsup #channel
+```
+
+#### Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| USER_NUMERIC | String(5) | 5-character sender numeric |
+| @TAGS | Tag string | Client-only tags (must be prefixed with `+`) |
+| TARGET | String | Channel name or user numeric |
+
+#### Tag Format
+
+Tags follow IRCv3 message-tags specification:
+- Semicolon-separated key=value pairs
+- Client-only tags MUST be prefixed with `+`
+- Values are optional (e.g., `+typing` without value is valid)
+- Special characters escaped per IRCv3 spec
+
+#### Common Tags
+
+| Tag | Values | Purpose |
+|-----|--------|---------|
+| `+typing` | `active`, `paused`, `done` | Typing indicator |
+| `+reply` | msgid reference | Reply to specific message |
+| `+react` | emoji or text | Reaction to message |
+
+#### Processing
+
+**Sender (Nefarious)**:
+1. Client sends `@+typing=active TAGMSG #channel`
+2. Extract client-only tags from message
+3. Validate target exists and is accessible
+4. Relay to local recipients with `message-tags` capability
+5. Send `TM @+typing=active #channel` to servers
+
+**Receiver (Nefarious)**:
+1. Parse TM command with @tags parameter
+2. Validate target (channel or user numeric)
+3. Relay to local recipients with `message-tags` capability
+4. Propagate to other servers
+
+**Services (X3)**:
+- Ignores TAGMSG commands
+- No action needed for typing indicators
+
+---
+
+### BATCH (BT) - Phase 13d
+
+**Purpose**: Coordinate batch markers across servers for grouped events like netjoin/netsplit.
+
+**IRCv3 Spec**: https://ircv3.net/specs/extensions/batch
+
+#### P10 Format
+
+**Start Batch**:
+```
+[SERVER_NUMERIC] BT +[BATCH_ID] [TYPE] [PARAMS...]
+```
+
+**End Batch**:
+```
+[SERVER_NUMERIC] BT -[BATCH_ID]
+```
+
+#### Examples
+
+```
+# Server AB starts netjoin batch
+AB BT +AB1703334400 netjoin CD irc.remote.com
+
+# Server AB ends netjoin batch
+AB BT -AB1703334400
+
+# Netsplit batch
+AB BT +AB1703334401 netsplit CD irc.remote.com
+AB BT -AB1703334401
+```
+
+#### Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| SERVER_NUMERIC | String(2) | 2-character server numeric |
+| +BATCH_ID | String | Unique identifier prefixed with `+` for start |
+| -BATCH_ID | String | Batch identifier prefixed with `-` for end |
+| TYPE | String | Batch type (`netjoin` or `netsplit`) |
+| PARAMS | String... | Type-specific parameters |
+
+#### Batch ID Format
+
+```
+[SERVER_NUMERIC][TIMESTAMP_OR_SEQUENCE]
+```
+
+Example: `AB1703334400` (server AB, timestamp-based)
+
+#### Batch Types
+
+| Type | Parameters | Description |
+|------|------------|-------------|
+| `netjoin` | server_numeric server_name | Server reconnecting to network |
+| `netsplit` | server_numeric server_name | Server disconnecting from network |
+
+#### Processing
+
+**Netjoin (Automatic)**:
+1. Server connects with junction flag
+2. `send_netjoin_batch_start()` generates batch ID
+3. Batch ID stored in `struct Server->batch_id`
+4. All user introductions tagged with `@batch=id` for local clients
+5. On END_OF_BURST: `send_netjoin_batch_end()`
+
+**Netsplit (Automatic)**:
+1. SQUIT received
+2. `send_netsplit_batch_start()` generates batch ID
+3. All QUIT messages tagged with `@batch=id` for local clients
+4. After processing: `send_netsplit_batch_end()`
+
+**Services (X3)**:
+- Ignores BT commands
+- Batch markers are for client display only
+
+---
+
+## SASL Protocol
+
+### Overview
+
+SASL authentication uses the SA token with subcmd codes to coordinate between IRC server and services.
+
+### P10 Format
+
+```
+[ORIGIN] SA [TARGET] [TOKEN] [SUBCMD] :[DATA]
+```
+
+### Subcmd Codes
+
+| Code | Direction | Description |
+|------|-----------|-------------|
+| `S` | Nef→X3 | Start SASL session (mechanism selection) |
+| `H` | Nef→X3 | Host information (`user@host:ip`) |
+| `C` | Both | Continue (authentication data exchange) |
+| `D` | X3→Nef | Done with result code (`S`=success, `F`=fail, `A`=abort) |
+| `L` | X3→Nef | Login information (`account timestamp`) |
+| `M` | X3→Nef | Mechanism list broadcast |
+| `I` | X3→Nef | Impersonation (for special cases) |
+
+### Session Flow
+
+```
+Client                Nefarious              X3
+   |                      |                   |
+   +--CAP REQ :sasl------>|                   |
+   |<--CAP ACK :sasl------|                   |
+   +--AUTHENTICATE PLAIN->|                   |
+   |                      |--SA target S PLAIN|
+   |                      |--SA target H info-|
+   |                      |<--SA target C +----|
+   |<--AUTHENTICATE +-----|                   |
+   +--AUTHENTICATE data-->|                   |
+   |                      |--SA target C data-|
+   |                      |<--SA target L acct|
+   |                      |<--SA target D S---|
+   |<--903 SASL success---|                   |
+```
+
+### Mechanism Broadcast (M Subcmd)
+
+**Purpose**: Dynamically advertise available SASL mechanisms.
+
+**Direction**: X3 → Nefarious (broadcast)
+
+```
+[X3_NUMERIC] SA * * M :[MECHANISM_LIST]
+```
+
+**Example**:
+```
+Az SA * * M :PLAIN,EXTERNAL,OAUTHBEARER
+```
+
+**When Sent**:
+1. After X3 completes burst (EOB acknowledgment)
+2. When Keycloak availability changes
+3. When any authentication backend status changes
+
+**Nefarious Handling**:
+- Stores mechanism list in global `SaslMechanisms[]`
+- Used in CAP LS 302 response: `sasl=PLAIN,EXTERNAL,OAUTHBEARER`
+
+### Re-Authentication
+
+Re-authentication (e.g., OAuth token refresh) uses the standard AUTHENTICATE flow:
+
+1. Client sends `AUTHENTICATE OAUTHBEARER`
+2. Nefarious clears `SASLComplete` flag
+3. SASL session state reset
+4. Standard SASL flow proceeds with `S` subcmd
+5. On success: account updated, ACCOUNT notification sent
+
+**Note**: A separate REAUTHENTICATE command and `R` subcmd were originally planned but determined unnecessary. The existing flow handles re-authentication correctly.
+
+---
+
+## Message Tags
+
+### Overview
+
+P10 messages can optionally include IRCv3 message tags as a prefix. This enables features like server-time, msgid, and client-only tags.
+
+### Format
+
+```
+@tag1=value;tag2;+clienttag=value [REST_OF_P10_MESSAGE]
+```
+
+### Tag Syntax
+
+- Tags prefixed with `@` at start of line
+- Multiple tags separated by `;`
+- Tag values after `=` (optional)
+- Client-only tags prefixed with `+`
+- Tag section ends at first space
+
+### Examples
+
+```
+# Message with time and msgid tags
+@time=2024-12-23T12:00:00.000Z;msgid=AB-1703334400-1 ABAAB P #channel :Hello
+
+# TAGMSG with client-only tags
+ABAAB TM @+typing=active #channel
+```
+
+### Server Tags
+
+| Tag | Description | Propagate S2S? |
+|-----|-------------|----------------|
+| `time` | ISO 8601 timestamp | Yes |
+| `msgid` | Unique message identifier | Yes |
+| `batch` | Batch reference ID | Yes |
+| `account` | Sender's account name | No (use AC) |
+| `label` | Command correlation | No (client-local) |
+| `bot` | Bot mode indicator | No (via user modes) |
+
+### Client-Only Tags
+
+| Tag | Description | Propagate S2S? |
+|-----|-------------|----------------|
+| `+typing` | Typing indicator | Yes (via TAGMSG) |
+| `+reply` | Reply reference | Yes (via TAGMSG) |
+| `+react` | Reaction | Yes (via TAGMSG) |
+
+### Tag Processing
+
+**Nefarious Parser** (`parse_server()` in parse.c):
+```c
+/* Skip IRCv3 message tags if present */
+if (buffer[0] == '@') {
+    char *tag_end = strchr(buffer, ' ');
+    if (tag_end)
+        buffer = tag_end + 1;
+}
+```
+
+**X3 Parser** (`parse_line()` in proto-p10.c):
+```c
+/* Skip IRCv3 message tags if present */
+if (line[0] == '@') {
+    char *tag_end = strchr(line, ' ');
+    if (tag_end)
+        line = tag_end + 1;
+}
+```
+
+### Msgid Generation
+
+Message IDs are generated with the format:
+```
+[SERVER_NUMERIC]-[STARTUP_TIMESTAMP]-[COUNTER]
+```
+
+Example: `AB-1703334400-12345`
+
+This ensures uniqueness across the network while maintaining a consistent format.
+
+---
+
+## Backward Compatibility
+
+### Design Principles
+
+All P10 extensions are designed for backward compatibility:
+
+1. **Unknown tokens ignored**: Old servers skip unrecognized tokens
+2. **Tag prefix skipped**: Old parsers ignore `@...` prefix
+3. **Optional features**: All IRCv3 features are opt-in via CAP
+
+### Compatibility Matrix
+
+| Message Type | Old Nefarious | New Nefarious | Old X3 | New X3 |
+|--------------|---------------|---------------|--------|--------|
+| SE (SETNAME) | Ignored | Processed | Ignored | Ignored |
+| TM (TAGMSG) | Ignored | Processed | Ignored | Ignored |
+| BT (BATCH) | Ignored | Processed | Ignored | Ignored |
+| SA M (mechanisms) | Ignored | Processed | N/A | Sent |
+| @tags prefix | Possible error | Parsed & skipped | Error | Skipped |
+
+### Mixed Network Behavior
+
+In a network with mixed old/new servers:
+- New tokens are silently dropped at old server boundaries
+- Tags are stripped when passing through old servers
+- Core protocol functionality unaffected
+
+### Feature Flags
+
+New features are controlled by feature flags in `ircd_features.h`:
+
+| Feature Flag | Default | Description |
+|--------------|---------|-------------|
+| `FEAT_CAP_setname` | TRUE | Enable setname capability |
+| `FEAT_CAP_batch` | TRUE | Enable batch capability |
+| `FEAT_CAP_labeled_response` | TRUE | Enable labeled-response |
+| `FEAT_CAP_standard_replies` | TRUE | Enable FAIL/WARN/NOTE |
+| `FEAT_MSGID` | TRUE | Generate message IDs |
+
+---
+
+## Quick Reference
+
+### New Tokens Summary
+
+| Token | Format | Purpose |
+|-------|--------|---------|
+| `SE` | `[NUMERIC] SE :[realname]` | Change realname |
+| `TM` | `[NUMERIC] TM @[tags] [target]` | Tag-only message |
+| `BT` | `[NUMERIC] BT +/-[id] [type] [params]` | Batch coordination |
+
+### New SASL Subcmds
+
+| Subcmd | Format | Purpose |
+|--------|--------|---------|
+| `M` | `[X3] SA * * M :[mechanisms]` | Mechanism broadcast |
+
+### Tag Propagation
+
+| Tag | Propagate? | Notes |
+|-----|------------|-------|
+| `@time` | Yes | Preserve original timestamp |
+| `@msgid` | Yes | Message deduplication |
+| `@batch` | Yes | Coordinated batches |
+| `@account` | No | Use AC command |
+| `@label` | No | Client-local |
+| `+typing` | Yes | Via TAGMSG only |
+| `+reply` | Yes | Via TAGMSG only |
+
+---
+
+## Implementation Files Reference
+
+### Nefarious IRCd
+
+| File | Purpose |
+|------|---------|
+| `ircd/m_setname.c` | SETNAME command handler |
+| `ircd/m_tagmsg.c` | TAGMSG command handler |
+| `ircd/m_batch.c` | BATCH command handler |
+| `ircd/m_sasl.c` | SASL protocol, M subcmd |
+| `ircd/m_cap.c` | CAP negotiation, mechanism list |
+| `ircd/parse.c` | Tag parsing, command registration |
+| `ircd/send.c` | Tag-aware send functions |
+| `include/msg.h` | Token definitions |
+| `include/capab.h` | Capability flags |
+| `include/client.h` | Client tag storage |
+
+### X3 Services
+
+| File | Purpose |
+|------|---------|
+| `src/proto-p10.c` | P10 parser with tag support |
+| `src/nickserv.c` | SASL handler, mechanism broadcast |
+
+---
+
+## Document History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0 | December 2024 | Initial release with IRCv3.2+ extensions |
+
+---
+
+*This document is part of the Nefarious IRCd IRCv3.2+ upgrade project.*
