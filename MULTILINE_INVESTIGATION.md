@@ -1,6 +1,6 @@
 # IRCv3 Multiline Messages Extension Investigation
 
-## Status: HIGH PRIORITY (Draft Specification)
+## Status: IMPLEMENTED
 
 **Specification**: https://ircv3.net/specs/extensions/multiline
 
@@ -32,335 +32,141 @@ The multiline extension allows clients to send messages that span multiple lines
 
 ---
 
-## Capability Value
+## Implementation Summary
 
-Required parameters:
-- `max-bytes=N` - Maximum total byte length of combined message
-- `max-lines=N` - Maximum number of lines (recommended)
+### Files Modified
 
-**Example**: `CAP LS :draft/multiline=max-bytes=4096,max-lines=24`
+| File | Changes |
+|------|---------|
+| `include/capab.h` | Added `CAP_DRAFT_MULTILINE` enum value |
+| `include/ircd_features.h` | Added `FEAT_CAP_draft_multiline`, `FEAT_MULTILINE_MAX_BYTES`, `FEAT_MULTILINE_MAX_LINES` |
+| `ircd/ircd_features.c` | Registered features with defaults (TRUE, 4096, 24) |
+| `ircd/m_cap.c` | Added `draft/multiline` capability with dynamic value generation |
+| `include/client.h` | Added multiline batch state fields to Connection struct |
+| `include/handlers.h` | Added `m_batch` declaration |
+| `ircd/parse.c` | Added parsing for `@batch=` and `draft/multiline-concat` tags |
+| `ircd/m_batch.c` | Added client BATCH handler with multiline batch processing |
+| `ircd/m_privmsg.c` | Added batch interception for multiline messages |
+
+### Capability Advertisement
+
+```
+CAP LS :draft/multiline=max-bytes=4096,max-lines=24
+```
+
+### Connection State
+
+New fields in `struct Connection`:
+- `con_ml_batch_id[16]` - Active multiline batch ID
+- `con_ml_target[256]` - Batch target (channel or nick)
+- `con_ml_messages` - Linked list of batched messages
+- `con_ml_msg_count` - Number of messages collected
+- `con_ml_total_bytes` - Total bytes in batch
+- `con_msg_batch_tag[16]` - Current message's @batch tag
+- `con_msg_concat` - Current message's concat flag
+
+### Message Flow
+
+```
+1. Client sends BATCH +id draft/multiline #channel
+2. Server stores batch ID and target in connection state
+3. Client sends @batch=id PRIVMSG #channel :message
+4. parse.c extracts @batch tag and concat flag
+5. m_privmsg.c intercepts if batch ID matches, calls multiline_add_message()
+6. Client sends BATCH -id
+7. m_batch.c calls process_multiline_batch() to deliver
+```
+
+### Delivery Logic
+
+- **Supporting clients**: Receive message wrapped in batch
+- **Non-supporting clients**: Receive individual PRIVMSG commands
+- **Echo-message**: Sender receives echo if echo-message enabled
 
 ---
 
-## Batch Format
-
-Multiline messages use the batch mechanism:
+## Configuration
 
 ```
-C: BATCH +abc draft/multiline #channel
-C: @batch=abc PRIVMSG #channel :First line
-C: @batch=abc PRIVMSG #channel :Second line
-C: @batch=abc PRIVMSG #channel :Third line
-C: BATCH -abc
+features {
+    "CAP_draft_multiline" = "TRUE";  /* enabled by default */
+    "MULTILINE_MAX_BYTES" = "4096";  /* max total bytes */
+    "MULTILINE_MAX_LINES" = "24";    /* max lines per batch */
+};
 ```
-
-### Batch Type
-
-**Type**: `draft/multiline`
-
-**Parameter**: Target recipient (channel or nick)
 
 ---
 
-## Message Concatenation
-
-### Default Behavior
-
-Lines are joined with `\n` (newline):
+## Example Flow
 
 ```
-First line
-Second line
-Third line
+C: CAP LS 302
+S: CAP * LS :... draft/multiline=max-bytes=4096,max-lines=24 ...
+C: CAP REQ :draft/multiline batch
+S: CAP * ACK :draft/multiline batch
+C: NICK user
+C: USER user 0 * :User Name
+S: 001 ...
+
+C: BATCH +abc123 draft/multiline #channel
+C: @batch=abc123 PRIVMSG #channel :Line 1
+C: @batch=abc123 PRIVMSG #channel :Line 2
+C: @batch=abc123;draft/multiline-concat PRIVMSG #channel : continued
+C: BATCH -abc123
 ```
 
-### Concat Tag
-
-Using `draft/multiline-concat` tag joins lines directly (no newline):
-
+Output for supporting clients:
 ```
-C: @batch=abc PRIVMSG #channel :Hello
-C: @batch=abc;draft/multiline-concat PRIVMSG #channel :World
+S: BATCH +serverid draft/multiline #channel
+S: @batch=serverid :user!ident@host PRIVMSG #channel :Line 1
+S: @batch=serverid :user!ident@host PRIVMSG #channel :Line 2
+S: @batch=serverid;draft/multiline-concat :user!ident@host PRIVMSG #channel : continued
+S: BATCH -serverid
 ```
 
-Result: `Hello World` (single line)
+Output for non-supporting clients:
+```
+S: :user!ident@host PRIVMSG #channel :Line 1
+S: :user!ident@host PRIVMSG #channel :Line 2
+S: :user!ident@host PRIVMSG #channel : continued
+```
 
 ---
 
-## Server Behavior
+## Error Handling
 
-### For Supporting Clients
+Uses IRCv3 standard-replies (FAIL):
 
-Forward batch as-is with appropriate tags.
-
-### For Non-Supporting Clients
-
-Deliver individual PRIVMSG/NOTICE messages:
-- Remove batch tags
-- Add `@msgid` and `@label` to first message
-- Send messages in order
+| Error Code | Condition |
+|------------|-----------|
+| `MULTILINE_MAX_BYTES` | Total bytes exceeded limit |
+| `MULTILINE_MAX_LINES` | Line count exceeded limit |
+| `INVALID_FORMAT` | Invalid batch format |
+| `UNSUPPORTED_TYPE` | Unknown batch type |
+| `NO_ACTIVE_BATCH` | Tried to end non-existent batch |
+| `BATCH_ID_MISMATCH` | Batch ID doesn't match active batch |
 
 ---
 
 ## Dependencies
 
-| Dependency | Status in Nefarious |
-|------------|---------------------|
+| Dependency | Status |
+|------------|--------|
 | `batch` | Complete |
 | `message-tags` | Complete |
 | `standard-replies` | Complete |
 | `echo-message` | Complete |
 | `labeled-response` | Complete |
 
-All dependencies are already implemented.
+All dependencies were already implemented.
 
 ---
 
-## Error Responses
+## Limitations
 
-| Error Code | Condition |
-|------------|-----------|
-| `MULTILINE_MAX_BYTES <limit>` | Total bytes exceeded |
-| `MULTILINE_MAX_LINES <limit>` | Line count exceeded |
-| `MULTILINE_INVALID_TARGET <batch> <msg>` | Mismatched targets |
-| `MULTILINE_INVALID` | Malformed batch |
-
----
-
-## Implementation Architecture
-
-### Batch Collection
-
-Server must collect all messages in a batch before processing:
-
-```c
-struct MultilineBatch {
-    char batchid[16];
-    char target[CHANNELLEN + 1];
-    struct Client *sender;
-    struct MultilineMessage *messages;
-    int message_count;
-    int total_bytes;
-    time_t started;
-};
-
-struct MultilineMessage {
-    char *content;
-    int concat;  /* Has draft/multiline-concat tag */
-    struct MultilineMessage *next;
-};
-```
-
-### Processing Flow
-
-```
-1. Client sends BATCH +id draft/multiline #channel
-2. Server creates MultilineBatch struct
-3. Client sends PRIVMSG messages with @batch=id
-4. Server collects messages, validates limits
-5. Client sends BATCH -id
-6. Server processes batch:
-   a. For supporting recipients: send as batch
-   b. For non-supporting: send individual PRIVMSGs
-```
-
----
-
-## Files to Modify (Nefarious)
-
-| File | Changes |
-|------|---------|
-| `include/capab.h` | Add `CAP_MULTILINE` |
-| `include/ircd_features.h` | Add multiline features |
-| `ircd/ircd_features.c` | Register features |
-| `ircd/m_cap.c` | Add `draft/multiline` with values |
-| `ircd/m_batch.c` | Handle multiline batch type |
-| `include/client.h` | Add multiline batch storage |
-| `ircd/m_privmsg.c` | Handle batched messages |
-
----
-
-## Batch Handler Changes
-
-In `m_batch.c`:
-
-```c
-int handle_batch_start(struct Client *sptr, const char *batchid,
-                       const char *type, const char *params)
-{
-    if (strcmp(type, "draft/multiline") == 0) {
-        return start_multiline_batch(sptr, batchid, params);
-    }
-    /* ... other batch types ... */
-}
-
-int handle_batch_end(struct Client *sptr, const char *batchid)
-{
-    struct MultilineBatch *batch = find_batch(sptr, batchid);
-    if (batch && batch->type == BATCH_MULTILINE) {
-        return process_multiline_batch(sptr, batch);
-    }
-    /* ... */
-}
-```
-
----
-
-## Processing Multiline Batch
-
-```c
-int process_multiline_batch(struct Client *sptr, struct MultilineBatch *batch)
-{
-    struct Channel *chptr = NULL;
-    struct Client *target = NULL;
-
-    /* Find target */
-    if (IsChannelName(batch->target)) {
-        chptr = FindChannel(batch->target);
-        if (!chptr)
-            return send_fail(sptr, "BATCH", "INVALID_TARGET", ...);
-    } else {
-        target = FindUser(batch->target);
-        if (!target)
-            return send_fail(sptr, "BATCH", "INVALID_TARGET", ...);
-    }
-
-    /* Send to supporting recipients as batch */
-    /* Send to non-supporting as individual messages */
-
-    return 0;
-}
-```
-
----
-
-## Fallback Delivery
-
-For clients without `draft/multiline`:
-
-```c
-void deliver_multiline_fallback(struct Client *to, struct MultilineBatch *batch)
-{
-    struct MultilineMessage *msg;
-    int first = 1;
-
-    for (msg = batch->messages; msg; msg = msg->next) {
-        if (first) {
-            /* Include @msgid and @label on first message */
-            sendcmdto_one_tags(batch->sender, CMD_PRIVMSG, to,
-                               "@msgid=...;@label=...",
-                               "%s :%s", batch->target, msg->content);
-            first = 0;
-        } else {
-            sendcmdto_one(batch->sender, CMD_PRIVMSG, to,
-                          "%s :%s", batch->target, msg->content);
-        }
-    }
-}
-```
-
----
-
-## Implementation Phases
-
-### Phase 1: Batch Collection
-
-1. Add capability with values
-2. Implement multiline batch storage
-3. Collect messages until batch end
-
-**Effort**: Medium (12-16 hours)
-
-### Phase 2: Batch Delivery
-
-1. Forward batch to supporting clients
-2. Fallback delivery to non-supporting clients
-3. Handle echo-message
-
-**Effort**: Medium (12-16 hours)
-
-### Phase 3: Validation and Limits
-
-1. Enforce max-bytes, max-lines
-2. Target validation
-3. Timeout handling for incomplete batches
-
-**Effort**: Low (8-12 hours)
-
-### Phase 4: Concat Tag Support
-
-1. Parse `draft/multiline-concat` tag
-2. Apply concatenation when joining
-
-**Effort**: Low (4-8 hours)
-
----
-
-## Configuration Options
-
-```
-features {
-    "CAP_multiline" = "TRUE";
-    "MULTILINE_MAX_BYTES" = "4096";
-    "MULTILINE_MAX_LINES" = "24";
-    "MULTILINE_TIMEOUT" = "30";  /* seconds */
-};
-```
-
----
-
-## P10 Considerations
-
-### Option A: Forward as Batch
-
-Propagate multiline batch between servers:
-
-```
-ABAAB BT +abc draft/multiline #channel
-@batch=abc ABAAB P #channel :Line 1
-@batch=abc ABAAB P #channel :Line 2
-ABAAB BT -abc
-```
-
-### Option B: Expand Before Relay
-
-Convert to individual messages for S2S:
-- Simpler implementation
-- Loses multiline semantics cross-server
-
----
-
-## Security Considerations
-
-1. **DoS prevention**: Timeout incomplete batches
-2. **Size limits**: Prevent memory exhaustion
-3. **Rate limiting**: Limit multiline batch frequency
-4. **Target validation**: Ensure target matches throughout
-
----
-
-## Complexity Assessment
-
-| Component | Effort | Risk |
-|-----------|--------|------|
-| Capability negotiation | Low | Low |
-| Batch collection | Medium | Medium |
-| Batch delivery | Medium | Medium |
-| Fallback delivery | Medium | Low |
-| Limits and timeout | Low | Low |
-| Concat tag | Low | Low |
-
-**Total**: Medium effort (36-52 hours)
-
----
-
-## Recommendation
-
-1. **HIGH PRIORITY**: Key feature for user retention from Discord/Slack/Matrix
-2. **Implement after client-batch**: Shared infrastructure
-3. **Start with Phase 1-2**: Core functionality first
-4. **Conservative limits initially**: Small max-lines, can increase later
-5. **Focus on code pasting use case**: Primary pain point for developer users
+- S2S propagation not implemented (multiline is client-to-server only)
+- No batch timeout implemented (incomplete batches persist until new batch starts)
+- Max 24 lines and 4096 bytes by default
 
 ---
 
@@ -372,8 +178,7 @@ Convert to individual messages for S2S:
 | soju | Bouncer |
 | Goguma | Client |
 | gamja | Client |
-
-Moderate adoption.
+| **Nefarious** | **Server (NEW)** |
 
 ---
 
