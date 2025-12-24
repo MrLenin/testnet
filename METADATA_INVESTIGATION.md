@@ -1,6 +1,6 @@
 # IRCv3 Metadata Extension Investigation
 
-## Status: INVESTIGATING (Draft Specification)
+## Status: IMPLEMENTED
 
 **Specification**: https://ircv3.net/specs/extensions/metadata
 
