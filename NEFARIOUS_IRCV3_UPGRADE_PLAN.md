@@ -21,7 +21,7 @@ Draft IRCv3 extensions under investigation are documented in separate files:
 | **message-redaction** | [MESSAGE_REDACTION_INVESTIGATION.md](MESSAGE_REDACTION_INVESTIGATION.md) | Investigating | Medium |
 | **pre-away** | [PRE_AWAY_INVESTIGATION.md](PRE_AWAY_INVESTIGATION.md) | Investigating | Low-Medium |
 | **extended-isupport** | [EXTENDED_ISUPPORT_INVESTIGATION.md](EXTENDED_ISUPPORT_INVESTIGATION.md) | Investigating | Low |
-| **no-implicit-names** | [NO_IMPLICIT_NAMES_INVESTIGATION.md](NO_IMPLICIT_NAMES_INVESTIGATION.md) | Investigating | Very Low |
+| **no-implicit-names** | [NO_IMPLICIT_NAMES_INVESTIGATION.md](NO_IMPLICIT_NAMES_INVESTIGATION.md) | ✅ Implemented | Very Low |
 | **metadata-2** | [METADATA_INVESTIGATION.md](METADATA_INVESTIGATION.md) | Investigating | Very High |
 | **multiline** | [MULTILINE_INVESTIGATION.md](MULTILINE_INVESTIGATION.md) | Investigating | High (user retention issue) |
 | **websocket** | [WEBSOCKET_INVESTIGATION.md](WEBSOCKET_INVESTIGATION.md) | Investigating | High (native supported by Ergo/UnrealIRCd/InspIRCd) |
@@ -64,11 +64,11 @@ features {
 
 These are trivial to implement and provide immediate value:
 
-| Extension | Effort | Why |
-|-----------|--------|-----|
-| **no-implicit-names** | ~2-4 hours | Single if-statement change, reduces bandwidth for mobile clients |
-| **extended-isupport** | ~16-28 hours | Simple new command, enables pre-registration feature discovery |
-| **pre-away** | ~24-36 hours | Small m_away.c change, useful for bouncers |
+| Extension | Effort | Status |
+|-----------|--------|--------|
+| **no-implicit-names** | ~2-4 hours | ✅ Implemented |
+| **extended-isupport** | ~16-28 hours | Pending |
+| **pre-away** | ~24-36 hours | Pending |
 
 ### Tier 2: High Priority (User Retention)
 

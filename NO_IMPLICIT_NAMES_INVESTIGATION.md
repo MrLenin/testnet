@@ -1,6 +1,6 @@
 # IRCv3 No-Implicit-Names Extension Investigation
 
-## Status: QUICK WIN - IMPLEMENT FIRST
+## Status: ✅ IMPLEMENTED
 
 **Specification**: https://ircv3.net/specs/extensions/no-implicit-names
 
@@ -84,83 +84,87 @@ No external dependencies.
 
 ---
 
-## Implementation Architecture
+## Implementation Details
 
-### Current JOIN Flow
-
-In `m_join.c`:
-
-```c
-/* After successful join */
-send_topic_burst(cptr, chptr);   /* 332, 333 */
-do_names(cptr, chptr, NAMES_ALL); /* 353, 366 */
-```
-
-### New JOIN Flow
-
-```c
-/* After successful join */
-send_topic_burst(cptr, chptr);   /* 332, 333 */
-
-/* Skip names if no-implicit-names negotiated */
-if (!HasCap(cptr, CAP_NOIMPLICITNAMES))
-    do_names(cptr, chptr, NAMES_ALL);
-```
-
----
-
-## Files to Modify (Nefarious)
+### Files Modified
 
 | File | Changes |
 |------|---------|
-| `include/capab.h` | Add `CAP_NOIMPLICITNAMES` |
-| `include/ircd_features.h` | Add `FEAT_CAP_no_implicit_names` |
-| `ircd/ircd_features.c` | Register feature (default: FALSE) |
-| `ircd/m_cap.c` | Add `draft/no-implicit-names` to capability list |
-| `ircd/m_join.c` | Conditionally skip names |
-
----
-
-## Code Changes
+| `include/capab.h` | Added `CAP_DRAFT_NOIMPLICITNAMES` enum value |
+| `include/ircd_features.h` | Added `FEAT_CAP_draft_no_implicit_names` |
+| `ircd/ircd_features.c` | Registered feature (default: TRUE) |
+| `ircd/m_cap.c` | Added `draft/no-implicit-names` to capability list |
+| `ircd/m_join.c` | Added `#include "capab.h"`, conditionally skip `do_names()` |
+| `ircd/m_svsjoin.c` | Added `#include "capab.h"`, conditionally skip `do_names()` |
 
 ### capab.h
 
 ```c
-#define CAP_NOIMPLICITNAMES  0x80000  /* draft/no-implicit-names */
+/* Added to enum Capab before TLS */
+_CAP(DRAFT_NOIMPLICITNAMES, 0, "draft/no-implicit-names", 0),
+```
+
+### ircd_features.h
+
+```c
+/* Added after FEAT_CAP_standard_replies */
+FEAT_CAP_draft_no_implicit_names,
+```
+
+### ircd_features.c
+
+```c
+/* Added after CAP_standard_replies */
+F_B(CAP_draft_no_implicit_names, 0, 1, 0),
 ```
 
 ### m_cap.c
 
 ```c
-{ "draft/no-implicit-names", CAP_NOIMPLICITNAMES, FEAT_CAP_no_implicit_names },
+/* Added to capab_list[] */
+_CAP(DRAFT_NOIMPLICITNAMES, 0, "draft/no-implicit-names", FEAT_CAP_draft_no_implicit_names),
 ```
 
 ### m_join.c
 
-Find the `do_names()` call after join:
+```c
+/* Added include at top */
+#include "capab.h"
+
+/* Modified do_names() call (line ~284) */
+/* Skip implicit NAMES if client has draft/no-implicit-names capability */
+if (!HasCap(sptr, CAP_DRAFT_NOIMPLICITNAMES))
+  do_names(sptr, chptr, NAMES_ALL|NAMES_EON); /* send /names list */
+```
+
+### m_svsjoin.c
 
 ```c
-/* Before */
-do_names(sptr, chptr, NAMES_EON);
+/* Added include at top */
+#include "capab.h"
 
-/* After */
-if (!HasCap(sptr, CAP_NOIMPLICITNAMES))
-    do_names(sptr, chptr, NAMES_EON);
+/* Modified do_names() call (line ~198) */
+/* Skip implicit NAMES if client has draft/no-implicit-names capability */
+if (!HasCap(acptr, CAP_DRAFT_NOIMPLICITNAMES))
+  do_names(acptr, chptr, NAMES_ALL|NAMES_EON); /* send /names list */
 ```
 
 ---
 
-## Implementation Phases
+## Configuration
 
-### Phase 1: Basic Implementation
+```
+features {
+    "CAP_draft_no_implicit_names" = "TRUE";  /* enabled by default */
+};
+```
 
-1. Add capability and feature flag
-2. Add capability check before do_names()
-3. Test with capable client
-
-**Effort**: Very Low (2-4 hours)
-
-This is one of the simplest IRCv3 extensions to implement.
+To disable:
+```
+features {
+    "CAP_draft_no_implicit_names" = "FALSE";
+};
+```
 
 ---
 
@@ -201,16 +205,6 @@ For a client joining 20 channels:
 
 ---
 
-## Configuration Options
-
-```
-features {
-    "CAP_no_implicit_names" = "TRUE";
-};
-```
-
----
-
 ## Edge Cases
 
 1. **WHO vs NAMES**: Some clients use WHO instead of NAMES
@@ -224,26 +218,6 @@ features {
 
 ---
 
-## Complexity Assessment
-
-| Component | Effort | Risk |
-|-----------|--------|------|
-| Capability negotiation | Low | Low |
-| Join modification | Very Low | Low |
-| Testing | Low | Low |
-
-**Total**: Very Low effort (2-4 hours)
-
----
-
-## Recommendation
-
-1. **Implement immediately**: Trivial change
-2. **Low risk**: No complex state management
-3. **Feature flag enabled by default**: Simple and safe
-
----
-
 ## Client Support
 
 | Software | Support |
@@ -254,8 +228,7 @@ features {
 | Goguma | Client |
 | soju | Bouncer |
 | Matrix2051 | Bridge |
-
-Reasonable adoption for a draft spec.
+| **Nefarious** | **Server (NEW)** |
 
 ---
 
