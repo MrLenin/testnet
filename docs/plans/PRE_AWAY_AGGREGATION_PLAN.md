@@ -1,6 +1,8 @@
 # Pre-away Presence Aggregation Implementation Plan
 
-## Status: TO IMPLEMENT
+## Status: IMPLEMENTED
+
+**Branch**: `ircv3.2-upgrade` (commit `9f8219d`)
 
 ## Overview
 

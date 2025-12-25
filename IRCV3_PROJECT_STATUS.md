@@ -1,8 +1,10 @@
 # IRCv3.2+ Upgrade Project Status
 
 **Reference Commits:**
-- Nefarious: `0487306b078a192fb7c3db9890dd3d71b2f3ac51`
+- Nefarious: `2a0aaba` (ircv3.2-upgrade branch)
 - X3: `ea1b586` (keycloak-integration branch)
+
+> **Note:** The `ircv3.2-upgrade` branch contains all IRCv3 features including WebSocket and Presence aggregation.
 
 ---
 
@@ -311,9 +313,9 @@ features {
 
 | Feature | Priority | Status | Description | Plan |
 |---------|----------|--------|-------------|------|
-| WebSocket transport | High | To Implement | Native WebSocket connections to IRCd | [WEBSOCKET_INVESTIGATION.md](docs/investigations/WEBSOCKET_INVESTIGATION.md) |
-| Presence aggregation | High | To Implement | Aggregate AWAY across multiple connections | [PRE_AWAY_AGGREGATION_PLAN.md](docs/plans/PRE_AWAY_AGGREGATION_PLAN.md) |
-| Redis pub/sub sync | Optional | Planned | Multi-X3 instance real-time metadata sync | [X3_STORAGE_BACKEND_PLAN.md](docs/plans/X3_STORAGE_BACKEND_PLAN.md#optional-phase-7-redis-pubsub-layer) |
+| Redis pub/sub sync | Optional | Planned | Multi-X3 instance real-time metadata sync (requires X3 architecture changes) | [X3_STORAGE_BACKEND_PLAN.md](docs/plans/X3_STORAGE_BACKEND_PLAN.md#optional-phase-7-redis-pubsub-layer) |
+
+> **All other features are implemented.** WebSocket transport and Presence aggregation are complete on the `ircv3.2-upgrade` branch.
 
 ---
 
