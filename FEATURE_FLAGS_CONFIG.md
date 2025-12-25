@@ -74,6 +74,26 @@ Feature flags are configured in the `features {}` block of the IRCd config file.
 
 **Retention Purge**: Messages older than `CHATHISTORY_RETENTION` days are automatically deleted via an hourly timer (`history_purge_callback`). Set to 0 to disable automatic purging.
 
+### Presence Aggregation Configuration
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `FEAT_PRESENCE_AGGREGATION` | FALSE | Enable multi-connection presence aggregation |
+| `FEAT_AWAY_STAR_MSG` | "Away" | Fallback message stored for away-star connections |
+
+**Presence Aggregation**: When enabled, the IRCd tracks all connections per account and computes an "effective" presence using "most-present-wins" logic:
+1. If any connection is PRESENT → account is PRESENT
+2. If all connections are AWAY (with message) → account is AWAY
+3. If all connections are AWAY-STAR → account is hidden
+
+**Away-Star**: Special away state (`AWAY *`) for hidden/background connections (e.g., mobile apps when backgrounded). These don't count toward presence.
+
+**LMDB Persistence**: The `last_present` timestamp for each account is persisted via the METADATA LMDB backend using the reserved key `$last_present`.
+
+**Virtual METADATA Keys**:
+- `$presence` - Returns current effective presence ("present", "away:message", or "away-star")
+- `$last_present` - Returns Unix timestamp of when account was last present
+
 ### Example Configuration
 
 ```
@@ -105,6 +125,10 @@ features {
     "CHATHISTORY_DB" = "history";
     "CHATHISTORY_RETENTION" = "7";
     "CHATHISTORY_PRIVATE" = "FALSE";
+
+    # Presence Aggregation
+    "PRESENCE_AGGREGATION" = "FALSE";  # Enable for multi-connection presence
+    "AWAY_STAR_MSG" = "Away";          # Fallback for away-star storage
 };
 ```
 

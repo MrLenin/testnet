@@ -631,6 +631,94 @@ ABAAB MD ABAAB avatar
 
 ---
 
+### AWAY (A) - Presence Aggregation Extension
+
+**Purpose**: User away status management with multi-connection presence aggregation support.
+
+**IRCv3 Specs**:
+- https://ircv3.net/specs/extensions/away-notify
+- https://ircv3.net/specs/extensions/pre-away
+
+#### Standard P10 Format
+
+```
+[USER_NUMERIC] A :[AWAY_MESSAGE]    # Set away with message
+[USER_NUMERIC] A                    # Clear away (back/present)
+```
+
+#### Extended Format (Away-Star)
+
+```
+[USER_NUMERIC] A *                  # Hidden connection (away-star)
+```
+
+**Away-Star** is a special away state indicating a "hidden" connection that should not count toward presence aggregation. Mobile clients use this when backgrounded.
+
+#### Examples
+
+```
+# User sets normal away
+ABAAB A :Be right back
+
+# User clears away (back to present)
+ABAAB A
+
+# User sets away-star (hidden/mobile backgrounded)
+ABAAB A *
+```
+
+#### Presence States
+
+| State | Away Message | Description |
+|-------|--------------|-------------|
+| Present | (none) | User is actively present |
+| Away | Non-`*` message | User is away with message |
+| Away-Star | `*` only | Hidden connection (doesn't count as present) |
+
+#### Presence Aggregation (Multi-Connection)
+
+When `FEAT_PRESENCE_AGGREGATION` is enabled, the IRCd aggregates presence across all connections for the same account:
+
+| Priority | State | Effective Presence |
+|----------|-------|-------------------|
+| 1 (highest) | Any connection PRESENT | Account is PRESENT |
+| 2 | Any connection AWAY (not away-star) | Account is AWAY |
+| 3 (lowest) | All connections AWAY-STAR | Account is hidden |
+
+**Broadcast Suppression**: With aggregation enabled, AWAY broadcasts only occur when the *effective* presence changes, not on every individual connection's state change.
+
+#### Feature Flags
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `FEAT_PRESENCE_AGGREGATION` | OFF | Enable multi-connection aggregation |
+| `FEAT_AWAY_STAR_MSG` | "Away" | Fallback message for away-star storage |
+
+#### Processing
+
+**Sender (Nefarious)**:
+1. Client sends `AWAY [:message]` or `AWAY *`
+2. Update local away state
+3. If aggregation enabled for logged-in user:
+   - Update connection registry
+   - Compute effective presence
+   - Only broadcast if effective state changed
+4. Send `A [:message]` or `A *` to servers
+
+**Receiver (Nefarious/X3)**:
+1. Parse `A` token
+2. Check for `*` (away-star) vs normal message
+3. Update user's away state
+4. If aggregation enabled, update presence registry
+5. Propagate to other servers
+
+**Pre-Away (Unregistered Clients)**:
+Clients with `draft/pre-away` capability can set away state before registration completes:
+- `AWAY *` during registration → connection starts as away-star
+- Applied when registration completes (`register_user`)
+
+---
+
 ## SASL Protocol
 
 ### Overview
