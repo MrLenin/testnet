@@ -309,11 +309,11 @@ features {
 
 ## Future Work
 
-| Feature | Priority | Description | Plan |
-|---------|----------|-------------|------|
-| Redis pub/sub sync | Optional | Multi-X3 instance real-time metadata sync | [X3_STORAGE_BACKEND_PLAN.md](docs/plans/X3_STORAGE_BACKEND_PLAN.md#optional-phase-7-redis-pubsub-layer) |
-| WebSocket transport | Low | Native WebSocket connections to IRCd | [WEBSOCKET_INVESTIGATION.md](docs/investigations/WEBSOCKET_INVESTIGATION.md) |
-| Presence aggregation | Low | Aggregate AWAY across multiple connections | [PRE_AWAY_AGGREGATION_PLAN.md](docs/plans/PRE_AWAY_AGGREGATION_PLAN.md) |
+| Feature | Priority | Status | Description | Plan |
+|---------|----------|--------|-------------|------|
+| WebSocket transport | High | To Implement | Native WebSocket connections to IRCd | [WEBSOCKET_INVESTIGATION.md](docs/investigations/WEBSOCKET_INVESTIGATION.md) |
+| Presence aggregation | High | To Implement | Aggregate AWAY across multiple connections | [PRE_AWAY_AGGREGATION_PLAN.md](docs/plans/PRE_AWAY_AGGREGATION_PLAN.md) |
+| Redis pub/sub sync | Optional | Planned | Multi-X3 instance real-time metadata sync | [X3_STORAGE_BACKEND_PLAN.md](docs/plans/X3_STORAGE_BACKEND_PLAN.md#optional-phase-7-redis-pubsub-layer) |
 
 ---
 

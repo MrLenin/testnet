@@ -1,5 +1,7 @@
 # Pre-away Presence Aggregation Implementation Plan
 
+## Status: TO IMPLEMENT
+
 ## Overview
 
 This document details the implementation plan for presence aggregation across multiple connections for users logged into the same account. This enhancement builds on the existing `draft/pre-away` implementation.
