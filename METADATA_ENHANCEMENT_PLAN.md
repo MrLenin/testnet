@@ -892,15 +892,61 @@ This is more work upfront but results in:
 
 ### Keycloak Group Integration for Channels
 
-X3 already has Keycloak group support implemented in `keycloak.c`:
+#### Currently Implemented in X3 (`keycloak.c`)
 
-| Function | Purpose |
-|----------|---------|
-| `keycloak_get_group_by_name()` | Look up group by name, returns UUID |
-| `keycloak_add_user_to_group()` | Add user to group by UUIDs |
-| `keycloak_remove_user_from_group()` | Remove user from group |
+| Function | Keycloak API | Purpose |
+|----------|--------------|---------|
+| `keycloak_get_group_by_name()` | `GET /groups?search=` | Look up group by name, returns UUID |
+| `keycloak_add_user_to_group()` | `PUT /users/{id}/groups/{groupId}` | Add user to group |
+| `keycloak_remove_user_from_group()` | `DELETE /users/{id}/groups/{groupId}` | Remove user from group |
+| `keycloak_get_user_attribute()` | `GET /users/{id}` | Get single user attribute |
+| `keycloak_set_user_attribute()` | `PUT /users/{id}` | Set user attribute |
+| `keycloak_list_user_attributes()` | `GET /users/{id}` | List attributes with prefix |
 
 **Current usage**: Oper group membership - when a user's opserv level exceeds `keycloak_oper_group_level`, they're added to the configured `keycloak_oper_group`.
+
+#### Available but NOT Implemented
+
+These Keycloak REST API endpoints could be useful for channel integration:
+
+| Endpoint | Method | Purpose | Use Case |
+|----------|--------|---------|----------|
+| `/groups` | POST | Create group | Auto-create group when channel registered |
+| `/groups/{id}` | PUT | Update group (including attributes) | Store channel metadata in group attrs |
+| `/groups/{id}` | DELETE | Delete group | Clean up when channel dropped |
+| `/groups/{id}` | GET | Get group with attributes | Retrieve channel config from KC |
+| `/groups/{id}/members` | GET | List group members | Get channel access list |
+| `/users/{id}/groups` | GET | List user's groups | Get all channels user has access to |
+| `/users/{id}/groups/count` | GET | Count user's groups | Quick check for access |
+
+#### Group Attributes for Channel Metadata
+
+Keycloak groups support custom attributes (`Map<String, List<String>>`). This could store:
+
+```json
+{
+  "name": "irc-channel-#afternet",
+  "attributes": {
+    "irc_channel": ["#afternet"],
+    "irc_default_modes": ["+nt"],
+    "irc_entrymsg": ["Welcome to AfterNET!"],
+    "irc_max_users": ["500"],
+    "metadata.url": ["https://afternet.org"],
+    "metadata.description": ["The main AfterNET channel"]
+  }
+}
+```
+
+**Pros of group attributes**:
+- Single source of truth in Keycloak
+- Accessible via Keycloak Admin UI
+- Survives X3 restarts without local storage
+- Could sync across multiple X3 instances
+
+**Cons**:
+- Requires admin API for every metadata change (network latency)
+- Not designed for high-frequency updates
+- No P10-style real-time sync to IRCd
 
 #### Potential Channel Integration
 
@@ -954,7 +1000,41 @@ irc-opers               Auto-oper on connect
 
 **Recommendation**: Option 2 (Hybrid) - Use Keycloak groups for channel access control only, keep channel metadata in LMDB. This leverages Keycloak's strengths (identity, authorization) without trying to make it do things it wasn't designed for.
 
-**Implementation effort**: 20-30 hours (after LMDB integration complete)
+#### New Keycloak Functions Needed for Full Integration
+
+If pursuing Option 1 or 3 (deeper KC integration), these functions would need to be added to `keycloak.c`:
+
+```c
+/* Group CRUD operations */
+int keycloak_create_group(realm, client, group_name, attributes, group_id_out);
+int keycloak_update_group(realm, client, group_id, attributes);
+int keycloak_delete_group(realm, client, group_id);
+int keycloak_get_group(realm, client, group_id, group_out);  /* Full group with attrs */
+
+/* Group membership queries */
+int keycloak_get_group_members(realm, client, group_id, members_out, count_out);
+int keycloak_get_user_groups(realm, client, user_id, groups_out, count_out);
+
+/* Group attribute operations (if storing metadata in KC) */
+int keycloak_set_group_attribute(realm, client, group_id, attr_name, attr_value);
+int keycloak_get_group_attribute(realm, client, group_id, attr_name, value_out);
+int keycloak_list_group_attributes(realm, client, group_id, prefix, entries_out);
+```
+
+**Effort for full KC group integration**: 24-32 hours
+
+#### Recommended Phased Approach
+
+| Phase | Scope | Effort |
+|-------|-------|--------|
+| 1 | Use existing group functions for channel access control | 8-12 hours |
+| 2 | Add `keycloak_get_group_members()` for listing channel access | 4-6 hours |
+| 3 | Add `keycloak_get_user_groups()` for "what channels can I access" | 4-6 hours |
+| 4 | (Optional) Add group CRUD for auto-creating channel groups | 8-12 hours |
+| 5 | (Optional) Add group attributes for KC-stored metadata | 8-12 hours |
+
+**Total for hybrid model (Phases 1-3)**: 16-24 hours
+**Total for full KC integration (Phases 1-5)**: 32-48 hours
 
 ---
 
