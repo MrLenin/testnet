@@ -884,11 +884,385 @@ This is more work upfront but results in:
 
 ## Future Considerations
 
-1. **Shared LMDB**: Could Nefarious and X3 share LMDB file? (Probably not - different processes)
-2. **Metadata expiry**: TTL for cached metadata entries
-3. **Sync on demand**: Request metadata from X3 for specific users/channels
-4. **Compression**: Compress large metadata values in LMDB
-5. **Keycloak groups for channel access** - See detailed analysis below
+### 1. Shared LMDB Between Nefarious and X3
+
+**Question**: Could Nefarious and X3 share a single LMDB database file?
+
+**Analysis**:
+
+```
+Current Architecture:
+┌─────────────┐    ┌─────────────┐
+│  Nefarious  │    │     X3      │
+│  (Process A)│    │  (Process B)│
+└──────┬──────┘    └──────┬──────┘
+       │                   │
+       ▼                   ▼
+┌─────────────┐    ┌─────────────┐
+│ nef.lmdb    │    │  x3.lmdb    │
+│ (metadata)  │    │ (channels,  │
+└─────────────┘    │  accounts)  │
+                   └─────────────┘
+
+Proposed Shared Architecture:
+┌─────────────┐    ┌─────────────┐
+│  Nefarious  │    │     X3      │
+│  (Process A)│    │  (Process B)│
+└──────┬──────┘    └──────┬──────┘
+       │                   │
+       └─────────┬─────────┘
+                 ▼
+         ┌─────────────┐
+         │ shared.lmdb │
+         │ (all data)  │
+         └─────────────┘
+```
+
+**LMDB Multi-Process Semantics**:
+
+| Aspect | LMDB Behavior |
+|--------|---------------|
+| Multiple readers | Fully supported, concurrent access |
+| Single writer | Only one process can write at a time |
+| Write lock | Global lock across all processes |
+| Readers during write | Readers see consistent snapshot |
+
+**Challenges**:
+
+1. **Write contention**: Both Nefarious and X3 want to write frequently
+   - Nefarious: Metadata updates, cache writes
+   - X3: Channel/account changes, service operations
+   - Would need to serialize all writes through lock
+
+2. **Different data models**:
+   - Nefarious stores per-client metadata, P10 state
+   - X3 stores service-level data (registrations, access lists)
+   - Mixing these in one DB makes schema complex
+
+3. **Failure isolation**: If one process corrupts the DB, both fail
+   - Separate DBs = one can recover independently
+
+4. **Upgrade complexity**:
+   - Can't upgrade X3 independently of Nefarious
+   - Schema changes affect both
+
+**Alternative: Shared via P10**:
+
+Current P10 protocol already provides real-time sync:
+```
+Nefarious sets metadata → MD token → X3 receives → stores in x3.lmdb
+X3 sets metadata → MD token → Nefarious receives → stores in nef.lmdb
+```
+
+This is effectively a distributed database with eventual consistency.
+
+**Recommendation**: Keep separate LMDB files.
+
+**Rationale**:
+- P10 provides real-time sync without shared storage complexity
+- Write contention would hurt performance
+- Failure isolation is important for production
+- Separate files = independent upgrades
+
+**Effort to implement if pursued**: 24-32 hours (not recommended)
+
+---
+
+### 2. Metadata Expiry (TTL)
+
+**Question**: Should metadata entries expire automatically after a certain time?
+
+**Use Cases for TTL**:
+
+| Scenario | TTL Benefit |
+|----------|-------------|
+| User hasn't logged in for months | Free cache memory |
+| Stale channel metadata | Ensure freshness |
+| Orphaned metadata (deleted account/channel) | Cleanup |
+| Temporary metadata (e.g., typing indicator) | Auto-cleanup |
+
+**Implementation Approaches**:
+
+#### Approach A: Per-Entry TTL
+
+```c
+struct MetadataEntry {
+  char *key;
+  char *value;
+  int visibility;
+  time_t created;
+  time_t expires;        /* 0 = never expires */
+  struct MetadataEntry *next;
+};
+
+/* In LMDB, store as: */
+struct LMDBMetadata {
+  uint32_t visibility;
+  uint32_t created;
+  uint32_t expires;      /* Seconds since epoch, or 0 */
+  uint16_t value_len;
+  char value[];
+};
+```
+
+**Pros**:
+- Granular control per key
+- Some metadata can be permanent, others temporary
+- Supports future "ephemeral metadata" use cases
+
+**Cons**:
+- Extra 4-8 bytes per entry
+- Requires periodic sweep to clean expired entries
+- Complexity in LMDB storage format
+
+#### Approach B: Global Sweep with Last-Access Time
+
+```c
+/* Track last access time, sweep entries not accessed in N days */
+void metadata_sweep_stale(int max_age_seconds) {
+  time_t cutoff = CurrentTime - max_age_seconds;
+  /* Iterate LMDB, delete entries with last_access < cutoff */
+}
+```
+
+**Pros**:
+- Simple implementation
+- Cleans up genuinely unused data
+- No per-entry overhead
+
+**Cons**:
+- All-or-nothing - can't keep some permanent
+- Requires tracking last access (write on every read)
+
+#### Approach C: Event-Based Cleanup Only
+
+Current approach - clean up when:
+- User disconnects (clear in-memory)
+- Account deleted (X3 notifies, clear LMDB)
+- Channel destroyed (clear channel metadata)
+
+**Pros**:
+- No timer overhead
+- Simple, predictable behavior
+- Already partially implemented
+
+**Cons**:
+- Orphaned data possible if cleanup missed
+- Long-unused data stays in cache
+
+**Recommendation**: Approach C (Event-Based) with Approach A for future ephemeral metadata
+
+**Implementation Plan**:
+
+| Phase | Scope | When |
+|-------|-------|------|
+| Current | Event-based cleanup only | Now |
+| Future | Add optional TTL field to LMDB format | When ephemeral metadata needed |
+| Future | Periodic sweep for expired entries | When ephemeral metadata needed |
+
+**Effort**: 4-6 hours for current approach, 12-16 hours for full TTL support
+
+---
+
+### 3. Sync On Demand
+
+**Question**: Should Nefarious be able to request metadata from X3 for specific users/channels?
+
+**Current Flow**:
+```
+User logs in → X3 sends ALL metadata via P10 → Nefarious caches
+```
+
+**On-Demand Flow**:
+```
+Client requests metadata for user not in cache
+  → Nefarious checks: is it in cache? No
+  → Nefarious queries X3: "send metadata for account X"
+  → X3 looks up Keycloak/LMDB
+  → X3 sends MD tokens
+  → Nefarious caches and returns to client
+```
+
+**Use Cases**:
+
+| Scenario | Benefit |
+|----------|---------|
+| WHOIS on offline user | Show metadata without pre-loading |
+| Channel ACCESS listing | Get metadata for all users with access |
+| Bot integration | Look up user metadata without login |
+| Search functionality | Find users by metadata value |
+
+**P10 Protocol Extension**:
+
+```
+New token: MDQ (Metadata Query)
+
+Format: [SOURCE] MDQ [TARGET] [KEY|*]
+
+Examples:
+AB MDQ NickServ *         → "Send all metadata for account NickServ"
+AB MDQ #channel url       → "Send 'url' metadata for #channel"
+AB MDQ Rubin timezone     → "Send 'timezone' for account Rubin"
+
+Response: Standard MD tokens
+AB MD Rubin timezone * :America/New_York
+
+Error response (if not found):
+AB MDQ Rubin unknown      → No response (or empty MD)
+```
+
+**Implementation Requirements**:
+
+1. **Nefarious changes**:
+   - New `m_metadata_query.c` handler for MDQ token
+   - Track pending queries (avoid duplicate queries)
+   - Timeout for unanswered queries
+   - Cache results when received
+
+2. **X3 changes**:
+   - Handle MDQ token in `proto-p10.c`
+   - Look up metadata from Keycloak/LMDB
+   - Send MD tokens in response
+
+3. **Rate limiting**:
+   - Limit queries per source to prevent abuse
+   - Cache negative results ("no metadata") briefly
+
+**Security Considerations**:
+
+- Only return public (`*`) metadata for arbitrary queries
+- Private (`P`) metadata only to authenticated requestor
+- Rate limit to prevent enumeration attacks
+
+**Effort**: 16-24 hours
+
+---
+
+### 4. Compression for Large Metadata Values
+
+**Question**: Should large metadata values be compressed in LMDB?
+
+**Current Limits**:
+
+```c
+#define METADATA_VALUE_LEN 1000  /* Max value length */
+```
+
+**Compressible Metadata Types**:
+
+| Type | Example | Typical Size | Compressible? |
+|------|---------|--------------|---------------|
+| Avatar URL | https://cdn.example.com/avatar.png | 50-100 bytes | No (short) |
+| Bio/Description | User-written text | 100-500 bytes | Maybe |
+| JSON blob | Structured settings | 200-1000 bytes | Yes |
+| Base64 data | Small images | 500-10000 bytes | Yes |
+
+**Compression Options**:
+
+#### Option A: LZ4 (Fast)
+
+```c
+#include <lz4.h>
+
+int metadata_compress(const char *in, size_t in_len,
+                      char *out, size_t *out_len) {
+  int compressed = LZ4_compress_default(in, out, in_len, *out_len);
+  if (compressed > 0) {
+    *out_len = compressed;
+    return 0;
+  }
+  return -1;  /* Compression failed or didn't help */
+}
+```
+
+**Pros**:
+- Extremely fast (500 MB/s compression, 2 GB/s decompression)
+- Low CPU overhead
+- Good for real-time systems
+
+**Cons**:
+- Lower compression ratio (~2:1)
+- Adds LZ4 dependency
+
+#### Option B: Zstd (Balanced)
+
+```c
+#include <zstd.h>
+
+int metadata_compress(const char *in, size_t in_len,
+                      char *out, size_t *out_len) {
+  size_t compressed = ZSTD_compress(out, *out_len, in, in_len, 1);
+  if (!ZSTD_isError(compressed)) {
+    *out_len = compressed;
+    return 0;
+  }
+  return -1;
+}
+```
+
+**Pros**:
+- Better ratio (~3:1 to 5:1)
+- Still fast (300 MB/s)
+- Modern, well-maintained
+
+**Cons**:
+- Larger library (~1MB)
+- Adds dependency
+
+#### Option C: No Compression (Current)
+
+**Pros**:
+- Simple
+- No dependencies
+- Predictable performance
+
+**Cons**:
+- Larger LMDB database
+- More I/O for large values
+
+**Storage Format with Compression**:
+
+```c
+/* LMDB value format */
+struct LMDBMetadataValue {
+  uint8_t  flags;         /* Bit 0: compressed */
+  uint8_t  compression;   /* 0=none, 1=lz4, 2=zstd */
+  uint16_t original_len;  /* Uncompressed length */
+  uint16_t stored_len;    /* Actual stored length */
+  char     data[];        /* Compressed or raw data */
+};
+```
+
+**When to Compress**:
+
+```c
+#define METADATA_COMPRESS_THRESHOLD 256  /* Only compress if > 256 bytes */
+
+if (value_len > METADATA_COMPRESS_THRESHOLD) {
+  /* Attempt compression */
+  if (compressed_len < value_len * 0.9) {
+    /* Only use if 10%+ smaller */
+    store_compressed();
+  } else {
+    store_raw();
+  }
+}
+```
+
+**Recommendation**: No compression initially, add LZ4 if LMDB grows large
+
+**Rationale**:
+- Current max value is 1000 bytes - small
+- Compression overhead may exceed savings
+- Add later if database size becomes concern
+
+**Effort**: 8-12 hours (if implemented)
+
+---
+
+### 5. Keycloak Groups for Channel Access
+
+See detailed analysis below
 
 ### Keycloak Group Integration for Channels
 
