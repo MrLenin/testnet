@@ -487,23 +487,41 @@ AB MD #channel rules * :Be nice
 
 ## Effort Summary
 
+### Nefarious Phases
+
 | Phase | Description | Effort |
 |-------|-------------|--------|
 | 1 | Cache-Aware Metadata Operations | 8-12 hours |
 | 2 | X3 Availability Detection | 4-8 hours |
 | 3 | Write Queue for X3 Unavailability | 12-16 hours |
-| 4 | Channel Metadata in X3/ChanServ | 16-24 hours |
 | 5 | Netburst Metadata Exchange | 12-16 hours |
 | 6 | Multi-Server Strategy | 4-8 hours |
-| Testing | All phases | 12-16 hours |
 
-**Total Estimate**: 68-100 hours
+### X3 Phases (Updated with LMDB)
+
+| Phase | Description | Effort |
+|-------|-------------|--------|
+| A | Add LMDB to X3 Build System | 4-8 hours |
+| B | Create X3 LMDB Wrapper Module | 16-24 hours |
+| C | ChanServ LMDB Integration | 8-12 hours |
+| 4 | Channel Metadata P10 Handler | 16-24 hours |
+
+### Testing
+
+| Area | Effort |
+|------|--------|
+| Nefarious phases testing | 8-12 hours |
+| X3 LMDB integration testing | 6-10 hours |
+| End-to-end metadata flow | 4-6 hours |
+
+**Total Estimate**: 96-148 hours (increased due to LMDB integration)
 
 ---
 
 ## Implementation Priority
 
 ### Must Have (Core Functionality)
+- **X3 Phase A-C**: LMDB integration (prerequisite for everything else)
 - Phase 1: Cache-aware operations
 - Phase 4: Channel metadata in X3
 
@@ -517,6 +535,248 @@ AB MD #channel rules * :Be nice
 
 ---
 
+## X3 Database Backend Analysis
+
+### Current State: SAXDB Limitations
+
+SAXDB (Simple And eXtensible DataBase) is X3's current storage mechanism:
+
+```
+Write mechanism:
+1. Open temp file (e.g., chanserv.db.new)
+2. Serialize entire database to text format
+3. Flush and close file
+4. Rename temp to final (atomic replace)
+5. Default write interval: 30 minutes
+```
+
+**Problems for metadata operations**:
+
+| Issue | Impact |
+|-------|--------|
+| Full rewrite on save | O(n) write for any change - doesn't scale |
+| Text format | Larger on disk, slower to parse |
+| No random access | Must read entire file to find one key |
+| No transactions | Crash during write = potential data loss |
+| Delayed persistence | 30-minute window of potential data loss |
+| Single-threaded writes | Blocks X3 during large database writes |
+
+**SAXDB is fine for**: Channel registrations, user accounts (infrequent changes).
+**SAXDB is problematic for**: High-frequency metadata updates, real-time sync.
+
+### Backend Options Analysis
+
+#### Option A: LMDB (Lightning Memory-Mapped Database)
+
+**Already used in Nefarious** for account/channel metadata storage.
+
+| Aspect | Details |
+|--------|---------|
+| Type | Embedded key-value store |
+| License | OpenLDAP (permissive) |
+| Transactions | Full ACID, crash-safe |
+| Performance | ~10M ops/sec, memory-mapped |
+| Footprint | ~32KB library, single file DB |
+| Dependencies | None (self-contained) |
+
+**Pros**:
+- Already integrated in Nefarious codebase
+- Zero configuration needed
+- Memory-mapped = fast reads without syscalls
+- B+tree = efficient range queries (list all keys for channel)
+- Single-writer, multiple-reader (safe for concurrent access)
+- Copy-on-write = never corrupts existing data
+
+**Cons**:
+- Max database size must be set at open time
+- Memory-mapped can be problematic on 32-bit systems
+- Single writer means writes must be serialized
+
+**Integration effort**: ~16-24 hours (already have patterns from Nefarious)
+
+#### Option B: SQLite
+
+| Aspect | Details |
+|--------|---------|
+| Type | Embedded relational database |
+| License | Public domain |
+| Transactions | Full ACID |
+| Performance | Good for reads, decent for writes |
+| Footprint | ~600KB library |
+| Dependencies | None |
+
+**Pros**:
+- Familiar SQL interface
+- Built-in indexing, queries
+- Excellent documentation
+- Can query across tables (user ↔ channel relationships)
+
+**Cons**:
+- More complex API than key-value stores
+- WAL mode needed for concurrent readers during write
+- Slightly more overhead than LMDB
+
+**Integration effort**: ~24-32 hours
+
+#### Option C: PostgreSQL (via libpq)
+
+X3 already has PostgreSQL patches in `/x3/patches/` for logging and HelpServ.
+
+| Aspect | Details |
+|--------|---------|
+| Type | External relational database |
+| License | PostgreSQL License (permissive) |
+| Transactions | Full ACID |
+| Performance | Excellent with proper indexing |
+| Footprint | Requires external server |
+| Dependencies | libpq, running PostgreSQL server |
+
+**Pros**:
+- Existing X3 integration patterns in patches
+- Full SQL, complex queries
+- Concurrent access handled by server
+- Network accessible (multi-server aware)
+
+**Cons**:
+- External dependency (PostgreSQL server)
+- Network latency for every operation
+- Deployment complexity increased significantly
+- Overkill for key-value metadata
+
+**Integration effort**: ~32-40 hours
+
+#### Option D: In-Memory + SAXDB Hybrid
+
+Keep existing SAXDB but optimize for metadata:
+
+1. Store metadata in memory hash tables
+2. Write to SAXDB only on shutdown or periodic flush
+3. Use write-ahead log for crash recovery
+
+**Pros**:
+- No new dependencies
+- Simple implementation
+- Compatible with existing infrastructure
+
+**Cons**:
+- Still has SAXDB limitations for large metadata volumes
+- Requires implementing WAL manually
+- Doesn't solve multi-server sync
+
+**Integration effort**: ~12-20 hours
+
+### Recommendation: LMDB
+
+**Primary recommendation**: LMDB for X3 channel metadata storage
+
+**Rationale**:
+1. **Consistency with Nefarious**: Same backend reduces cognitive load, allows code sharing
+2. **Proven in codebase**: Already working in Nefarious for identical use case
+3. **Zero external deps**: No PostgreSQL server to manage
+4. **Performance**: More than adequate for metadata operations
+5. **Crash safety**: Never corrupts existing data
+
+### LMDB Integration Plan for X3
+
+#### Phase A: Add LMDB to X3 Build System
+
+```bash
+# configure.in additions
+AC_ARG_WITH([lmdb],
+  [AS_HELP_STRING([--with-lmdb=PATH],
+    [Path to LMDB installation])],
+  [with_lmdb=$withval],
+  [with_lmdb=check])
+
+# Check for liblmdb
+AC_CHECK_LIB([lmdb], [mdb_env_create], [have_lmdb=yes], [have_lmdb=no])
+AC_CHECK_HEADERS([lmdb.h], [], [have_lmdb=no])
+```
+
+**Effort**: 4-8 hours
+
+#### Phase B: Create X3 LMDB Wrapper Module
+
+New files: `src/lmdb_store.c`, `src/lmdb_store.h`
+
+```c
+/* Initialize LMDB environment for X3 */
+int x3_lmdb_init(const char *path);
+void x3_lmdb_shutdown(void);
+
+/* Channel metadata operations */
+int x3_lmdb_channel_set(const char *channel, const char *key,
+                        const char *value, int visibility);
+int x3_lmdb_channel_get(const char *channel, const char *key,
+                        char *value, size_t value_len);
+int x3_lmdb_channel_del(const char *channel, const char *key);
+struct dict *x3_lmdb_channel_list(const char *channel);
+
+/* Account metadata (future - currently uses Keycloak) */
+int x3_lmdb_account_set(const char *account, const char *key,
+                        const char *value, int visibility);
+```
+
+**Effort**: 16-24 hours
+
+#### Phase C: ChanServ LMDB Integration
+
+Modify `chanserv.c` to use LMDB for channel metadata:
+
+```c
+/* In chanserv_read_metadata() */
+if (x3_lmdb_available()) {
+  channel->metadata = x3_lmdb_channel_list(channel->channel->name);
+} else {
+  /* Fall back to SAXDB parsing */
+}
+
+/* In chanserv_write_metadata() */
+/* LMDB writes are immediate, no need to batch */
+```
+
+**Effort**: 8-12 hours
+
+### Dual-Storage Strategy
+
+For reliability during transition:
+
+```
+             ┌─────────────────┐
+             │  ChanServ MD    │
+             │    Request      │
+             └────────┬────────┘
+                      │
+              ┌───────▼───────┐
+              │  Write Both   │
+              │  LMDB + SAXDB │
+              └───────┬───────┘
+         ┌────────────┴────────────┐
+         ▼                         ▼
+   ┌─────────────┐          ┌─────────────┐
+   │    LMDB     │          │   SAXDB     │
+   │  (Primary)  │          │  (Backup)   │
+   └─────────────┘          └─────────────┘
+         │                         │
+         │    On read:             │
+         └────────┬────────────────┘
+                  │
+          ┌───────▼───────┐
+          │  Read from    │
+          │  LMDB first,  │
+          │  fallback to  │
+          │  SAXDB if     │
+          │  not found    │
+          └───────────────┘
+```
+
+This allows:
+- Gradual migration without data loss
+- SAXDB still provides human-readable backup
+- Can disable SAXDB writes once LMDB is proven stable
+
+---
+
 ## Dependencies
 
 | Dependency | Status |
@@ -526,12 +786,13 @@ AB MD #channel rules * :Be nice
 | MD P10 token | Complete |
 | Visibility support | Complete |
 | SAXDB in X3 | Complete |
+| **LMDB in X3** | **New - Required for Phase 4** |
 
 ---
 
 ## Future Considerations
 
-1. **Redis backend**: Replace LMDB with Redis for shared cache across servers
+1. **Shared LMDB**: Could Nefarious and X3 share LMDB file? (Probably not - different processes)
 2. **Metadata expiry**: TTL for cached metadata entries
 3. **Sync on demand**: Request metadata from X3 for specific users/channels
 4. **Compression**: Compress large metadata values in LMDB
@@ -543,10 +804,11 @@ AB MD #channel rules * :Be nice
 
 Before implementing:
 
-1. **Keycloak for channels?** - Keep channel metadata in SAXDB or explore Keycloak groups?
+1. **LMDB vs SQLite for X3?** - Recommended: LMDB for consistency with Nefarious
 2. **Write queue persistence?** - Queue in memory or persist to LMDB?
 3. **Burst optimization?** - Batch metadata in single P10 message?
 4. **Cache TTL?** - Should cached entries expire?
+5. **Dual-storage duration?** - How long to maintain SAXDB backup?
 
 ---
 
