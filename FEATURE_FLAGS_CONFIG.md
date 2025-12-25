@@ -351,6 +351,40 @@ The VAPID token is set dynamically when X3 connects and broadcasts its VAPID key
 
 ---
 
+## P10 Protocol Extensions
+
+### METADATAQUERY (MDQ) Token
+
+The MDQ token enables on-demand metadata synchronization between Nefarious and X3.
+
+**Format:**
+```
+[SOURCE] MDQ <target> <key|*>
+```
+
+**Examples:**
+```
+AB MDQ accountname *       → Query all metadata for account
+AB MDQ accountname avatar  → Query specific key for account
+AB MDQ #channel *          → Query all metadata for channel
+AB MDQ #channel url        → Query specific key for channel
+```
+
+**Response:** Standard MD (METADATA) tokens containing the requested data.
+
+**Use Cases:**
+- Retrieving metadata for offline users from X3's storage
+- On-demand sync when IRCd's LMDB cache doesn't have the data
+- Channel metadata queries for registered channels
+
+**Flow:**
+1. Nefarious receives METADATA GET from client for offline user
+2. Nefarious sends MDQ to X3 if data not in local cache
+3. X3 looks up data in Keycloak/LMDB and responds with MD tokens
+4. Nefarious caches response and forwards to client
+
+---
+
 ## Environment Variables (Docker)
 
 ### Nefarious
