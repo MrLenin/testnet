@@ -524,15 +524,15 @@ ABAAB RN #oldname #newname :Rebranding
 
 ### METADATA (MD) - Phase 29
 
-**Purpose**: User and channel metadata synchronization.
+**Purpose**: User and channel metadata synchronization with visibility support.
 
 **IRCv3 Spec**: https://ircv3.net/specs/extensions/metadata
 
 #### P10 Format
 
-**Set Metadata**:
+**Set Metadata with Visibility**:
 ```
-[SOURCE] MD [TARGET] [KEY] :[VALUE]
+[SOURCE] MD [TARGET] [KEY] [VISIBILITY] :[VALUE]
 ```
 
 **Clear Metadata**:
@@ -540,18 +540,41 @@ ABAAB RN #oldname #newname :Rebranding
 [SOURCE] MD [TARGET] [KEY]
 ```
 
+#### Visibility Tokens
+
+| Token | Meaning |
+|-------|---------|
+| `*` | Public - visible to everyone |
+| `P` | Private - visible only to owner and opers |
+
 #### Examples
 
 ```
-# Set user avatar
-ABAAB MD ABAAB avatar :https://example.com/avatar.png
+# Set user avatar (public)
+ABAAB MD ABAAB avatar * :https://example.com/avatar.png
 
-# Set channel description
-AB MD #channel description :Welcome to our channel
+# Set private user data
+ABAAB MD ABAAB secret P :private-value
 
-# Clear metadata
+# Set channel description (public)
+AB MD #channel description * :Welcome to our channel
+
+# Clear metadata (visibility not needed)
 ABAAB MD ABAAB avatar
 ```
+
+#### Processing
+
+**Sender (Nefarious)**:
+1. Client sends `METADATA * SET key [visibility] :value`
+2. Parse visibility (`*` or `private`) - defaults to public
+3. Store in in-memory metadata + LMDB for logged-in users
+4. Send `MD target key visibility :value` to servers
+
+**Receiver (X3)**:
+1. Parse visibility token (`*` or `P`)
+2. Store in Keycloak with visibility prefix for private values
+3. Only send back to user's connections on login
 
 ---
 
@@ -790,6 +813,12 @@ All P10 extensions are designed for backward compatibility:
 | SE (SETNAME) | Ignored | Processed | Ignored | Ignored |
 | TM (TAGMSG) | Ignored | Processed | Ignored | Ignored |
 | BT (BATCH) | Ignored | Processed | Ignored | Ignored |
+| CH (CHATHISTORY) | Ignored | Processed | N/A | N/A |
+| RD (REDACT) | Ignored | Processed | Ignored | Ignored |
+| RN (RENAME) | Ignored | Processed | Ignored | Processed |
+| MD (METADATA) | Ignored | Processed | Ignored | Processed |
+| MR (MARKREAD) | Ignored | Processed | Ignored | Processed |
+| WP (WEBPUSH) | Ignored | Processed | N/A | Processed |
 | SA M (mechanisms) | Ignored | Processed | N/A | Sent |
 | @tags prefix | Possible error | Parsed & skipped | Error | Skipped |
 
@@ -800,17 +829,7 @@ In a network with mixed old/new servers:
 - Tags are stripped when passing through old servers
 - Core protocol functionality unaffected
 
-### Feature Flags
-
-New features are controlled by feature flags in `ircd_features.h`:
-
-| Feature Flag | Default | Description |
-|--------------|---------|-------------|
-| `FEAT_CAP_setname` | TRUE | Enable setname capability |
-| `FEAT_CAP_batch` | TRUE | Enable batch capability |
-| `FEAT_CAP_labeled_response` | TRUE | Enable labeled-response |
-| `FEAT_CAP_standard_replies` | TRUE | Enable FAIL/WARN/NOTE |
-| `FEAT_MSGID` | TRUE | Generate message IDs |
+**Note**: Feature flags are documented in [FEATURE_FLAGS_CONFIG.md](FEATURE_FLAGS_CONFIG.md).
 
 ---
 
@@ -830,7 +849,7 @@ New features are controlled by feature flags in `ircd_features.h`:
 | `RR` | `[X3] RR [server] [user] [result] :[msg]` | Registration reply |
 | `MR` | `[NUMERIC] MR [target] [timestamp]` | Read marker |
 | `RN` | `[NUMERIC] RN [old] [new] :[reason]` | Channel rename |
-| `MD` | `[SOURCE] MD [target] [key] :[value]` | Metadata |
+| `MD` | `[SOURCE] MD [target] [key] [vis] :[value]` | Metadata (vis: `*` or `P`) |
 | `WP` | `[SOURCE] WP [subcmd] [params...]` | Web push |
 
 ### New SASL Subcmds
@@ -907,6 +926,7 @@ New features are controlled by feature flags in `ircd_features.h`:
 |---------|------|---------|
 | 1.0 | December 2024 | Initial release with IRCv3.2+ extensions |
 | 1.1 | December 2024 | Added chathistory, redact, registration, read-marker, rename, metadata, webpush |
+| 1.2 | December 2024 | Added metadata visibility support (P10 `*`/`P` tokens), updated compatibility matrix, removed duplicate feature flags section |
 
 ---
 
