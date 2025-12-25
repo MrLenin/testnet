@@ -170,6 +170,7 @@ AB B #test 1703334400 +nt ABAAB,ABAAC:o :%ABAAD
 | `MR` | MARKREAD | Both | Read marker sync (Phase 25) |
 | `RN` | RENAME | Both | Channel rename (Phase 28) |
 | `MD` | METADATA | Both | User/channel metadata (Phase 29) |
+| `MDQ` | METADATAQUERY | Both | Metadata query to services (Phase 29) |
 | `WP` | WEBPUSH | Both | Web push notifications (Phase 30) |
 
 ### SASL Tokens
@@ -479,26 +480,94 @@ ABAAB RD #channel AB-1703334400-123 :Removing inappropriate content
 
 ### MARKREAD (MR) - Phase 25
 
-**Purpose**: Synchronize read marker position across clients.
+**Purpose**: Synchronize read marker position across clients via X3 services.
 
 **IRCv3 Spec**: https://ircv3.net/specs/extensions/read-marker
 
+Read markers are routed through X3 as the authoritative storage, enabling natural multi-device synchronization.
+
 #### P10 Format
 
-**Set Marker**:
+**Set Marker** (Nefarious → X3):
 ```
-[USER_NUMERIC] MR [TARGET] [TIMESTAMP]
-```
-
-**Sync Request** (Nefarious → X3):
-```
-[SERVER] MR S [USER_NUMERIC] [TARGET]
+[SERVER] MR S [USER_NUMERIC] [TARGET] [TIMESTAMP]
 ```
 
-**Sync Response** (X3 → Nefarious):
+**Get Marker** (Nefarious → X3):
+```
+[SERVER] MR G [USER_NUMERIC] [TARGET]
+```
+
+**Get Response** (X3 → Nefarious):
 ```
 [X3] MR R [TARGET_SERVER] [USER_NUMERIC] [TARGET] [TIMESTAMP]
 ```
+
+**Broadcast Update** (X3 → All Servers):
+```
+[X3] MR [ACCOUNT] [TARGET] [TIMESTAMP]
+```
+
+#### Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| USER_NUMERIC | String(5) | 5-character user numeric |
+| TARGET | String | Channel name or nick |
+| TIMESTAMP | String | ISO 8601 timestamp (or `*` if unknown) |
+| TARGET_SERVER | String(2) | Server numeric to route reply to |
+| ACCOUNT | String | Account name for broadcast |
+
+#### Examples
+
+```
+# Client sets read marker - Nefarious forwards to X3
+AB MR S ABAAB #channel 2025-01-01T12:00:00.000Z
+
+# X3 stores and broadcasts to all servers
+Az MR accountname #channel 2025-01-01T12:00:00.000Z
+
+# Client queries read marker - Nefarious forwards to X3
+AB MR G ABAAB #channel
+
+# X3 replies with stored timestamp
+Az MR R AB ABAAB #channel 2025-01-01T12:00:00.000Z
+```
+
+#### Multi-Hop Routing
+
+MARKREAD messages route through intermediate servers toward X3:
+
+```
+Client → ServerA → ServerB → X3
+           |          |
+           +--(MR S)--+----> X3 stores, broadcasts
+                             |
+X3 → ServerB → ServerA → Client (MR broadcast)
+```
+
+Each intermediate server:
+1. Receives `MR S` or `MR G` - forwards toward X3 (services server)
+2. Receives broadcast `MR <account>` - notifies local clients, propagates to other servers
+
+#### Processing
+
+**Nefarious (m_markread - client handler)**:
+1. Client sends `MARKREAD #channel timestamp=...`
+2. Find services server
+3. Send `MR S <numeric> #channel <timestamp>` to X3
+4. Also store locally in LMDB cache (if available)
+5. Notify local clients with same account
+
+**Nefarious (ms_markread - server handler)**:
+1. Parse MR subcommand (S, G, R, or broadcast)
+2. For S/G: forward toward X3 if not from services
+3. For R: route reply to user's server, deliver to client
+4. For broadcast: cache locally, notify local clients, propagate
+
+**X3 (cmd_markread)**:
+1. For S: Validate newer timestamp, store in LMDB and Keycloak, broadcast
+2. For G: Look up in LMDB, send R reply with timestamp (or `*`)
 
 ---
 
@@ -575,6 +644,103 @@ ABAAB MD ABAAB avatar
 1. Parse visibility token (`*` or `P`)
 2. Store in Keycloak with visibility prefix for private values
 3. Only send back to user's connections on login
+
+---
+
+### METADATAQUERY (MDQ) - Phase 29
+
+**Purpose**: Query metadata for offline users or cached data from X3 services.
+
+**Use Case**: When a client requests metadata for a user not currently online, Nefarious queries X3 (the authoritative source) for persisted metadata.
+
+#### P10 Format
+
+**Query** (Nefarious → X3):
+```
+[SOURCE] MDQ [TARGET] [KEY|*]
+```
+
+**Response** (X3 → Nefarious):
+Uses standard MD tokens to return requested metadata.
+
+#### Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| SOURCE | String(2-5) | Server or user numeric |
+| TARGET | String | Account name or channel name |
+| KEY | String | Specific key to query, or `*` for all keys |
+
+#### Examples
+
+```
+# Query all metadata for an account
+AB MDQ accountname *
+
+# Query specific key for an account
+AB MDQ accountname avatar
+
+# Query channel metadata
+AB MDQ #channel *
+
+# Query specific channel key
+AB MDQ #channel url
+```
+
+#### Multi-Hop Routing
+
+In networks with multiple Nefarious servers between client and X3:
+
+```
+Client → ServerA → ServerB → X3
+           ↓
+    (forward MDQ)
+           ↓
+         ServerB → X3
+           ↓
+    (MD response)
+           ↓
+         ServerB → ServerA → Client
+```
+
+Each intermediate server:
+1. Checks if X3 is available (via heartbeat detection)
+2. If X3 available: forwards MDQ toward X3
+3. If X3 unavailable: answers from local LMDB cache (graceful degradation)
+
+#### Processing
+
+**Sender (Nefarious)**:
+1. Client sends `METADATA * GET account key`
+2. User not online - check local LMDB cache
+3. Cache miss - send `MDQ account key` toward X3
+4. Track pending request with timeout (30 seconds)
+
+**Intermediate (Nefarious)**:
+1. Receive MDQ from another server
+2. If from services: process as response, deliver to waiting clients
+3. If X3 available: forward toward X3 (services server)
+4. If X3 unavailable: answer from local LMDB cache
+
+**Receiver (X3)**:
+1. Parse MDQ command
+2. Look up metadata in Keycloak/LMDB
+3. Respond with MD tokens for each key-value pair
+4. MD responses include visibility (`*` public, `P` private)
+
+**Response Handling (Nefarious)**:
+1. Receive MD tokens from X3 (IsService check)
+2. Cache in local LMDB for future queries
+3. Find pending MDQ requests for this target/key
+4. Forward METADATA response to waiting clients
+5. Clean up request tracking
+
+#### Timeout Handling
+
+- Requests timeout after 30 seconds (`METADATA_REQUEST_TIMEOUT`)
+- Maximum 100 pending requests (`METADATA_MAX_PENDING`)
+- Expired requests cleaned up in main loop (ping check interval)
+- Client notified via `FAIL METADATA TEMPORARILY_UNAVAILABLE`
 
 ---
 
@@ -935,9 +1101,10 @@ In a network with mixed old/new servers:
 | `RG` | `[SERVER] RG [user] [account] [email] :[pass]` | Account registration |
 | `VF` | `[SERVER] VF [user] [account] [code]` | Verification |
 | `RR` | `[X3] RR [server] [user] [result] :[msg]` | Registration reply |
-| `MR` | `[NUMERIC] MR [target] [timestamp]` | Read marker |
+| `MR` | `[SOURCE] MR [subcmd] [params...]` | Read marker (S, G, R, broadcast) |
 | `RN` | `[NUMERIC] RN [old] [new] :[reason]` | Channel rename |
 | `MD` | `[SOURCE] MD [target] [key] [vis] :[value]` | Metadata (vis: `*` or `P`) |
+| `MDQ` | `[SOURCE] MDQ [target] [key\|*]` | Metadata query to X3 |
 | `WP` | `[SOURCE] WP [subcmd] [params...]` | Web push |
 
 ### New SASL Subcmds
@@ -1015,6 +1182,8 @@ In a network with mixed old/new servers:
 | 1.0 | December 2024 | Initial release with IRCv3.2+ extensions |
 | 1.1 | December 2024 | Added chathistory, redact, registration, read-marker, rename, metadata, webpush |
 | 1.2 | December 2024 | Added metadata visibility support (P10 `*`/`P` tokens), updated compatibility matrix, removed duplicate feature flags section |
+| 1.3 | December 2024 | Added METADATAQUERY (MDQ) token documentation with multi-hop routing |
+| 1.4 | December 2024 | Updated MARKREAD (MR) to route through X3 with S/G/R subcommands and broadcast |
 
 ---
 
