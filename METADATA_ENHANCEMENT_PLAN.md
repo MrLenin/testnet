@@ -1040,14 +1040,178 @@ int keycloak_list_group_attributes(realm, client, group_id, prefix, entries_out)
 
 ## Decision Points
 
-Before implementing:
+### Resolved Decisions
 
 1. **LMDB vs SQLite for X3?** - Decided: LMDB for consistency with Nefarious
 2. **SAXDB replacement vs dual-storage?** - Decided: Full replacement with import layer
-3. **Write queue persistence?** - Queue in memory or persist to LMDB?
-4. **Burst optimization?** - Batch metadata in single P10 message?
-5. **Cache TTL?** - Should cached entries expire?
-6. **Migration rollback?** - Keep *.db.bak files for how long?
+
+### Decision 3: Write Queue Persistence
+
+**Question**: When X3/Keycloak is unavailable and Nefarious queues metadata writes, should the queue be in memory or persisted to LMDB?
+
+| Option | Pros | Cons |
+|--------|------|------|
+| **Memory only** | Simple, fast, no I/O | Lost on crash/restart |
+| **LMDB persisted** | Survives restarts, durable | More complex, I/O overhead |
+
+**Recommendation: Memory only with size limit**
+
+Rationale:
+- X3 outages should be brief (minutes, not hours)
+- If Nefarious restarts during X3 outage, metadata is already in LMDB cache
+- Persisting queue adds complexity for rare edge case
+- Queue size limit (1000 entries) prevents memory exhaustion
+- On Nefarious restart, X3 will re-sync on reconnect anyway
+
+```c
+#define METADATA_WRITE_QUEUE_MAX 1000
+
+/* Queue structure - memory only */
+struct MetadataWriteQueue {
+  char account[ACCOUNTLEN + 1];
+  char key[METADATA_KEY_LEN];
+  char *value;
+  int visibility;
+  time_t timestamp;
+  struct MetadataWriteQueue *next;
+};
+
+/* On X3 reconnect, replay queue then clear */
+void metadata_x3_reconnected(void) {
+  metadata_replay_queue();  /* Send all queued writes to X3 */
+  metadata_clear_queue();   /* Free memory */
+}
+```
+
+**Decision: Memory-only queue with 1000 entry limit. Oldest entries evicted if full.**
+
+---
+
+### Decision 4: Burst Optimization
+
+**Question**: Should metadata be batched into single P10 messages during netburst?
+
+| Option | Pros | Cons |
+|--------|------|------|
+| **One MD per key** | Simple, existing format works | More messages, more overhead |
+| **Batched MD** | Fewer messages, faster burst | New P10 format needed |
+
+**Analysis of current burst traffic**:
+
+```
+Current (one per key):
+AB N user 1 timestamp ident host +modes account B64IP :realname
+AB MD ABAAB avatar * :https://example.com/avatar.png
+AB MD ABAAB timezone * :America/New_York
+AB MD ABAAB url * :https://mysite.com
+
+Batched (hypothetical):
+AB N user 1 timestamp ident host +modes account B64IP :realname
+AB MDB ABAAB avatar=https://example.com/avatar.png,timezone=America/New_York,url=https://mysite.com
+```
+
+**Recommendation: Keep one MD per key (no batching)**
+
+Rationale:
+- Average user has 2-5 metadata keys - batching saves minimal overhead
+- Existing MD format is well-tested and understood
+- Batching requires escaping values (commas, equals signs) - complexity
+- P10 line length limit (512 bytes) constrains batch size anyway
+- Channels have even fewer metadata keys typically
+- Optimization is premature - measure first, optimize if needed
+
+**Decision: No batching. Use existing one-MD-per-key format.**
+
+---
+
+### Decision 5: Cache TTL
+
+**Question**: Should cached metadata entries in LMDB expire automatically?
+
+| Option | Pros | Cons |
+|--------|------|------|
+| **No TTL** | Simple, no timer overhead | Stale data possible if X3 changes |
+| **TTL with refresh** | Fresh data guaranteed | Timer complexity, more X3 queries |
+| **TTL with lazy refresh** | Balance of freshness/performance | Still need staleness handling |
+
+**Analysis of data flow**:
+
+```
+User metadata lifecycle:
+1. User logs in → X3 sends all metadata via P10 → Nefarious caches
+2. User sets metadata → Nefarious updates cache + sends to X3
+3. User logs out → Cache entry remains (for next login optimization)
+4. User logs in again → X3 sends fresh data → Cache refreshed
+
+Channel metadata lifecycle:
+1. Channel burst → X3 sends metadata → Nefarious caches
+2. Metadata set → Immediate update to both
+3. Channel empty/destroyed → Cache cleared
+4. Channel recreated → Fresh data from X3
+```
+
+**Recommendation: No automatic TTL expiry**
+
+Rationale:
+- X3 is authoritative - it sends fresh data on login/burst
+- TTL would cause unnecessary X3 queries
+- Stale data only possible if X3 changes data without P10 notification (shouldn't happen)
+- Memory cleanup happens naturally (user disconnect, channel destroy)
+- Could add optional `FEAT_METADATA_CACHE_TTL` later if needed
+
+**Exception**: If implementing "sync on demand" (Future Consideration #3), could add per-entry timestamps for staleness detection without automatic expiry.
+
+**Decision: No TTL. Cache refreshed on login/burst. Optional staleness tracking for future sync-on-demand.**
+
+---
+
+### Decision 6: Migration Rollback
+
+**Question**: How long to keep *.db.bak files after SAXDB → LMDB migration?
+
+| Option | Timeframe | Pros | Cons |
+|--------|-----------|------|------|
+| **Delete immediately** | 0 | Clean, saves space | No rollback possible |
+| **Keep 7 days** | 1 week | Quick rollback window | Manual cleanup needed |
+| **Keep 30 days** | 1 month | Extended safety net | Uses disk space |
+| **Keep indefinitely** | Forever | Maximum safety | Clutter, forgotten files |
+| **Keep until explicit delete** | User decides | Full control | Manual action required |
+
+**Recommendation: Keep until explicit OpServ command**
+
+Rationale:
+- Migration is one-time, not repeated
+- Disk space for *.db.bak is minimal (text files)
+- Admin should verify LMDB is working before deleting backups
+- Automatic deletion could delete files before admin notices issues
+- OpServ command provides audit trail
+
+```c
+/* OpServ command to clean up migration backups */
+static MODCMD_FUNC(cmd_clearmigration) {
+  /* Delete *.db.bak files */
+  unlink("chanserv.db.bak");
+  unlink("nickserv.db.bak");
+  /* ... */
+  reply("OSMSG_MIGRATION_CLEANED");
+  return 1;
+}
+```
+
+**Decision: Keep *.db.bak indefinitely. Add OpServ CLEARMIGRATION command for explicit cleanup.**
+
+---
+
+### Decision Summary
+
+| # | Decision | Resolution |
+|---|----------|------------|
+| 1 | LMDB vs SQLite | LMDB |
+| 2 | SAXDB replacement | Full replacement with import layer |
+| 3 | Write queue persistence | Memory-only, 1000 entry limit |
+| 4 | Burst optimization | No batching, one MD per key |
+| 5 | Cache TTL | No automatic expiry |
+| 6 | Migration rollback | Keep *.db.bak until OpServ CLEARMIGRATION |
 
 ---
 
