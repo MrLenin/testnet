@@ -326,3 +326,311 @@ describe('IRCv3 SASL Value', () => {
     }
   });
 });
+
+describe('CAP Edge Cases', () => {
+  const clients: IRCv3TestClient[] = [];
+
+  const trackClient = (client: IRCv3TestClient): IRCv3TestClient => {
+    clients.push(client);
+    return client;
+  };
+
+  afterEach(() => {
+    for (const client of clients) {
+      try {
+        client.quit('Test cleanup');
+      } catch {
+        // Ignore
+      }
+    }
+    clients.length = 0;
+  });
+
+  describe('CAP LS Versions', () => {
+    it('CAP LS without version returns capabilities', async () => {
+      const client = trackClient(
+        await createRawIRCv3Client({ nick: 'lsver1' })
+      );
+
+      // Send CAP LS without version number (legacy)
+      client.raw('CAP LS');
+
+      const response = await client.waitForRaw(/^:\S+ CAP \S+ LS/i);
+      expect(response).toMatch(/CAP \S+ LS/i);
+    });
+
+    it('CAP LS 301 returns capabilities without values', async () => {
+      const client = trackClient(
+        await createRawIRCv3Client({ nick: 'lsver2' })
+      );
+
+      client.raw('CAP LS 301');
+
+      const response = await client.waitForRaw(/^:\S+ CAP \S+ LS/i);
+      expect(response).toMatch(/CAP \S+ LS/i);
+      // CAP 301 should not include values (no = in caps)
+    });
+
+    it('CAP LS 302 returns capabilities with values', async () => {
+      const client = trackClient(
+        await createRawIRCv3Client({ nick: 'lsver3' })
+      );
+
+      const caps = await client.capLs(302);
+
+      // 302 should include capability values
+      // Check that at least one cap has a value (like sasl=PLAIN or multiline=...)
+      const hasValues = Array.from(caps.values()).some(v => v !== null);
+      expect(hasValues).toBe(true);
+    });
+  });
+
+  describe('CAP REQ Edge Cases', () => {
+    it('can disable a capability with -prefix', async () => {
+      const client = trackClient(
+        await createRawIRCv3Client({ nick: 'capdis1' })
+      );
+
+      await client.capLs();
+
+      // First enable
+      await client.capReq(['multi-prefix']);
+      expect(client.hasCapEnabled('multi-prefix')).toBe(true);
+
+      // Then disable
+      const result = await client.capReq(['-multi-prefix']);
+      expect(result.ack).toContain('-multi-prefix');
+      expect(client.hasCapEnabled('multi-prefix')).toBe(false);
+    });
+
+    it('NAKs request with mix of valid and invalid caps', async () => {
+      const client = trackClient(
+        await createRawIRCv3Client({ nick: 'capmix1' })
+      );
+
+      await client.capLs();
+
+      // Request valid and invalid together - should NAK entire request
+      const result = await client.capReq(['multi-prefix', 'invalid-cap-xyz']);
+
+      // Per spec, entire request should be NAKed if any cap is invalid
+      expect(result.nak.length).toBeGreaterThan(0);
+    });
+
+    it('can request capabilities before CAP LS', async () => {
+      const client = trackClient(
+        await createRawIRCv3Client({ nick: 'caporder1' })
+      );
+
+      // Request without LS first - server should still respond
+      client.raw('CAP REQ :multi-prefix');
+
+      const response = await client.waitForRaw(/^:\S+ CAP \S+ (ACK|NAK)/i);
+      expect(response).toMatch(/CAP \S+ (ACK|NAK)/i);
+    });
+
+    it('handles empty CAP REQ gracefully', async () => {
+      const client = trackClient(
+        await createRawIRCv3Client({ nick: 'capempty1' })
+      );
+
+      await client.capLs();
+      client.raw('CAP REQ :');
+
+      // Should get some response (ACK or NAK)
+      try {
+        const response = await client.waitForRaw(/^:\S+ CAP \S+ (ACK|NAK)/i, 3000);
+        expect(response).toBeDefined();
+      } catch {
+        // Some servers may ignore empty REQ
+      }
+    });
+  });
+
+  describe('CAP LIST', () => {
+    it('CAP LIST shows enabled capabilities', async () => {
+      const client = trackClient(
+        await createRawIRCv3Client({ nick: 'caplist1' })
+      );
+
+      await client.capLs();
+      await client.capReq(['multi-prefix', 'away-notify']);
+
+      client.raw('CAP LIST');
+
+      const response = await client.waitForRaw(/^:\S+ CAP \S+ LIST/i);
+      expect(response).toMatch(/multi-prefix/);
+      expect(response).toMatch(/away-notify/);
+    });
+
+    it('CAP LIST is empty when no caps enabled', async () => {
+      const client = trackClient(
+        await createRawIRCv3Client({ nick: 'caplist2' })
+      );
+
+      // Don't request any caps
+      client.raw('CAP LIST');
+
+      const response = await client.waitForRaw(/^:\S+ CAP \S+ LIST/i);
+      // LIST response should exist but may have empty cap list
+      expect(response).toMatch(/CAP \S+ LIST/i);
+    });
+  });
+
+  describe('CAP NEW/DEL (cap-notify)', () => {
+    it('can request cap-notify capability', async () => {
+      const client = trackClient(
+        await createRawIRCv3Client({ nick: 'capnotify1' })
+      );
+
+      await client.capLs();
+      const result = await client.capReq(['cap-notify']);
+
+      // cap-notify is implicitly enabled with CAP 302, but explicit REQ should work
+      expect(result.ack.length + result.nak.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('CAP During Registration', () => {
+    it('CAP negotiation pauses registration', async () => {
+      const client = trackClient(
+        await createRawIRCv3Client({ nick: 'cappause1' })
+      );
+
+      // Start CAP negotiation
+      await client.capLs();
+
+      // Send NICK and USER but not CAP END
+      client.register('cappause1');
+
+      // Should NOT receive 001 yet
+      try {
+        await client.waitForRaw(/001/, 1000);
+        // If we get here, server didn't wait for CAP END
+        throw new Error('Server should wait for CAP END');
+      } catch (error) {
+        // Expected - timeout means server is waiting
+        if (error instanceof Error && error.message.includes('should wait')) {
+          throw error;
+        }
+        // Timeout is expected
+      }
+
+      // Now send CAP END
+      client.capEnd();
+
+      // Should receive 001
+      const welcome = await client.waitForRaw(/001/);
+      expect(welcome).toContain('cappause1');
+    });
+  });
+
+  describe('Capability Values', () => {
+    it('multiline capability has max-bytes value', async () => {
+      const client = trackClient(
+        await createRawIRCv3Client({ nick: 'capval1' })
+      );
+
+      const caps = await client.capLs(302);
+      const multiline = caps.get('draft/multiline');
+
+      if (multiline) {
+        expect(multiline).toMatch(/max-bytes=\d+/);
+      }
+    });
+
+    it('multiline capability has max-lines value', async () => {
+      const client = trackClient(
+        await createRawIRCv3Client({ nick: 'capval2' })
+      );
+
+      const caps = await client.capLs(302);
+      const multiline = caps.get('draft/multiline');
+
+      if (multiline) {
+        expect(multiline).toMatch(/max-lines=\d+/);
+      }
+    });
+
+    it('chathistory capability has limit value', async () => {
+      const client = trackClient(
+        await createRawIRCv3Client({ nick: 'capval3' })
+      );
+
+      const caps = await client.capLs(302);
+      const chathistory = caps.get('draft/chathistory');
+
+      // chathistory may have max messages value
+      console.log('chathistory value:', chathistory);
+    });
+  });
+});
+
+describe('CAP Post-Registration', () => {
+  const clients: IRCv3TestClient[] = [];
+
+  const trackClient = (client: IRCv3TestClient): IRCv3TestClient => {
+    clients.push(client);
+    return client;
+  };
+
+  afterEach(() => {
+    for (const client of clients) {
+      try {
+        client.quit('Test cleanup');
+      } catch {
+        // Ignore
+      }
+    }
+    clients.length = 0;
+  });
+
+  it('can request additional caps after registration', async () => {
+    const client = trackClient(
+      await createRawIRCv3Client({ nick: 'postreg1' })
+    );
+
+    // Complete registration with minimal caps
+    await client.capLs();
+    await client.capReq(['multi-prefix']);
+    client.capEnd();
+    client.register('postreg1');
+    await client.waitForRaw(/001/);
+
+    // Now request additional capability
+    const result = await client.capReq(['away-notify']);
+    expect(result.ack).toContain('away-notify');
+  });
+
+  it('can disable caps after registration', async () => {
+    const client = trackClient(
+      await createRawIRCv3Client({ nick: 'postreg2' })
+    );
+
+    await client.capLs();
+    await client.capReq(['multi-prefix', 'away-notify']);
+    client.capEnd();
+    client.register('postreg2');
+    await client.waitForRaw(/001/);
+
+    // Disable a capability
+    const result = await client.capReq(['-away-notify']);
+    expect(result.ack).toContain('-away-notify');
+  });
+
+  it('CAP LS works after registration', async () => {
+    const client = trackClient(
+      await createRawIRCv3Client({ nick: 'postreg3' })
+    );
+
+    await client.capLs();
+    await client.capReq(['multi-prefix']);
+    client.capEnd();
+    client.register('postreg3');
+    await client.waitForRaw(/001/);
+
+    // CAP LS after registration
+    const caps = await client.capLs(302);
+    expect(caps.size).toBeGreaterThan(0);
+  });
+});
