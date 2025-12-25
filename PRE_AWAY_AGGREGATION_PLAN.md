@@ -447,12 +447,150 @@ if (new_state == 2) {
 
 ## Decision Points
 
-Before implementing, decisions needed on:
+### Decision 1: Scope
 
-1. **Scope**: Full aggregation or just away-star handling?
-2. **P10 format**: How to propagate per-connection state?
-3. **Multi-server**: Should X3 be involved in aggregation?
-4. **Feature flag**: Ship disabled by default?
+**Question**: Implement full presence aggregation or just AWAY * (away-star) handling?
+
+| Option | Complexity | User Benefit |
+|--------|------------|--------------|
+| **AWAY * only** | Low | Hides "zombie" connections |
+| **Full aggregation** | High | True multi-device presence |
+
+**Analysis**:
+
+AWAY * semantics (from spec):
+> "treated as though the connection did not exist at all"
+
+This suggests AWAY * connections should be invisible to presence, but other connections still matter.
+
+**Recommendation: Full aggregation**
+
+Rationale:
+- AWAY * without aggregation is incomplete - still shows "away" when user has present connection
+- Full aggregation is the spec's intent for multi-connection scenarios
+- Implementation complexity is similar once account tracking exists
+- Provides better UX for users with multiple devices
+
+**Decision: Implement full presence aggregation. AWAY * is just one state in the aggregation logic.**
+
+---
+
+### Decision 2: P10 Format
+
+**Question**: How to propagate per-connection away state across servers?
+
+| Option | Description | Pros | Cons |
+|--------|-------------|------|------|
+| **Existing AWAY** | `AWAY :*` for away-star | No protocol changes | Servers can't distinguish AWAY * from message "*" |
+| **Extended AWAY** | `AWAY * :message` (star as flag) | Clear semantics | Minor protocol extension |
+| **New token** | `AWAYSTATE 0/1/2` per connection | Full control | New token needed |
+
+**Current implementation**:
+```
+AWAY :message  → Normal away
+AWAY           → Present (clear away)
+AWAY :*        → Away-star (ambiguous - could be literal "*" message)
+```
+
+**Recommendation: Use extended AWAY with visibility-style flag**
+
+```
+AWAY           → Present (clear away)
+AWAY :message  → Normal away with message
+AWAY * :       → Away-star (no message, hidden)
+AWAY * :msg    → Away-star with fallback message (for old clients)
+```
+
+This mirrors the metadata visibility syntax (`*` = public, `P` = private) and is backwards-compatible - old servers treat `* :` as a message starting with "* ".
+
+**Decision: Extend AWAY to use `*` prefix for away-star state. Backwards compatible.**
+
+---
+
+### Decision 3: Multi-Server / X3 Involvement
+
+**Question**: Should X3 be involved in presence aggregation, or should each IRCd handle it locally?
+
+| Option | Description | Pros | Cons |
+|--------|-------------|------|------|
+| **IRCd-only** | Each server aggregates locally | Simple, no X3 changes | Inconsistent if connections on different servers |
+| **X3 authoritative** | X3 tracks all connections, broadcasts effective state | Consistent network-wide | X3 dependency, latency |
+| **Hybrid** | IRCd aggregates local, X3 aggregates cross-server | Best of both | Most complex |
+
+**Analysis of multi-server scenario**:
+```
+Server A: User connects with AWAY *
+Server B: User connects, present
+
+Without coordination:
+- Server A thinks user is away (only sees local connection)
+- Server B thinks user is present (only sees local connection)
+- Different users on A vs B see different presence!
+```
+
+**Recommendation: IRCd-only with P10 propagation**
+
+Rationale:
+- P10 already propagates AWAY messages to all servers
+- Each server receives all connection states via P10
+- No X3 involvement needed - IRCd has full picture
+- Account connection registry (Phase 1) tracks all connections network-wide via P10
+
+```
+User connects to Server A, AWAY *:
+  A broadcasts: AB AWAY ABAAB * :
+  B receives, stores in account connection list
+
+User connects to Server B, present:
+  B broadcasts: CD AWAY CDAAC    (empty = present)
+  A receives, updates account connection list
+
+Both servers now know: 2 connections, one AWAY *, one present
+Aggregation: User is PRESENT (present > away-star)
+```
+
+**Decision: IRCd handles aggregation using P10-propagated state. No X3 involvement needed.**
+
+---
+
+### Decision 4: Feature Flag
+
+**Question**: Should presence aggregation be enabled by default or require opt-in?
+
+| Option | Pros | Cons |
+|--------|------|------|
+| **Enabled by default** | Users get benefit immediately | May surprise admins, harder to debug |
+| **Disabled by default** | Safe rollout, explicit opt-in | Users don't benefit until enabled |
+| **Enabled with override** | Best of both | Slightly more complex config |
+
+**Recommendation: Disabled by default initially, enabled after stabilization**
+
+Rationale:
+- New feature with network-wide impact
+- Admins should explicitly enable after testing
+- Can flip default in future release once proven stable
+- Feature flag allows quick disable if issues found
+
+```c
+/* ircd.conf */
+FEAT_PRESENCE_AGGREGATION = FALSE;  /* Default: disabled */
+
+/* After testing */
+FEAT_PRESENCE_AGGREGATION = TRUE;
+```
+
+**Decision: Disabled by default via `FEAT_PRESENCE_AGGREGATION`. Flip to enabled in future release after stabilization.**
+
+---
+
+### Decision Summary
+
+| # | Decision | Resolution |
+|---|----------|------------|
+| 1 | Scope | Full aggregation (not just AWAY *) |
+| 2 | P10 format | Extended AWAY with `*` prefix for away-star |
+| 3 | Multi-server | IRCd-only via P10 propagation, no X3 |
+| 4 | Feature flag | Disabled by default initially |
 
 ---
 
