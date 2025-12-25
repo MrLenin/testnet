@@ -74,6 +74,20 @@ Feature flags are configured in the `features {}` block of the IRCd config file.
 
 **Retention Purge**: Messages older than `CHATHISTORY_RETENTION` days are automatically deleted via an hourly timer (`history_purge_callback`). Set to 0 to disable automatic purging.
 
+### Metadata Caching Configuration
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `FEAT_METADATA_CACHE_ENABLED` | TRUE | Enable LMDB metadata caching |
+| `FEAT_METADATA_X3_TIMEOUT` | 60 | Seconds to wait for X3 before using cache-only mode |
+| `FEAT_METADATA_QUEUE_SIZE` | 1000 | Maximum pending writes when X3 is unavailable |
+| `FEAT_METADATA_BURST` | TRUE | Send metadata during netburst to linking servers |
+
+**Cache-Aware Metadata**: When enabled, Nefarious maintains an LMDB-backed cache for metadata:
+- **X3 Detection**: Automatically detects X3 availability via heartbeat on METADATA updates
+- **Write Queue**: Queues writes when X3 is unavailable, replays when reconnected
+- **Netburst**: Sends user/channel metadata to linking servers during netburst
+
 ### Presence Aggregation Configuration
 
 | Feature | Default | Description |
@@ -276,8 +290,22 @@ readmarker.$nick = "1703334500.654321"
 | Option | Description |
 |--------|-------------|
 | `--with-keycloak` | Enable Keycloak integration (requires libcurl) |
+| `--with-lmdb` | Enable LMDB metadata cache (requires liblmdb) |
 | `--with-ssl` | Enable SSL/TLS support |
 | `--with-ldap` | Enable LDAP support |
+
+### X3 LMDB Configuration
+
+When LMDB is enabled, X3 uses it as a cache layer for metadata:
+
+| Setting | Description |
+|---------|-------------|
+| `services/x3/lmdb_path` | Path to LMDB database directory (default: `x3data/lmdb`) |
+
+LMDB provides:
+- **Read-through caching**: Check LMDB first, query Keycloak on cache miss
+- **Write-through caching**: Write to LMDB immediately, propagate to Keycloak
+- **Offline resilience**: Continue operating with cached data when Keycloak is unavailable
 
 ### Required Libraries for Web Push
 
