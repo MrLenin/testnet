@@ -383,6 +383,41 @@ AB MDQ #channel url        → Query specific key for channel
 3. X3 looks up data in Keycloak/LMDB and responds with MD tokens
 4. Nefarious caches response and forwards to client
 
+### MARKREAD (MR) Token
+
+The MR token enables read marker synchronization through X3 as the authoritative source.
+
+**Formats:**
+```
+[SERVER] MR S <user_numeric> <target> <timestamp>  → Set marker (to X3)
+[SERVER] MR G <user_numeric> <target>              → Get marker (to X3)
+[X3] MR R <server> <user_numeric> <target> <ts>    → Reply (from X3)
+[X3] MR <account> <target> <timestamp>             → Broadcast (from X3)
+```
+
+**Architecture:**
+- X3 is the authoritative storage for read markers (LMDB + Keycloak)
+- Nefarious maintains a local LMDB cache for fast lookups
+- All SET operations are routed to X3, which validates and broadcasts
+- Multi-device sync is natural: X3 broadcasts to all servers with matching accounts
+
+**Flow (Set):**
+1. Client sends `MARKREAD #channel timestamp=...`
+2. Nefarious forwards `MR S <numeric> #channel <ts>` toward X3
+3. X3 validates timestamp is newer, stores in LMDB/Keycloak
+4. X3 broadcasts `MR <account> #channel <ts>` to all servers
+5. Each server caches locally and notifies matching local clients
+
+**Flow (Get):**
+1. Client sends `MARKREAD #channel` (no timestamp)
+2. Nefarious checks local LMDB cache first
+3. If not found, forwards `MR G <numeric> #channel` to X3
+4. X3 responds with `MR R <server> <numeric> #channel <ts>`
+5. Response is routed back to client
+
+**Multi-Hop Routing:**
+In networks with multiple servers between client and X3, each intermediate server forwards MR S/G messages toward X3 (services server). Only X3 broadcasts, ensuring consistent ordering.
+
 ---
 
 ## Environment Variables (Docker)
@@ -412,6 +447,7 @@ AB MDQ #channel url        → Query specific key for channel
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | December 2024 | Initial documentation |
+| 1.1 | December 2024 | Added MDQ and MARKREAD P10 protocol documentation |
 
 ---
 
