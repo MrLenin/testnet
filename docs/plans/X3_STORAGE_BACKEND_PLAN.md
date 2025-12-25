@@ -234,8 +234,10 @@ External PostgreSQL database for everything
 
 ## Selected Approach: Hybrid LMDB + Optional Redis
 
-**Phase 1:** Implement LMDB for high-frequency data (metadata, markers, presence)
+**Phase 1:** ✅ **COMPLETE** - LMDB for high-frequency data (metadata, markers, channel access)
 **Phase 2 (Optional):** Add Redis pub/sub layer for multi-server sync
+
+> **Implementation Status:** The LMDB storage layer is fully implemented in `x3/src/x3_lmdb.c` and `x3/src/x3_lmdb.h`. See the actual implementation for the complete API including TTL support, zstd compression, and Keycloak group sync.
 
 ---
 
@@ -501,18 +503,18 @@ x3_lmdb.$(OBJEXT)
 
 ## Implementation Order
 
-| Phase | Task | Files | Effort |
+| Phase | Task | Files | Status |
 |-------|------|-------|--------|
-| 1 | Create x3_lmdb module | x3_lmdb.c/h | 4-6 hrs |
-| 2 | Migrate account metadata | nickserv.c | 4-6 hrs |
-| 3 | Migrate channel metadata | chanserv.c | 3-4 hrs |
-| 4 | Migrate read markers | nickserv.c | 2-3 hrs |
-| 5 | Add presence storage | nickserv.c | 2-3 hrs |
-| 6 | SAXDB import layer | x3_lmdb.c | 3-4 hrs |
-| 7 | Build system updates | configure.ac, Makefile.in | 1-2 hrs |
-| 8 | Testing & documentation | - | 4-6 hrs |
+| 1 | Create x3_lmdb module | x3_lmdb.c/h | ✅ Complete |
+| 2 | Migrate account metadata | nickserv.c | ✅ Complete |
+| 3 | Migrate channel metadata | chanserv.c | ✅ Complete |
+| 4 | Migrate read markers | nickserv.c | ✅ Complete (via metadata API) |
+| 5 | Add presence storage | nickserv.c | N/A (computed from connections) |
+| 6 | SAXDB import layer | x3_lmdb.c | ✅ Complete |
+| 7 | Build system updates | configure.ac, Makefile.in | ✅ Complete |
+| 8 | Testing & documentation | - | ✅ Complete |
 
-**Total Estimated Effort: 23-34 hours**
+**LMDB Phase: COMPLETE**
 
 ---
 
@@ -567,15 +569,15 @@ x3_lmdb.$(OBJEXT)
 
 ## Testing Checklist
 
-- [ ] Build with `--with-lmdb` compiles successfully
-- [ ] Build without LMDB uses stub macros
-- [ ] Fresh install creates LMDB databases
-- [ ] Existing saxdb metadata is imported
-- [ ] Metadata operations use LMDB
-- [ ] SAXDB no longer writes metadata section
-- [ ] Read markers persist immediately
-- [ ] X3 restart preserves LMDB data
-- [ ] Compression works for large values
+- [x] Build with `--with-lmdb` compiles successfully
+- [x] Build without LMDB uses stub macros
+- [x] Fresh install creates LMDB databases
+- [x] Existing saxdb metadata is imported
+- [x] Metadata operations use LMDB
+- [x] SAXDB no longer writes metadata section
+- [x] Read markers persist immediately
+- [x] X3 restart preserves LMDB data
+- [x] Compression works for large values (zstd integration)
 
 ---
 

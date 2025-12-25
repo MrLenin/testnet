@@ -1,6 +1,6 @@
 # IRCv3 WebSocket Extension Investigation
 
-## Status: IMPLEMENTED (Draft Specification)
+## Status: TO IMPLEMENT (Draft Specification)
 
 **Specification**: https://ircv3.net/specs/extensions/websocket
 
@@ -8,31 +8,31 @@
 
 **Priority**: HIGH - Native WebSocket support is standard in modern IRC servers
 
-**Feature Flag**: `FEAT_DRAFT_WEBSOCKET` (enabled by default)
+**Feature Flag**: `FEAT_DRAFT_WEBSOCKET` (to be added)
 
 ---
 
 ## Implementation Status
 
-Native WebSocket support has been implemented in Nefarious, achieving feature parity with other major IRC servers.
+Native WebSocket support needs to be implemented in Nefarious to achieve feature parity with other major IRC servers.
 
-### Files Modified
+### Files To Modify
 
 | File | Changes |
 |------|---------|
-| `include/client.h` | Added `FLAG_WEBSOCKET`, `FLAG_WSNEEDHANDSHAKE` flags |
-| `include/listener.h` | Added `LISTEN_WEBSOCKET` flag |
+| `include/client.h` | Add `FLAG_WEBSOCKET`, `FLAG_WSNEEDHANDSHAKE` flags |
+| `include/listener.h` | Add `LISTEN_WEBSOCKET` flag |
 | `include/websocket.h` | New header for WebSocket functions |
-| `include/ircd_features.h` | Added `FEAT_DRAFT_WEBSOCKET` |
+| `include/ircd_features.h` | Add `FEAT_DRAFT_WEBSOCKET` |
 | `ircd/websocket.c` | New WebSocket implementation (~400 lines) |
 | `ircd/s_bsd.c` | WebSocket connection accept, frame wrap/unwrap |
 | `ircd/packet.c` | WebSocket handshake handling |
 | `ircd/ircd_parser.y` | WebSocket listener configuration |
 | `ircd/ircd_lexer.l` | WEBSOCKET token |
 | `ircd/ircd_features.c` | Feature registration |
-| `ircd/Makefile.in` | Added websocket.c to build |
+| `ircd/Makefile.in` | Add websocket.c to build |
 
-### Configuration
+### Configuration (Planned)
 
 ```
 Port {
@@ -49,13 +49,13 @@ features {
 };
 ```
 
-### Implementation Details
+### Implementation Requirements
 
-- **No external library required** - Uses OpenSSL (already linked) for SHA1/Base64
-- **Integrated with event loop** - No threading, uses existing poll/epoll/kqueue
+- **No external library required** - Use OpenSSL (already linked) for SHA1/Base64
+- **Integrate with event loop** - No threading, use existing poll/epoll/kqueue
 - **RFC 6455 compliant** - Full WebSocket protocol support
-- **IRCv3 subprotocols** - Supports `binary.ircv3.net` and `text.ircv3.net`
-- **SSL support** - Works with existing TLS infrastructure
+- **IRCv3 subprotocols** - Support `binary.ircv3.net` and `text.ircv3.net`
+- **SSL support** - Work with existing TLS infrastructure
 
 ---
 
@@ -65,7 +65,7 @@ Native WebSocket support is implemented in all major modern IRC servers:
 - **Ergo** - Native WebSocket
 - **InspIRCd** - Native WebSocket
 - **UnrealIRCd** - Native WebSocket
-- **Nefarious** - ✅ Native WebSocket (now implemented)
+- **Nefarious** - ⏳ To be implemented
 
 ---
 
@@ -84,8 +84,8 @@ The WebSocket extension defines how IRC can be transported over WebSocket connec
 
 | Subprotocol | Description | Status |
 |-------------|-------------|--------|
-| `binary.ircv3.net` | Carries arbitrary bytes (required) | ✅ Supported |
-| `text.ircv3.net` | UTF-8 only messages (recommended) | ✅ Supported |
+| `binary.ircv3.net` | Carries arbitrary bytes (required) | ⏳ Planned |
+| `text.ircv3.net` | UTF-8 only messages (recommended) | ⏳ Planned |
 
 ---
 
@@ -156,9 +156,9 @@ All bytes are valid; no conversion needed.
 
 ## Architecture
 
-### Native Implementation (Current)
+### Native Implementation (Planned)
 
-WebSocket is implemented directly in Nefarious:
+WebSocket will be implemented directly in Nefarious:
 
 ```
 Client <--WebSocket--> Nefarious
@@ -167,7 +167,7 @@ Client <--WebSocket--> Nefarious
 ```
 
 **Pros**: Single process, lowest latency, no dependencies
-**Implementation**: Custom RFC 6455 implementation using OpenSSL for crypto
+**Plan**: Custom RFC 6455 implementation using OpenSSL for crypto
 
 ### Alternative: WebSocket Proxy
 
@@ -243,7 +243,7 @@ Options: webircgateway, websockify, etc.
 | Ergo | Yes |
 | InspIRCd | Yes |
 | UnrealIRCd | Yes |
-| Nefarious | ✅ Yes |
+| Nefarious | ⏳ Planned |
 
 ---
 
