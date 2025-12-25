@@ -240,6 +240,81 @@ X3 configuration is in `x3.conf` or environment variables for Docker.
 };
 ```
 
+### ChanServ Keycloak Group Sync
+
+ChanServ can synchronize channel access from Keycloak groups, using LMDB as the primary storage with periodic sync from Keycloak.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `keycloak_access_sync` | 0 | Enable Keycloak group sync for channel access |
+| `keycloak_hierarchical_groups` | 0 | Use hierarchical group paths instead of flat names |
+| `keycloak_group_prefix` | (auto) | Group name/path prefix (defaults based on mode) |
+| `keycloak_sync_frequency` | 3600 | Sync interval in seconds (0 = startup only) |
+
+**Group Naming Modes**:
+
+- **Flat mode** (default): Groups named `<prefix><channel>-<level>`
+  - Example: `irc-channel-#help-owner`, `irc-channel-#help-op`
+  - Default prefix: `irc-channel-`
+
+- **Hierarchical mode**: Groups at path `/<prefix>/<channel>/<level>`
+  - Example: `/irc-channels/#help/owner`, `/irc-channels/#help/op`
+  - Default prefix: `irc-channels`
+
+**Access Levels** (mapped from Keycloak group suffixes):
+
+| Suffix | Access Level | Value |
+|--------|--------------|-------|
+| `owner` | UL_OWNER | 500 |
+| `coowner` | UL_COOWNER | 400 |
+| `manager` | UL_MANAGER | 300 |
+| `op` | UL_OP | 200 |
+| `halfop` | UL_HALFOP | 150 |
+| `peon` | UL_PEON | 1 |
+
+**Example Keycloak Group Hierarchies**:
+
+```
+Flat mode:
+  irc-channel-#help-owner      → members get access level 500
+  irc-channel-#help-op         → members get access level 200
+  irc-channel-#support-halfop  → members get access level 150
+
+Hierarchical mode:
+  /irc-channels/
+    └── #help/
+        ├── owner    → members get access level 500
+        ├── op       → members get access level 200
+        └── halfop   → members get access level 150
+    └── #support/
+        └── op       → members get access level 200
+```
+
+**Example x3.conf Section**:
+
+```
+"chanserv" {
+    // Enable Keycloak group sync
+    "keycloak_access_sync" = "1";
+
+    // Use hierarchical groups (optional, default is flat)
+    "keycloak_hierarchical_groups" = "1";
+
+    // Custom prefix (optional, has smart defaults)
+    "keycloak_group_prefix" = "irc-channels";
+
+    // Sync every hour (0 = sync at startup only)
+    "keycloak_sync_frequency" = "3600";
+};
+```
+
+**Sync Behavior**:
+
+1. **Startup Delay**: Initial sync runs 30 seconds after X3 starts
+2. **Periodic Sync**: If `keycloak_sync_frequency > 0`, syncs repeat at that interval
+3. **LMDB Primary**: All access lookups use LMDB for speed
+4. **Fallback Integration**: ChanServ `_GetChannelUser()` checks LMDB if user not in SAXDB
+
 ---
 
 ## Keycloak Integration
@@ -448,6 +523,7 @@ In networks with multiple servers between client and X3, each intermediate serve
 |---------|------|---------|
 | 1.0 | December 2024 | Initial documentation |
 | 1.1 | December 2024 | Added MDQ and MARKREAD P10 protocol documentation |
+| 1.2 | December 2024 | Added ChanServ Keycloak Group Sync documentation |
 
 ---
 
