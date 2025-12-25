@@ -497,41 +497,51 @@ AB MD #channel rules * :Be nice
 | 5 | Netburst Metadata Exchange | 12-16 hours |
 | 6 | Multi-Server Strategy | 4-8 hours |
 
-### X3 Phases (Updated with LMDB)
+### X3 Phases (SAXDB Replacement)
 
 | Phase | Description | Effort |
 |-------|-------------|--------|
 | A | Add LMDB to X3 Build System | 4-8 hours |
 | B | Create X3 LMDB Wrapper Module | 16-24 hours |
-| C | ChanServ LMDB Integration | 8-12 hours |
+| C | ChanServ/NickServ LMDB Integration | 12-16 hours |
+| D | SAXDB Import Layer (migration) | 12-16 hours |
+| E | Remove SAXDB Write Path | 8-12 hours |
 | 4 | Channel Metadata P10 Handler | 16-24 hours |
+| - | Human-readable export tool | 4-6 hours |
 
 ### Testing
 
 | Area | Effort |
 |------|--------|
 | Nefarious phases testing | 8-12 hours |
-| X3 LMDB integration testing | 6-10 hours |
+| X3 LMDB + migration testing | 10-14 hours |
 | End-to-end metadata flow | 4-6 hours |
 
-**Total Estimate**: 96-148 hours (increased due to LMDB integration)
+**Total Estimate**: 134-194 hours
+
+Note: While this is higher than the original estimate, the full SAXDB replacement provides long-term benefits:
+- Eliminates dual-maintenance burden
+- Improves performance for ALL X3 operations
+- Cleaner, more maintainable codebase
 
 ---
 
 ## Implementation Priority
 
 ### Must Have (Core Functionality)
-- **X3 Phase A-C**: LMDB integration (prerequisite for everything else)
-- Phase 1: Cache-aware operations
+- **X3 Phase A-D**: LMDB integration + SAXDB migration (prerequisite for everything else)
+- Phase 1: Cache-aware operations (Nefarious)
 - Phase 4: Channel metadata in X3
 
 ### Should Have (Reliability)
+- **X3 Phase E**: Remove SAXDB write path (after A-D proven stable)
 - Phase 2: X3 availability detection
 - Phase 5: Netburst metadata
 
-### Nice to Have (Resilience)
+### Nice to Have (Resilience/Polish)
 - Phase 3: Write queue
 - Phase 6: Multi-server strategy
+- Human-readable export tool
 
 ---
 
@@ -737,43 +747,125 @@ if (x3_lmdb_available()) {
 
 **Effort**: 8-12 hours
 
-### Dual-Storage Strategy
+### SAXDB Replacement Strategy
 
-For reliability during transition:
+Rather than maintaining dual storage indefinitely, replace SAXDB with LMDB as the primary storage backend for all X3 data, keeping SAXDB only for backwards-compatible import.
+
+#### Why Full Replacement Makes Sense
+
+| Aspect | Dual-Storage | Full Replacement |
+|--------|--------------|------------------|
+| Complexity | High - two code paths | Low - single backend |
+| Maintenance | Double the bugs | Single codebase |
+| Performance | SAXDB still runs | Pure LMDB speed |
+| Migration | Indefinite transition | Clean cutover |
+| Code size | Larger | Smaller after migration |
+
+#### Migration Architecture
 
 ```
-             ┌─────────────────┐
-             │  ChanServ MD    │
-             │    Request      │
-             └────────┬────────┘
-                      │
-              ┌───────▼───────┐
-              │  Write Both   │
-              │  LMDB + SAXDB │
-              └───────┬───────┘
-         ┌────────────┴────────────┐
-         ▼                         ▼
-   ┌─────────────┐          ┌─────────────┐
-   │    LMDB     │          │   SAXDB     │
-   │  (Primary)  │          │  (Backup)   │
-   └─────────────┘          └─────────────┘
-         │                         │
-         │    On read:             │
-         └────────┬────────────────┘
-                  │
-          ┌───────▼───────┐
-          │  Read from    │
-          │  LMDB first,  │
-          │  fallback to  │
-          │  SAXDB if     │
-          │  not found    │
-          └───────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                    First Run (Migration)                     │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│   ┌─────────────┐     ┌─────────────┐     ┌─────────────┐   │
+│   │  SAXDB      │────▶│  Migrator   │────▶│    LMDB     │   │
+│   │  (*.db)     │     │  (one-time) │     │  (x3.lmdb)  │   │
+│   └─────────────┘     └─────────────┘     └─────────────┘   │
+│         │                                        │          │
+│         ▼                                        ▼          │
+│   ┌─────────────┐                         ┌─────────────┐   │
+│   │  Rename to  │                         │  All future │   │
+│   │  *.db.bak   │                         │  operations │   │
+│   └─────────────┘                         └─────────────┘   │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│                    Normal Operation                          │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│   ┌─────────────┐                                           │
+│   │   X3 Core   │                                           │
+│   └──────┬──────┘                                           │
+│          │                                                   │
+│          ▼                                                   │
+│   ┌─────────────┐     No more SAXDB writes                  │
+│   │    LMDB     │     No more periodic flush                │
+│   │   Backend   │     Instant persistence                   │
+│   └─────────────┘     ACID transactions                     │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-This allows:
-- Gradual migration without data loss
-- SAXDB still provides human-readable backup
-- Can disable SAXDB writes once LMDB is proven stable
+#### Phase D: SAXDB Import Layer (New)
+
+Keep SAXDB **read-only** for importing existing databases:
+
+```c
+/* saxdb_import.c - One-time migration from SAXDB to LMDB */
+
+int saxdb_import_to_lmdb(const char *saxdb_path, const char *lmdb_path);
+
+/* Called once at startup if LMDB is empty but SAXDB exists */
+void x3_migrate_databases(void) {
+  if (!x3_lmdb_has_data() && saxdb_file_exists("chanserv.db")) {
+    log_module(MAIN_LOG, LOG_INFO, "Migrating SAXDB to LMDB...");
+    saxdb_import_to_lmdb("chanserv.db", "x3.lmdb");
+    saxdb_import_to_lmdb("nickserv.db", "x3.lmdb");
+    /* ... other databases ... */
+    rename("chanserv.db", "chanserv.db.bak");
+    log_module(MAIN_LOG, LOG_INFO, "Migration complete. Old files renamed to *.bak");
+  }
+}
+```
+
+**Effort**: 12-16 hours
+
+#### Phase E: Remove SAXDB Write Path (New)
+
+Once LMDB is stable, remove SAXDB writer code entirely:
+
+1. Remove `saxdb_write_*()` functions from service modules
+2. Remove periodic write timers
+3. Keep `saxdb_read_*()` for import compatibility
+4. Simplify build (optional SAXDB for legacy import only)
+
+**Effort**: 8-12 hours
+
+#### Human-Readable Export
+
+For debugging/backup, add LMDB export to text format:
+
+```c
+/* Export LMDB to human-readable format (like old SAXDB) */
+int x3_lmdb_export_text(const char *lmdb_path, const char *output_path);
+
+/* CLI command: /msg OpServ EXPORTDB */
+```
+
+This provides the benefits of SAXDB's readability without the runtime cost.
+
+**Effort**: 4-6 hours
+
+### Updated X3 Phase Summary
+
+| Phase | Description | Effort |
+|-------|-------------|--------|
+| A | Add LMDB to X3 Build System | 4-8 hours |
+| B | Create X3 LMDB Wrapper Module | 16-24 hours |
+| C | ChanServ/NickServ LMDB Integration | 12-16 hours |
+| D | SAXDB Import Layer (migration) | 12-16 hours |
+| E | Remove SAXDB Write Path | 8-12 hours |
+| - | Human-readable export tool | 4-6 hours |
+
+**X3 Subtotal**: 56-82 hours
+
+This is more work upfront but results in:
+- Cleaner codebase long-term
+- No dual-maintenance burden
+- Better performance for all X3 operations (not just metadata)
+- Simpler deployment (no periodic DB writes blocking)
 
 ---
 
@@ -804,11 +896,12 @@ This allows:
 
 Before implementing:
 
-1. **LMDB vs SQLite for X3?** - Recommended: LMDB for consistency with Nefarious
-2. **Write queue persistence?** - Queue in memory or persist to LMDB?
-3. **Burst optimization?** - Batch metadata in single P10 message?
-4. **Cache TTL?** - Should cached entries expire?
-5. **Dual-storage duration?** - How long to maintain SAXDB backup?
+1. **LMDB vs SQLite for X3?** - Decided: LMDB for consistency with Nefarious
+2. **SAXDB replacement vs dual-storage?** - Decided: Full replacement with import layer
+3. **Write queue persistence?** - Queue in memory or persist to LMDB?
+4. **Burst optimization?** - Batch metadata in single P10 message?
+5. **Cache TTL?** - Should cached entries expire?
+6. **Migration rollback?** - Keep *.db.bak files for how long?
 
 ---
 
