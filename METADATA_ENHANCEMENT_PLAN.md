@@ -888,7 +888,73 @@ This is more work upfront but results in:
 2. **Metadata expiry**: TTL for cached metadata entries
 3. **Sync on demand**: Request metadata from X3 for specific users/channels
 4. **Compression**: Compress large metadata values in LMDB
-5. **Keycloak for channels**: If Keycloak adds group support, use for channels
+5. **Keycloak groups for channel access** - See detailed analysis below
+
+### Keycloak Group Integration for Channels
+
+X3 already has Keycloak group support implemented in `keycloak.c`:
+
+| Function | Purpose |
+|----------|---------|
+| `keycloak_get_group_by_name()` | Look up group by name, returns UUID |
+| `keycloak_add_user_to_group()` | Add user to group by UUIDs |
+| `keycloak_remove_user_from_group()` | Remove user from group |
+
+**Current usage**: Oper group membership - when a user's opserv level exceeds `keycloak_oper_group_level`, they're added to the configured `keycloak_oper_group`.
+
+#### Potential Channel Integration
+
+Keycloak groups could map to IRC channels:
+
+```
+Keycloak Group          IRC Channel
+─────────────────────────────────────
+irc-channel-#afternet   #afternet (access level from group attrs)
+irc-channel-#help       #help
+irc-opers               Auto-oper on connect
+```
+
+**Benefits**:
+- Centralized access control (single source of truth)
+- SSO integration (corporate/org identity → IRC access)
+- Group attributes could store access levels
+- Works with existing Keycloak admin UI
+
+**Challenges**:
+- Keycloak groups are flat or hierarchical, not key-value
+- Would need convention for mapping group → channel + access level
+- Network latency for group membership checks
+- Channel metadata (topic, modes) doesn't fit group model well
+
+**Possible approaches**:
+
+1. **Groups as access lists only**: Use Keycloak groups for "who can access channel" but keep channel metadata in LMDB
+   ```
+   Group: irc-channel-#secret
+   Members: user1, user2, user3
+   Attributes: {"irc_access_level": "300", "irc_autoop": "true"}
+   ```
+
+2. **Hybrid model**: Keycloak for authentication/authorization, LMDB for channel state
+   ```
+   Keycloak: Who is allowed in #channel, at what level
+   LMDB: Channel topic, modes, metadata, bans
+   ```
+
+3. **Group attributes as metadata**: Store channel metadata in group custom attributes
+   ```
+   Group: irc-channel-#mychannel
+   Attributes: {
+     "irc_topic": "Welcome to the channel",
+     "irc_modes": "+nt",
+     "metadata.description": "Our main hangout"
+   }
+   ```
+   Con: Requires admin API calls for every metadata change
+
+**Recommendation**: Option 2 (Hybrid) - Use Keycloak groups for channel access control only, keep channel metadata in LMDB. This leverages Keycloak's strengths (identity, authorization) without trying to make it do things it wasn't designed for.
+
+**Implementation effort**: 20-30 hours (after LMDB integration complete)
 
 ---
 
