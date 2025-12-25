@@ -382,6 +382,77 @@ LMDB provides:
 - **Write-through caching**: Write to LMDB immediately, propagate to Keycloak
 - **Offline resilience**: Continue operating with cached data when Keycloak is unavailable
 
+### Metadata TTL (Time-To-Live)
+
+X3 supports automatic expiration of metadata entries to prevent unbounded growth and stale data accumulation.
+
+#### Account Metadata TTL (NickServ)
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `metadata_ttl_enabled` | 1 | Enable metadata expiry (1/0) |
+| `metadata_default_ttl` | 2592000 | Default TTL in seconds (30 days) |
+| `metadata_purge_frequency` | 3600 | Purge interval in seconds (1 hour) |
+| `metadata_immutable_keys` | "avatar pronouns bot homepage" | Space-separated keys that never expire |
+
+#### Channel Metadata TTL (ChanServ)
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `channel_metadata_ttl_enabled` | 1 | Enable channel metadata expiry (1/0) |
+| `channel_metadata_default_ttl` | 2592000 | Default TTL in seconds (30 days) |
+| `channel_immutable_keys` | "url website rules description" | Space-separated keys that never expire |
+
+**TTL Behavior:**
+
+- **Default TTL**: Non-immutable metadata entries expire after the configured TTL (default 30 days)
+- **Immutable Keys**: Keys listed in `*_immutable_keys` never expire, ideal for user profile data (avatar, pronouns) or channel identity (url, rules)
+- **Lazy Expiry**: Expired entries are deleted on read (cache miss triggers deletion)
+- **Periodic Purge**: Background timer (hourly by default) sweeps and removes all expired entries
+- **TTL Refresh**: Account metadata TTL is refreshed when the key is written (e.g., on metadata SET)
+
+**Value Format (Internal):**
+
+TTL is encoded as a prefix in the stored value:
+```
+[T:timestamp:][P:]value
+
+Examples:
+  T:1735689600:myvalue        → Public, expires 2025-01-01
+  T:1735689600:P:myvalue      → Private, expires 2025-01-01
+  myvalue                     → Public, never expires (legacy)
+  P:myvalue                   → Private, never expires (legacy)
+```
+
+**Example x3.conf Section:**
+
+```
+"nickserv" {
+    // Enable metadata TTL (default: enabled)
+    "metadata_ttl_enabled" = "1";
+
+    // 30 days default TTL
+    "metadata_default_ttl" = "2592000";
+
+    // Purge expired entries hourly
+    "metadata_purge_frequency" = "3600";
+
+    // These keys never expire
+    "metadata_immutable_keys" = "avatar pronouns bot homepage";
+};
+
+"chanserv" {
+    // Enable channel metadata TTL
+    "channel_metadata_ttl_enabled" = "1";
+
+    // 30 days default TTL
+    "channel_metadata_default_ttl" = "2592000";
+
+    // These channel keys never expire
+    "channel_immutable_keys" = "url website rules description";
+};
+```
+
 ### Required Libraries for Web Push
 
 | Library | Version | Purpose |
@@ -524,6 +595,7 @@ In networks with multiple servers between client and X3, each intermediate serve
 | 1.0 | December 2024 | Initial documentation |
 | 1.1 | December 2024 | Added MDQ and MARKREAD P10 protocol documentation |
 | 1.2 | December 2024 | Added ChanServ Keycloak Group Sync documentation |
+| 1.3 | December 2024 | Added Metadata TTL (Time-To-Live) documentation |
 
 ---
 
