@@ -453,6 +453,67 @@ Examples:
 };
 ```
 
+### X3 SSL/TLS S2S Connection
+
+X3 supports TLS-encrypted connections to Nefarious IRCd for server-to-server (S2S) communication.
+
+#### Uplink SSL Configuration
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `ssl` | 0 | Enable SSL for this uplink (1/0) |
+| `ssl_cert` | (none) | Path to client certificate file (PEM) |
+| `ssl_key` | (none) | Path to client private key file (PEM) |
+| `ssl_ca` | (none) | Path to CA certificate file for server verification |
+| `ssl_verify` | 0 | Verify server certificate (1/0, default off for self-signed) |
+| `ssl_fingerprint` | (none) | Expected server certificate fingerprint (SHA256, hex) |
+
+**TLS Configuration:**
+- **Minimum Version**: TLS 1.2 (enforced via `SSL_CTX_set_min_proto_version()`)
+- **Non-Blocking Handshake**: SSL handshake is non-blocking, compatible with X3's event loop
+- **Fingerprint Verification**: Optional SHA256 fingerprint verification for self-signed certificates
+
+**Example x3.conf Uplink Block:**
+
+```
+"uplinks" {
+    "hub.example.org" {
+        "address" "10.1.2.2";
+        "port" "9998";
+        "password" "linkpass";
+        "their_password" "linkpass";
+        "enabled" "1";
+        "max_tries" "3";
+
+        // SSL configuration
+        "ssl" "1";
+        "ssl_cert" "/data/x3.crt";           // Optional client cert
+        "ssl_key" "/data/x3.key";            // Optional client key
+        "ssl_verify" "0";                     // Don't verify (self-signed)
+        "ssl_fingerprint" "";                 // Optional fingerprint check
+    };
+};
+```
+
+**Nefarious SSL Configuration:**
+
+On the Nefarious side, enable SSL in the Connect block for X3:
+
+```
+Connect {
+    name = "services.example.org";
+    host = "10.1.2.3";
+    password = "linkpass";
+    port = 9998;
+    class = "Server";
+    ssl = yes;           // Enable SSL for this connection
+};
+```
+
+**Build Requirement:**
+
+SSL support requires OpenSSL and is enabled automatically when `--with-ssl` is used during configure.
+
 ### Required Libraries for Web Push
 
 | Library | Version | Purpose |
@@ -596,6 +657,7 @@ In networks with multiple servers between client and X3, each intermediate serve
 | 1.1 | December 2024 | Added MDQ and MARKREAD P10 protocol documentation |
 | 1.2 | December 2024 | Added ChanServ Keycloak Group Sync documentation |
 | 1.3 | December 2024 | Added Metadata TTL (Time-To-Live) documentation |
+| 1.4 | December 2024 | Added X3 SSL/TLS S2S connection documentation |
 
 ---
 
