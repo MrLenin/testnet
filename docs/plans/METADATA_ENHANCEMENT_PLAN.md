@@ -1592,7 +1592,7 @@ static MODCMD_FUNC(cmd_clearmigration) {
 ## References
 
 - [IRCv3 metadata specification](https://ircv3.net/specs/extensions/metadata)
-- [METADATA_INVESTIGATION.md](METADATA_INVESTIGATION.md) - Current implementation status
-- [P10_PROTOCOL_REFERENCE.md](P10_PROTOCOL_REFERENCE.md) - MD token documentation
+- [METADATA_INVESTIGATION.md](../investigations/METADATA_INVESTIGATION.md) - Current implementation status
+- [P10_PROTOCOL_REFERENCE.md](../../P10_PROTOCOL_REFERENCE.md) - MD token documentation
 - Nefarious `ircd/metadata.c` - Core implementation
 - X3 `src/nickserv.c` - Keycloak integration

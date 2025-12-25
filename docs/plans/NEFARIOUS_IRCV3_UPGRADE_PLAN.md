@@ -14,30 +14,30 @@ Draft IRCv3 extensions under investigation are documented in separate files:
 
 | Extension | File | Status | Effort |
 |-----------|------|--------|--------|
-| **chathistory** | [CHATHISTORY_INVESTIGATION.md](CHATHISTORY_INVESTIGATION.md) | ✅ Implemented | Very High |
-| **read-marker** | [READ_MARKER_INVESTIGATION.md](READ_MARKER_INVESTIGATION.md) | ✅ Implemented | High |
-| **account-registration** | [ACCOUNT_REGISTRATION_INVESTIGATION.md](ACCOUNT_REGISTRATION_INVESTIGATION.md) | ✅ Implemented | High |
-| **channel-rename** | [CHANNEL_RENAME_INVESTIGATION.md](CHANNEL_RENAME_INVESTIGATION.md) | ✅ Implemented | High |
-| **message-redaction** | [MESSAGE_REDACTION_INVESTIGATION.md](MESSAGE_REDACTION_INVESTIGATION.md) | ✅ Implemented | Medium |
-| **pre-away** | [PRE_AWAY_INVESTIGATION.md](PRE_AWAY_INVESTIGATION.md) | ✅ Implemented | Low-Medium |
-| **extended-isupport** | [EXTENDED_ISUPPORT_INVESTIGATION.md](EXTENDED_ISUPPORT_INVESTIGATION.md) | ✅ Implemented | Low |
-| **no-implicit-names** | [NO_IMPLICIT_NAMES_INVESTIGATION.md](NO_IMPLICIT_NAMES_INVESTIGATION.md) | ✅ Implemented | Very Low |
-| **multiline** | [MULTILINE_INVESTIGATION.md](MULTILINE_INVESTIGATION.md) | ✅ Implemented | High (user retention issue) |
-| **metadata-2** | [METADATA_INVESTIGATION.md](METADATA_INVESTIGATION.md) | ✅ Implemented | Very High |
-| **websocket** | [WEBSOCKET_INVESTIGATION.md](WEBSOCKET_INVESTIGATION.md) | ✅ Implemented | High (native supported by Ergo/UnrealIRCd/InspIRCd) |
-| **webpush** | [WEBPUSH_INVESTIGATION.md](WEBPUSH_INVESTIGATION.md) | ✅ Implemented | High (X3 services integration) |
+| **chathistory** | [CHATHISTORY_INVESTIGATION.md](../investigations/CHATHISTORY_INVESTIGATION.md) | ✅ Implemented | Very High |
+| **read-marker** | [READ_MARKER_INVESTIGATION.md](../investigations/READ_MARKER_INVESTIGATION.md) | ✅ Implemented | High |
+| **account-registration** | [ACCOUNT_REGISTRATION_INVESTIGATION.md](../investigations/ACCOUNT_REGISTRATION_INVESTIGATION.md) | ✅ Implemented | High |
+| **channel-rename** | [CHANNEL_RENAME_INVESTIGATION.md](../investigations/CHANNEL_RENAME_INVESTIGATION.md) | ✅ Implemented | High |
+| **message-redaction** | [MESSAGE_REDACTION_INVESTIGATION.md](../investigations/MESSAGE_REDACTION_INVESTIGATION.md) | ✅ Implemented | Medium |
+| **pre-away** | [PRE_AWAY_INVESTIGATION.md](../investigations/PRE_AWAY_INVESTIGATION.md) | ✅ Implemented | Low-Medium |
+| **extended-isupport** | [EXTENDED_ISUPPORT_INVESTIGATION.md](../investigations/EXTENDED_ISUPPORT_INVESTIGATION.md) | ✅ Implemented | Low |
+| **no-implicit-names** | [NO_IMPLICIT_NAMES_INVESTIGATION.md](../investigations/NO_IMPLICIT_NAMES_INVESTIGATION.md) | ✅ Implemented | Very Low |
+| **multiline** | [MULTILINE_INVESTIGATION.md](../investigations/MULTILINE_INVESTIGATION.md) | ✅ Implemented | High (user retention issue) |
+| **metadata-2** | [METADATA_INVESTIGATION.md](../investigations/METADATA_INVESTIGATION.md) | ✅ Implemented | Very High |
+| **websocket** | [WEBSOCKET_INVESTIGATION.md](../investigations/WEBSOCKET_INVESTIGATION.md) | ✅ Implemented | High (native supported by Ergo/UnrealIRCd/InspIRCd) |
+| **webpush** | [WEBPUSH_INVESTIGATION.md](../investigations/WEBPUSH_INVESTIGATION.md) | ✅ Implemented | High (X3 services integration) |
 
 ### Client-Only Tags
 
 | Extension | File | Status |
 |-----------|------|--------|
-| **+reply, +react, +channel-context** | [CLIENT_TAGS_INVESTIGATION.md](CLIENT_TAGS_INVESTIGATION.md) | ✅ Implemented |
+| **+reply, +react, +channel-context** | [CLIENT_TAGS_INVESTIGATION.md](../investigations/CLIENT_TAGS_INVESTIGATION.md) | ✅ Implemented |
 
 ### Framework Specs
 
 | Extension | File | Status |
 |-----------|------|--------|
-| **client-batch** | [CLIENT_BATCH_INVESTIGATION.md](CLIENT_BATCH_INVESTIGATION.md) | ✅ Implemented |
+| **client-batch** | [CLIENT_BATCH_INVESTIGATION.md](../investigations/CLIENT_BATCH_INVESTIGATION.md) | ✅ Implemented |
 
 ---
 
