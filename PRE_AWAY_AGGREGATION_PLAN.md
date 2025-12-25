@@ -596,10 +596,542 @@ FEAT_PRESENCE_AGGREGATION = TRUE;
 
 ## Future Considerations
 
-1. **X3 integration**: X3 could track account presence across the network
-2. **Presence API**: Expose aggregated presence via METADATA or new command
-3. **Mobile awareness**: Different presence priorities for mobile vs desktop connections
-4. **Presence history**: Track when user was last present
+### 1. X3 Integration for Presence Tracking
+
+**Question**: Should X3 track account presence across the network?
+
+**Current Model (IRCd-Only)**:
+```
+Server A             Server B             X3
+    │                    │                 │
+    ├─────AWAY P10───────┤                 │
+    │    (to all)        │                 │
+    │                    ├─────AWAY P10────┤ (receives but ignores)
+    │                    │                 │
+Each IRCd maintains its own account connection registry
+X3 only knows about connections to services
+```
+
+**X3-Integrated Model**:
+```
+Server A             Server B             X3
+    │                    │                 │
+    ├─────AWAY P10───────┼────────────────▶│ X3 maintains master registry
+    │                    │                 │
+    │◀───────────────────┼─────PRESENCE────│ X3 broadcasts effective state
+    │                    │◀────────────────│
+All servers receive authoritative presence from X3
+```
+
+**Benefits of X3 Integration**:
+
+| Benefit | Description |
+|---------|-------------|
+| Single source of truth | X3 is authoritative for account state |
+| Persistent presence | Survives netsplits better |
+| Service awareness | MemoServ can use presence for notifications |
+| Cross-network queries | "Is user X present?" can be answered by X3 |
+| NickServ integration | Link presence to account status |
+
+**Implementation Approach**:
+
+1. **X3 Presence Registry** (`nickserv.c`):
+   ```c
+   struct AccountPresence {
+     char account[ACCOUNTLEN];
+     int connection_count;
+     int present_count;      /* Connections without AWAY */
+     int away_count;         /* Connections with AWAY message */
+     int away_star_count;    /* Connections with AWAY * */
+     time_t last_present;    /* When user was last present */
+     char *away_message;     /* Current effective away message */
+   };
+   ```
+
+2. **P10 Handler Extensions** (`proto-p10.c`):
+   ```c
+   /* Track AWAY changes for presence aggregation */
+   static CMD_FUNC(cmd_away_presence) {
+     const char *account = /* from user lookup */;
+     struct AccountPresence *pres = presence_get(account);
+
+     update_presence_state(pres, user, new_away_state);
+
+     if (presence_effective_changed(pres)) {
+       /* Notify interested parties */
+       presence_broadcast_change(pres);
+     }
+   }
+   ```
+
+3. **Presence Query Command**:
+   ```
+   /msg NickServ PRESENCE <account>
+   -NickServ- User 'Rubin' is currently PRESENT
+   -NickServ- Last seen: now
+   -NickServ- Connections: 3 (2 present, 1 away-star)
+   ```
+
+**Trade-offs**:
+
+| Aspect | IRCd-Only | X3-Integrated |
+|--------|-----------|---------------|
+| Complexity | Lower | Higher |
+| Latency | None | P10 round-trip |
+| X3 dependency | None | Presence breaks if X3 down |
+| Consistency | Per-server view | Network-wide consistency |
+| Extensibility | Limited | Rich service integration |
+
+**Recommendation**: Start with IRCd-only (current plan), add X3 integration as Phase 7
+
+**Effort**: 16-24 hours
+
+---
+
+### 2. Presence API via METADATA or New Command
+
+**Question**: How should clients query aggregated presence?
+
+**Current Access Methods**:
+- WHOIS: Shows away message (per-connection, not aggregated)
+- AWAY-NOTIFY: Real-time notifications (capability-based)
+
+**Proposed: METADATA-Based Presence**
+
+Store aggregated presence as a special metadata key:
+
+```
+Key: $presence (special, system-managed)
+Value: JSON-encoded presence state
+
+Example:
+METADATA Rubin $presence * :{"status":"present","connections":3,"last_away":"2024-01-15T10:30:00Z"}
+```
+
+**Benefits**:
+- Uses existing METADATA infrastructure
+- Clients can query via standard METADATA GET
+- Supports subscription via METADATA NOTIFY (future)
+- Extensible JSON format
+
+**Implementation**:
+
+1. **Reserved Key** (`$presence`):
+   ```c
+   /* In metadata.c */
+   #define METADATA_PRESENCE_KEY "$presence"
+
+   /* Updated on every presence change */
+   void presence_update_metadata(struct Client *cptr, int state) {
+     char json[256];
+     snprintf(json, sizeof(json),
+       "{\"status\":\"%s\",\"connections\":%d}",
+       state == 0 ? "present" : "away",
+       account_conn_count(cli_account(cptr)));
+     metadata_set_client(cptr, METADATA_PRESENCE_KEY, json, METADATA_VIS_PUBLIC);
+   }
+   ```
+
+2. **Client Query**:
+   ```
+   METADATA Rubin GET $presence
+   :server METADATA Rubin $presence * :{"status":"present","connections":3}
+   ```
+
+**Alternative: Dedicated PRESENCE Command**
+
+New IRC command for presence queries:
+
+```
+PRESENCE <target>
+
+Response:
+:server 320 mynick Rubin :is currently present
+:server 321 mynick Rubin :Last away: 2024-01-15 10:30:00
+:server 322 mynick Rubin :3 connections (2 present, 1 away-star)
+```
+
+**Comparison**:
+
+| Aspect | METADATA Approach | PRESENCE Command |
+|--------|-------------------|------------------|
+| Standards | Uses existing IRCv3 | New protocol addition |
+| Client support | Existing METADATA clients | Requires new client code |
+| Format | JSON (flexible) | Numeric replies (IRC-native) |
+| Batch query | METADATA GET for multiple | Separate command per user |
+| Subscription | Via METADATA NOTIFY | Would need PRESENCE-NOTIFY |
+
+**Recommendation**: METADATA approach for consistency with existing infrastructure
+
+**Effort**: 8-12 hours
+
+---
+
+### 3. Mobile Awareness (Device-Type Priority)
+
+**Question**: Should presence aggregation consider device type (mobile vs desktop)?
+
+**Motivation**:
+
+Mobile devices often use AWAY * to indicate backgrounded apps:
+- Phone screen locked → client sends AWAY *
+- Phone unlocked → client clears AWAY
+
+Desktop clients typically have more stable presence:
+- User at keyboard → present
+- User AFK → explicit AWAY with message
+
+**Priority Model**:
+
+```
+Priority (highest to lowest):
+1. Desktop present
+2. Mobile present
+3. Desktop away with message
+4. Mobile away with message
+5. Desktop away-star
+6. Mobile away-star (lowest - essentially invisible)
+```
+
+**Detection Methods**:
+
+1. **Client Capability** (new `device-type` extension):
+   ```
+   CAP REQ device-type=mobile
+   CAP REQ device-type=desktop
+   CAP REQ device-type=bot
+   ```
+
+2. **User-Agent Parsing** (if available):
+   ```c
+   int detect_device_type(const char *user_agent) {
+     if (strstr(user_agent, "Android") || strstr(user_agent, "iOS"))
+       return DEVICE_MOBILE;
+     if (strstr(user_agent, "Bot") || strstr(user_agent, "bridge"))
+       return DEVICE_BOT;
+     return DEVICE_DESKTOP;
+   }
+   ```
+
+3. **Client Software Hints**:
+   Some clients identify themselves in VERSION reply or CTCP
+
+**Implementation**:
+
+```c
+struct AccountConnection {
+  struct Client *client;
+  unsigned char away_state;    /* 0=present, 1=away, 2=away-star */
+  unsigned char device_type;   /* 0=unknown, 1=desktop, 2=mobile, 3=bot */
+  struct AccountConnection *next;
+};
+
+/* Enhanced aggregation considering device type */
+int account_presence_compute_v2(const char *account, char **message) {
+  /* Priority: desktop present > mobile present > desktop away > ... */
+
+  struct AccountConnection *best = NULL;
+  int best_priority = 999;
+
+  for (conn = ...; conn; conn = conn->next) {
+    int priority = compute_priority(conn->away_state, conn->device_type);
+    if (priority < best_priority) {
+      best_priority = priority;
+      best = conn;
+    }
+  }
+
+  /* Return state from highest-priority connection */
+  return best ? best->away_state : 0;
+}
+```
+
+**Use Cases**:
+
+| Scenario | Without Device Awareness | With Device Awareness |
+|----------|--------------------------|----------------------|
+| Desktop AFK, phone in pocket | Shows "away" | Shows "away" (correct) |
+| Desktop closed, phone active | Shows "present" | Shows "present" (correct) |
+| Desktop active, phone locked | Shows "present" | Shows "present" (both correct) |
+| Only phone, locked | Shows "away" | Shows "away" or hidden (better) |
+
+**Recommendation**: Defer to future phase, implement only if clients adopt device-type capability
+
+**Effort**: 12-16 hours
+
+---
+
+### 4. Presence History
+
+**Question**: Should we track when a user was last present?
+
+**Use Cases**:
+
+| Use Case | Benefit |
+|----------|---------|
+| "Last seen" info | Know when user was last active |
+| Idle time calculation | Show how long user has been away |
+| Notification decisions | Don't notify if user hasn't been seen in weeks |
+| Analytics | Network activity patterns |
+
+**Implementation Approaches**:
+
+#### Approach A: In-Memory Only
+
+Store last-present time in account connection registry:
+
+```c
+struct AccountPresence {
+  /* ... */
+  time_t last_present;     /* Last time any connection was present */
+  time_t first_away;       /* When user first went away */
+};
+
+/* Update on presence change */
+void presence_record_change(struct AccountPresence *pres, int new_state) {
+  if (new_state == 0) {  /* Becoming present */
+    pres->last_present = CurrentTime;
+    pres->first_away = 0;
+  } else if (pres->first_away == 0) {  /* First away */
+    pres->first_away = CurrentTime;
+  }
+}
+```
+
+**Pros**: Simple, no persistence needed
+**Cons**: Lost on restart, only covers current session
+
+#### Approach B: Persistent in LMDB
+
+Store in account metadata (Nefarious LMDB or X3):
+
+```c
+/* Special metadata keys */
+#define MD_LAST_PRESENT "$last_present"
+#define MD_LAST_AWAY    "$last_away"
+
+/* Store as Unix timestamp */
+metadata_account_set(account, MD_LAST_PRESENT, timestamp_str, METADATA_VIS_PUBLIC);
+```
+
+**Pros**: Survives restarts, queryable
+**Cons**: LMDB writes on every presence change
+
+#### Approach C: Hybrid (Periodic Persistence)
+
+Track in memory, persist periodically:
+
+```c
+/* Every 5 minutes, persist presence history to LMDB */
+void presence_persist_timer(void) {
+  for_each_account_presence(pres) {
+    if (pres->dirty) {
+      metadata_account_set(pres->account, MD_LAST_PRESENT, ...);
+      pres->dirty = 0;
+    }
+  }
+}
+```
+
+**Recommendation**: Approach C (Hybrid) for balance of accuracy and performance
+
+**Exposure to Clients**:
+
+1. **WHOIS Extension**:
+   ```
+   :server 317 mynick Rubin 3600 1705312200 :seconds idle, signon time
+   :server 320 mynick Rubin :Last present: 2024-01-15 10:30:00 UTC
+   ```
+
+2. **METADATA Key**:
+   ```
+   METADATA Rubin $last_present * :1705312200
+   ```
+
+3. **NickServ INFO**:
+   ```
+   /msg NickServ INFO Rubin
+   -NickServ- Rubin is currently AWAY
+   -NickServ- Last seen present: 2 hours ago
+   ```
+
+**Privacy Considerations**:
+
+- Should last-present be public by default?
+- Consider user setting to hide presence history
+- Respect "invisible" mode (+i) for presence info
+
+**Effort**: 8-12 hours for basic implementation, 12-16 hours with persistence
+
+---
+
+### 5. Presence-Based Notifications
+
+**Question**: How should services (like MemoServ) use presence information?
+
+**Current MemoServ Behavior**:
+- Delivers memos when user logs in
+- No awareness of multi-connection or away state
+
+**Enhanced Behavior with Presence Awareness**:
+
+| Scenario | Current Behavior | Enhanced Behavior |
+|----------|------------------|-------------------|
+| User has 3 connections, one present | Delivers memo to all | Delivers only to present connection |
+| User is AWAY * on all connections | Delivers on login | Queues until present, or delivers after timeout |
+| User just went away | Delivers immediately | May queue for "soon to return" cases |
+
+**Implementation**:
+
+```c
+/* In memoserv.c */
+int memoserv_should_deliver(struct userNode *user) {
+  /* Check aggregated presence */
+  int state = presence_get_effective(user, NULL);
+
+  switch (state) {
+    case PRESENCE_PRESENT:
+      return 1;  /* Deliver now */
+    case PRESENCE_AWAY:
+      return 1;  /* Deliver - user set explicit away */
+    case PRESENCE_AWAY_STAR:
+      return 0;  /* Queue - user's connection is hidden */
+    default:
+      return 1;
+  }
+}
+
+/* Find best connection for delivery */
+struct Client *memoserv_best_connection(const char *account) {
+  struct AccountConnection *conn;
+  struct Client *best = NULL;
+
+  for (conn = account_conn_list(account); conn; conn = conn->next) {
+    /* Prefer present connections over away */
+    if (conn->away_state == 0) {
+      return conn->client;  /* Present - deliver here */
+    }
+    if (!best && conn->away_state != 2) {
+      best = conn->client;  /* Away but not away-star */
+    }
+  }
+
+  return best;
+}
+```
+
+**Effort**: 8-12 hours
+
+---
+
+### 6. Presence Federation (Multi-Network)
+
+**Question**: Could presence be shared across linked networks?
+
+**Scenario**: AfterNET links with another IRC network via a bridge
+
+**Challenges**:
+
+1. **Account namespace conflicts**: "Rubin" on AfterNET ≠ "Rubin" on OtherNet
+2. **Trust**: Should foreign network's presence claims be trusted?
+3. **Protocol differences**: Other network may not support presence aggregation
+
+**Possible Approach**:
+
+```
+Network A (AfterNET)      Bridge Bot        Network B
+      │                      │                  │
+      ├────AWAY P10─────────▶│                  │
+      │                      ├──AWAY (IRC)──────▶
+      │                      │                  │
+      │◀─────────────────────┤◀──AWAY (IRC)─────│
+```
+
+Bridge bot translates presence between networks:
+- Maps accounts across networks (if identity linked)
+- Propagates away state bidirectionally
+- Handles format differences
+
+**Recommendation**: Out of scope for initial implementation, document as future possibility
+
+**Effort**: 24-40 hours (if implemented)
+
+---
+
+### 7. Presence Webhooks / Event System
+
+**Question**: Could external systems subscribe to presence changes?
+
+**Use Cases**:
+
+| Subscriber | Use Case |
+|------------|----------|
+| Discord bridge | Sync presence to Discord status |
+| Monitoring | Alert when critical users go offline |
+| Analytics | Track network activity |
+| Bots | React to user presence changes |
+
+**Implementation Approach**:
+
+1. **Internal Event System**:
+   ```c
+   /* Presence event callback */
+   typedef void (*presence_callback_t)(const char *account,
+                                       int old_state, int new_state,
+                                       const char *message);
+
+   void presence_add_listener(presence_callback_t cb);
+   void presence_remove_listener(presence_callback_t cb);
+
+   /* When presence changes */
+   void presence_notify_listeners(const char *account, ...) {
+     for (listener in listeners) {
+       listener(account, old_state, new_state, message);
+     }
+   }
+   ```
+
+2. **Webhook Delivery** (via X3 or external service):
+   ```json
+   POST /webhook/presence
+   {
+     "account": "Rubin",
+     "old_state": "present",
+     "new_state": "away",
+     "message": "BRB",
+     "timestamp": "2024-01-15T10:30:00Z",
+     "connections": 2
+   }
+   ```
+
+3. **Internal Pub/Sub** (for bots on same network):
+   ```
+   New capability: presence-subscribe
+
+   Client: CAP REQ presence-subscribe
+   Client: PRESENCE SUBSCRIBE Rubin
+   Server: PRESENCE Rubin AWAY :BRB
+   ```
+
+**Recommendation**: Add internal event system first (hooks), webhooks later
+
+**Effort**: 12-16 hours for internal events, 16-24 hours for webhooks
+
+---
+
+### Summary of Future Considerations
+
+| # | Consideration | Priority | Effort | Dependencies |
+|---|---------------|----------|--------|--------------|
+| 1 | X3 Integration | Medium | 16-24h | Core presence aggregation |
+| 2 | Presence API | Medium | 8-12h | Core presence aggregation |
+| 3 | Mobile Awareness | Low | 12-16h | Device-type capability |
+| 4 | Presence History | Medium | 12-16h | Core presence aggregation |
+| 5 | Presence Notifications | Medium | 8-12h | X3 Integration |
+| 6 | Federation | Low | 24-40h | Bridge protocol |
+| 7 | Webhooks | Low | 16-24h | Internal event system |
+
+**Recommended Order**: 2 → 4 → 1 → 5 → 3 → 7 → 6
 
 ---
 
