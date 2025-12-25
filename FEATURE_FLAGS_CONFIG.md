@@ -514,6 +514,57 @@ Connect {
 
 SSL support requires OpenSSL and is enabled automatically when `--with-ssl` is used during configure.
 
+### Metadata Compression (zstd)
+
+X3 supports optional Zstandard (zstd) compression for metadata values stored in LMDB. This reduces storage requirements for large metadata values.
+
+**Why zstd?**
+- 10-20% better compression ratio than zlib
+- 3-5x faster decompression than zlib
+- Adjustable compression levels (1-22)
+- Used by Linux kernel, PostgreSQL, MySQL, MongoDB
+
+#### Compression Configuration
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `metadata_compress_threshold` | 256 | Minimum value size (bytes) to trigger compression |
+| `metadata_compress_level` | 3 | Compression level (1-22, higher = better ratio, slower) |
+
+**Compression Levels:**
+- Level 1: Fastest, ~60% of max compression
+- Level 3: Default, good balance (recommended)
+- Level 9: Similar to zlib -9
+- Level 19-22: Maximum compression, much slower
+
+**Example x3.conf Configuration:**
+
+```
+"nickserv" {
+    /* ... existing config ... */
+
+    // Metadata compression (requires WITH_ZSTD)
+    "metadata_compress_threshold" "256";  // Compress values > 256 bytes
+    "metadata_compress_level" "3";        // zstd level 1-22
+};
+```
+
+**How It Works:**
+- Values below threshold are stored uncompressed
+- Compressed values are prefixed with a magic byte (0x1F) for detection
+- Decompression is automatic and transparent on read
+- Falls back to uncompressed if compression doesn't save space
+- Backward compatible: old uncompressed data is read correctly
+
+**Build Requirement:**
+
+Compression support requires libzstd and is enabled with `--with-zstd` during configure:
+```bash
+./configure --with-zstd
+```
+
+Package: `libzstd-dev` (Debian/Ubuntu) or `libzstd-devel` (RHEL/Fedora)
+
 ### Required Libraries for Web Push
 
 | Library | Version | Purpose |
@@ -658,6 +709,7 @@ In networks with multiple servers between client and X3, each intermediate serve
 | 1.2 | December 2024 | Added ChanServ Keycloak Group Sync documentation |
 | 1.3 | December 2024 | Added Metadata TTL (Time-To-Live) documentation |
 | 1.4 | December 2024 | Added X3 SSL/TLS S2S connection documentation |
+| 1.5 | December 2024 | Added Metadata Compression (zstd) documentation |
 
 ---
 
