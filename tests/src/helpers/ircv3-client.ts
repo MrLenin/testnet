@@ -768,8 +768,54 @@ export class RawSocketClient {
   }
 }
 
-export async function createRawSocketClient(host = process.env.IRC_HOST ?? 'nefarious', port = 6667): Promise<RawSocketClient> {
+/**
+ * Server configuration for multi-server testing.
+ */
+export interface ServerConfig {
+  host: string;
+  port: number;
+  name: string;
+}
+
+/** Primary IRC server (hub) */
+export const PRIMARY_SERVER: ServerConfig = {
+  host: process.env.IRC_HOST ?? 'nefarious',
+  port: 6667,
+  name: 'primary',
+};
+
+/** Secondary IRC server (leaf) - only available with 'linked' profile */
+export const SECONDARY_SERVER: ServerConfig = {
+  host: process.env.IRC_HOST2 ?? 'nefarious2',
+  port: 6667,
+  name: 'secondary',
+};
+
+export async function createRawSocketClient(host = PRIMARY_SERVER.host, port = PRIMARY_SERVER.port): Promise<RawSocketClient> {
   const client = new RawSocketClient();
   await client.connect(host, port);
   return client;
+}
+
+/**
+ * Create a client connected to a specific server.
+ */
+export async function createClientOnServer(server: ServerConfig): Promise<RawSocketClient> {
+  const client = new RawSocketClient();
+  await client.connect(server.host, server.port);
+  return client;
+}
+
+/**
+ * Check if the secondary server is available (for skip condition in tests).
+ */
+export async function isSecondaryServerAvailable(): Promise<boolean> {
+  try {
+    const client = new RawSocketClient();
+    await client.connect(SECONDARY_SERVER.host, SECONDARY_SERVER.port);
+    client.close();
+    return true;
+  } catch {
+    return false;
+  }
 }

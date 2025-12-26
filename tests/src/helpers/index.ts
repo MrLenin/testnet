@@ -13,6 +13,11 @@ export {
   createRawIRCv3Client,
   RawSocketClient,
   createRawSocketClient,
+  createClientOnServer,
+  isSecondaryServerAvailable,
+  PRIMARY_SERVER,
+  SECONDARY_SERVER,
   type IRCv3Config,
   type CapState,
+  type ServerConfig,
 } from './ircv3-client.js';
