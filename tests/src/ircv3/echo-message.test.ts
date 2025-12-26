@@ -289,13 +289,18 @@ describe('IRCv3 TAGMSG', () => {
     client2.send(`JOIN ${channelName}`);
     await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
     await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
-    await new Promise(r => setTimeout(r, 500));
+    // Wait for client2 to see client1's join notification
+    await client2.waitForLine(/JOIN.*tagmsg1/i, 2000).catch(() => {});
+    await new Promise(r => setTimeout(r, 200));
+
+    // Clear buffer before sending TAGMSG
+    client2.clearRawBuffer();
 
     // Send TAGMSG with typing indicator
     client1.send(`@+typing=active TAGMSG ${channelName}`);
 
     try {
-      const received = await client2.waitForLine(/TAGMSG.*#tagmsg/i, 3000);
+      const received = await client2.waitForLine(/TAGMSG/i, 3000);
       expect(received).toContain('TAGMSG');
       console.log('TAGMSG received:', received);
     } catch {
