@@ -1,5 +1,5 @@
-import { describe, it, expect, afterEach, beforeAll } from 'vitest';
-import { IRCv3TestClient, createRawIRCv3Client, createIRCv3Client } from '../helpers/index.js';
+import { describe, it, expect, afterEach } from 'vitest';
+import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
 
 /**
  * SASL Authentication Tests
@@ -13,13 +13,13 @@ import { IRCv3TestClient, createRawIRCv3Client, createIRCv3Client } from '../hel
  * the SASL protocol flow.
  */
 describe('IRCv3 SASL Authentication', () => {
-  const clients: IRCv3TestClient[] = [];
+  const clients: RawSocketClient[] = [];
 
   // Test credentials - should match a registered account
   const TEST_ACCOUNT = process.env.IRC_TEST_ACCOUNT ?? 'testaccount';
   const TEST_PASSWORD = process.env.IRC_TEST_PASSWORD ?? 'testpass';
 
-  const trackClient = (client: IRCv3TestClient): IRCv3TestClient => {
+  const trackClient = (client: RawSocketClient): RawSocketClient => {
     clients.push(client);
     return client;
   };
@@ -27,7 +27,7 @@ describe('IRCv3 SASL Authentication', () => {
   afterEach(() => {
     for (const client of clients) {
       try {
-        client.quit('Test cleanup');
+        client.close();
       } catch {
         // Ignore errors during cleanup
       }
@@ -35,75 +35,89 @@ describe('IRCv3 SASL Authentication', () => {
     clients.length = 0;
   });
 
+  // Helper for SASL PLAIN authentication
+  const saslPlain = async (client: RawSocketClient, user: string, pass: string): Promise<boolean> => {
+    client.send('AUTHENTICATE PLAIN');
+
+    try {
+      await client.waitForLine(/^AUTHENTICATE \+$/);
+    } catch {
+      return false;
+    }
+
+    // SASL PLAIN format: base64(authzid\0authcid\0password)
+    const payload = Buffer.from(`${user}\0${user}\0${pass}`).toString('base64');
+    client.send(`AUTHENTICATE ${payload}`);
+
+    try {
+      await client.waitForLine(/903/); // RPL_SASLSUCCESS
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   describe('SASL Capability', () => {
     it('server advertises sasl capability', async () => {
-      const client = trackClient(
-        await createRawIRCv3Client({ nick: 'sasltest1' })
-      );
-
+      const client = trackClient(await createRawSocketClient());
       const caps = await client.capLs();
       expect(caps.has('sasl')).toBe(true);
+      client.send('QUIT');
     });
 
     it('can request sasl capability', async () => {
-      const client = trackClient(
-        await createRawIRCv3Client({ nick: 'sasltest2' })
-      );
-
+      const client = trackClient(await createRawSocketClient());
       await client.capLs();
       const result = await client.capReq(['sasl']);
 
       expect(result.ack).toContain('sasl');
       expect(client.hasCapEnabled('sasl')).toBe(true);
+      client.send('QUIT');
     });
   });
 
   describe('SASL PLAIN Flow', () => {
     it('server responds to AUTHENTICATE PLAIN', async () => {
-      const client = trackClient(
-        await createRawIRCv3Client({ nick: 'authtest1' })
-      );
+      const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
       await client.capReq(['sasl']);
 
-      client.raw('AUTHENTICATE PLAIN');
+      client.send('AUTHENTICATE PLAIN');
 
       // Server should respond with AUTHENTICATE +
-      const response = await client.waitForRaw(/^AUTHENTICATE \+$/);
+      const response = await client.waitForLine(/^AUTHENTICATE \+$/);
       expect(response).toBe('AUTHENTICATE +');
+      client.send('QUIT');
     });
 
     it('receives 904 for invalid credentials', async () => {
-      const client = trackClient(
-        await createRawIRCv3Client({ nick: 'authtest2' })
-      );
+      const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
       await client.capReq(['sasl']);
 
-      client.raw('AUTHENTICATE PLAIN');
-      await client.waitForRaw(/^AUTHENTICATE \+$/);
+      client.send('AUTHENTICATE PLAIN');
+      await client.waitForLine(/^AUTHENTICATE \+$/);
 
       // Send invalid credentials
       const invalidPayload = Buffer.from('invalid\0invalid\0wrongpass').toString('base64');
-      client.raw(`AUTHENTICATE ${invalidPayload}`);
+      client.send(`AUTHENTICATE ${invalidPayload}`);
 
       // Should receive 904 (ERR_SASLFAIL)
-      const result = await client.waitForRaw(/^:\S+ 90[0-9]/);
+      const result = await client.waitForLine(/90[0-9]/);
       // 904 = SASLFAIL, 902 = NICK_LOCKED
       expect(result).toMatch(/90[24]/);
+      client.send('QUIT');
     });
 
     it('can authenticate with valid credentials', async () => {
-      const client = trackClient(
-        await createRawIRCv3Client({ nick: 'authtest3' })
-      );
+      const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
       await client.capReq(['sasl']);
 
-      const success = await client.saslPlain(TEST_ACCOUNT, TEST_PASSWORD);
+      const success = await saslPlain(client, TEST_ACCOUNT, TEST_PASSWORD);
 
       // This test may fail if the test account doesn't exist
       // In that case, it verifies the protocol flow at least works
@@ -114,7 +128,7 @@ describe('IRCv3 SASL Authentication', () => {
         client.capEnd();
         client.register('authtest3');
 
-        const welcome = await client.waitForRaw(/001/);
+        const welcome = await client.waitForLine(/001/);
         expect(welcome).toContain('authtest3');
       } else {
         // Log that credentials are invalid (expected for fresh install)
@@ -122,134 +136,167 @@ describe('IRCv3 SASL Authentication', () => {
         // Still pass - we're testing the protocol, not the credentials
         expect(true).toBe(true);
       }
+      client.send('QUIT');
     });
 
     it('receives 900 on successful authentication', async () => {
-      const client = trackClient(
-        await createRawIRCv3Client({ nick: 'authtest4' })
-      );
+      const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
       await client.capReq(['sasl']);
 
-      client.raw('AUTHENTICATE PLAIN');
-      await client.waitForRaw(/^AUTHENTICATE \+$/);
+      client.send('AUTHENTICATE PLAIN');
+      await client.waitForLine(/^AUTHENTICATE \+$/);
 
       const payload = Buffer.from(`${TEST_ACCOUNT}\0${TEST_ACCOUNT}\0${TEST_PASSWORD}`).toString('base64');
-      client.raw(`AUTHENTICATE ${payload}`);
+      client.send(`AUTHENTICATE ${payload}`);
 
       try {
         // 900 = RPL_LOGGEDIN (success indicator before 903)
         // 903 = RPL_SASLSUCCESS
-        const result = await client.waitForRaw(/^:\S+ (900|903)/, 3000);
+        const result = await client.waitForLine(/(900|903)/, 3000);
         expect(result).toMatch(/(900|903)/);
       } catch {
         // May fail if account doesn't exist
         console.log('SASL 900/903 not received - test account may not exist');
       }
+      client.send('QUIT');
     });
   });
 
   describe('SASL EXTERNAL Flow', () => {
     it('EXTERNAL requires TLS client certificate', async () => {
-      const client = trackClient(
-        await createRawIRCv3Client({ nick: 'exttest1' })
-      );
+      const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
       const result = await client.capReq(['sasl']);
 
       if (!result.ack.includes('sasl')) {
+        client.send('QUIT');
         return; // SASL not available
       }
 
       // Try EXTERNAL without certificate
-      client.raw('AUTHENTICATE EXTERNAL');
+      client.send('AUTHENTICATE EXTERNAL');
 
       // Should fail - we don't have a client cert
       try {
-        const response = await client.waitForRaw(/^(AUTHENTICATE|\S+ 90[0-9])/);
+        const response = await client.waitForLine(/(AUTHENTICATE|90[0-9])/, 3000);
         // Either server doesn't support EXTERNAL (will send error)
         // or it expects a cert we don't have
         expect(response).toBeDefined();
       } catch {
         // Timeout is acceptable - server may ignore unsupported mechanism
       }
+      client.send('QUIT');
     });
   });
 
   describe('Account Tags After SASL', () => {
     it('JOIN messages include account after SASL auth', async () => {
-      const client = trackClient(
-        await createRawIRCv3Client({ nick: 'accttest1' })
-      );
+      const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
       await client.capReq(['sasl', 'extended-join', 'account-tag']);
 
-      const success = await client.saslPlain(TEST_ACCOUNT, TEST_PASSWORD);
+      const success = await saslPlain(client, TEST_ACCOUNT, TEST_PASSWORD);
 
       if (!success) {
         console.log('Skipping account tag test - SASL auth failed');
+        client.send('QUIT');
         return;
       }
 
       client.capEnd();
       client.register('accttest1');
-      await client.waitForRaw(/001/);
+      await client.waitForLine(/001/);
 
       // Join a channel and check for extended-join with account
-      client.join('#accttestchan');
+      client.send('JOIN #accttestchan');
 
-      const joinMsg = await client.waitForRaw(/JOIN.*#accttestchan/i);
+      const joinMsg = await client.waitForLine(/JOIN.*#accttestchan/i);
       expect(joinMsg).toBeDefined();
 
       // With extended-join, JOIN includes account name
       // Format: :nick!user@host JOIN #channel accountname :realname
       // Or with account-tag: @account=name :nick!user@host JOIN #channel
       console.log('JOIN message:', joinMsg);
+      client.send('QUIT');
     });
   });
 
-  describe('Automatic SASL via irc-framework', () => {
-    it('can authenticate automatically on connect', async () => {
-      // This uses irc-framework's built-in SASL support
-      try {
-        const client = trackClient(
-          await createIRCv3Client({
-            nick: 'autosasl1',
-            sasl_user: TEST_ACCOUNT,
-            sasl_pass: TEST_PASSWORD,
-          })
-        );
+  describe('Full SASL Flow', () => {
+    it('can register account and authenticate with it', async () => {
+      // Step 1: Register a new account using draft/account-registration
+      const regClient = trackClient(await createRawSocketClient());
 
-        // If we get here without error, auth succeeded
-        expect(client.isRegistered).toBe(true);
+      await regClient.capLs();
+      const regCaps = await regClient.capReq(['draft/account-registration']);
 
-        // Check for logged-in numeric
-        const hasLoggedIn = client.rawMessages.some(
-          msg => msg.includes('900') || msg.includes('903')
-        );
-
-        if (hasLoggedIn) {
-          expect(hasLoggedIn).toBe(true);
-        } else {
-          console.log('Auto SASL may have failed - check test account');
-        }
-      } catch (error) {
-        // Connection may fail if SASL is required but creds are bad
-        console.log('Auto SASL connection failed:', error);
-        // Still pass - we're testing the mechanism exists
-        expect(true).toBe(true);
+      if (!regCaps.ack.includes('draft/account-registration')) {
+        console.log('Skipping - server does not support account registration');
+        regClient.send('QUIT');
+        return;
       }
+
+      regClient.capEnd();
+      regClient.register('saslreg1');
+      await regClient.waitForLine(/001/);
+
+      // Generate unique account name (max 15 chars for ACCOUNTLEN)
+      const uniqueAccount = `sl${Date.now() % 1000000000}`;
+      const uniquePassword = 'testpass123';
+
+      // Format per spec: REGISTER <account> <email> <password>
+      regClient.send(`REGISTER ${uniqueAccount} ${uniqueAccount}@example.com ${uniquePassword}`);
+
+      let accountRegistered = false;
+      try {
+        const response = await regClient.waitForLine(/REGISTER SUCCESS|920/, 5000);
+        if (response.includes('SUCCESS') || response.includes('920')) {
+          accountRegistered = true;
+          console.log('Account registered:', uniqueAccount);
+        }
+      } catch {
+        console.log('Account registration failed or not supported');
+      }
+
+      regClient.send('QUIT');
+      await new Promise(r => setTimeout(r, 500));
+
+      if (!accountRegistered) {
+        console.log('Skipping SASL test - could not register account');
+        return;
+      }
+
+      // Step 2: Connect fresh and authenticate with the new account
+      const authClient = trackClient(await createRawSocketClient());
+
+      await authClient.capLs();
+      await authClient.capReq(['sasl']);
+
+      const success = await saslPlain(authClient, uniqueAccount, uniquePassword);
+      expect(success).toBe(true);
+
+      authClient.capEnd();
+      authClient.register('saslauth1');
+      await authClient.waitForLine(/001/);
+
+      // Verify we're logged in - WHOIS should show account
+      authClient.send(`WHOIS saslauth1`);
+      const whoisResponse = await authClient.waitForLine(/330|WHOIS|311/i, 3000);
+      expect(whoisResponse).toBeDefined();
+      console.log('Authenticated as:', uniqueAccount);
+
+      authClient.send('QUIT');
     });
   });
 });
 
 describe('Account Registration (draft/account-registration)', () => {
-  const clients: IRCv3TestClient[] = [];
+  const clients: RawSocketClient[] = [];
 
-  const trackClient = (client: IRCv3TestClient): IRCv3TestClient => {
+  const trackClient = (client: RawSocketClient): RawSocketClient => {
     clients.push(client);
     return client;
   };
@@ -257,7 +304,7 @@ describe('Account Registration (draft/account-registration)', () => {
   afterEach(() => {
     for (const client of clients) {
       try {
-        client.quit('Test cleanup');
+        client.close();
       } catch {
         // Ignore
       }
@@ -266,48 +313,45 @@ describe('Account Registration (draft/account-registration)', () => {
   });
 
   it('server advertises draft/account-registration', async () => {
-    const client = trackClient(
-      await createRawIRCv3Client({ nick: 'regtest1' })
-    );
-
+    const client = trackClient(await createRawSocketClient());
     const caps = await client.capLs();
     expect(caps.has('draft/account-registration')).toBe(true);
+    client.send('QUIT');
   });
 
   it('can request draft/account-registration', async () => {
-    const client = trackClient(
-      await createRawIRCv3Client({ nick: 'regtest2' })
-    );
-
+    const client = trackClient(await createRawSocketClient());
     await client.capLs();
     const result = await client.capReq(['draft/account-registration']);
 
     expect(result.ack).toContain('draft/account-registration');
+    client.send('QUIT');
   });
 
   it('REGISTER command exists', async () => {
-    const client = trackClient(
-      await createRawIRCv3Client({ nick: 'regtest3' })
-    );
+    const client = trackClient(await createRawSocketClient());
 
     await client.capLs();
     await client.capReq(['draft/account-registration']);
     client.capEnd();
     client.register('regtest3');
-    await client.waitForRaw(/001/);
+    await client.waitForLine(/001/);
 
-    // Try to register a new account (will likely fail with duplicate or need email)
-    const uniqueAccount = `testacct${Date.now()}`;
-    client.raw(`REGISTER * ${uniqueAccount} :test@example.com`);
+    // Try to register a new account
+    // Format per spec: REGISTER <account> <email> <password>
+    // Generate unique account name (max 15 chars for ACCOUNTLEN)
+    const uniqueAccount = `ta${Date.now() % 1000000000}`;
+    client.send(`REGISTER ${uniqueAccount} test@example.com testpass123`);
 
     // Should get some response - success or failure
     try {
-      const response = await client.waitForRaw(/REGISTER|FAIL|920|921|923|927/, 5000);
+      const response = await client.waitForLine(/REGISTER|FAIL|920|921|923|927/, 5000);
       expect(response).toBeDefined();
       console.log('REGISTER response:', response);
     } catch {
       // Some servers may not respond if registration is disabled
       console.log('No REGISTER response - registration may be disabled');
     }
+    client.send('QUIT');
   });
 });

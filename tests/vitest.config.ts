@@ -7,5 +7,14 @@ export default defineConfig({
     hookTimeout: 30000,
     include: ['src/**/*.test.ts'],
     reporters: ['verbose'],
+    // Run tests sequentially to avoid IRC server connection throttling
+    pool: 'forks',
+    poolOptions: {
+      forks: {
+        singleFork: true,
+      },
+    },
+    // Also run test files sequentially
+    fileParallelism: false,
   },
 });

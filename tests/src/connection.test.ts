@@ -1,11 +1,11 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { TestIRCClient, createTestClient } from './helpers/index.js';
+import { createRawSocketClient, RawSocketClient } from './helpers/index.js';
 
 describe('IRC Connection', () => {
-  const clients: TestIRCClient[] = [];
+  const clients: RawSocketClient[] = [];
 
   // Helper to track clients for cleanup
-  const trackClient = (client: TestIRCClient): TestIRCClient => {
+  const trackClient = (client: RawSocketClient): RawSocketClient => {
     clients.push(client);
     return client;
   };
@@ -13,70 +13,107 @@ describe('IRC Connection', () => {
   afterEach(() => {
     // Clean up all clients after each test
     for (const client of clients) {
-      client.quit('Test cleanup');
+      try {
+        client.close();
+      } catch {
+        // Ignore
+      }
     }
     clients.length = 0;
   });
 
   it('can connect to the IRC server', async () => {
-    const client = trackClient(await createTestClient({ nick: 'testuser1' }));
+    const client = trackClient(await createRawSocketClient());
+
+    await client.capLs();
+    client.capEnd();
+    client.register('testuser1');
+    await client.waitForLine(/001/);
 
     // If we get here, connection succeeded
     expect(client).toBeDefined();
+    client.send('QUIT');
   });
 
   it('receives welcome message on connect', async () => {
-    const client = trackClient(await createTestClient({ nick: 'testuser2' }));
+    const client = trackClient(await createRawSocketClient());
 
-    // Check for 001 (RPL_WELCOME) in raw buffer
-    const hasWelcome = client.rawMessages.some((msg) =>
-      msg.includes('001')
-    );
-    expect(hasWelcome).toBe(true);
+    await client.capLs();
+    client.capEnd();
+    client.register('testuser2');
+
+    // Wait for 001 (RPL_WELCOME)
+    const welcome = await client.waitForLine(/001/);
+    expect(welcome).toContain('001');
+    client.send('QUIT');
   });
 
   it('can join a channel', async () => {
-    const client = trackClient(await createTestClient({ nick: 'testuser3' }));
+    const client = trackClient(await createRawSocketClient());
 
-    client.join('#test');
+    await client.capLs();
+    client.capEnd();
+    client.register('testuser3');
+    await client.waitForLine(/001/);
+
+    client.send('JOIN #test');
 
     // Wait for JOIN confirmation
-    const joinMsg = await client.waitForRaw(/JOIN.*#test/i);
+    const joinMsg = await client.waitForLine(/JOIN.*#test/i);
     expect(joinMsg).toContain('#test');
+    client.send('QUIT');
   });
 
   it('can send and receive messages in a channel', async () => {
     // Create two clients
-    const client1 = trackClient(await createTestClient({ nick: 'sender1' }));
-    const client2 = trackClient(await createTestClient({ nick: 'receiver1' }));
+    const client1 = trackClient(await createRawSocketClient());
+    const client2 = trackClient(await createRawSocketClient());
+
+    await client1.capLs();
+    client1.capEnd();
+    client1.register('sender1');
+    await client1.waitForLine(/001/);
+
+    await client2.capLs();
+    client2.capEnd();
+    client2.register('receiver1');
+    await client2.waitForLine(/001/);
 
     // Both join the same channel
-    client1.join('#msgtest');
-    client2.join('#msgtest');
+    client1.send('JOIN #msgtest');
+    client2.send('JOIN #msgtest');
 
     // Wait for both to join
-    await client1.waitForRaw(/JOIN.*#msgtest/i);
-    await client2.waitForRaw(/JOIN.*#msgtest/i);
+    await client1.waitForLine(/JOIN.*#msgtest/i);
+    await client2.waitForLine(/JOIN.*#msgtest/i);
 
     // Small delay to ensure channel state is synced
     await new Promise((r) => setTimeout(r, 500));
 
     // Client 1 sends a message
     const testMessage = `Hello from test ${Date.now()}`;
-    client1.say('#msgtest', testMessage);
+    client1.send(`PRIVMSG #msgtest :${testMessage}`);
 
     // Client 2 should receive it
-    const received = await client2.waitForRaw(new RegExp(testMessage));
+    const received = await client2.waitForLine(new RegExp(testMessage));
     expect(received).toContain(testMessage);
+    client1.send('QUIT');
+    client2.send('QUIT');
   });
 
   it('can change nickname', async () => {
-    const client = trackClient(await createTestClient({ nick: 'oldnick1' }));
+    const client = trackClient(await createRawSocketClient());
 
-    client.nick('newnick1');
+    await client.capLs();
+    client.capEnd();
+    client.register('oldnick1');
+    await client.waitForLine(/001/);
+
+    client.send('NICK newnick1');
 
     // Wait for NICK confirmation
-    const nickMsg = await client.waitForRaw(/NICK.*newnick1/i);
+    const nickMsg = await client.waitForLine(/NICK.*newnick1/i);
     expect(nickMsg).toContain('newnick1');
+    client.send('QUIT');
   });
 });

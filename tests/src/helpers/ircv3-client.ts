@@ -1,4 +1,5 @@
 import { Client } from 'irc-framework';
+import { Socket } from 'net';
 
 export interface IRCv3Config {
   host: string;
@@ -141,7 +142,9 @@ export class IRCv3TestClient {
     // Wait for CAP LS response (may be multiline with *)
     let done = false;
     while (!done) {
-      const response = await this.waitForRaw(/^:\S+ CAP \S+ LS/i);
+      let response = await this.waitForRaw(/^:\S+ CAP \S+ LS/i);
+      // Trim trailing CRLF/whitespace
+      response = response.replace(/[\r\n]+$/, '');
 
       // Parse capabilities from response
       // Format: :server CAP nick LS [*] :cap1 cap2=value cap3
@@ -149,8 +152,11 @@ export class IRCv3TestClient {
       if (match) {
         const caps = match[2].split(' ');
         for (const cap of caps) {
-          const [name, value] = cap.split('=');
-          this.capState.available.set(name, value ?? null);
+          // Only split on first = to preserve value (e.g., draft/multiline=max-bytes=4096,max-lines=24)
+          const eqIndex = cap.indexOf('=');
+          const name = eqIndex === -1 ? cap : cap.substring(0, eqIndex);
+          const value = eqIndex === -1 ? null : cap.substring(eqIndex + 1);
+          this.capState.available.set(name, value);
         }
         // If no *, this is the final line
         done = !match[1];
@@ -169,29 +175,66 @@ export class IRCv3TestClient {
   async capReq(caps: string[]): Promise<{ ack: string[]; nak: string[] }> {
     this.raw(`CAP REQ :${caps.join(' ')}`);
 
-    const response = await this.waitForRaw(/^:\S+ CAP \S+ (ACK|NAK)/i);
-    const match = response.match(/CAP \S+ (ACK|NAK) :(.*)$/i);
+    // Server may send multiple CAP responses (e.g., cap-notify auto-ACKs)
+    // We need to collect all ACK/NAK responses and find our requested caps
+    const ackCaps: string[] = [];
+    const nakCaps: string[] = [];
+    const requestedSet = new Set(caps.map(c => c.toLowerCase().replace(/^-/, '')));
+    let foundResponse = false;
 
-    if (!match) {
-      throw new Error(`Invalid CAP response: ${response}`);
-    }
+    // Wait for responses with a timeout
+    const startTime = Date.now();
+    const timeout = 5000;
 
-    const type = match[1].toUpperCase();
-    const respondedCaps = match[2].split(' ').filter(c => c);
+    while (!foundResponse && Date.now() - startTime < timeout) {
+      try {
+        let response = await this.waitForRaw(/^:\S+ CAP \S+ (ACK|NAK)/i, 1000, true);
+        // Trim trailing CRLF/whitespace
+        response = response.replace(/[\r\n]+$/, '');
 
-    if (type === 'ACK') {
-      for (const cap of respondedCaps) {
-        // Handle -cap (disabled) vs cap (enabled)
-        if (cap.startsWith('-')) {
-          this.capState.enabled.delete(cap.substring(1));
-        } else {
-          this.capState.enabled.add(cap);
+        // Try both formats: with and without colon before caps
+        let match = response.match(/CAP \S+ (ACK|NAK) :(.*)$/i);
+        if (!match) {
+          match = response.match(/CAP \S+ (ACK|NAK) (.*)$/i);
         }
+
+        if (match) {
+          const type = match[1].toUpperCase();
+          const respondedCaps = match[2].split(' ').filter(c => c);
+
+          for (const cap of respondedCaps) {
+            const capName = cap.toLowerCase().replace(/^-/, '');
+            if (type === 'ACK') {
+              // Handle -cap (disabled) vs cap (enabled)
+              if (cap.startsWith('-')) {
+                this.capState.enabled.delete(cap.substring(1));
+              } else {
+                this.capState.enabled.add(cap);
+              }
+              ackCaps.push(cap);
+            } else {
+              nakCaps.push(cap);
+            }
+
+            // Check if this response includes any of our requested caps
+            if (requestedSet.has(capName)) {
+              foundResponse = true;
+            }
+          }
+        }
+      } catch {
+        // Timeout waiting for more responses, break out
+        break;
       }
-      return { ack: respondedCaps, nak: [] };
-    } else {
-      return { ack: [], nak: respondedCaps };
     }
+
+    // If we didn't find our specific caps, but got ACK responses,
+    // the requested caps might be in there (some servers ACK all at once)
+    if (!foundResponse && ackCaps.length > 0) {
+      foundResponse = true;
+    }
+
+    return { ack: ackCaps, nak: nakCaps };
   }
 
   /**
@@ -255,8 +298,9 @@ export class IRCv3TestClient {
 
   /**
    * Wait for a raw message matching a pattern.
+   * Set consumeFromBuffer=true to remove the matched line from buffer (useful for loops).
    */
-  async waitForRaw(pattern: string | RegExp, timeout = 5000): Promise<string> {
+  async waitForRaw(pattern: string | RegExp, timeout = 5000, consumeFromBuffer = false): Promise<string> {
     const regex = typeof pattern === 'string' ? new RegExp(pattern) : pattern;
 
     return new Promise((resolve, reject) => {
@@ -269,9 +313,13 @@ export class IRCv3TestClient {
       }, timeout);
 
       // Check existing buffer first
-      for (const line of this.rawBuffer) {
-        if (regex.test(line)) {
+      for (let i = 0; i < this.rawBuffer.length; i++) {
+        if (regex.test(this.rawBuffer[i])) {
           clearTimeout(timer);
+          const line = this.rawBuffer[i];
+          if (consumeFromBuffer) {
+            this.rawBuffer.splice(i, 1);
+          }
           resolve(line);
           return;
         }
@@ -483,5 +531,245 @@ export async function createRawIRCv3Client(
     gecos: config.gecos,
     tls: config.tls,
   });
+  return client;
+}
+
+/**
+ * Pure socket-based IRC client for truly raw protocol testing.
+ * Does not use irc-framework at all - just raw TCP socket.
+ */
+export class RawSocketClient {
+  private socket: Socket | null = null;
+  private buffer = '';
+  private lines: string[] = [];
+  private lineListeners: Array<(line: string) => void> = [];
+  private availableCaps = new Map<string, string | null>();
+  private enabledCaps = new Set<string>();
+
+  async connect(host: string, port: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.socket = new Socket();
+
+      const timeout = setTimeout(() => {
+        reject(new Error('Connection timeout'));
+      }, 10000);
+
+      this.socket.on('connect', () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+
+      this.socket.on('error', (err: Error) => {
+        clearTimeout(timeout);
+        reject(err);
+      });
+
+      this.socket.on('data', (data: Buffer) => {
+        this.buffer += data.toString();
+        const parts = this.buffer.split('\r\n');
+        this.buffer = parts.pop() || '';
+        for (const line of parts) {
+          if (line) {
+            // Auto-respond to PING
+            if (line.startsWith('PING ')) {
+              const pingArg = line.substring(5);
+              this.send(`PONG ${pingArg}`);
+            }
+            this.lines.push(line);
+            for (const listener of this.lineListeners) {
+              listener(line);
+            }
+          }
+        }
+      });
+
+      this.socket.connect(port, host);
+    });
+  }
+
+  send(line: string): void {
+    this.socket?.write(line + '\r\n');
+  }
+
+  private consumedIndices = new Set<number>();
+
+  async waitForLine(pattern: RegExp, timeout = 5000): Promise<string> {
+    // Check existing lines first (skip already consumed ones)
+    for (let i = 0; i < this.lines.length; i++) {
+      if (!this.consumedIndices.has(i) && pattern.test(this.lines[i])) {
+        this.consumedIndices.add(i);
+        return this.lines[i];
+      }
+    }
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const idx = this.lineListeners.indexOf(handler);
+        if (idx >= 0) this.lineListeners.splice(idx, 1);
+        reject(new Error(`Timeout waiting for ${pattern}\nBuffer: ${this.lines.slice(-10).join('\\n')}`));
+      }, timeout);
+
+      const handler = (line: string) => {
+        if (pattern.test(line)) {
+          clearTimeout(timer);
+          const idx = this.lineListeners.indexOf(handler);
+          if (idx >= 0) this.lineListeners.splice(idx, 1);
+          // Mark as consumed (it's the last line added)
+          this.consumedIndices.add(this.lines.length - 1);
+          resolve(line);
+        }
+      };
+
+      this.lineListeners.push(handler);
+    });
+  }
+
+  async collectLines(pattern: RegExp, stopPattern: RegExp, timeout = 5000): Promise<string[]> {
+    const collected: string[] = [];
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < timeout) {
+      try {
+        const line = await this.waitForLine(pattern, Math.min(1000, timeout - (Date.now() - startTime)));
+        collected.push(line);
+        if (stopPattern.test(line)) {
+          break;
+        }
+      } catch {
+        break;
+      }
+    }
+
+    return collected;
+  }
+
+  get allLines(): string[] {
+    return [...this.lines];
+  }
+
+  /**
+   * Clear the buffer to reset line consumption.
+   * This marks all existing lines as consumed so waitForLine only matches new lines.
+   */
+  clearRawBuffer(): void {
+    // Mark all current lines as consumed
+    for (let i = 0; i < this.lines.length; i++) {
+      this.consumedIndices.add(i);
+    }
+  }
+
+  /**
+   * Alias for clearRawBuffer for compatibility.
+   */
+  clearBuffer(): void {
+    this.clearRawBuffer();
+  }
+
+  /**
+   * Perform CAP LS and parse capabilities.
+   */
+  async capLs(version = 302): Promise<Map<string, string | null>> {
+    this.send(`CAP LS ${version}`);
+
+    // Collect all CAP LS lines (may be multiline)
+    // Pattern matches both pre-registration (CAP * LS) and post-registration (CAP nick LS)
+    let done = false;
+    while (!done) {
+      const line = await this.waitForLine(/CAP \S+ LS/i);
+
+      // Parse capabilities from line
+      // Format: :server CAP target LS [*] :cap1 cap2=value cap3
+      const match = line.match(/CAP \S+ LS( \*)? :(.+)$/i);
+      if (match) {
+        const caps = match[2].split(' ');
+        for (const cap of caps) {
+          const eqIdx = cap.indexOf('=');
+          if (eqIdx === -1) {
+            this.availableCaps.set(cap, null);
+          } else {
+            this.availableCaps.set(cap.substring(0, eqIdx), cap.substring(eqIdx + 1));
+          }
+        }
+        // If no *, this is the final line
+        done = !match[1];
+      } else {
+        done = true;
+      }
+    }
+
+    return this.availableCaps;
+  }
+
+  /**
+   * Request capabilities and get ACK/NAK response.
+   */
+  async capReq(caps: string[]): Promise<{ ack: string[]; nak: string[] }> {
+    this.send(`CAP REQ :${caps.join(' ')}`);
+
+    // Pattern matches both pre-registration (CAP * ACK/NAK) and post-registration (CAP nick ACK/NAK)
+    const response = await this.waitForLine(/CAP \S+ (ACK|NAK)/i);
+    const match = response.match(/CAP \S+ (ACK|NAK) :?(.*)$/i);
+
+    const ack: string[] = [];
+    const nak: string[] = [];
+
+    if (match) {
+      const type = match[1].toUpperCase();
+      const respondedCaps = match[2].split(' ').filter(c => c);
+
+      for (const cap of respondedCaps) {
+        if (type === 'ACK') {
+          if (cap.startsWith('-')) {
+            this.enabledCaps.delete(cap.substring(1));
+          } else {
+            this.enabledCaps.add(cap);
+          }
+          ack.push(cap);
+        } else {
+          nak.push(cap);
+        }
+      }
+    }
+
+    return { ack, nak };
+  }
+
+  /**
+   * Send CAP END.
+   */
+  capEnd(): void {
+    this.send('CAP END');
+  }
+
+  /**
+   * Register with NICK and USER.
+   */
+  register(nick: string, user?: string, gecos?: string): void {
+    this.send(`NICK ${nick}`);
+    this.send(`USER ${user ?? nick} 0 * :${gecos ?? 'Test User'}`);
+  }
+
+  /**
+   * Check if a capability is enabled.
+   */
+  hasCapEnabled(cap: string): boolean {
+    return this.enabledCaps.has(cap);
+  }
+
+  /**
+   * Get available capabilities.
+   */
+  get caps(): Map<string, string | null> {
+    return this.availableCaps;
+  }
+
+  close(): void {
+    this.socket?.destroy();
+  }
+}
+
+export async function createRawSocketClient(host = process.env.IRC_HOST ?? 'nefarious', port = 6667): Promise<RawSocketClient> {
+  const client = new RawSocketClient();
+  await client.connect(host, port);
   return client;
 }
