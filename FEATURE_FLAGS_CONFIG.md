@@ -82,11 +82,34 @@ Feature flags are configured in the `features {}` block of the IRCd config file.
 | `FEAT_METADATA_X3_TIMEOUT` | 60 | Seconds to wait for X3 before using cache-only mode |
 | `FEAT_METADATA_QUEUE_SIZE` | 1000 | Maximum pending writes when X3 is unavailable |
 | `FEAT_METADATA_BURST` | TRUE | Send metadata during netburst to linking servers |
+| `FEAT_METADATA_DB` | "metadata" | LMDB database directory path for metadata storage |
 
 **Cache-Aware Metadata**: When enabled, Nefarious maintains an LMDB-backed cache for metadata:
 - **X3 Detection**: Automatically detects X3 availability via heartbeat on METADATA updates
 - **Write Queue**: Queues writes when X3 is unavailable, replays when reconnected
 - **Netburst**: Sends user/channel metadata to linking servers during netburst
+- **LMDB Path**: Configurable via `METADATA_DB` feature (default: `metadata/` relative to ircd dir)
+
+### Compression Configuration (Nefarious)
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `FEAT_COMPRESS_THRESHOLD` | 256 | Minimum value size (bytes) to trigger zstd compression |
+| `FEAT_COMPRESS_LEVEL` | 3 | zstd compression level (1-22, higher = better ratio, slower) |
+
+**Compression**: When built with `--with-zstd`, Nefarious automatically compresses LMDB-stored values (metadata, chathistory) that exceed the threshold.
+
+**Compression Levels:**
+- Level 1: Fastest, ~60% of max compression
+- Level 3: Default, good balance (recommended)
+- Level 9: Similar to zlib -9
+- Level 19-22: Maximum compression, much slower
+
+**Compression Passthrough (Z flag)**: When X3 sends metadata responses via the P10 `MD` token with the `Z` flag, Nefarious stores the pre-compressed data directly without recompression:
+```
+Az MD ABAAB avatar * Z :KLUv/QBYpQEAaHR0cHM6Ly9...
+```
+This eliminates unnecessary decompress/recompress cycles between services.
 
 ### Presence Aggregation Configuration
 
@@ -139,6 +162,14 @@ features {
     "CHATHISTORY_DB" = "history";
     "CHATHISTORY_RETENTION" = "7";
     "CHATHISTORY_PRIVATE" = "FALSE";
+
+    # Metadata caching
+    "METADATA_DB" = "metadata";        # LMDB database directory
+    "METADATA_BURST" = "TRUE";         # Send metadata during netburst
+
+    # Compression (requires --with-zstd)
+    "COMPRESS_THRESHOLD" = "256";      # Compress values > 256 bytes
+    "COMPRESS_LEVEL" = "3";            # zstd level (1-22)
 
     # Presence Aggregation
     "PRESENCE_AGGREGATION" = "FALSE";  # Enable for multi-connection presence
@@ -556,6 +587,13 @@ X3 supports optional Zstandard (zstd) compression for metadata values stored in 
 - Falls back to uncompressed if compression doesn't save space
 - Backward compatible: old uncompressed data is read correctly
 
+**Compression Passthrough:**
+When responding to MDQ queries from Nefarious, X3 uses `irc_metadata_raw()` to send compressed data with the P10 `Z` flag:
+```
+Az MD ABAAB avatar * Z :KLUv/QBYpQEAaHR0cHM6Ly9...
+```
+This allows Nefarious to store pre-compressed data directly in its LMDB cache without recompression, eliminating CPU overhead on both sides.
+
 **Build Requirement:**
 
 Compression support requires libzstd and is enabled with `--with-zstd` during configure:
@@ -710,6 +748,7 @@ In networks with multiple servers between client and X3, each intermediate serve
 | 1.3 | December 2024 | Added Metadata TTL (Time-To-Live) documentation |
 | 1.4 | December 2024 | Added X3 SSL/TLS S2S connection documentation |
 | 1.5 | December 2024 | Added Metadata Compression (zstd) documentation |
+| 1.6 | December 2024 | Added FEAT_COMPRESS_THRESHOLD, FEAT_COMPRESS_LEVEL, FEAT_METADATA_DB for Nefarious |
 
 ---
 

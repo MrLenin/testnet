@@ -604,6 +604,11 @@ ABAAB RN #oldname #newname :Rebranding
 [SOURCE] MD [TARGET] [KEY] [VISIBILITY] :[VALUE]
 ```
 
+**Set Metadata with Compression Passthrough (Z flag)**:
+```
+[SOURCE] MD [TARGET] [KEY] [VISIBILITY] Z :[BASE64_COMPRESSED_VALUE]
+```
+
 **Clear Metadata**:
 ```
 [SOURCE] MD [TARGET] [KEY]
@@ -616,6 +621,15 @@ ABAAB RN #oldname #newname :Rebranding
 | `*` | Public - visible to everyone |
 | `P` | Private - visible only to owner and opers |
 
+#### Compression Flag (Z)
+
+The optional `Z` flag indicates:
+- Value is zstd-compressed
+- Value is base64-encoded (for safe P10 transmission)
+- Receiver should decode + store directly without recompression
+
+This enables compressed data passthrough between X3 and Nefarious LMDB caches, eliminating unnecessary decompress/recompress cycles.
+
 #### Examples
 
 ```
@@ -627,6 +641,9 @@ ABAAB MD ABAAB secret P :private-value
 
 # Set channel description (public)
 AB MD #channel description * :Welcome to our channel
+
+# Set compressed metadata (Z flag)
+Az MD ABAAB avatar * Z :KLUv/QBYpQEAaHR0cHM6Ly9...
 
 # Clear metadata (visibility not needed)
 ABAAB MD ABAAB avatar
@@ -1184,6 +1201,7 @@ In a network with mixed old/new servers:
 | 1.2 | December 2024 | Added metadata visibility support (P10 `*`/`P` tokens), updated compatibility matrix, removed duplicate feature flags section |
 | 1.3 | December 2024 | Added METADATAQUERY (MDQ) token documentation with multi-hop routing |
 | 1.4 | December 2024 | Updated MARKREAD (MR) to route through X3 with S/G/R subcommands and broadcast |
+| 1.5 | December 2024 | Added compression passthrough Z flag to MD token for zstd-compressed metadata |
 
 ---
 
