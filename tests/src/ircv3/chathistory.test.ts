@@ -258,8 +258,10 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.clearRawBuffer();
 
       // Request list of targets with history
+      // TARGETS requires two timestamps (unlike other subcommands that accept *)
       const now = new Date().toISOString();
-      client.send(`CHATHISTORY TARGETS timestamp=${now} * 10`);
+      const past = new Date(Date.now() - 3600000).toISOString(); // 1 hour ago
+      client.send(`CHATHISTORY TARGETS timestamp=${past} timestamp=${now} 10`);
 
       try {
         // Response includes CHATHISTORY lines listing targets
@@ -586,21 +588,25 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
         const match = echo.match(/msgid=([^\s;]+)/);
         if (match) {
           msgid = match[1];
+          console.log('Captured msgid:', msgid);
         }
       } catch {
         console.log('No echo with msgid');
       }
 
       if (msgid) {
-        await new Promise(r => setTimeout(r, 500));
+        // Wait for history backend to persist the message
+        await new Promise(r => setTimeout(r, 1000));
         client.clearRawBuffer();
 
         // Request messages before this msgid
+        console.log(`Sending: CHATHISTORY BEFORE ${channelName} msgid=${msgid} 10`);
         client.send(`CHATHISTORY BEFORE ${channelName} msgid=${msgid} 10`);
 
         try {
           const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
           expect(batchStart).toBeDefined();
+          console.log('Got batch start:', batchStart);
 
           const messages: string[] = [];
           const startTime = Date.now();
@@ -614,15 +620,18 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
             }
           }
 
+          console.log('Messages found:', messages.length);
           // Should have at least the first message
           expect(messages.length).toBeGreaterThanOrEqual(1);
           // Should NOT include "Second message"
           for (const msg of messages) {
             expect(msg).not.toContain('Second message');
           }
-        } catch {
-          console.log('BEFORE with msgid failed');
+        } catch (e) {
+          console.log('BEFORE with msgid failed:', (e as Error).message);
         }
+      } else {
+        console.log('No msgid captured, skipping test');
       }
 
       client.send('QUIT');
@@ -655,21 +664,26 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
         console.log('No echo with msgid');
       }
 
-      // Send more messages
-      await new Promise(r => setTimeout(r, 100));
-      client.send(`PRIVMSG ${channelName} :After message 1`);
-      client.send(`PRIVMSG ${channelName} :After message 2`);
-
       if (msgid) {
-        await new Promise(r => setTimeout(r, 500));
+        // Send more messages after capturing the reference msgid
+        await new Promise(r => setTimeout(r, 100));
+        client.send(`PRIVMSG ${channelName} :After message 1`);
+        await client.waitForLine(/PRIVMSG.*After message 1/i, 3000);
+        client.send(`PRIVMSG ${channelName} :After message 2`);
+        await client.waitForLine(/PRIVMSG.*After message 2/i, 3000);
+
+        // Wait for history backend to persist
+        await new Promise(r => setTimeout(r, 1000));
         client.clearRawBuffer();
 
         // Request messages after this msgid
+        console.log(`Sending: CHATHISTORY AFTER ${channelName} msgid=${msgid} 10`);
         client.send(`CHATHISTORY AFTER ${channelName} msgid=${msgid} 10`);
 
         try {
           const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
           expect(batchStart).toBeDefined();
+          console.log('Got batch start:', batchStart);
 
           const messages: string[] = [];
           const startTime = Date.now();
@@ -683,15 +697,18 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
             }
           }
 
+          console.log('Messages found:', messages.length);
           // Should have at least 2 messages
           expect(messages.length).toBeGreaterThanOrEqual(2);
           // Should NOT include "Reference message"
           for (const msg of messages) {
             expect(msg).not.toContain('Reference message');
           }
-        } catch {
-          console.log('AFTER with msgid failed');
+        } catch (e) {
+          console.log('AFTER with msgid failed:', (e as Error).message);
         }
+      } else {
+        console.log('No msgid captured, skipping test');
       }
 
       client.send('QUIT');
