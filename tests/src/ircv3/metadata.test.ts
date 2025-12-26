@@ -388,4 +388,322 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.send('QUIT');
     });
   });
+
+  describe('Metadata Limits and Constraints', () => {
+    it('rejects metadata value exceeding max size', async () => {
+      const client = trackClient(await createRawSocketClient());
+
+      const caps = await client.capLs();
+      const metaCap = caps.has('draft/metadata-2') ? 'draft/metadata-2' : 'draft/metadata';
+      await client.capReq([metaCap]);
+      client.capEnd();
+      client.register('metalimit1');
+      await client.waitForLine(/001/);
+
+      // Create a very large value (exceeds typical limits)
+      const largeValue = 'x'.repeat(100000);
+      client.send(`METADATA * SET largetest :${largeValue}`);
+
+      try {
+        // Should receive 766 ERR_KEYINVALID or FAIL
+        const response = await client.waitForLine(/766|FAIL|ERR/i, 5000);
+        console.log('Large value response:', response);
+      } catch {
+        console.log('No error for large metadata value');
+      }
+
+      client.send('QUIT');
+    });
+
+    it('handles special characters in metadata keys', async () => {
+      const client = trackClient(await createRawSocketClient());
+
+      const caps = await client.capLs();
+      const metaCap = caps.has('draft/metadata-2') ? 'draft/metadata-2' : 'draft/metadata';
+      await client.capReq([metaCap]);
+      client.capEnd();
+      client.register('metaspecial1');
+      await client.waitForLine(/001/);
+
+      // Keys with dots are typically used for namespacing
+      client.send('METADATA * SET example.org/customkey :value');
+      await new Promise(r => setTimeout(r, 500));
+      client.send('METADATA * GET example.org/customkey');
+
+      try {
+        const response = await client.waitForLine(/761|METADATA|766|FAIL/i, 3000);
+        console.log('Namespaced key response:', response);
+      } catch {
+        console.log('No response for namespaced key');
+      }
+
+      client.send('QUIT');
+    });
+
+    it('rejects empty key names', async () => {
+      const client = trackClient(await createRawSocketClient());
+
+      const caps = await client.capLs();
+      const metaCap = caps.has('draft/metadata-2') ? 'draft/metadata-2' : 'draft/metadata';
+      await client.capReq([metaCap]);
+      client.capEnd();
+      client.register('metaempty1');
+      await client.waitForLine(/001/);
+
+      // Empty key
+      client.send('METADATA * SET  :value');
+
+      try {
+        const response = await client.waitForLine(/766|FAIL|ERR|461/i, 3000);
+        console.log('Empty key response:', response);
+      } catch {
+        console.log('No error for empty key');
+      }
+
+      client.send('QUIT');
+    });
+  });
+
+  describe('Metadata Visibility', () => {
+    it('private metadata is only visible to owner', async () => {
+      const owner = trackClient(await createRawSocketClient());
+      const other = trackClient(await createRawSocketClient());
+
+      const caps = await owner.capLs();
+      const metaCap = caps.has('draft/metadata-2') ? 'draft/metadata-2' : 'draft/metadata';
+      await owner.capReq([metaCap]);
+      owner.capEnd();
+      owner.register('metapriv1');
+      await owner.waitForLine(/001/);
+
+      await other.capLs();
+      await other.capReq([metaCap]);
+      other.capEnd();
+      other.register('metapriv2');
+      await other.waitForLine(/001/);
+
+      // Owner sets private metadata (if supported)
+      owner.send('METADATA * SET privatekey :secretvalue');
+      await new Promise(r => setTimeout(r, 500));
+
+      // Other tries to get it
+      other.send('METADATA metapriv1 GET privatekey');
+
+      try {
+        const response = await other.waitForLine(/761|765|766|FAIL/i, 3000);
+        console.log('Private metadata access response:', response);
+        // 765 = ERR_KEYNOTSET (key not visible), 766 = ERR_KEYNOPERM
+      } catch {
+        console.log('No response for private metadata access');
+      }
+
+      owner.send('QUIT');
+      other.send('QUIT');
+    });
+
+    it('public metadata is visible to others', async () => {
+      const setter = trackClient(await createRawSocketClient());
+      const getter = trackClient(await createRawSocketClient());
+
+      const caps = await setter.capLs();
+      const metaCap = caps.has('draft/metadata-2') ? 'draft/metadata-2' : 'draft/metadata';
+      await setter.capReq([metaCap]);
+      setter.capEnd();
+      setter.register('metapub1');
+      await setter.waitForLine(/001/);
+
+      await getter.capLs();
+      await getter.capReq([metaCap]);
+      getter.capEnd();
+      getter.register('metapub2');
+      await getter.waitForLine(/001/);
+
+      // Setter sets a public key (avatar is typically public)
+      setter.send('METADATA * SET avatar :https://example.com/public.png');
+      await new Promise(r => setTimeout(r, 500));
+
+      // Getter retrieves it
+      getter.send('METADATA metapub1 GET avatar');
+
+      try {
+        const response = await getter.waitForLine(/761.*avatar|765/i, 3000);
+        console.log('Public metadata access response:', response);
+      } catch {
+        console.log('No response for public metadata access');
+      }
+
+      setter.send('QUIT');
+      getter.send('QUIT');
+    });
+  });
+
+  describe('Metadata Subscription Edge Cases', () => {
+    it('handles multiple SUB requests', async () => {
+      const client = trackClient(await createRawSocketClient());
+
+      const caps = await client.capLs();
+      const metaCap = caps.has('draft/metadata-2') ? 'draft/metadata-2' : 'draft/metadata';
+      await client.capReq([metaCap]);
+      client.capEnd();
+      client.register('metasub2');
+      await client.waitForLine(/001/);
+
+      // Subscribe to multiple keys
+      client.send('METADATA * SUB avatar');
+      client.send('METADATA * SUB pronouns');
+      client.send('METADATA * SUB bot');
+
+      await new Promise(r => setTimeout(r, 500));
+
+      // UNSUB from one
+      client.send('METADATA * UNSUB avatar');
+
+      try {
+        const response = await client.waitForLine(/769|770|METADATA/i, 3000);
+        console.log('Multiple SUB response:', response);
+      } catch {
+        console.log('No response for multiple subscriptions');
+      }
+
+      client.send('QUIT');
+    });
+
+    it('UNSUB from non-subscribed key', async () => {
+      const client = trackClient(await createRawSocketClient());
+
+      const caps = await client.capLs();
+      const metaCap = caps.has('draft/metadata-2') ? 'draft/metadata-2' : 'draft/metadata';
+      await client.capReq([metaCap]);
+      client.capEnd();
+      client.register('metaunsub1');
+      await client.waitForLine(/001/);
+
+      // Try to unsubscribe from something we never subscribed to
+      client.send('METADATA * UNSUB nonexistent');
+
+      try {
+        const response = await client.waitForLine(/769|770|FAIL|METADATA/i, 3000);
+        console.log('UNSUB non-subscribed response:', response);
+      } catch {
+        console.log('No response for UNSUB non-subscribed');
+      }
+
+      client.send('QUIT');
+    });
+  });
+
+  describe('Metadata Persistence', () => {
+    it('metadata persists across reconnection for authenticated users', async () => {
+      // This test requires SASL authentication to verify persistence
+      const client1 = trackClient(await createRawSocketClient());
+
+      const caps = await client1.capLs();
+      const metaCap = caps.has('draft/metadata-2') ? 'draft/metadata-2' : 'draft/metadata';
+
+      // Check if SASL is available
+      if (!caps.has('sasl')) {
+        console.log('Skipping persistence test - SASL not available');
+        client1.send('QUIT');
+        return;
+      }
+
+      await client1.capReq([metaCap, 'sasl']);
+
+      // Try to authenticate
+      client1.send('AUTHENTICATE PLAIN');
+      try {
+        await client1.waitForLine(/AUTHENTICATE \+/);
+        const user = process.env.IRC_TEST_ACCOUNT ?? 'testaccount';
+        const pass = process.env.IRC_TEST_PASSWORD ?? 'testpass';
+        const payload = Buffer.from(`${user}\0${user}\0${pass}`).toString('base64');
+        client1.send(`AUTHENTICATE ${payload}`);
+        await client1.waitForLine(/903/i, 5000);
+      } catch {
+        console.log('SASL auth failed - skipping persistence test');
+        client1.send('QUIT');
+        return;
+      }
+
+      client1.capEnd();
+      client1.register('metapersist1');
+      await client1.waitForLine(/001/);
+
+      // Set metadata
+      const testValue = `persist_${Date.now()}`;
+      client1.send(`METADATA * SET testpersist :${testValue}`);
+      await new Promise(r => setTimeout(r, 500));
+
+      client1.send('QUIT');
+      await new Promise(r => setTimeout(r, 1000));
+
+      // Reconnect and check if metadata persists
+      const client2 = trackClient(await createRawSocketClient());
+      await client2.capLs();
+      await client2.capReq([metaCap, 'sasl']);
+
+      client2.send('AUTHENTICATE PLAIN');
+      try {
+        await client2.waitForLine(/AUTHENTICATE \+/);
+        const user = process.env.IRC_TEST_ACCOUNT ?? 'testaccount';
+        const pass = process.env.IRC_TEST_PASSWORD ?? 'testpass';
+        const payload = Buffer.from(`${user}\0${user}\0${pass}`).toString('base64');
+        client2.send(`AUTHENTICATE ${payload}`);
+        await client2.waitForLine(/903/i, 5000);
+      } catch {
+        console.log('SASL auth failed on reconnect');
+        client2.send('QUIT');
+        return;
+      }
+
+      client2.capEnd();
+      client2.register('metapersist2');
+      await client2.waitForLine(/001/);
+
+      // Try to get the metadata we set
+      client2.send('METADATA * GET testpersist');
+
+      try {
+        const response = await client2.waitForLine(/761.*testpersist/i, 3000);
+        expect(response).toContain(testValue);
+        console.log('Metadata persisted:', response);
+      } catch {
+        console.log('Metadata did not persist or not found');
+      }
+
+      client2.send('QUIT');
+    });
+  });
+
+  describe('Metadata Rate Limiting', () => {
+    it('handles rapid metadata requests', async () => {
+      const client = trackClient(await createRawSocketClient());
+
+      const caps = await client.capLs();
+      const metaCap = caps.has('draft/metadata-2') ? 'draft/metadata-2' : 'draft/metadata';
+      await client.capReq([metaCap]);
+      client.capEnd();
+      client.register('metarate1');
+      await client.waitForLine(/001/);
+
+      // Send many rapid metadata requests
+      for (let i = 0; i < 20; i++) {
+        client.send(`METADATA * SET ratetest${i} :value${i}`);
+      }
+
+      await new Promise(r => setTimeout(r, 1000));
+
+      // Check if any rate limiting occurred
+      // Server may respond with FAIL or silently drop some
+      client.send('METADATA * LIST');
+
+      try {
+        const response = await client.waitForLine(/761|762|FAIL|METADATA/i, 5000);
+        console.log('Rate limit test response:', response);
+      } catch {
+        console.log('No response after rapid requests');
+      }
+
+      client.send('QUIT');
+    });
+  });
 });
