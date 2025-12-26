@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { IRCv3TestClient, createRawIRCv3Client } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
 
 /**
  * Message Redaction Tests (draft/message-redaction)
@@ -8,9 +8,9 @@ import { IRCv3TestClient, createRawIRCv3Client } from '../helpers/index.js';
  * Allows users to remove their own messages or ops to remove any message.
  */
 describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
-  const clients: IRCv3TestClient[] = [];
+  const clients: RawSocketClient[] = [];
 
-  const trackClient = (client: IRCv3TestClient): IRCv3TestClient => {
+  const trackClient = (client: RawSocketClient): RawSocketClient => {
     clients.push(client);
     return client;
   };
@@ -18,7 +18,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
   afterEach(() => {
     for (const client of clients) {
       try {
-        client.quit('Test cleanup');
+        client.close();
       } catch {
         // Ignore
       }
@@ -28,48 +28,46 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
 
   describe('Capability', () => {
     it('server advertises draft/message-redaction', async () => {
-      const client = trackClient(
-        await createRawIRCv3Client({ nick: 'redtest1' })
-      );
+      const client = trackClient(await createRawSocketClient());
 
       const caps = await client.capLs();
       expect(caps.has('draft/message-redaction')).toBe(true);
+
+      client.send('QUIT');
     });
 
     it('can request draft/message-redaction capability', async () => {
-      const client = trackClient(
-        await createRawIRCv3Client({ nick: 'redtest2' })
-      );
+      const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
       const result = await client.capReq(['draft/message-redaction']);
 
       expect(result.ack).toContain('draft/message-redaction');
+
+      client.send('QUIT');
     });
   });
 
   describe('REDACT Command', () => {
     it('can redact own message with REDACT', async () => {
-      const client = trackClient(
-        await createRawIRCv3Client({ nick: 'redact1' })
-      );
+      const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['draft/message-redaction', 'echo-message', 'message-tags']);
+      await client.capReq(['draft/message-redaction', 'echo-message']);
       client.capEnd();
       client.register('redact1');
-      await client.waitForRaw(/001/);
+      await client.waitForLine(/001/);
 
       const channel = `#redact${Date.now()}`;
-      client.join(channel);
-      await client.waitForRaw(new RegExp(`JOIN.*${channel}`, 'i'));
+      client.send(`JOIN ${channel}`);
+      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
       // Send a message and get its msgid
-      client.say(channel, 'Message to be redacted');
+      client.send(`PRIVMSG ${channel} :Message to be redacted`);
 
       let msgid: string | null = null;
       try {
-        const echo = await client.waitForRaw(/PRIVMSG.*Message to be redacted/i, 3000);
+        const echo = await client.waitForLine(/PRIVMSG.*Message to be redacted/i, 3000);
         const match = echo.match(/msgid=([^\s;]+)/);
         if (match) {
           msgid = match[1];
@@ -82,51 +80,49 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
         client.clearRawBuffer();
 
         // Redact the message
-        client.raw(`REDACT ${channel} ${msgid}`);
+        client.send(`REDACT ${channel} ${msgid}`);
 
         try {
-          const response = await client.waitForRaw(/REDACT|FAIL/i, 5000);
+          const response = await client.waitForLine(/REDACT|FAIL/i, 5000);
           expect(response).toBeDefined();
           console.log('REDACT response:', response);
         } catch {
           console.log('No REDACT response');
         }
       }
+
+      client.send('QUIT');
     });
 
     it('REDACT with reason includes reason in notification', async () => {
-      const sender = trackClient(
-        await createRawIRCv3Client({ nick: 'redsend1' })
-      );
-      const receiver = trackClient(
-        await createRawIRCv3Client({ nick: 'redrecv1' })
-      );
+      const sender = trackClient(await createRawSocketClient());
+      const receiver = trackClient(await createRawSocketClient());
 
       await sender.capLs();
-      await sender.capReq(['draft/message-redaction', 'echo-message', 'message-tags']);
+      await sender.capReq(['draft/message-redaction', 'echo-message']);
       sender.capEnd();
       sender.register('redsend1');
-      await sender.waitForRaw(/001/);
+      await sender.waitForLine(/001/);
 
       await receiver.capLs();
-      await receiver.capReq(['draft/message-redaction', 'message-tags']);
+      await receiver.capReq(['draft/message-redaction']);
       receiver.capEnd();
       receiver.register('redrecv1');
-      await receiver.waitForRaw(/001/);
+      await receiver.waitForLine(/001/);
 
       const channel = `#redreason${Date.now()}`;
-      sender.join(channel);
-      receiver.join(channel);
-      await sender.waitForRaw(new RegExp(`JOIN.*${channel}`, 'i'));
-      await receiver.waitForRaw(new RegExp(`JOIN.*${channel}`, 'i'));
+      sender.send(`JOIN ${channel}`);
+      receiver.send(`JOIN ${channel}`);
+      await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await receiver.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
       await new Promise(r => setTimeout(r, 300));
 
       // Send message
-      sender.say(channel, 'This will be redacted');
+      sender.send(`PRIVMSG ${channel} :This will be redacted`);
 
       let msgid: string | null = null;
       try {
-        const echo = await sender.waitForRaw(/PRIVMSG.*This will be redacted/i, 3000);
+        const echo = await sender.waitForLine(/PRIVMSG.*This will be redacted/i, 3000);
         const match = echo.match(/msgid=([^\s;]+)/);
         if (match) {
           msgid = match[1];
@@ -139,10 +135,10 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
         receiver.clearRawBuffer();
 
         // Redact with reason
-        sender.raw(`REDACT ${channel} ${msgid} :Posted by mistake`);
+        sender.send(`REDACT ${channel} ${msgid} :Posted by mistake`);
 
         try {
-          const notification = await receiver.waitForRaw(/REDACT/i, 5000);
+          const notification = await receiver.waitForLine(/REDACT/i, 5000);
           expect(notification).toContain(msgid);
           // May contain reason
           console.log('REDACT notification:', notification);
@@ -150,45 +146,44 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
           console.log('No REDACT notification received');
         }
       }
+
+      sender.send('QUIT');
+      receiver.send('QUIT');
     });
   });
 
   describe('REDACT Permissions', () => {
     it('cannot redact other user message without op', async () => {
-      const sender = trackClient(
-        await createRawIRCv3Client({ nick: 'redsender2' })
-      );
-      const attacker = trackClient(
-        await createRawIRCv3Client({ nick: 'redattack1' })
-      );
+      const sender = trackClient(await createRawSocketClient());
+      const attacker = trackClient(await createRawSocketClient());
 
       await sender.capLs();
-      await sender.capReq(['draft/message-redaction', 'echo-message', 'message-tags']);
+      await sender.capReq(['draft/message-redaction', 'echo-message']);
       sender.capEnd();
       sender.register('redsender2');
-      await sender.waitForRaw(/001/);
+      await sender.waitForLine(/001/);
 
       await attacker.capLs();
-      await attacker.capReq(['draft/message-redaction', 'message-tags']);
+      await attacker.capReq(['draft/message-redaction']);
       attacker.capEnd();
       attacker.register('redattack1');
-      await attacker.waitForRaw(/001/);
+      await attacker.waitForLine(/001/);
 
       const channel = `#redperm${Date.now()}`;
-      sender.join(channel);
-      await sender.waitForRaw(new RegExp(`JOIN.*${channel}`, 'i'));
+      sender.send(`JOIN ${channel}`);
+      await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
       // Sender is now op, let attacker join
-      attacker.join(channel);
-      await attacker.waitForRaw(new RegExp(`JOIN.*${channel}`, 'i'));
+      attacker.send(`JOIN ${channel}`);
+      await attacker.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
       await new Promise(r => setTimeout(r, 300));
 
       // Sender sends message
-      sender.say(channel, 'Protected message');
+      sender.send(`PRIVMSG ${channel} :Protected message`);
 
       let msgid: string | null = null;
       try {
-        const echo = await sender.waitForRaw(/PRIVMSG.*Protected message/i, 3000);
+        const echo = await sender.waitForLine(/PRIVMSG.*Protected message/i, 3000);
         const match = echo.match(/msgid=([^\s;]+)/);
         if (match) {
           msgid = match[1];
@@ -201,53 +196,52 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
         attacker.clearRawBuffer();
 
         // Attacker tries to redact sender's message
-        attacker.raw(`REDACT ${channel} ${msgid}`);
+        attacker.send(`REDACT ${channel} ${msgid}`);
 
         try {
           // Should receive error (FAIL or numeric)
-          const response = await attacker.waitForRaw(/REDACT|FAIL|4\d\d/i, 3000);
+          const response = await attacker.waitForLine(/REDACT|FAIL|4\d\d/i, 3000);
           // Either FAIL or error numeric expected
           console.log('Unauthorized REDACT response:', response);
         } catch {
           console.log('No response to unauthorized REDACT');
         }
       }
+
+      sender.send('QUIT');
+      attacker.send('QUIT');
     });
 
     it('op can redact any message in channel', async () => {
-      const op = trackClient(
-        await createRawIRCv3Client({ nick: 'redop1' })
-      );
-      const user = trackClient(
-        await createRawIRCv3Client({ nick: 'reduser1' })
-      );
+      const op = trackClient(await createRawSocketClient());
+      const user = trackClient(await createRawSocketClient());
 
       await op.capLs();
-      await op.capReq(['draft/message-redaction', 'message-tags']);
+      await op.capReq(['draft/message-redaction']);
       op.capEnd();
       op.register('redop1');
-      await op.waitForRaw(/001/);
+      await op.waitForLine(/001/);
 
       await user.capLs();
-      await user.capReq(['draft/message-redaction', 'echo-message', 'message-tags']);
+      await user.capReq(['draft/message-redaction', 'echo-message']);
       user.capEnd();
       user.register('reduser1');
-      await user.waitForRaw(/001/);
+      await user.waitForLine(/001/);
 
       const channel = `#redop${Date.now()}`;
-      op.join(channel);
-      await op.waitForRaw(new RegExp(`JOIN.*${channel}`, 'i'));
+      op.send(`JOIN ${channel}`);
+      await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
-      user.join(channel);
-      await user.waitForRaw(new RegExp(`JOIN.*${channel}`, 'i'));
+      user.send(`JOIN ${channel}`);
+      await user.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
       await new Promise(r => setTimeout(r, 300));
 
       // User sends message
-      user.say(channel, 'User message');
+      user.send(`PRIVMSG ${channel} :User message`);
 
       let msgid: string | null = null;
       try {
-        const echo = await user.waitForRaw(/PRIVMSG.*User message/i, 3000);
+        const echo = await user.waitForLine(/PRIVMSG.*User message/i, 3000);
         const match = echo.match(/msgid=([^\s;]+)/);
         if (match) {
           msgid = match[1];
@@ -260,68 +254,69 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
         op.clearRawBuffer();
 
         // Op redacts user's message
-        op.raw(`REDACT ${channel} ${msgid} :Moderation action`);
+        op.send(`REDACT ${channel} ${msgid} :Moderation action`);
 
         try {
-          const response = await op.waitForRaw(/REDACT/i, 5000);
+          const response = await op.waitForLine(/REDACT/i, 5000);
           expect(response).toBeDefined();
           console.log('Op REDACT response:', response);
         } catch {
           console.log('No op REDACT response');
         }
       }
+
+      op.send('QUIT');
+      user.send('QUIT');
     });
   });
 
   describe('REDACT Edge Cases', () => {
     it('REDACT nonexistent msgid returns error', async () => {
-      const client = trackClient(
-        await createRawIRCv3Client({ nick: 'redinv1' })
-      );
+      const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
       await client.capReq(['draft/message-redaction']);
       client.capEnd();
       client.register('redinv1');
-      await client.waitForRaw(/001/);
+      await client.waitForLine(/001/);
 
       const channel = `#redinv${Date.now()}`;
-      client.join(channel);
-      await client.waitForRaw(new RegExp(`JOIN.*${channel}`, 'i'));
+      client.send(`JOIN ${channel}`);
+      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
       client.clearRawBuffer();
 
       // Try to redact nonexistent message
-      client.raw(`REDACT ${channel} nonexistent-msgid-12345`);
+      client.send(`REDACT ${channel} nonexistent-msgid-12345`);
 
       try {
-        const response = await client.waitForRaw(/REDACT|FAIL|4\d\d/i, 3000);
+        const response = await client.waitForLine(/REDACT|FAIL|4\d\d/i, 3000);
         console.log('Invalid msgid response:', response);
       } catch {
         console.log('No response for invalid msgid');
       }
+
+      client.send('QUIT');
     });
 
     it('REDACT same message twice', async () => {
-      const client = trackClient(
-        await createRawIRCv3Client({ nick: 'redtwice1' })
-      );
+      const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['draft/message-redaction', 'echo-message', 'message-tags']);
+      await client.capReq(['draft/message-redaction', 'echo-message']);
       client.capEnd();
       client.register('redtwice1');
-      await client.waitForRaw(/001/);
+      await client.waitForLine(/001/);
 
       const channel = `#redtwice${Date.now()}`;
-      client.join(channel);
-      await client.waitForRaw(new RegExp(`JOIN.*${channel}`, 'i'));
+      client.send(`JOIN ${channel}`);
+      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
-      client.say(channel, 'Double redact test');
+      client.send(`PRIVMSG ${channel} :Double redact test`);
 
       let msgid: string | null = null;
       try {
-        const echo = await client.waitForRaw(/PRIVMSG.*Double redact/i, 3000);
+        const echo = await client.waitForLine(/PRIVMSG.*Double redact/i, 3000);
         const match = echo.match(/msgid=([^\s;]+)/);
         if (match) {
           msgid = match[1];
@@ -332,57 +327,55 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
 
       if (msgid) {
         // First redact
-        client.raw(`REDACT ${channel} ${msgid}`);
+        client.send(`REDACT ${channel} ${msgid}`);
         await new Promise(r => setTimeout(r, 500));
 
         client.clearRawBuffer();
 
         // Second redact of same message
-        client.raw(`REDACT ${channel} ${msgid}`);
+        client.send(`REDACT ${channel} ${msgid}`);
 
         try {
-          const response = await client.waitForRaw(/REDACT|FAIL|4\d\d/i, 3000);
+          const response = await client.waitForLine(/REDACT|FAIL|4\d\d/i, 3000);
           console.log('Double REDACT response:', response);
         } catch {
           console.log('No response for double REDACT');
         }
       }
+
+      client.send('QUIT');
     });
   });
 
   describe('REDACT Notification', () => {
     it('other channel members receive REDACT notification', async () => {
-      const redactor = trackClient(
-        await createRawIRCv3Client({ nick: 'rednote1' })
-      );
-      const observer = trackClient(
-        await createRawIRCv3Client({ nick: 'redobs1' })
-      );
+      const redactor = trackClient(await createRawSocketClient());
+      const observer = trackClient(await createRawSocketClient());
 
       await redactor.capLs();
-      await redactor.capReq(['draft/message-redaction', 'echo-message', 'message-tags']);
+      await redactor.capReq(['draft/message-redaction', 'echo-message']);
       redactor.capEnd();
       redactor.register('rednote1');
-      await redactor.waitForRaw(/001/);
+      await redactor.waitForLine(/001/);
 
       await observer.capLs();
-      await observer.capReq(['draft/message-redaction', 'message-tags']);
+      await observer.capReq(['draft/message-redaction']);
       observer.capEnd();
       observer.register('redobs1');
-      await observer.waitForRaw(/001/);
+      await observer.waitForLine(/001/);
 
       const channel = `#rednote${Date.now()}`;
-      redactor.join(channel);
-      observer.join(channel);
-      await redactor.waitForRaw(new RegExp(`JOIN.*${channel}`, 'i'));
-      await observer.waitForRaw(new RegExp(`JOIN.*${channel}`, 'i'));
+      redactor.send(`JOIN ${channel}`);
+      observer.send(`JOIN ${channel}`);
+      await redactor.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await observer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
       await new Promise(r => setTimeout(r, 300));
 
-      redactor.say(channel, 'Message to be seen redacted');
+      redactor.send(`PRIVMSG ${channel} :Message to be seen redacted`);
 
       let msgid: string | null = null;
       try {
-        const echo = await redactor.waitForRaw(/PRIVMSG.*Message to be seen/i, 3000);
+        const echo = await redactor.waitForLine(/PRIVMSG.*Message to be seen/i, 3000);
         const match = echo.match(/msgid=([^\s;]+)/);
         if (match) {
           msgid = match[1];
@@ -394,10 +387,10 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       if (msgid) {
         observer.clearRawBuffer();
 
-        redactor.raw(`REDACT ${channel} ${msgid}`);
+        redactor.send(`REDACT ${channel} ${msgid}`);
 
         try {
-          const notification = await observer.waitForRaw(/REDACT/i, 5000);
+          const notification = await observer.waitForLine(/REDACT/i, 5000);
           expect(notification).toContain('REDACT');
           expect(notification).toContain(channel);
           console.log('Observer REDACT notification:', notification);
@@ -405,6 +398,9 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
           console.log('Observer did not receive REDACT');
         }
       }
+
+      redactor.send('QUIT');
+      observer.send('QUIT');
     });
   });
 });
