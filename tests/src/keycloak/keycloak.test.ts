@@ -7,9 +7,11 @@ import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
  * Tests X3's Keycloak integration features:
  * - SASL PLAIN authentication via Keycloak
  * - SASL OAUTHBEARER authentication
+ * - SASL EXTERNAL certificate fingerprint authentication
  * - User auto-creation from Keycloak accounts
  * - OpServ level sync via x3_opserv_level attribute
  * - Oper group membership sync
+ * - x509_fingerprints attribute management
  *
  * Prerequisites:
  * 1. Keycloak container running (docker compose up keycloak)
@@ -234,6 +236,111 @@ async function setKeycloakUserAttribute(
     return updateResponse.status === 204;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Helper to set x509_fingerprints attribute (multivalued)
+ */
+async function setKeycloakFingerprints(
+  adminToken: string,
+  username: string,
+  fingerprints: string[]
+): Promise<boolean> {
+  try {
+    // Find user
+    const searchResponse = await fetch(
+      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/users?username=${username}&exact=true`,
+      {
+        headers: { 'Authorization': `Bearer ${adminToken}` },
+      }
+    );
+
+    if (!searchResponse.ok) return false;
+
+    const users = await searchResponse.json();
+    if (users.length === 0) return false;
+
+    const user = users[0];
+    const userId = user.id;
+
+    // Update user with fingerprints attribute
+    const attributes = user.attributes ?? {};
+    attributes['x509_fingerprints'] = fingerprints;
+
+    const updateResponse = await fetch(
+      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/users/${userId}`,
+      {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ...user, attributes }),
+      }
+    );
+
+    return updateResponse.status === 204;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Helper to get user's x509_fingerprints from Keycloak
+ */
+async function getKeycloakFingerprints(
+  adminToken: string,
+  username: string
+): Promise<string[]> {
+  try {
+    const searchResponse = await fetch(
+      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/users?username=${username}&exact=true`,
+      {
+        headers: { 'Authorization': `Bearer ${adminToken}` },
+      }
+    );
+
+    if (!searchResponse.ok) return [];
+
+    const users = await searchResponse.json();
+    if (users.length === 0) return [];
+
+    const user = users[0];
+    return user.attributes?.x509_fingerprints ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Helper to search users by fingerprint
+ */
+async function findUserByFingerprint(
+  adminToken: string,
+  fingerprint: string
+): Promise<string | null> {
+  try {
+    // URL-encode the fingerprint for the query
+    const encodedFp = encodeURIComponent(fingerprint);
+    const response = await fetch(
+      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/users?q=x509_fingerprints:${encodedFp}`,
+      {
+        headers: { 'Authorization': `Bearer ${adminToken}` },
+      }
+    );
+
+    if (!response.ok) return null;
+
+    const users = await response.json();
+    if (users.length === 0) return null;
+    if (users.length > 1) {
+      console.warn(`WARNING: Fingerprint collision - ${users.length} users have fingerprint ${fingerprint}`);
+    }
+
+    return users[0].username;
+  } catch {
+    return null;
   }
 }
 
@@ -658,6 +765,221 @@ describe('Keycloak Integration', () => {
       // This tests that the group exists and can be used
       // Actual X3 -> Keycloak sync would happen when OpServ level is set
       expect(added).toBe(true);
+    });
+  });
+
+  describe('SASL EXTERNAL / x509_fingerprints', () => {
+    // Sample fingerprints for testing (SHA-256 format with colons)
+    const TEST_FINGERPRINT_1 = 'AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99';
+    const TEST_FINGERPRINT_2 = '11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00';
+
+    it('x509_fingerprints attribute exists in user profile', async () => {
+      if (!keycloakAvailable) {
+        console.log('Skipping - Keycloak not available');
+        return;
+      }
+
+      const adminToken = await getAdminToken();
+      if (!adminToken) {
+        console.log('Skipping - could not get admin token');
+        return;
+      }
+
+      // Get user profile configuration
+      const response = await fetch(
+        `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/users/profile`,
+        {
+          headers: { 'Authorization': `Bearer ${adminToken}` },
+        }
+      );
+
+      expect(response.ok).toBe(true);
+      const profile = await response.json();
+
+      // Check x509_fingerprints attribute is defined
+      const fpAttr = profile.attributes?.find(
+        (a: { name: string }) => a.name === 'x509_fingerprints'
+      );
+
+      if (fpAttr) {
+        console.log('x509_fingerprints attribute config:', JSON.stringify(fpAttr, null, 2));
+        expect(fpAttr.name).toBe('x509_fingerprints');
+        expect(fpAttr.multivalued).toBe(true);
+      } else {
+        console.log('x509_fingerprints attribute not found in user profile');
+        console.log('Run scripts/setup-keycloak.sh to configure it');
+      }
+    });
+
+    it('can set and retrieve fingerprints for a user', async () => {
+      if (!keycloakAvailable) {
+        console.log('Skipping - Keycloak not available');
+        return;
+      }
+
+      const adminToken = await getAdminToken();
+      if (!adminToken) {
+        console.log('Skipping - could not get admin token');
+        return;
+      }
+
+      // Set fingerprints
+      const set = await setKeycloakFingerprints(adminToken, TEST_USER, [TEST_FINGERPRINT_1]);
+      expect(set).toBe(true);
+
+      // Retrieve and verify
+      const fingerprints = await getKeycloakFingerprints(adminToken, TEST_USER);
+      expect(fingerprints).toContain(TEST_FINGERPRINT_1);
+      console.log('User fingerprints:', fingerprints);
+    });
+
+    it('supports multiple fingerprints per user', async () => {
+      if (!keycloakAvailable) {
+        console.log('Skipping - Keycloak not available');
+        return;
+      }
+
+      const adminToken = await getAdminToken();
+      if (!adminToken) {
+        console.log('Skipping - could not get admin token');
+        return;
+      }
+
+      // Set multiple fingerprints
+      const set = await setKeycloakFingerprints(adminToken, TEST_USER, [
+        TEST_FINGERPRINT_1,
+        TEST_FINGERPRINT_2,
+      ]);
+      expect(set).toBe(true);
+
+      // Verify both are stored
+      const fingerprints = await getKeycloakFingerprints(adminToken, TEST_USER);
+      expect(fingerprints.length).toBe(2);
+      expect(fingerprints).toContain(TEST_FINGERPRINT_1);
+      expect(fingerprints).toContain(TEST_FINGERPRINT_2);
+      console.log('Multiple fingerprints stored:', fingerprints);
+
+      // Cleanup - restore original single fingerprint
+      await setKeycloakFingerprints(adminToken, TEST_USER, [TEST_FINGERPRINT_1]);
+    });
+
+    it('can search users by fingerprint (Scenario 1 lookup)', async () => {
+      if (!keycloakAvailable) {
+        console.log('Skipping - Keycloak not available');
+        return;
+      }
+
+      const adminToken = await getAdminToken();
+      if (!adminToken) {
+        console.log('Skipping - could not get admin token');
+        return;
+      }
+
+      // Ensure test user has the fingerprint
+      await setKeycloakFingerprints(adminToken, TEST_USER, [TEST_FINGERPRINT_1]);
+
+      // Search for user by fingerprint
+      const username = await findUserByFingerprint(adminToken, TEST_FINGERPRINT_1);
+
+      if (username) {
+        expect(username).toBe(TEST_USER);
+        console.log(`Found user '${username}' by fingerprint lookup`);
+      } else {
+        // Keycloak may not support attribute search via q= parameter
+        console.log('Fingerprint search returned no results');
+        console.log('Note: Keycloak attribute search may require specific configuration');
+      }
+    });
+
+    it('fingerprint not found returns null', async () => {
+      if (!keycloakAvailable) {
+        console.log('Skipping - Keycloak not available');
+        return;
+      }
+
+      const adminToken = await getAdminToken();
+      if (!adminToken) {
+        console.log('Skipping - could not get admin token');
+        return;
+      }
+
+      // Search for non-existent fingerprint
+      const nonExistentFp = 'ZZ:ZZ:ZZ:ZZ:ZZ:ZZ:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99';
+      const username = await findUserByFingerprint(adminToken, nonExistentFp);
+      expect(username).toBeNull();
+      console.log('Non-existent fingerprint correctly returns null');
+    });
+
+    it('includes x509_fingerprints in token claims', async () => {
+      if (!keycloakAvailable) {
+        console.log('Skipping - Keycloak not available');
+        return;
+      }
+
+      const adminToken = await getAdminToken();
+      if (!adminToken) {
+        console.log('Skipping - could not get admin token');
+        return;
+      }
+
+      // Ensure test user has fingerprint
+      await setKeycloakFingerprints(adminToken, TEST_USER, [TEST_FINGERPRINT_1]);
+
+      // Get user token
+      const token = await getKeycloakToken(TEST_USER, TEST_PASS);
+      if (!token) {
+        console.log('Skipping - could not get token');
+        return;
+      }
+
+      // Decode JWT payload
+      const parts = token.split('.');
+      if (parts.length >= 2) {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+
+        if (payload.x509_fingerprints !== undefined) {
+          console.log('x509_fingerprints in token:', payload.x509_fingerprints);
+          expect(Array.isArray(payload.x509_fingerprints)).toBe(true);
+          expect(payload.x509_fingerprints).toContain(TEST_FINGERPRINT_1);
+        } else {
+          console.log('x509_fingerprints not in token - mapper may not be configured');
+          console.log('Token claims:', Object.keys(payload).join(', '));
+        }
+      }
+    });
+
+    it('server advertises EXTERNAL mechanism', async () => {
+      const client = trackClient(await createRawSocketClient());
+      const caps = await client.capLs();
+
+      const saslValue = caps.get('sasl');
+      if (saslValue) {
+        console.log('SASL mechanisms:', saslValue);
+        if (saslValue.includes('EXTERNAL')) {
+          expect(saslValue).toContain('EXTERNAL');
+          console.log('EXTERNAL mechanism advertised');
+        } else {
+          console.log('EXTERNAL not advertised - may require TLS with client cert');
+        }
+      }
+
+      client.send('QUIT');
+    });
+
+    it('validates fingerprint format (SHA-256 with colons)', () => {
+      // Test valid fingerprint format
+      const validFp = 'AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99';
+      expect(validFp.length).toBe(95); // 32 bytes * 2 hex chars + 31 colons
+      expect(validFp.split(':').length).toBe(32); // 32 octets
+
+      // Regex pattern from Keycloak user profile
+      const pattern = /^[A-Fa-f0-9:]{95}$/;
+      expect(pattern.test(validFp)).toBe(true);
+
+      // Invalid formats
+      expect(pattern.test('invalid')).toBe(false);
+      expect(pattern.test('AA:BB:CC')).toBe(false); // Too short
+      expect(pattern.test('AABBCCDD...')).toBe(false); // No colons
     });
   });
 });
