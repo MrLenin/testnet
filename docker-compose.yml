@@ -36,6 +36,46 @@ services:
       retries: 5
       start_period: 10s
 
+  nefarious2:
+    container_name: nefarious2
+    build:
+        context: ./nefarious
+        dockerfile: Dockerfile
+        additional_contexts:
+          - data=./data
+    privileged: true
+    networks:
+      irc_net:
+        ipv4_address: 172.28.0.4
+        aliases:
+          - leaf.fractalrealities.net
+    command: ["/home/nefarious/bin/ircd", "-n", "-x", "8", "-f", "ircd.conf"]
+    volumes:
+     - ./data/ircd2.conf:/home/nefarious/ircd/local.conf
+     - ./data/saslusers:/home/nefarious/ircd/saslusers
+     - history_data2:/home/nefarious/ircd/history
+     - metadata_data2:/home/nefarious/ircd/metadata
+    ports:
+      - 127.0.0.1:6668:6667
+      - 127.0.0.1:6698:6697
+    env_file:
+      - .env
+      - .env.local
+    environment:
+      - IRCD_GENERAL_NAME=leaf.fractalrealities.net
+      - IRCD_GENERAL_NUMERIC=2
+    depends_on:
+      nefarious:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pgrep", "-x", "ircd"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    profiles:
+      - linked
+
   x3:
     container_name: x3
     build:
@@ -55,7 +95,7 @@ services:
       - .env
       - .env.local
     volumes:
-      - ./x3data/:/x3/data
+      - x3_data:/x3/data
       - ./data/x3.conf:/x3/x3.conf
 
   integration-tests:
@@ -87,11 +127,16 @@ services:
   keycloak:
     container_name: keycloak
     image: quay.io/keycloak/keycloak:26.4.7
+    networks:
+      - irc_net
     ports:
       - 127.0.0.1:8080:8080
     environment:
       - KC_BOOTSTRAP_ADMIN_USERNAME=admin
       - KC_BOOTSTRAP_ADMIN_PASSWORD=admin
+      - KC_HOSTNAME=localhost
+      - KC_HOSTNAME_PORT=8080
+      - KC_HOSTNAME_STRICT=false
     command: start-dev
     volumes:
       - keycloak_data:/opt/keycloak/data
@@ -100,7 +145,9 @@ volumes:
   keycloak_data:
   history_data:
   metadata_data:
-#  x3_data:
+  history_data2:
+  metadata_data2:
+  x3_data:
 
 networks:
   irc_net:
