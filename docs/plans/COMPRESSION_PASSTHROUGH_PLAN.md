@@ -1,6 +1,31 @@
 # Compressed Data Passthrough Optimization
 
-## Status: PLANNED
+## Status: IMPLEMENTED (Metadata)
+
+**Implementation Date:** December 2024
+
+### Metadata Passthrough - Completed:
+- [x] X3: `x3_lmdb_account_get_raw()` - Get data without decompression
+- [x] X3: `x3_lmdb_account_set_raw()` - Set data without compression
+- [x] X3: `x3_lmdb_account_list_raw()` - List raw entries with compression flag
+- [x] X3: `irc_metadata_raw()` - Send compressed metadata with Z flag
+- [x] X3: `nickserv_sync_account_metadata_to_ircd()` - Uses raw passthrough for MDQ responses
+- [x] Nefarious: `metadata_account_set_raw()` - Store without recompression
+- [x] Nefarious: `ms_metadata()` Z flag detection and raw storage
+
+### Chathistory - N/A:
+Chathistory compression passthrough is not applicable because:
+- History is stored locally per-server in LMDB (not synchronized between servers)
+- Clients receive plaintext IRC protocol (PRIVMSG/NOTICE), not raw data
+- Decompression is only needed when serving clients (unavoidable)
+- Compression still provides storage efficiency benefit
+
+### Optional/Deferred:
+- [ ] CAPAB negotiation for server link capability (not critical, Z flag is backward compatible)
+- [ ] End-to-end testing with compression metrics
+- [ ] Future: If server-to-server history sync is added, implement compressed batch forwarding
+
+---
 
 ## Problem Statement
 
