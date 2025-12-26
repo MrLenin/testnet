@@ -13,21 +13,47 @@ echo "=== Keycloak IRC Testnet Setup ==="
 echo "Keycloak URL: $KEYCLOAK_URL"
 echo "Realm: $REALM_NAME"
 
+# Function to get/refresh admin token
+get_admin_token() {
+  curl -s -X POST "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "username=$ADMIN_USER" \
+    -d "password=$ADMIN_PASS" \
+    -d "grant_type=password" \
+    -d "client_id=admin-cli" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4
+}
+
 # Get admin token
 echo ""
 echo "Getting admin token..."
-TOKEN=$(curl -s -X POST "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=$ADMIN_USER" \
-  -d "password=$ADMIN_PASS" \
-  -d "grant_type=password" \
-  -d "client_id=admin-cli" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
+TOKEN=$(get_admin_token)
 
 if [ -z "$TOKEN" ]; then
   echo "ERROR: Failed to get admin token. Is Keycloak running?"
   exit 1
 fi
 echo "Got admin token"
+
+# Increase admin-cli token lifespan in master realm (default is 60 seconds!)
+echo "Configuring admin-cli token lifespan..."
+ADMIN_CLI_ID=$(curl -s -H "Authorization: Bearer $TOKEN" \
+  "$KEYCLOAK_URL/admin/realms/master/clients?clientId=admin-cli" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+if [ -n "$ADMIN_CLI_ID" ]; then
+  curl -s -X PUT "$KEYCLOAK_URL/admin/realms/master/clients/$ADMIN_CLI_ID" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "clientId": "admin-cli",
+      "attributes": {
+        "access.token.lifespan": "900"
+      }
+    }' 2>/dev/null || true
+  echo "  admin-cli token lifespan set to 15 minutes"
+
+  # Refresh token after updating lifespan
+  TOKEN=$(get_admin_token)
+fi
 
 # Check if realm exists
 REALM_EXISTS=$(curl -s -o /dev/null -w "%{http_code}" \
@@ -84,6 +110,87 @@ else
       "failureFactor": 30
     }'
   echo "Realm created"
+fi
+
+# =============================================================================
+# X.509 Authentication Flow Configuration (Scenario 2 - Future)
+# =============================================================================
+# This section configures Keycloak's built-in X.509 authenticator for direct
+# certificate validation. This is NOT required for Scenario 1 (X3-managed
+# fingerprint lookup via Admin API), but is set up for future use.
+#
+# Certificate source options for Scenario 2:
+#   1. Direct TLS termination at Keycloak
+#   2. Reverse proxy (nginx/HAProxy) forwarding cert via headers
+#   3. API call from X3 with certificate data
+#
+# For proxy setups, Keycloak needs these headers configured:
+#   - X-SSL-Client-Cert (PEM-encoded certificate)
+#   - Or X-SSL-Client-Cert-Chain for full chain
+# =============================================================================
+echo ""
+echo "Configuring X.509 authentication flow (for future Scenario 2)..."
+
+# Check if x509-browser flow already exists
+X509_FLOW_EXISTS=$(curl -s \
+  -H "Authorization: Bearer $TOKEN" \
+  "$KEYCLOAK_URL/admin/realms/$REALM_NAME/authentication/flows" | grep -o '"alias":"x509-browser"')
+
+if [ -z "$X509_FLOW_EXISTS" ]; then
+  echo "Creating X.509 browser authentication flow..."
+
+  # Copy the browser flow
+  curl -s -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/authentication/flows/browser/copy" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"newName": "x509-browser"}'
+
+  # Get the new flow ID
+  X509_FLOW_ID=$(curl -s \
+    -H "Authorization: Bearer $TOKEN" \
+    "$KEYCLOAK_URL/admin/realms/$REALM_NAME/authentication/flows?search=x509-browser" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+  if [ -n "$X509_FLOW_ID" ]; then
+    # Add X.509 authenticator execution to the flow
+    curl -s -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/authentication/flows/x509-browser/executions/execution" \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"provider": "auth-x509-client-username-form"}'
+
+    echo "  X.509 browser flow created"
+
+    # Get the X.509 execution to configure it
+    X509_EXEC=$(curl -s \
+      -H "Authorization: Bearer $TOKEN" \
+      "$KEYCLOAK_URL/admin/realms/$REALM_NAME/authentication/flows/x509-browser/executions" | \
+      grep -o '"id":"[^"]*","authenticator":"auth-x509-client-username-form"' | head -1 | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
+
+    if [ -n "$X509_EXEC" ]; then
+      # Configure X.509 authenticator - use fingerprint for user identity mapping
+      # This matches users by their x509_fingerprints attribute
+      curl -s -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/authentication/executions/$X509_EXEC/config" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d '{
+          "alias": "x509-config",
+          "config": {
+            "x509-cert-auth.mapper-selection": "Custom Attribute Mapper",
+            "x509-cert-auth.mapper-selection.user-attribute-name": "x509_fingerprints",
+            "x509-cert-auth.mapping-source-selection": "SHA-256 Thumbprint (hex)",
+            "x509-cert-auth.regular-expression": "(.*)",
+            "x509-cert-auth.timestamp-validation-enabled": "false",
+            "x509-cert-auth.crl-checking-enabled": "false",
+            "x509-cert-auth.ocsp-checking-enabled": "false"
+          }
+        }'
+      echo "  X.509 authenticator configured (fingerprint-based, no CRL/OCSP)"
+      echo "  Note: This flow is not active by default. To use Scenario 2:"
+      echo "        - Set x509-browser as the browser flow binding in realm settings"
+      echo "        - Configure TLS client cert at Keycloak or proxy"
+    fi
+  fi
+else
+  echo "X.509 browser flow already exists"
 fi
 
 # Configure user profile for IRC use:
@@ -164,7 +271,24 @@ USER_PROFILE=$(cat <<'PROFILE_EOF'
         "view": ["admin"],
         "edit": ["admin"]
       },
-      "multivalued": false
+      "multivalued": false,
+      "group": "x3-attributes"
+    },
+    {
+      "name": "x509_fingerprints",
+      "displayName": "X.509 Certificate Fingerprints",
+      "annotations": {
+        "inputHelperTextBefore": "SHA-256 fingerprints of client certificates for SASL EXTERNAL authentication"
+      },
+      "validations": {
+        "pattern": { "pattern": "^[A-Fa-f0-9:]{95}$", "error-message": "Must be SHA-256 fingerprint (64 hex chars with colons)" }
+      },
+      "permissions": {
+        "view": ["admin"],
+        "edit": ["admin"]
+      },
+      "multivalued": true,
+      "group": "x3-attributes"
     }
   ],
   "groups": [
@@ -298,24 +422,49 @@ IRC_CLIENT=$(curl -s \
 
 if [ -n "$IRC_CLIENT" ]; then
   echo "IRC client already exists (id: $IRC_CLIENT)"
+  # Update token lifespan for existing client
+  echo "  Updating token lifespan settings..."
+  # IRC sessions are long-lived - tokens should last at least a week
+  # access.token.lifespan: 604800 (7 days)
+  # offline.session: 2592000 (30 days) for refresh tokens
+  curl -s -X PUT "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$IRC_CLIENT" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "clientId": "irc-client",
+      "attributes": {
+        "access.token.lifespan": "604800",
+        "client.offline.session.idle.timeout": "2592000",
+        "client.offline.session.max.lifespan": "2592000"
+      }
+    }' 2>/dev/null || true
+  echo "  Token lifespan: 7 days access, 30 days refresh (IRC sessions are long-lived)"
 else
   echo "Creating IRC client..."
+  # IRC sessions are long-lived - tokens should last at least a week
+  # access.token.lifespan: 604800 (7 days)
+  # offline.session: 2592000 (30 days) for refresh tokens
   curl -s -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients" \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
     -d '{
       "clientId": "irc-client",
       "name": "IRC Client Authentication",
-      "description": "Used by IRC clients for SASL authentication",
+      "description": "Used by IRC clients for SASL OAUTHBEARER authentication",
       "enabled": true,
       "clientAuthenticatorType": "client-secret",
       "publicClient": true,
       "standardFlowEnabled": false,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": true,
-      "protocol": "openid-connect"
+      "protocol": "openid-connect",
+      "attributes": {
+        "access.token.lifespan": "604800",
+        "client.offline.session.idle.timeout": "2592000",
+        "client.offline.session.max.lifespan": "2592000"
+      }
     }'
-  echo "IRC client created"
+  echo "IRC client created (7-day access tokens for long IRC sessions)"
 
   # Get the new client ID for adding mappers
   IRC_CLIENT=$(curl -s \
@@ -323,14 +472,17 @@ else
     "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients?clientId=irc-client" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 fi
 
-# Add x3_opserv_level protocol mapper to IRC client (includes opserv level in tokens)
+# Refresh token before mapper configuration
+TOKEN=$(get_admin_token)
+
+# Add protocol mappers to IRC client (includes custom attributes in tokens)
 echo ""
-echo "Configuring x3_opserv_level token mapper..."
+echo "Configuring token mappers for IRC client..."
 if [ -n "$IRC_CLIENT" ]; then
-  # Check if mapper already exists
+  # x3_opserv_level mapper
   MAPPER_EXISTS=$(curl -s \
     -H "Authorization: Bearer $TOKEN" \
-    "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$IRC_CLIENT/protocol-mappers/models" | grep -o '"name":"x3_opserv_level"')
+    "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$IRC_CLIENT/protocol-mappers/models" | grep -o '"name":"x3_opserv_level"' || true)
 
   if [ -z "$MAPPER_EXISTS" ]; then
     curl -s -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$IRC_CLIENT/protocol-mappers/models" \
@@ -350,9 +502,38 @@ if [ -n "$IRC_CLIENT" ]; then
           "introspection.token.claim": "true"
         }
       }'
-    echo "x3_opserv_level mapper added to IRC client"
+    echo "  x3_opserv_level mapper added"
   else
-    echo "x3_opserv_level mapper already exists"
+    echo "  x3_opserv_level mapper already exists"
+  fi
+
+  # x509_fingerprints mapper (for SASL EXTERNAL)
+  FP_MAPPER_EXISTS=$(curl -s \
+    -H "Authorization: Bearer $TOKEN" \
+    "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$IRC_CLIENT/protocol-mappers/models" | grep -o '"name":"x509_fingerprints"' || true)
+
+  if [ -z "$FP_MAPPER_EXISTS" ]; then
+    curl -s -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$IRC_CLIENT/protocol-mappers/models" \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "x509_fingerprints",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-usermodel-attribute-mapper",
+        "config": {
+          "user.attribute": "x509_fingerprints",
+          "claim.name": "x509_fingerprints",
+          "jsonType.label": "JSON",
+          "id.token.claim": "true",
+          "access.token.claim": "true",
+          "userinfo.token.claim": "true",
+          "introspection.token.claim": "true",
+          "multivalued": "true"
+        }
+      }'
+    echo "  x509_fingerprints mapper added (for SASL EXTERNAL)"
+  else
+    echo "  x509_fingerprints mapper already exists"
   fi
 fi
 
@@ -437,6 +618,26 @@ CREATE_RESULT=$(curl -s -w "\nHTTP:%{http_code}" -X POST "$KEYCLOAK_URL/admin/re
 HTTP_CODE=$(echo "$CREATE_RESULT" | grep "HTTP:" | cut -d: -f2)
 if [ "$HTTP_CODE" = "201" ]; then
   echo "Test user created (username: testuser, password: testpass)"
+
+  # Add a sample certificate fingerprint to the test user for SASL EXTERNAL testing
+  # This uses a placeholder fingerprint - replace with actual cert fingerprint for testing
+  TEST_USER_ID=$(curl -s \
+    -H "Authorization: Bearer $TOKEN" \
+    "$KEYCLOAK_URL/admin/realms/$REALM_NAME/users?username=testuser&exact=true" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+  if [ -n "$TEST_USER_ID" ]; then
+    # Set sample x509_fingerprints attribute (SHA-256 fingerprint format with colons)
+    # Users can add real fingerprints via NickServ CERT ADD command
+    curl -s -X PUT "$KEYCLOAK_URL/admin/realms/$REALM_NAME/users/$TEST_USER_ID" \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "attributes": {
+          "x509_fingerprints": ["AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99"]
+        }
+      }'
+    echo "  Added sample x509 fingerprint for SASL EXTERNAL testing"
+  fi
 else
   echo "Error creating test user: $CREATE_RESULT"
 fi
@@ -455,9 +656,36 @@ echo '        "keycloak_autocreate" "1";'
 echo '        "keycloak_oper_group" "x3-opers";'
 echo '        "keycloak_oper_group_level" "99";'
 echo '        "keycloak_attr_oslevel" "x3_opserv_level";'
+echo '        "keycloak_attr_fingerprints" "x509_fingerprints";'
 echo '        "keycloak_email_policy" "0";'
 echo ""
 echo "Keycloak URL (from host): http://localhost:8080"
 echo "Keycloak URL (from containers): http://keycloak:8080"
 echo "Admin console: http://localhost:8080/admin (admin/admin)"
 echo "Test user: testuser / testpass"
+echo ""
+echo "=== SASL Mechanisms Supported ==="
+echo "  PLAIN       - Username/password authentication"
+echo "  EXTERNAL    - Client certificate fingerprint authentication"
+echo "  OAUTHBEARER - OAuth 2.0 bearer token authentication"
+echo ""
+echo "=== SASL EXTERNAL Implementation ==="
+echo ""
+echo "Scenario 1 (Active - X3 Admin API Lookup):"
+echo "  1. User connects with TLS client certificate"
+echo "  2. IRC server extracts SHA-256 fingerprint, sends to X3"
+echo "  3. X3 queries Keycloak Admin API for user with matching x509_fingerprints"
+echo "  4. Keycloak returns username, X3 authenticates user"
+echo ""
+echo "Scenario 2 (Future - Keycloak Direct Validation):"
+echo "  - x509-browser authentication flow is pre-configured but not active"
+echo "  - Requires: Keycloak TLS client cert termination OR proxy header forwarding"
+echo "  - To activate: Set x509-browser as browser flow in realm settings"
+echo ""
+echo "Certificate Management (via NickServ):"
+echo "  /msg NickServ CERT ADD      - Add current cert fingerprint"
+echo "  /msg NickServ CERT DEL <fp> - Remove fingerprint"
+echo "  /msg NickServ CERT LIST     - List registered fingerprints"
+echo ""
+echo "Test fingerprint for testuser:"
+echo "  AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99"
