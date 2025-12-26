@@ -5,15 +5,21 @@ services:
     build:
         context: ./nefarious
         dockerfile: Dockerfile
-#    privileged: true
-#    networks:
-#      test_net:
-#        ipv6_address: fec0:3200::99
-    command: ["/home/nefarious/bin/ircd", "-n", "-x", "8", "-f", "ircd-docker.conf"]
+        additional_contexts:
+          - data=./data
+    privileged: true
+    networks:
+      irc_net:
+        ipv4_address: 172.28.0.2
+        aliases:
+          - testnet.fractalrealities.net
+    command: ["/home/nefarious/bin/ircd", "-n", "-x", "8", "-f", "ircd.conf"]
 
     volumes:
-     - ./data/ircd.conf:/home/nefarious/ircd/ircd.conf
+     - ./data/ircd.conf:/home/nefarious/ircd/local.conf
      - ./data/saslusers:/home/nefarious/ircd/saslusers
+     - history_data:/home/nefarious/ircd/history
+     - metadata_data:/home/nefarious/ircd/metadata
 #      - ./data/:/home/nefarious/data
     ports:
       - 127.0.0.1:6667:6667
@@ -35,6 +41,13 @@ services:
     build:
       context: ./x3
       dockerfile: Dockerfile
+      additional_contexts:
+        - data=./data
+    networks:
+      irc_net:
+        ipv4_address: 172.28.0.3
+        aliases:
+          - x3.fractalrealities.services
     depends_on:
       nefarious:
         condition: service_healthy
@@ -42,13 +55,16 @@ services:
       - .env
       - .env.local
     volumes:
-      - ./data/x3.conf:/x3/data/x3.conf
+      - ./x3data/:/x3/data
+      - ./data/x3.conf:/x3/x3.conf
 
   integration-tests:
     container_name: integration-tests
     build:
       context: ./tests
       dockerfile: Dockerfile
+    networks:
+      - irc_net
     depends_on:
       nefarious:
         condition: service_healthy
@@ -82,14 +98,14 @@ services:
 
 volumes:
   keycloak_data:
+  history_data:
+  metadata_data:
 #  x3_data:
 
-#networks:
-#  test_net:
-#    enable_ipv6: true
-#    driver: bridge
-#    ipam:
-#      driver: default
-#      config:
-#        - subnet: 10.1.2.0/24
-#        - subnet: fec0:3200::1/64
+networks:
+  irc_net:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.0.0/24
