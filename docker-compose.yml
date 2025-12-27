@@ -1,5 +1,22 @@
 services:
 
+  nefarious-init:
+    container_name: nefarious-init
+    build:
+        context: ./nefarious
+        dockerfile: Dockerfile
+        additional_contexts:
+          - data=./data
+    user: "0:0"  # Run as root to fix permissions
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        chown -R 1234:1234 /home/nefarious/ircd/history /home/nefarious/ircd/metadata
+        echo "Nefarious volume permissions fixed"
+    volumes:
+      - history_data:/home/nefarious/ircd/history
+      - metadata_data:/home/nefarious/ircd/metadata
+
   nefarious:
     container_name: nefarious
     build:
@@ -7,20 +24,18 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-    privileged: true
+    user: "1234:1234"  # nefarious user
     networks:
       irc_net:
         ipv4_address: 172.29.0.2
         aliases:
           - testnet.fractalrealities.net
     command: ["/home/nefarious/bin/ircd", "-n", "-x", "8", "-f", "ircd.conf"]
-
     volumes:
      - ./data/ircd.conf:/home/nefarious/ircd/local.conf
      - ./data/saslusers:/home/nefarious/ircd/saslusers
      - history_data:/home/nefarious/ircd/history
      - metadata_data:/home/nefarious/ircd/metadata
-#      - ./data/:/home/nefarious/data
     ports:
       - 127.0.0.1:6667:6667
       - 127.0.0.1:6697:6697
@@ -29,12 +44,34 @@ services:
     env_file:
       - .env
       - .env.local
+    depends_on:
+      nefarious-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "pgrep", "-x", "ircd"]
       interval: 5s
       timeout: 3s
       retries: 5
       start_period: 10s
+
+  nefarious2-init:
+    container_name: nefarious2-init
+    build:
+        context: ./nefarious
+        dockerfile: Dockerfile
+        additional_contexts:
+          - data=./data
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        chown -R 1234:1234 /home/nefarious/ircd/history /home/nefarious/ircd/metadata
+        echo "Nefarious2 volume permissions fixed"
+    volumes:
+      - history_data2:/home/nefarious/ircd/history
+      - metadata_data2:/home/nefarious/ircd/metadata
+    profiles:
+      - linked
 
   nefarious2:
     container_name: nefarious2
@@ -43,7 +80,7 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-    privileged: true
+    user: "1234:1234"  # nefarious user
     networks:
       irc_net:
         ipv4_address: 172.29.0.5
@@ -67,6 +104,8 @@ services:
     depends_on:
       nefarious:
         condition: service_healthy
+      nefarious2-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "pgrep", "-x", "ircd"]
       interval: 5s
@@ -76,6 +115,22 @@ services:
     profiles:
       - linked
 
+  x3-init:
+    container_name: x3-init
+    build:
+      context: ./x3
+      dockerfile: Dockerfile
+      additional_contexts:
+        - data=./data
+    user: "0:0"  # Run as root to fix permissions
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        chown -R 1234:1234 /x3/data
+        echo "X3 volume permissions fixed"
+    volumes:
+      - x3_data:/x3/data
+
   x3:
     container_name: x3
     build:
@@ -83,6 +138,7 @@ services:
       dockerfile: Dockerfile
       additional_contexts:
         - data=./data
+    user: "1234:1234"  # x3 user
     networks:
       irc_net:
         ipv4_address: 172.29.0.3
@@ -91,6 +147,8 @@ services:
     depends_on:
       nefarious:
         condition: service_healthy
+      x3-init:
+        condition: service_completed_successfully
     env_file:
       - .env
       - .env.local
@@ -124,9 +182,23 @@ services:
 ##      - .env
 ##      - .env.local
 
+  keycloak-init:
+    container_name: keycloak-init
+    image: quay.io/keycloak/keycloak:26.4.7
+    user: "0:0"  # Run as root to fix permissions
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        chown -R 1000:1000 /opt/keycloak/data
+        chmod -R 750 /opt/keycloak/data
+        echo "Keycloak data permissions fixed"
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+
   keycloak:
     container_name: keycloak
     image: quay.io/keycloak/keycloak:26.4.7
+    user: "1000:1000"  # keycloak user
     networks:
       irc_net:
         ipv4_address: 172.29.0.10
@@ -141,6 +213,15 @@ services:
     command: start-dev
     volumes:
       - keycloak_data:/opt/keycloak/data
+    depends_on:
+      keycloak-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
 volumes:
   keycloak_data:

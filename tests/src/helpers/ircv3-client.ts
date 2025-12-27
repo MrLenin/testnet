@@ -787,7 +787,7 @@ export const PRIMARY_SERVER: ServerConfig = {
 /** Secondary IRC server (leaf) - only available with 'linked' profile */
 export const SECONDARY_SERVER: ServerConfig = {
   host: process.env.IRC_HOST2 ?? 'nefarious2',
-  port: 6667,
+  port: parseInt(process.env.IRC_PORT2 ?? '6667', 10),
   name: 'secondary',
 };
 
