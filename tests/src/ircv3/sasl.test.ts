@@ -5,9 +5,8 @@ import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
  * SASL Authentication Tests
  *
  * Note: These tests require a registered account on the server.
- * The test assumes an account 'testaccount' with password 'testpass' exists.
- * You may need to register this account before running tests:
- *   /msg AuthServ REGISTER testaccount testpass test@example.com
+ * The test assumes an account 'testuser' with password 'testpass' exists.
+ * This account is created by scripts/setup-keycloak.sh.
  *
  * Alternatively, some tests can run without authentication to verify
  * the SASL protocol flow.
@@ -15,8 +14,9 @@ import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
 describe('IRCv3 SASL Authentication', () => {
   const clients: RawSocketClient[] = [];
 
-  // Test credentials - should match a registered account
-  const TEST_ACCOUNT = process.env.IRC_TEST_ACCOUNT ?? 'testaccount';
+  // Test credentials - should match a registered account in Keycloak
+  // Created by scripts/setup-keycloak.sh
+  const TEST_ACCOUNT = process.env.IRC_TEST_ACCOUNT ?? 'testuser';
   const TEST_PASSWORD = process.env.IRC_TEST_PASSWORD ?? 'testpass';
 
   const trackClient = (client: RawSocketClient): RawSocketClient => {
@@ -456,7 +456,7 @@ describe('SASL Multi-line Payload', () => {
     // Actually, PLAIN auth payloads are typically small, so this tests
     // the infrastructure rather than actual chunking
     const user = 'testuser';
-    const pass = 'testpassword';
+    const pass = 'testpass';
     const payload = Buffer.from(`${user}\0${user}\0${pass}`).toString('base64');
 
     client.send(`AUTHENTICATE ${payload}`);
@@ -497,7 +497,7 @@ describe('SASL with account-notify', () => {
     await client.waitForLine(/AUTHENTICATE \+/);
 
     // Use test credentials
-    const user = process.env.IRC_TEST_ACCOUNT ?? 'testaccount';
+    const user = process.env.IRC_TEST_ACCOUNT ?? 'testuser';
     const pass = process.env.IRC_TEST_PASSWORD ?? 'testpass';
     const payload = Buffer.from(`${user}\0${user}\0${pass}`).toString('base64');
 
