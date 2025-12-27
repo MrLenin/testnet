@@ -128,70 +128,76 @@ fi
 #   - X-SSL-Client-Cert (PEM-encoded certificate)
 #   - Or X-SSL-Client-Cert-Chain for full chain
 # =============================================================================
+# NOTE: X.509 flow configuration is commented out for now as it's not needed
+# for current SASL EXTERNAL implementation (Scenario 1 - X3 Admin API lookup).
+# Uncomment this section when implementing Scenario 2.
+#
+# echo ""
+# echo "Configuring X.509 authentication flow (for future Scenario 2)..."
+#
+# # Check if x509-browser flow already exists
+# X509_FLOW_EXISTS=$(curl -s \
+#   -H "Authorization: Bearer $TOKEN" \
+#   "$KEYCLOAK_URL/admin/realms/$REALM_NAME/authentication/flows" | grep -o '"alias":"x509-browser"')
+#
+# if [ -z "$X509_FLOW_EXISTS" ]; then
+#   echo "Creating X.509 browser authentication flow..."
+#
+#   # Copy the browser flow
+#   curl -s -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/authentication/flows/browser/copy" \
+#     -H "Authorization: Bearer $TOKEN" \
+#     -H "Content-Type: application/json" \
+#     -d '{"newName": "x509-browser"}'
+#
+#   # Get the new flow ID
+#   X509_FLOW_ID=$(curl -s \
+#     -H "Authorization: Bearer $TOKEN" \
+#     "$KEYCLOAK_URL/admin/realms/$REALM_NAME/authentication/flows?search=x509-browser" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+#
+#   if [ -n "$X509_FLOW_ID" ]; then
+#     # Add X.509 authenticator execution to the flow
+#     curl -s -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/authentication/flows/x509-browser/executions/execution" \
+#       -H "Authorization: Bearer $TOKEN" \
+#       -H "Content-Type: application/json" \
+#       -d '{"provider": "auth-x509-client-username-form"}'
+#
+#     echo "  X.509 browser flow created"
+#
+#     # Get the X.509 execution to configure it
+#     X509_EXEC=$(curl -s \
+#       -H "Authorization: Bearer $TOKEN" \
+#       "$KEYCLOAK_URL/admin/realms/$REALM_NAME/authentication/flows/x509-browser/executions" | \
+#       grep -o '"id":"[^"]*","authenticator":"auth-x509-client-username-form"' | head -1 | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
+#
+#     if [ -n "$X509_EXEC" ]; then
+#       # Configure X.509 authenticator - use fingerprint for user identity mapping
+#       # This matches users by their x509_fingerprints attribute
+#       curl -s -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/authentication/executions/$X509_EXEC/config" \
+#         -H "Authorization: Bearer $TOKEN" \
+#         -H "Content-Type: application/json" \
+#         -d '{
+#           "alias": "x509-config",
+#           "config": {
+#             "x509-cert-auth.mapper-selection": "Custom Attribute Mapper",
+#             "x509-cert-auth.mapper-selection.user-attribute-name": "x509_fingerprints",
+#             "x509-cert-auth.mapping-source-selection": "SHA-256 Thumbprint (hex)",
+#             "x509-cert-auth.regular-expression": "(.*)",
+#             "x509-cert-auth.timestamp-validation-enabled": "false",
+#             "x509-cert-auth.crl-checking-enabled": "false",
+#             "x509-cert-auth.ocsp-checking-enabled": "false"
+#           }
+#         }'
+#       echo "  X.509 authenticator configured (fingerprint-based, no CRL/OCSP)"
+#       echo "  Note: This flow is not active by default. To use Scenario 2:"
+#       echo "        - Set x509-browser as the browser flow binding in realm settings"
+#       echo "        - Configure TLS client cert at Keycloak or proxy"
+#     fi
+#   fi
+# else
+#   echo "X.509 browser flow already exists"
+# fi
 echo ""
-echo "Configuring X.509 authentication flow (for future Scenario 2)..."
-
-# Check if x509-browser flow already exists
-X509_FLOW_EXISTS=$(curl -s \
-  -H "Authorization: Bearer $TOKEN" \
-  "$KEYCLOAK_URL/admin/realms/$REALM_NAME/authentication/flows" | grep -o '"alias":"x509-browser"')
-
-if [ -z "$X509_FLOW_EXISTS" ]; then
-  echo "Creating X.509 browser authentication flow..."
-
-  # Copy the browser flow
-  curl -s -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/authentication/flows/browser/copy" \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/json" \
-    -d '{"newName": "x509-browser"}'
-
-  # Get the new flow ID
-  X509_FLOW_ID=$(curl -s \
-    -H "Authorization: Bearer $TOKEN" \
-    "$KEYCLOAK_URL/admin/realms/$REALM_NAME/authentication/flows?search=x509-browser" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
-
-  if [ -n "$X509_FLOW_ID" ]; then
-    # Add X.509 authenticator execution to the flow
-    curl -s -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/authentication/flows/x509-browser/executions/execution" \
-      -H "Authorization: Bearer $TOKEN" \
-      -H "Content-Type: application/json" \
-      -d '{"provider": "auth-x509-client-username-form"}'
-
-    echo "  X.509 browser flow created"
-
-    # Get the X.509 execution to configure it
-    X509_EXEC=$(curl -s \
-      -H "Authorization: Bearer $TOKEN" \
-      "$KEYCLOAK_URL/admin/realms/$REALM_NAME/authentication/flows/x509-browser/executions" | \
-      grep -o '"id":"[^"]*","authenticator":"auth-x509-client-username-form"' | head -1 | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
-
-    if [ -n "$X509_EXEC" ]; then
-      # Configure X.509 authenticator - use fingerprint for user identity mapping
-      # This matches users by their x509_fingerprints attribute
-      curl -s -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/authentication/executions/$X509_EXEC/config" \
-        -H "Authorization: Bearer $TOKEN" \
-        -H "Content-Type: application/json" \
-        -d '{
-          "alias": "x509-config",
-          "config": {
-            "x509-cert-auth.mapper-selection": "Custom Attribute Mapper",
-            "x509-cert-auth.mapper-selection.user-attribute-name": "x509_fingerprints",
-            "x509-cert-auth.mapping-source-selection": "SHA-256 Thumbprint (hex)",
-            "x509-cert-auth.regular-expression": "(.*)",
-            "x509-cert-auth.timestamp-validation-enabled": "false",
-            "x509-cert-auth.crl-checking-enabled": "false",
-            "x509-cert-auth.ocsp-checking-enabled": "false"
-          }
-        }'
-      echo "  X.509 authenticator configured (fingerprint-based, no CRL/OCSP)"
-      echo "  Note: This flow is not active by default. To use Scenario 2:"
-      echo "        - Set x509-browser as the browser flow binding in realm settings"
-      echo "        - Configure TLS client cert at Keycloak or proxy"
-    fi
-  fi
-else
-  echo "X.509 browser flow already exists"
-fi
+echo "Skipping X.509 authentication flow (Scenario 2 - not currently needed)"
 
 # Configure user profile for IRC use:
 # - username and email are required
@@ -475,7 +481,71 @@ fi
 # Refresh token before mapper configuration
 TOKEN=$(get_admin_token)
 
-# Add protocol mappers to IRC client (includes custom attributes in tokens)
+# Add protocol mappers to x3-services client (X3 authenticates using this client)
+echo ""
+echo "Configuring token mappers for x3-services client..."
+if [ -n "$X3_CLIENT" ]; then
+  # x3_opserv_level mapper
+  MAPPER_EXISTS=$(curl -s \
+    -H "Authorization: Bearer $TOKEN" \
+    "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$X3_CLIENT/protocol-mappers/models" | grep -o '"name":"x3_opserv_level"' || true)
+
+  if [ -z "$MAPPER_EXISTS" ]; then
+    curl -s -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$X3_CLIENT/protocol-mappers/models" \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "x3_opserv_level",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-usermodel-attribute-mapper",
+        "config": {
+          "user.attribute": "x3_opserv_level",
+          "claim.name": "x3_opserv_level",
+          "jsonType.label": "String",
+          "id.token.claim": "true",
+          "access.token.claim": "true",
+          "userinfo.token.claim": "true",
+          "introspection.token.claim": "true"
+        }
+      }'
+    echo "  x3_opserv_level mapper added"
+  else
+    echo "  x3_opserv_level mapper already exists"
+  fi
+
+  # x509_fingerprints mapper (for SASL EXTERNAL)
+  FP_MAPPER_EXISTS=$(curl -s \
+    -H "Authorization: Bearer $TOKEN" \
+    "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$X3_CLIENT/protocol-mappers/models" | grep -o '"name":"x509_fingerprints"' || true)
+
+  if [ -z "$FP_MAPPER_EXISTS" ]; then
+    curl -s -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$X3_CLIENT/protocol-mappers/models" \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "x509_fingerprints",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-usermodel-attribute-mapper",
+        "config": {
+          "user.attribute": "x509_fingerprints",
+          "claim.name": "x509_fingerprints",
+          "jsonType.label": "JSON",
+          "id.token.claim": "true",
+          "access.token.claim": "true",
+          "userinfo.token.claim": "true",
+          "introspection.token.claim": "true",
+          "multivalued": "true"
+        }
+      }'
+    echo "  x509_fingerprints mapper added (for SASL EXTERNAL)"
+  else
+    echo "  x509_fingerprints mapper already exists"
+  fi
+else
+  echo "  WARNING: X3_CLIENT not found, skipping mapper configuration"
+fi
+
+# Also add mappers to IRC client (for future use by IRC clients authenticating directly)
 echo ""
 echo "Configuring token mappers for IRC client..."
 if [ -n "$IRC_CLIENT" ]; then
@@ -495,7 +565,7 @@ if [ -n "$IRC_CLIENT" ]; then
         "config": {
           "user.attribute": "x3_opserv_level",
           "claim.name": "x3_opserv_level",
-          "jsonType.label": "int",
+          "jsonType.label": "String",
           "id.token.claim": "true",
           "access.token.claim": "true",
           "userinfo.token.claim": "true",
@@ -628,10 +698,13 @@ if [ "$HTTP_CODE" = "201" ]; then
   if [ -n "$TEST_USER_ID" ]; then
     # Set sample x509_fingerprints attribute (SHA-256 fingerprint format with colons)
     # Users can add real fingerprints via NickServ CERT ADD command
+    # Note: Also include email to preserve it (partial PUT can overwrite user fields)
     curl -s -X PUT "$KEYCLOAK_URL/admin/realms/$REALM_NAME/users/$TEST_USER_ID" \
       -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: application/json" \
       -d '{
+        "email": "testuser@example.com",
+        "emailVerified": true,
         "attributes": {
           "x509_fingerprints": ["AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99"]
         }
