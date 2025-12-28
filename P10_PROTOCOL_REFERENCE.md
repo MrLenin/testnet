@@ -162,7 +162,7 @@ AB B #test 1703334400 +nt ABAAB,ABAAC:o :%ABAAD
 | `SE` | SETNAME | Both | Realname change (Phase 12) |
 | `TM` | TAGMSG | Both | Tag-only message (Phase 17) |
 | `BT` | BATCH | Both | Batch coordination (Phase 13d) |
-| `CH` | CHATHISTORY | Both | Message history requests (Phase 23) |
+| `CH` | CHATHISTORY | Local | Message history (local LMDB, no S2S) |
 | `RD` | REDACT | Both | Message redaction (Phase 27) |
 | `RG` | REGISTER | Both | Account registration (Phase 24) |
 | `VF` | VERIFY | Both | Account verification (Phase 24) |
@@ -384,32 +384,52 @@ Example: `AB1703334400` (server AB, timestamp-based)
 
 ### CHATHISTORY (CH) - Phase 23
 
-**Purpose**: Request message history from services for playback to clients.
+**Purpose**: Query message history for playback to clients.
 
 **IRCv3 Spec**: https://ircv3.net/specs/extensions/chathistory
 
-#### P10 Format
+#### Implementation Notes
 
-**Request** (Nefarious → X3):
-```
-[SERVER] CH [USER_NUMERIC] [SUBCOMMAND] [TARGET] [PARAMS...]
-```
+Chathistory is implemented **locally** in each Nefarious server using LMDB storage. There is no P10 S2S protocol for chathistory - each server maintains its own history database.
 
-**Response** (X3 → Nefarious):
+**Architecture**:
+- Messages are stored in LMDB as they pass through each server
+- Clients query their connected server directly via the `CHATHISTORY` client command
+- No S2S chathistory synchronization exists
+- X3 does not participate in chathistory
+
+#### Client Command Format
+
 ```
-[X3] CH [TARGET_SERVER] [USER_NUMERIC] [MSGID] [TIMESTAMP] [SENDER] [TEXT]
+CHATHISTORY <subcommand> <target> [params...]
 ```
 
 #### Subcommands
 
 | Subcommand | Parameters | Description |
 |------------|------------|-------------|
-| `LATEST` | target [limit] | Latest messages |
-| `BEFORE` | target msgid/timestamp [limit] | Messages before reference |
-| `AFTER` | target msgid/timestamp [limit] | Messages after reference |
-| `AROUND` | target msgid/timestamp [limit] | Messages around reference |
-| `BETWEEN` | target start end [limit] | Messages in range |
-| `TARGETS` | timestamp limit | Recent conversation targets |
+| `LATEST` | target \* limit | Latest messages |
+| `BEFORE` | target msgid/timestamp limit | Messages before reference |
+| `AFTER` | target msgid/timestamp limit | Messages after reference |
+| `AROUND` | target msgid/timestamp limit | Messages around reference |
+| `BETWEEN` | target start end limit | Messages in range |
+| `TARGETS` | timestamp timestamp limit | Recent conversation targets |
+
+#### Reference Format
+
+References can be:
+- `*` - No reference (for LATEST)
+- `timestamp=2024-12-25T12:00:00.000Z` - ISO 8601 timestamp
+- `msgid=AB-1703334400-123` - Message ID
+
+#### Configuration
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `FEAT_CHATHISTORY_MAX` | 100 | Maximum messages per request |
+| `FEAT_CHATHISTORY_DB` | "history" | LMDB database directory |
+| `FEAT_CHATHISTORY_RETENTION` | 7 | Days to keep messages (0 = forever) |
+| `FEAT_CHATHISTORY_PRIVATE` | FALSE | Enable private message history |
 
 ---
 
@@ -1217,7 +1237,7 @@ In a network with mixed old/new servers:
 | `SE` | `[NUMERIC] SE :[realname]` | Change realname |
 | `TM` | `[NUMERIC] TM @[tags] [target]` | Tag-only message |
 | `BT` | `[NUMERIC] BT +/-[id] [type] [params]` | Batch coordination |
-| `CH` | `[SERVER] CH [user] [subcmd] [target] [params]` | Chat history |
+| `CH` | (Client command only - no P10 S2S) | Chat history (local LMDB) |
 | `RD` | `[NUMERIC] RD [target] [msgid] :[reason]` | Message redaction |
 | `RG` | `[SERVER] RG [user] [account] [email] :[pass]` | Account registration |
 | `VF` | `[SERVER] VF [user] [account] [code]` | Verification |
@@ -1308,6 +1328,7 @@ In a network with mixed old/new servers:
 | 1.4 | December 2024 | Updated MARKREAD (MR) to route through X3 with S/G/R subcommands and broadcast |
 | 1.5 | December 2024 | Added compression passthrough Z flag to MD token for zstd-compressed metadata |
 | 1.6 | December 2024 | Added MULTILINE (ML) token for S2S multiline batch propagation |
+| 1.7 | December 2024 | Corrected CHATHISTORY documentation - local LMDB only, no X3 involvement |
 
 ---
 
