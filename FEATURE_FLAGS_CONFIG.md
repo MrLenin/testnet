@@ -294,10 +294,17 @@ ChanServ can synchronize channel access from Keycloak groups, using LMDB as the 
 |---------|---------|-------------|
 | `keycloak_access_sync` | 0 | Enable Keycloak group sync for channel access |
 | `keycloak_hierarchical_groups` | 0 | Use hierarchical group paths instead of flat names |
+| `keycloak_use_group_attributes` | 0 | Use `x3_access_level` group attribute for flexible access levels |
+| `keycloak_bidirectional_sync` | 0 | Enable bidirectional sync (X3 changes pushed to Keycloak) |
 | `keycloak_group_prefix` | (auto) | Group name/path prefix (defaults based on mode) |
+| `keycloak_access_level_attr` | x3_access_level | Attribute name for numeric access level |
 | `keycloak_sync_frequency` | 3600 | Sync interval in seconds (0 = startup only) |
 
-**Group Naming Modes**:
+#### Group Naming Modes
+
+**Legacy Suffix Mode** (default, `keycloak_use_group_attributes = 0`):
+
+Groups are named with a suffix indicating the access level:
 
 - **Flat mode** (default): Groups named `<prefix><channel>-<level>`
   - Example: `irc-channel-#help-owner`, `irc-channel-#help-op`
@@ -318,22 +325,47 @@ ChanServ can synchronize channel access from Keycloak groups, using LMDB as the 
 | `halfop` | UL_HALFOP | 150 |
 | `peon` | UL_PEON | 1 |
 
+#### Attribute-Based Mode (Recommended)
+
+When `keycloak_use_group_attributes = 1`, groups use the `x3_access_level` attribute to specify any numeric access level (1-500). This provides full flexibility for custom access levels.
+
+- **Flat mode**: Groups named `<prefix><channel>` with `x3_access_level` attribute
+  - Example: `irc-channel-#help` with attribute `x3_access_level = 350`
+
+- **Hierarchical mode**: Groups at path `/<prefix>/<channel>` with attribute
+  - Example: `/irc-channels/#help` with attribute `x3_access_level = 350`
+
+**Keycloak Group Attribute Setup**:
+
+In Keycloak Admin Console:
+1. Navigate to Groups
+2. Create or select a group (e.g., `irc-channel-#help`)
+3. Go to the "Attributes" tab
+4. Add attribute: `x3_access_level` = `350`
+
+Or via Keycloak Admin API:
+```json
+POST /admin/realms/{realm}/groups
+{
+  "name": "irc-channel-#help",
+  "attributes": {
+    "x3_access_level": ["350"]
+  }
+}
+```
+
 **Example Keycloak Group Hierarchies**:
 
 ```
-Flat mode:
+Legacy Suffix Mode (keycloak_use_group_attributes = 0):
   irc-channel-#help-owner      → members get access level 500
   irc-channel-#help-op         → members get access level 200
   irc-channel-#support-halfop  → members get access level 150
 
-Hierarchical mode:
-  /irc-channels/
-    └── #help/
-        ├── owner    → members get access level 500
-        ├── op       → members get access level 200
-        └── halfop   → members get access level 150
-    └── #support/
-        └── op       → members get access level 200
+Attribute Mode (keycloak_use_group_attributes = 1):
+  irc-channel-#help-seniors    (x3_access_level=350) → level 350
+  irc-channel-#help-juniors    (x3_access_level=250) → level 250
+  irc-channel-#support         (x3_access_level=200) → level 200
 ```
 
 **Example x3.conf Section**:
@@ -346,8 +378,14 @@ Hierarchical mode:
     // Use hierarchical groups (optional, default is flat)
     "keycloak_hierarchical_groups" = "1";
 
+    // Use attribute-based access levels (recommended for flexibility)
+    "keycloak_use_group_attributes" = "1";
+
     // Custom prefix (optional, has smart defaults)
     "keycloak_group_prefix" = "irc-channels";
+
+    // Custom attribute name (optional, default is x3_access_level)
+    // "keycloak_access_level_attr" = "x3_access_level";
 
     // Sync every hour (0 = sync at startup only)
     "keycloak_sync_frequency" = "3600";
@@ -360,6 +398,46 @@ Hierarchical mode:
 2. **Periodic Sync**: If `keycloak_sync_frequency > 0`, syncs repeat at that interval
 3. **LMDB Primary**: All access lookups use LMDB for speed
 4. **Fallback Integration**: ChanServ `_GetChannelUser()` checks LMDB if user not in SAXDB
+
+#### Bidirectional Sync (X3 → Keycloak)
+
+When `keycloak_bidirectional_sync = 1`, changes made through ChanServ commands are automatically pushed to Keycloak:
+
+**Automatic Actions**:
+- `ADDUSER` → Creates channel group in Keycloak, sets access level, adds user
+- `CLVL` → Updates user's group membership with new access level
+- `DELUSER` → Removes user from the channel group
+- `UNREGISTER` → Deletes the channel group from Keycloak
+
+**Group Structure**:
+Bidirectional sync uses hierarchical paths:
+```
+/irc-channels/#channelname
+    └── Attribute: x3_access_level = <numeric level>
+    └── Members: users with access to this channel
+```
+
+**Example x3.conf with Bidirectional Sync**:
+
+```
+"chanserv" {
+    "keycloak_access_sync" = "1";
+    "keycloak_bidirectional_sync" = "1";
+    "keycloak_use_group_attributes" = "1";
+    "keycloak_hierarchical_groups" = "1";
+    "keycloak_sync_frequency" = "3600";
+};
+```
+
+**How It Works**:
+1. User runs `/msg ChanServ ADDUSER #help JohnDoe 350`
+2. X3 adds JohnDoe to internal channel access (SAXDB/LMDB)
+3. X3 creates `/irc-channels/#help` group in Keycloak (if not exists)
+4. X3 sets `x3_access_level = 350` attribute on the group
+5. X3 adds JohnDoe to the Keycloak group
+6. Periodic sync keeps Keycloak → X3 in sync (other direction)
+
+**Note**: Bidirectional sync requires Keycloak client credentials with admin API access to create groups and manage memberships
 
 ---
 
@@ -766,6 +844,8 @@ In networks with multiple servers between client and X3, each intermediate serve
 | 1.6 | December 2024 | Added FEAT_COMPRESS_THRESHOLD, FEAT_COMPRESS_LEVEL, FEAT_METADATA_DB for Nefarious |
 | 1.7 | December 2024 | Added FEAT_REGISTER_SERVER, FEAT_AWAY_THROTTLE |
 | 1.8 | December 2024 | Added FEAT_CHATHISTORY_FEDERATION, FEAT_CHATHISTORY_TIMEOUT for S2S federation |
+| 1.9 | December 2024 | Added Keycloak group attribute-based access levels (keycloak_use_group_attributes) |
+| 2.0 | December 2024 | Added Keycloak bidirectional sync (keycloak_bidirectional_sync) - X3 auto-creates groups |
 
 ---
 
