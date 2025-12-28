@@ -113,12 +113,14 @@ Parameters are position-counted from the end:
 - `-2`: User numeric (SSCCC format)
 - `-1`: Realname/fullname
 
-Mode parameters (when `+modes` present) appear between the modes and the final 3 parameters. Known modes with parameters:
-- `+r`: Account name (indicates user is logged in)
-- `+h`: Virtual user@host
-- `+f`: Fake host
-- `+C`: Cloaked host
-- `+c`: Cloaked IP
+Mode parameters (when `+modes` present) appear between the modes and the final 3 parameters. **Parameter order is fixed** (regardless of mode string order):
+1. `+r`: Account name (indicates user is logged in)
+2. `+h`: Virtual user@host
+3. `+f`: Fake host
+4. `+C`: Cloaked host
+5. `+c`: Cloaked IP
+
+For example, both `+hr` and `+rh` have parameters in order: account, then vhost.
 
 Examples:
 ```
