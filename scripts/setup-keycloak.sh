@@ -529,7 +529,7 @@ if [ -n "$X3_CLIENT" ]; then
         "config": {
           "user.attribute": "x509_fingerprints",
           "claim.name": "x509_fingerprints",
-          "jsonType.label": "JSON",
+          "jsonType.label": "String",
           "id.token.claim": "true",
           "access.token.claim": "true",
           "userinfo.token.claim": "true",
@@ -593,7 +593,7 @@ if [ -n "$IRC_CLIENT" ]; then
         "config": {
           "user.attribute": "x509_fingerprints",
           "claim.name": "x509_fingerprints",
-          "jsonType.label": "JSON",
+          "jsonType.label": "String",
           "id.token.claim": "true",
           "access.token.claim": "true",
           "userinfo.token.claim": "true",
