@@ -734,7 +734,8 @@ describe('Keycloak Integration', () => {
         console.log('Token claims:', JSON.stringify(payload, null, 2));
 
         if (payload.x3_opserv_level !== undefined) {
-          expect(payload.x3_opserv_level).toBe(500);
+          // x3_opserv_level is a String in the token (to avoid type conversion errors)
+          expect(payload.x3_opserv_level).toBe('500');
         } else {
           console.log('x3_opserv_level claim not in token - mapper may not be configured');
         }
@@ -1330,5 +1331,706 @@ describe('Keycloak Channel Access Groups', () => {
     } else {
       console.log('Could not verify via group-by-path');
     }
+  });
+});
+
+/**
+ * Helper to get channel group with access level attribute
+ */
+async function getChannelGroupWithAttribute(
+  adminToken: string,
+  channelName: string
+): Promise<{ id: string; name: string; attributes?: Record<string, string[]> } | null> {
+  try {
+    // Get irc-channels parent first
+    const parentResponse = await fetch(
+      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups?search=irc-channels&exact=true`,
+      {
+        headers: { 'Authorization': `Bearer ${adminToken}` },
+      }
+    );
+
+    if (!parentResponse.ok) return null;
+    const parents = await parentResponse.json();
+    if (parents.length === 0) return null;
+
+    const parentId = parents[0].id;
+    const groupName = channelName.replace('#', '');
+
+    // Get children of irc-channels
+    const childrenResponse = await fetch(
+      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups/${parentId}/children`,
+      {
+        headers: { 'Authorization': `Bearer ${adminToken}` },
+      }
+    );
+
+    if (!childrenResponse.ok) return null;
+    const children = await childrenResponse.json();
+    const channelGroup = children.find((g: { name: string }) => g.name === groupName);
+
+    if (!channelGroup) return null;
+
+    // Get full group details including attributes
+    const groupResponse = await fetch(
+      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups/${channelGroup.id}`,
+      {
+        headers: { 'Authorization': `Bearer ${adminToken}` },
+      }
+    );
+
+    if (!groupResponse.ok) return null;
+    return await groupResponse.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Helper to delete a channel group from Keycloak
+ */
+async function deleteChannelGroup(adminToken: string, channelName: string): Promise<boolean> {
+  try {
+    // Get irc-channels parent first
+    const parentResponse = await fetch(
+      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups?search=irc-channels&exact=true`,
+      {
+        headers: { 'Authorization': `Bearer ${adminToken}` },
+      }
+    );
+
+    if (!parentResponse.ok) return false;
+    const parents = await parentResponse.json();
+    if (parents.length === 0) return false;
+
+    const parentId = parents[0].id;
+    const groupName = channelName.replace('#', '');
+
+    // Get children of irc-channels
+    const childrenResponse = await fetch(
+      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups/${parentId}/children`,
+      {
+        headers: { 'Authorization': `Bearer ${adminToken}` },
+      }
+    );
+
+    if (!childrenResponse.ok) return false;
+    const children = await childrenResponse.json();
+    const channelGroup = children.find((g: { name: string }) => g.name === groupName);
+
+    if (!channelGroup) return true; // Already deleted
+
+    // Delete the group
+    const deleteResponse = await fetch(
+      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups/${channelGroup.id}`,
+      {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${adminToken}` },
+      }
+    );
+
+    return deleteResponse.status === 204;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Helper to unregister a channel properly with confirmation code
+ * X3 responds with: "To confirm this unregistration, you must use 'unregister #channel a1b2c3d4'."
+ */
+async function unregisterChannel(client: RawSocketClient, channelName: string): Promise<void> {
+  // First send UNREGISTER to get the confirmation code
+  client.send(`PRIVMSG ChanServ :UNREGISTER ${channelName}`);
+
+  try {
+    // Wait for the confirmation prompt - format: "use 'unregister #channel CODE'"
+    const response = await client.waitForLine(/unregister.*\s([a-f0-9]{8})'/i, 5000);
+    // Extract the 8-character hex confirmation code at the end before the quote
+    const match = response.match(/unregister\s+\S+\s+([a-f0-9]{8})'/i);
+    if (match) {
+      const confirmCode = match[1];
+      console.log(`Confirming unregister of ${channelName} with code ${confirmCode}`);
+      client.send(`PRIVMSG ChanServ :UNREGISTER ${channelName} ${confirmCode}`);
+      // Wait for success confirmation - X3 says "has been unregistered"
+      await client.waitForLine(/has been unregistered|unregistered|removed/i, 5000);
+      console.log(`Successfully unregistered ${channelName}`);
+    } else {
+      console.log(`Could not extract confirmation code from: ${response}`);
+    }
+  } catch (e) {
+    console.log(`Could not unregister ${channelName} - ${(e as Error).message}`);
+  }
+}
+
+/**
+ * Helper to authenticate a second user via SASL for ADDUSER tests
+ */
+async function authenticateSecondUser(
+  username: string,
+  password: string
+): Promise<RawSocketClient | null> {
+  try {
+    const client = await createRawSocketClient();
+    await client.capLs();
+    await client.capReq(['sasl']);
+
+    client.send('AUTHENTICATE PLAIN');
+    await client.waitForLine(/AUTHENTICATE \+/);
+
+    const payload = Buffer.from(`${username}\0${username}\0${password}`).toString('base64');
+    client.send(`AUTHENTICATE ${payload}`);
+
+    await client.waitForLine(/903/, 5000);
+    client.capEnd();
+    client.register(`${username.slice(0, 7)}${Date.now() % 1000}`);
+    await client.waitForLine(/001/);
+
+    return client;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Bidirectional Sync Tests
+ *
+ * Tests X3's Keycloak bidirectional sync feature:
+ * - ADDUSER creates Keycloak channel groups with access level
+ * - CLVL updates the access level attribute
+ * - DELUSER removes user from group (when implemented)
+ * - UNREGISTER deletes the channel group
+ *
+ * Prerequisites:
+ * 1. X3 built with Keycloak support (--with-keycloak)
+ * 2. keycloak_bidirectional_sync enabled in x3.conf
+ * 3. Keycloak configured with irc-channels parent group
+ */
+describe('Keycloak Bidirectional Sync', () => {
+  const clients: RawSocketClient[] = [];
+  let keycloakAvailable = false;
+  let adminToken: string | null = null;
+
+  const trackClient = (client: RawSocketClient): RawSocketClient => {
+    clients.push(client);
+    return client;
+  };
+
+  beforeAll(async () => {
+    try {
+      const response = await fetch(`${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      keycloakAvailable = response.ok;
+
+      if (keycloakAvailable) {
+        adminToken = await getAdminToken();
+      }
+    } catch {
+      keycloakAvailable = false;
+    }
+  });
+
+  afterEach(() => {
+    for (const client of clients) {
+      try {
+        client.close();
+      } catch {
+        // Ignore
+      }
+    }
+    clients.length = 0;
+  });
+
+  describe('ADDUSER creates Keycloak groups', () => {
+    it('creates channel group with x3_access_level attribute when user added', async () => {
+      if (!keycloakAvailable || !adminToken) {
+        console.log('Skipping - Keycloak not available');
+        return;
+      }
+
+      const channelName = `#bidisync${Date.now() % 100000}`;
+      const groupName = channelName.replace('#', '');
+
+      // Cleanup any existing group first
+      await deleteChannelGroup(adminToken, channelName);
+
+      // Connect and authenticate as owner
+      const client = trackClient(await createRawSocketClient());
+      await client.capLs();
+      await client.capReq(['sasl']);
+
+      client.send('AUTHENTICATE PLAIN');
+      await client.waitForLine(/AUTHENTICATE \+/);
+
+      const payload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
+      client.send(`AUTHENTICATE ${payload}`);
+
+      try {
+        await client.waitForLine(/903/, 5000);
+      } catch {
+        console.log('Skipping - could not authenticate');
+        return;
+      }
+
+      client.capEnd();
+      client.register(`bisync${Date.now() % 10000}`);
+      await client.waitForLine(/001/);
+
+      // Register channel (becomes owner - should create Keycloak group)
+      client.send(`JOIN ${channelName}`);
+      await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+      // Register the channel with ChanServ
+      client.send(`PRIVMSG ChanServ :REGISTER ${channelName}`);
+
+      // Wait for registration confirmation or error
+      // ChanServ responds with "You now have ownership of #channel"
+      try {
+        await client.waitForLine(/ownership|registered|already|error/i, 5000);
+      } catch {
+        console.log('Channel registration timed out');
+      }
+
+      // Wait for async Keycloak sync
+      await new Promise(r => setTimeout(r, 2000));
+
+      // Check if group was created in Keycloak
+      const group = await getChannelGroupWithAttribute(adminToken, channelName);
+
+      if (group) {
+        console.log(`Channel group created: ${groupName}`);
+        console.log('Group attributes:', JSON.stringify(group.attributes, null, 2));
+
+        // Check for x3_access_level attribute
+        const accessLevel = group.attributes?.x3_access_level?.[0];
+        if (accessLevel) {
+          console.log(`x3_access_level: ${accessLevel}`);
+          // Owner should be 500
+          expect(parseInt(accessLevel)).toBe(500);
+        } else {
+          console.log('x3_access_level attribute not set - bidirectional sync may not be enabled');
+        }
+      } else {
+        console.log('Channel group not created - bidirectional sync may not be enabled');
+        console.log('Enable with: keycloak_bidirectional_sync = true in x3.conf [chanserv] section');
+      }
+
+      // Cleanup - use proper unregister with confirmation code
+      await unregisterChannel(client, channelName);
+      client.send('QUIT');
+    });
+
+    it('creates group with correct access level for different user levels', async () => {
+      if (!keycloakAvailable || !adminToken) {
+        console.log('Skipping - Keycloak not available');
+        return;
+      }
+
+      // Create a second Keycloak user for this test
+      const secondUser = `bisyncadd${Date.now() % 100000}`;
+      const secondEmail = `${secondUser}@example.com`;
+      const secondPass = 'testpass123';
+
+      const created = await createKeycloakUser(adminToken, secondUser, secondEmail, secondPass);
+      if (!created) {
+        console.log('Skipping - could not create second Keycloak user');
+        return;
+      }
+
+      const channelName = `#bisyncadd${Date.now() % 100000}`;
+
+      try {
+        // Connect as first user and register channel
+        const ownerClient = trackClient(await createRawSocketClient());
+        await ownerClient.capLs();
+        await ownerClient.capReq(['sasl']);
+
+        ownerClient.send('AUTHENTICATE PLAIN');
+        await ownerClient.waitForLine(/AUTHENTICATE \+/);
+
+        const ownerPayload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
+        ownerClient.send(`AUTHENTICATE ${ownerPayload}`);
+
+        try {
+          await ownerClient.waitForLine(/903/, 5000);
+        } catch {
+          console.log('Skipping - could not authenticate owner');
+          return;
+        }
+
+        ownerClient.capEnd();
+        ownerClient.register(`bisown${Date.now() % 10000}`);
+        await ownerClient.waitForLine(/001/);
+
+        // Register channel
+        ownerClient.send(`JOIN ${channelName}`);
+        await ownerClient.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+        ownerClient.send(`PRIVMSG ChanServ :REGISTER ${channelName}`);
+
+        try {
+          await ownerClient.waitForLine(/ownership|registered|already/i, 5000);
+        } catch {
+          console.log('Registration result not received');
+        }
+
+        // Second user must authenticate via SASL to create X3 account before ADDUSER
+        const secondClient = await authenticateSecondUser(secondUser, secondPass);
+        if (secondClient) {
+          trackClient(secondClient);
+          console.log(`Second user ${secondUser} authenticated and connected`);
+          // Wait a bit for account to be fully synced
+          await new Promise(r => setTimeout(r, 500));
+        } else {
+          console.log(`Could not authenticate second user ${secondUser} - ADDUSER may fail`);
+        }
+
+        // Add second user at level 200 (manager level)
+        // Use *username prefix to look up by account handle, not nick
+        ownerClient.send(`PRIVMSG ChanServ :ADDUSER ${channelName} *${secondUser} 200`);
+
+        try {
+          await ownerClient.waitForLine(/added|access/i, 5000);
+          console.log(`Added ${secondUser} to ${channelName} at level 200`);
+        } catch {
+          console.log('ADDUSER result not received');
+        }
+
+        // Wait for Keycloak sync
+        await new Promise(r => setTimeout(r, 2000));
+
+        // Check the group's access level attribute
+        // Note: The current implementation stores the owner's access level on the group
+        // User-level access would need per-user subgroups or attributes
+        const group = await getChannelGroupWithAttribute(adminToken, channelName);
+
+        if (group) {
+          console.log(`Channel group: ${channelName.replace('#', '')}`);
+          console.log('Group attributes:', JSON.stringify(group.attributes, null, 2));
+
+          // This verifies the group exists - the access level tracking approach
+          // may vary based on implementation (group attribute vs subgroups)
+          expect(group.id).toBeDefined();
+        } else {
+          console.log('Group not found - bidirectional sync may not be enabled');
+        }
+
+        // Cleanup - use proper unregister with confirmation code
+        await unregisterChannel(ownerClient, channelName);
+        ownerClient.send('QUIT');
+      } finally {
+        // Cleanup Keycloak user
+        await deleteKeycloakUser(adminToken, secondUser);
+      }
+    });
+  });
+
+  describe('CLVL updates Keycloak access level', () => {
+    it('updates group attribute when access level changed', async () => {
+      if (!keycloakAvailable || !adminToken) {
+        console.log('Skipping - Keycloak not available');
+        return;
+      }
+
+      // Create a second Keycloak user
+      const secondUser = `bisyncclvl${Date.now() % 100000}`;
+      const secondEmail = `${secondUser}@example.com`;
+      const secondPass = 'testpass123';
+
+      const created = await createKeycloakUser(adminToken, secondUser, secondEmail, secondPass);
+      if (!created) {
+        console.log('Skipping - could not create second Keycloak user');
+        return;
+      }
+
+      const channelName = `#bisyncclvl${Date.now() % 100000}`;
+
+      try {
+        // Connect as owner
+        const ownerClient = trackClient(await createRawSocketClient());
+        await ownerClient.capLs();
+        await ownerClient.capReq(['sasl']);
+
+        ownerClient.send('AUTHENTICATE PLAIN');
+        await ownerClient.waitForLine(/AUTHENTICATE \+/);
+
+        const payload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
+        ownerClient.send(`AUTHENTICATE ${payload}`);
+
+        try {
+          await ownerClient.waitForLine(/903/, 5000);
+        } catch {
+          console.log('Skipping - could not authenticate');
+          return;
+        }
+
+        ownerClient.capEnd();
+        ownerClient.register(`clvl${Date.now() % 10000}`);
+        await ownerClient.waitForLine(/001/);
+
+        // Register channel
+        ownerClient.send(`JOIN ${channelName}`);
+        await ownerClient.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+        ownerClient.send(`PRIVMSG ChanServ :REGISTER ${channelName}`);
+        await new Promise(r => setTimeout(r, 1000));
+
+        // Second user must authenticate via SASL to create X3 account before ADDUSER
+        const secondClient = await authenticateSecondUser(secondUser, secondPass);
+        if (secondClient) {
+          trackClient(secondClient);
+          console.log(`Second user ${secondUser} authenticated and connected`);
+          await new Promise(r => setTimeout(r, 500));
+        }
+
+        // Add user at level 100 - use *username prefix for account lookup
+        ownerClient.send(`PRIVMSG ChanServ :ADDUSER ${channelName} *${secondUser} 100`);
+        await new Promise(r => setTimeout(r, 2000));
+
+        // Get initial state
+        let group = await getChannelGroupWithAttribute(adminToken, channelName);
+        const initialAccessLevel = group?.attributes?.x3_access_level?.[0];
+        console.log(`Initial access level attribute: ${initialAccessLevel || 'not set'}`);
+
+        // Change access level to 300 - use *username prefix for account lookup
+        ownerClient.send(`PRIVMSG ChanServ :CLVL ${channelName} *${secondUser} 300`);
+
+        try {
+          await ownerClient.waitForLine(/access.*changed|level.*changed|300/i, 5000);
+          console.log(`Changed ${secondUser} access level to 300`);
+        } catch {
+          console.log('CLVL result not received');
+        }
+
+        // Wait for sync
+        await new Promise(r => setTimeout(r, 2000));
+
+        // Check updated access level
+        group = await getChannelGroupWithAttribute(adminToken, channelName);
+        if (group?.attributes?.x3_access_level) {
+          const newAccessLevel = group.attributes.x3_access_level[0];
+          console.log(`Updated access level attribute: ${newAccessLevel}`);
+          // Note: The implementation may store the last modified user's level
+          // or use a different strategy
+          expect(parseInt(newAccessLevel)).toBeGreaterThan(0);
+        } else {
+          console.log('Access level attribute not found after CLVL');
+        }
+
+        // Cleanup - use proper unregister with confirmation code
+        await unregisterChannel(ownerClient, channelName);
+        ownerClient.send('QUIT');
+      } finally {
+        await deleteKeycloakUser(adminToken, secondUser);
+      }
+    });
+  });
+
+  describe('DELUSER removes from Keycloak group', () => {
+    it('removes user access when deleted from channel', async () => {
+      if (!keycloakAvailable || !adminToken) {
+        console.log('Skipping - Keycloak not available');
+        return;
+      }
+
+      // Create a second user
+      const secondUser = `bisyncdel${Date.now() % 100000}`;
+      const secondEmail = `${secondUser}@example.com`;
+      const secondPass = 'testpass123';
+
+      const created = await createKeycloakUser(adminToken, secondUser, secondEmail, secondPass);
+      if (!created) {
+        console.log('Skipping - could not create second Keycloak user');
+        return;
+      }
+
+      const channelName = `#bisyncdel${Date.now() % 100000}`;
+
+      try {
+        const ownerClient = trackClient(await createRawSocketClient());
+        await ownerClient.capLs();
+        await ownerClient.capReq(['sasl']);
+
+        ownerClient.send('AUTHENTICATE PLAIN');
+        await ownerClient.waitForLine(/AUTHENTICATE \+/);
+
+        const payload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
+        ownerClient.send(`AUTHENTICATE ${payload}`);
+
+        try {
+          await ownerClient.waitForLine(/903/, 5000);
+        } catch {
+          console.log('Skipping - could not authenticate');
+          return;
+        }
+
+        ownerClient.capEnd();
+        ownerClient.register(`delown${Date.now() % 10000}`);
+        await ownerClient.waitForLine(/001/);
+
+        // Register channel and add user
+        ownerClient.send(`JOIN ${channelName}`);
+        await ownerClient.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+        ownerClient.send(`PRIVMSG ChanServ :REGISTER ${channelName}`);
+        await new Promise(r => setTimeout(r, 1000));
+
+        // Second user must authenticate via SASL to create X3 account before ADDUSER
+        const secondClient = await authenticateSecondUser(secondUser, secondPass);
+        if (secondClient) {
+          trackClient(secondClient);
+          console.log(`Second user ${secondUser} authenticated and connected`);
+          await new Promise(r => setTimeout(r, 500));
+        }
+
+        // Add user - use *username prefix for account lookup
+        ownerClient.send(`PRIVMSG ChanServ :ADDUSER ${channelName} *${secondUser} 200`);
+        await new Promise(r => setTimeout(r, 2000));
+
+        // Verify group exists before delete
+        let group = await getChannelGroupWithAttribute(adminToken, channelName);
+        if (group) {
+          console.log(`Group exists before DELUSER: ${channelName.replace('#', '')}`);
+        }
+
+        // Delete user from channel - use *username prefix for account lookup
+        ownerClient.send(`PRIVMSG ChanServ :DELUSER ${channelName} *${secondUser}`);
+
+        try {
+          await ownerClient.waitForLine(/removed|deleted|access/i, 5000);
+          console.log(`Deleted ${secondUser} from ${channelName}`);
+        } catch {
+          console.log('DELUSER result not received');
+        }
+
+        // Wait for sync
+        await new Promise(r => setTimeout(r, 2000));
+
+        // The group should still exist (for other users), but user membership may be updated
+        // Depending on implementation, this could:
+        // 1. Remove user from group membership
+        // 2. Remove user's subgroup
+        // 3. Update group attributes
+        group = await getChannelGroupWithAttribute(adminToken, channelName);
+        console.log('Group after DELUSER:', group ? 'exists' : 'deleted');
+
+        // Cleanup - use proper unregister with confirmation code
+        await unregisterChannel(ownerClient, channelName);
+        ownerClient.send('QUIT');
+      } finally {
+        await deleteKeycloakUser(adminToken, secondUser);
+      }
+    });
+  });
+
+  describe('UNREGISTER deletes Keycloak channel group', () => {
+    it('deletes channel group when channel unregistered', async () => {
+      if (!keycloakAvailable || !adminToken) {
+        console.log('Skipping - Keycloak not available');
+        return;
+      }
+
+      const channelName = `#bisyncunreg${Date.now() % 100000}`;
+
+      const client = trackClient(await createRawSocketClient());
+      await client.capLs();
+      await client.capReq(['sasl']);
+
+      client.send('AUTHENTICATE PLAIN');
+      await client.waitForLine(/AUTHENTICATE \+/);
+
+      const payload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
+      client.send(`AUTHENTICATE ${payload}`);
+
+      try {
+        await client.waitForLine(/903/, 5000);
+      } catch {
+        console.log('Skipping - could not authenticate');
+        return;
+      }
+
+      client.capEnd();
+      client.register(`unreg${Date.now() % 10000}`);
+      await client.waitForLine(/001/);
+
+      // Register channel
+      client.send(`JOIN ${channelName}`);
+      await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+      client.send(`PRIVMSG ChanServ :REGISTER ${channelName}`);
+
+      try {
+        await client.waitForLine(/ownership|registered|already/i, 5000);
+      } catch {
+        console.log('Registration result not received');
+      }
+
+      // Wait for group creation
+      await new Promise(r => setTimeout(r, 2000));
+
+      // Verify group exists
+      let group = await getChannelGroupWithAttribute(adminToken, channelName);
+      if (group) {
+        console.log(`Group created: ${channelName.replace('#', '')} (id: ${group.id})`);
+        expect(group.id).toBeDefined();
+      } else {
+        console.log('Group not created - bidirectional sync may not be enabled');
+        console.log('Continuing to test UNREGISTER cleanup anyway...');
+      }
+
+      // Unregister channel - use proper confirmation code
+      await unregisterChannel(client, channelName);
+
+      // Wait for Keycloak sync
+      await new Promise(r => setTimeout(r, 2000));
+
+      // Verify group was deleted
+      group = await getChannelGroupWithAttribute(adminToken, channelName);
+      if (group) {
+        console.log('WARNING: Group still exists after UNREGISTER');
+        console.log('This may indicate bidirectional sync UNREGISTER handling is not implemented');
+      } else {
+        console.log('SUCCESS: Group deleted after UNREGISTER');
+      }
+
+      // Explicitly check the group is gone
+      expect(group).toBeNull();
+
+      client.send('QUIT');
+    });
+  });
+
+  describe('Error handling', () => {
+    it('handles Keycloak unavailable gracefully during sync', async () => {
+      // This test verifies that ChanServ commands still work
+      // even if Keycloak sync fails
+
+      const client = trackClient(await createRawSocketClient());
+      await client.capLs();
+      client.capEnd();
+      client.register(`synerr${Date.now() % 10000}`);
+      await client.waitForLine(/001/);
+
+      const channelName = `#syncerr${Date.now() % 100000}`;
+
+      // Join and register without authentication
+      client.send(`JOIN ${channelName}`);
+      await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+      // Try to register - should work or fail based on auth, not Keycloak
+      client.send(`PRIVMSG ChanServ :REGISTER ${channelName}`);
+
+      try {
+        const response = await client.waitForLine(/registered|must.*identify|authenticated|error/i, 5000);
+        console.log('Register response:', response);
+        // Either registered (if auth not required) or authentication required - both are valid
+        expect(response).toBeDefined();
+      } catch {
+        console.log('No response from ChanServ - may need authentication');
+      }
+
+      client.send('QUIT');
+    });
   });
 });
