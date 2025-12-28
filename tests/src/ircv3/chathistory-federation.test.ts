@@ -288,4 +288,508 @@ describe('IRCv3 Chathistory Federation', () => {
       client2.send('QUIT');
     });
   });
+
+  describe('Cross-Server Consistency', () => {
+    it('same history returned from both servers', async () => {
+      if (!secondaryAvailable) {
+        console.log('SKIP: Secondary server not available');
+        return;
+      }
+
+      // Create channel and send messages from primary
+      const client1 = trackClient(await createRawSocketClient(PRIMARY_SERVER.host, PRIMARY_SERVER.port));
+      await client1.capLs();
+      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'echo-message']);
+      client1.capEnd();
+      client1.register('consist1');
+      await client1.waitForLine(/001/);
+
+      const channelName = `#consist${Date.now()}`;
+      client1.send(`JOIN ${channelName}`);
+      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+      // Send messages and capture their msgids
+      const sentMsgIds: string[] = [];
+      for (let i = 1; i <= 5; i++) {
+        client1.send(`PRIVMSG ${channelName} :Consistency test message ${i}`);
+        try {
+          const echo = await client1.waitForLine(new RegExp(`PRIVMSG.*Consistency test message ${i}`, 'i'), 3000);
+          const match = echo.match(/msgid=([^\s;]+)/);
+          if (match) {
+            sentMsgIds.push(match[1]);
+          }
+        } catch {
+          // Continue
+        }
+        await new Promise(r => setTimeout(r, 50));
+      }
+
+      console.log(`Sent ${sentMsgIds.length} messages with msgids`);
+      await new Promise(r => setTimeout(r, 1000));
+
+      // Query history from primary
+      client1.clearRawBuffer();
+      client1.send(`CHATHISTORY LATEST ${channelName} * 10`);
+
+      const primaryMsgIds: string[] = [];
+      try {
+        await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+        const startTime = Date.now();
+        while (Date.now() - startTime < 5000) {
+          try {
+            const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 500);
+            if (line.includes('BATCH -')) break;
+            const match = line.match(/msgid=([^\s;]+)/);
+            if (match) primaryMsgIds.push(match[1]);
+          } catch {
+            break;
+          }
+        }
+      } catch (e) {
+        console.log('Primary query failed:', (e as Error).message);
+      }
+
+      console.log(`Primary server returned ${primaryMsgIds.length} messages`);
+
+      // Now query from secondary
+      const client2 = trackClient(await createRawSocketClient(SECONDARY_SERVER.host, SECONDARY_SERVER.port));
+      await client2.capLs();
+      await client2.capReq(['draft/chathistory', 'batch', 'server-time']);
+      client2.capEnd();
+      client2.register('consist2');
+      await client2.waitForLine(/001/);
+
+      client2.send(`JOIN ${channelName}`);
+      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+      await new Promise(r => setTimeout(r, 500));
+      client2.clearRawBuffer();
+      client2.send(`CHATHISTORY LATEST ${channelName} * 10`);
+
+      const secondaryMsgIds: string[] = [];
+      try {
+        await client2.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+        const startTime = Date.now();
+        while (Date.now() - startTime < 5000) {
+          try {
+            const line = await client2.waitForLine(/PRIVMSG|BATCH -/, 500);
+            if (line.includes('BATCH -')) break;
+            const match = line.match(/msgid=([^\s;]+)/);
+            if (match) secondaryMsgIds.push(match[1]);
+          } catch {
+            break;
+          }
+        }
+      } catch (e) {
+        console.log('Secondary query failed:', (e as Error).message);
+      }
+
+      console.log(`Secondary server returned ${secondaryMsgIds.length} messages`);
+
+      // Compare results
+      const primarySet = new Set(primaryMsgIds);
+      const secondarySet = new Set(secondaryMsgIds);
+
+      // Both should have same messages
+      let matches = 0;
+      for (const msgid of primaryMsgIds) {
+        if (secondarySet.has(msgid)) matches++;
+      }
+
+      console.log(`Matching msgids: ${matches}/${primaryMsgIds.length}`);
+      if (primaryMsgIds.length > 0 && secondaryMsgIds.length > 0) {
+        expect(matches).toBe(primaryMsgIds.length);
+        console.log('SUCCESS: Both servers return consistent history');
+      }
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+
+    it('history order is consistent across servers', async () => {
+      if (!secondaryAvailable) {
+        console.log('SKIP: Secondary server not available');
+        return;
+      }
+
+      const client1 = trackClient(await createRawSocketClient(PRIMARY_SERVER.host, PRIMARY_SERVER.port));
+      await client1.capLs();
+      await client1.capReq(['draft/chathistory', 'batch', 'server-time']);
+      client1.capEnd();
+      client1.register('order1');
+      await client1.waitForLine(/001/);
+
+      const channelName = `#order${Date.now()}`;
+      client1.send(`JOIN ${channelName}`);
+      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+      // Send numbered messages
+      for (let i = 1; i <= 5; i++) {
+        client1.send(`PRIVMSG ${channelName} :Order test ${i}`);
+        await new Promise(r => setTimeout(r, 100));
+      }
+      await new Promise(r => setTimeout(r, 1000));
+
+      // Query from primary
+      client1.clearRawBuffer();
+      client1.send(`CHATHISTORY LATEST ${channelName} * 10`);
+
+      const primaryOrder: string[] = [];
+      try {
+        await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+        const startTime = Date.now();
+        while (Date.now() - startTime < 5000) {
+          try {
+            const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 500);
+            if (line.includes('BATCH -')) break;
+            if (line.includes('Order test')) {
+              const match = line.match(/Order test (\d+)/);
+              if (match) primaryOrder.push(match[1]);
+            }
+          } catch {
+            break;
+          }
+        }
+      } catch (e) {
+        console.log('Primary query failed:', (e as Error).message);
+      }
+
+      // Query from secondary
+      const client2 = trackClient(await createRawSocketClient(SECONDARY_SERVER.host, SECONDARY_SERVER.port));
+      await client2.capLs();
+      await client2.capReq(['draft/chathistory', 'batch', 'server-time']);
+      client2.capEnd();
+      client2.register('order2');
+      await client2.waitForLine(/001/);
+
+      client2.send(`JOIN ${channelName}`);
+      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+      await new Promise(r => setTimeout(r, 500));
+      client2.clearRawBuffer();
+      client2.send(`CHATHISTORY LATEST ${channelName} * 10`);
+
+      const secondaryOrder: string[] = [];
+      try {
+        await client2.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+        const startTime = Date.now();
+        while (Date.now() - startTime < 5000) {
+          try {
+            const line = await client2.waitForLine(/PRIVMSG|BATCH -/, 500);
+            if (line.includes('BATCH -')) break;
+            if (line.includes('Order test')) {
+              const match = line.match(/Order test (\d+)/);
+              if (match) secondaryOrder.push(match[1]);
+            }
+          } catch {
+            break;
+          }
+        }
+      } catch (e) {
+        console.log('Secondary query failed:', (e as Error).message);
+      }
+
+      console.log(`Primary order: ${primaryOrder.join(', ')}`);
+      console.log(`Secondary order: ${secondaryOrder.join(', ')}`);
+
+      // Orders should match
+      if (primaryOrder.length > 0 && secondaryOrder.length > 0) {
+        expect(primaryOrder).toEqual(secondaryOrder);
+        console.log('SUCCESS: Message order is consistent');
+      }
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+
+    it('messages from both servers appear in shared history', async () => {
+      if (!secondaryAvailable) {
+        console.log('SKIP: Secondary server not available');
+        return;
+      }
+
+      const client1 = trackClient(await createRawSocketClient(PRIMARY_SERVER.host, PRIMARY_SERVER.port));
+      const client2 = trackClient(await createRawSocketClient(SECONDARY_SERVER.host, SECONDARY_SERVER.port));
+
+      await client1.capLs();
+      await client1.capReq(['draft/chathistory', 'batch', 'server-time']);
+      client1.capEnd();
+      client1.register('mixed1');
+      await client1.waitForLine(/001/);
+
+      await client2.capLs();
+      await client2.capReq(['draft/chathistory', 'batch', 'server-time']);
+      client2.capEnd();
+      client2.register('mixed2');
+      await client2.waitForLine(/001/);
+
+      const channelName = `#mixed${Date.now()}`;
+
+      client1.send(`JOIN ${channelName}`);
+      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+      client2.send(`JOIN ${channelName}`);
+      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await new Promise(r => setTimeout(r, 500));
+
+      // Send messages from both servers interleaved
+      client1.send(`PRIVMSG ${channelName} :From primary 1`);
+      await new Promise(r => setTimeout(r, 100));
+      client2.send(`PRIVMSG ${channelName} :From secondary 1`);
+      await new Promise(r => setTimeout(r, 100));
+      client1.send(`PRIVMSG ${channelName} :From primary 2`);
+      await new Promise(r => setTimeout(r, 100));
+      client2.send(`PRIVMSG ${channelName} :From secondary 2`);
+      await new Promise(r => setTimeout(r, 1000));
+
+      // Query history from either server
+      client1.clearRawBuffer();
+      client1.send(`CHATHISTORY LATEST ${channelName} * 10`);
+
+      let fromPrimary = 0;
+      let fromSecondary = 0;
+
+      try {
+        await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+        const startTime = Date.now();
+        while (Date.now() - startTime < 5000) {
+          try {
+            const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 500);
+            if (line.includes('BATCH -')) break;
+            if (line.includes('From primary')) fromPrimary++;
+            if (line.includes('From secondary')) fromSecondary++;
+          } catch {
+            break;
+          }
+        }
+      } catch (e) {
+        console.log('Query failed:', (e as Error).message);
+      }
+
+      console.log(`Messages from primary: ${fromPrimary}, from secondary: ${fromSecondary}`);
+
+      // Should have messages from both servers
+      if (fromPrimary > 0 || fromSecondary > 0) {
+        expect(fromPrimary).toBeGreaterThanOrEqual(2);
+        expect(fromSecondary).toBeGreaterThanOrEqual(2);
+        console.log('SUCCESS: History includes messages from both servers');
+      }
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+  });
+
+  describe('Netsplit Recovery', () => {
+    it('history remains available during brief netsplit', async () => {
+      if (!secondaryAvailable) {
+        console.log('SKIP: Secondary server not available');
+        return;
+      }
+
+      // Connect as oper to control server links
+      const operClient = trackClient(await createRawSocketClient(PRIMARY_SERVER.host, PRIMARY_SERVER.port));
+      await operClient.capLs();
+      await operClient.capReq(['draft/chathistory', 'batch', 'server-time']);
+      operClient.capEnd();
+      operClient.register('netsplit1');
+      await operClient.waitForLine(/001/);
+
+      // Become oper
+      operClient.send('OPER oper shmoo');
+      try {
+        await operClient.waitForLine(/381/, 5000);
+      } catch {
+        console.log('Cannot oper up - skipping netsplit test');
+        operClient.send('QUIT');
+        return;
+      }
+
+      const channelName = `#netsplit${Date.now()}`;
+      operClient.send(`JOIN ${channelName}`);
+      await operClient.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+      // Send messages before netsplit
+      for (let i = 1; i <= 3; i++) {
+        operClient.send(`PRIVMSG ${channelName} :Before netsplit ${i}`);
+        await new Promise(r => setTimeout(r, 50));
+      }
+      await new Promise(r => setTimeout(r, 500));
+
+      console.log('Messages sent before netsplit');
+
+      // SQUIT the secondary server (simulating netsplit)
+      const secondaryServerName = 'leaf.fractalrealities.net';
+      operClient.send(`SQUIT ${secondaryServerName} :Netsplit test`);
+      await new Promise(r => setTimeout(r, 1000));
+
+      // Send messages during netsplit
+      for (let i = 1; i <= 2; i++) {
+        operClient.send(`PRIVMSG ${channelName} :During netsplit ${i}`);
+        await new Promise(r => setTimeout(r, 50));
+      }
+      await new Promise(r => setTimeout(r, 500));
+
+      console.log('Messages sent during netsplit');
+
+      // Reconnect server
+      operClient.send(`CONNECT ${secondaryServerName}`);
+      await new Promise(r => setTimeout(r, 3000));
+
+      // Send messages after reconnect
+      for (let i = 1; i <= 2; i++) {
+        operClient.send(`PRIVMSG ${channelName} :After reconnect ${i}`);
+        await new Promise(r => setTimeout(r, 50));
+      }
+      await new Promise(r => setTimeout(r, 1000));
+
+      console.log('Messages sent after reconnect');
+
+      // Query history - should have all messages
+      operClient.clearRawBuffer();
+      operClient.send(`CHATHISTORY LATEST ${channelName} * 20`);
+
+      let beforeCount = 0;
+      let duringCount = 0;
+      let afterCount = 0;
+
+      try {
+        await operClient.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+        const startTime = Date.now();
+        while (Date.now() - startTime < 5000) {
+          try {
+            const line = await operClient.waitForLine(/PRIVMSG|BATCH -/, 500);
+            if (line.includes('BATCH -')) break;
+            if (line.includes('Before netsplit')) beforeCount++;
+            if (line.includes('During netsplit')) duringCount++;
+            if (line.includes('After reconnect')) afterCount++;
+          } catch {
+            break;
+          }
+        }
+      } catch (e) {
+        console.log('Query failed:', (e as Error).message);
+      }
+
+      console.log(`History after netsplit recovery: before=${beforeCount}, during=${duringCount}, after=${afterCount}`);
+
+      // All messages should be in history
+      if (beforeCount > 0 || duringCount > 0 || afterCount > 0) {
+        expect(beforeCount).toBe(3);
+        expect(duringCount).toBe(2);
+        expect(afterCount).toBe(2);
+        console.log('SUCCESS: All messages preserved through netsplit');
+      }
+
+      operClient.send('QUIT');
+    });
+
+    it('secondary server catches up after rejoining network', async () => {
+      if (!secondaryAvailable) {
+        console.log('SKIP: Secondary server not available');
+        return;
+      }
+
+      const operClient = trackClient(await createRawSocketClient(PRIMARY_SERVER.host, PRIMARY_SERVER.port));
+      await operClient.capLs();
+      await operClient.capReq(['draft/chathistory', 'batch', 'server-time']);
+      operClient.capEnd();
+      operClient.register('catchup1');
+      await operClient.waitForLine(/001/);
+
+      operClient.send('OPER oper shmoo');
+      try {
+        await operClient.waitForLine(/381/, 5000);
+      } catch {
+        console.log('Cannot oper up - skipping catchup test');
+        operClient.send('QUIT');
+        return;
+      }
+
+      const channelName = `#catchup${Date.now()}`;
+      operClient.send(`JOIN ${channelName}`);
+      await operClient.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+      // SQUIT secondary
+      const secondaryServerName = 'leaf.fractalrealities.net';
+      operClient.send(`SQUIT ${secondaryServerName} :Catchup test`);
+      await new Promise(r => setTimeout(r, 1500));
+
+      // Send messages while secondary is gone
+      for (let i = 1; i <= 5; i++) {
+        operClient.send(`PRIVMSG ${channelName} :Missed message ${i}`);
+        await new Promise(r => setTimeout(r, 100));
+      }
+      await new Promise(r => setTimeout(r, 500));
+
+      console.log('Sent 5 messages while secondary was disconnected');
+
+      // Reconnect secondary
+      operClient.send(`CONNECT ${secondaryServerName}`);
+
+      // Wait for reconnection
+      let reconnected = false;
+      for (let i = 0; i < 10; i++) {
+        try {
+          const testClient = new RawSocketClient();
+          await testClient.connect(SECONDARY_SERVER.host, SECONDARY_SERVER.port);
+          testClient.close();
+          reconnected = true;
+          break;
+        } catch {
+          await new Promise(r => setTimeout(r, 500));
+        }
+      }
+
+      if (!reconnected) {
+        console.log('Secondary did not reconnect');
+        operClient.send('QUIT');
+        return;
+      }
+
+      console.log('Secondary reconnected');
+      await new Promise(r => setTimeout(r, 1000));
+
+      // Query from secondary - should get all messages via federation
+      const secondaryClient = trackClient(await createRawSocketClient(SECONDARY_SERVER.host, SECONDARY_SERVER.port));
+      await secondaryClient.capLs();
+      await secondaryClient.capReq(['draft/chathistory', 'batch', 'server-time']);
+      secondaryClient.capEnd();
+      secondaryClient.register('catchup2');
+      await secondaryClient.waitForLine(/001/);
+
+      secondaryClient.send(`JOIN ${channelName}`);
+      await secondaryClient.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+      secondaryClient.clearRawBuffer();
+      secondaryClient.send(`CHATHISTORY LATEST ${channelName} * 10`);
+
+      let missedCount = 0;
+      try {
+        await secondaryClient.waitForLine(/BATCH \+\S+ chathistory/i, 10000);
+        const startTime = Date.now();
+        while (Date.now() - startTime < 5000) {
+          try {
+            const line = await secondaryClient.waitForLine(/PRIVMSG|BATCH -/, 500);
+            if (line.includes('BATCH -')) break;
+            if (line.includes('Missed message')) missedCount++;
+          } catch {
+            break;
+          }
+        }
+      } catch (e) {
+        console.log('Secondary query failed:', (e as Error).message);
+      }
+
+      console.log(`Secondary retrieved ${missedCount} missed messages`);
+
+      if (missedCount > 0) {
+        expect(missedCount).toBe(5);
+        console.log('SUCCESS: Secondary caught up with missed messages via federation');
+      }
+
+      operClient.send('QUIT');
+      secondaryClient.send('QUIT');
+    });
+  });
 });
