@@ -105,12 +105,34 @@ SERVER servername 1 timestamp starttime numeric :description
 ### User Introduction
 
 ```
-[SERVER] N nick 1 timestamp ident host +modes account B64IP :realname
+[SERVER] N nick hops timestamp ident host [+modes [mode_params...]] B64IP numeric :realname
 ```
 
-Example:
+Parameters are position-counted from the end:
+- `-3`: Base64 IP address
+- `-2`: User numeric (SSCCC format)
+- `-1`: Realname/fullname
+
+Mode parameters (when `+modes` present) appear between the modes and the final 3 parameters. Known modes with parameters:
+- `+r`: Account name (indicates user is logged in)
+- `+h`: Virtual user@host
+- `+f`: Fake host
+- `+C`: Cloaked host
+- `+c`: Cloaked IP
+
+Examples:
 ```
-AB N TestUser 1 1703334400 user example.com +i TestAccount AAAAAA :Test User
+# User without modes
+AB N TestUser 1 1703334400 user example.com AAAAAA ABAAB :Test User
+
+# User with +i mode (no parameters)
+AB N TestUser 1 1703334400 user example.com +i AAAAAA ABAAB :Test User
+
+# User with +r mode (account parameter)
+AB N TestUser 1 1703334400 user example.com +r TestAccount AAAAAA ABAAB :Test User
+
+# User with +ir modes (account parameter for +r)
+AB N TestUser 1 1703334400 user example.com +ir TestAccount AAAAAA ABAAB :Test User
 ```
 
 ### Channel Introduction
@@ -162,7 +184,7 @@ AB B #test 1703334400 +nt ABAAB,ABAAC:o :%ABAAD
 | `SE` | SETNAME | Both | Realname change (Phase 12) |
 | `TM` | TAGMSG | Both | Tag-only message (Phase 17) |
 | `BT` | BATCH | Both | Batch coordination (Phase 13d) |
-| `CH` | CHATHISTORY | Local | Message history (local LMDB, no S2S) |
+| `CH` | CHATHISTORY | Both | Message history with S2S federation (Phase 32) |
 | `RD` | REDACT | Both | Message redaction (Phase 27) |
 | `RG` | REGISTER | Both | Account registration (Phase 24) |
 | `VF` | VERIFY | Both | Account verification (Phase 24) |
@@ -384,18 +406,17 @@ Example: `AB1703334400` (server AB, timestamp-based)
 
 ### CHATHISTORY (CH) - Phase 23
 
-**Purpose**: Query message history for playback to clients.
+**Purpose**: Query message history for playback to clients, with S2S federation for distributed access.
 
 **IRCv3 Spec**: https://ircv3.net/specs/extensions/chathistory
 
-#### Implementation Notes
+#### Architecture
 
-Chathistory is implemented **locally** in each Nefarious server using LMDB storage. There is no P10 S2S protocol for chathistory - each server maintains its own history database.
-
-**Architecture**:
-- Messages are stored in LMDB as they pass through each server
-- Clients query their connected server directly via the `CHATHISTORY` client command
-- No S2S chathistory synchronization exists
+Chathistory uses a **federated query** model:
+- Each server stores all channel messages in local LMDB (messages are relayed S2S)
+- Clients query their connected server via the `CHATHISTORY` client command
+- When local results are incomplete, servers query peers for additional messages
+- Results are merged and deduplicated by msgid before returning to client
 - X3 does not participate in chathistory
 
 #### Client Command Format
@@ -404,7 +425,7 @@ Chathistory is implemented **locally** in each Nefarious server using LMDB stora
 CHATHISTORY <subcommand> <target> [params...]
 ```
 
-#### Subcommands
+#### Client Subcommands
 
 | Subcommand | Parameters | Description |
 |------------|------------|-------------|
@@ -422,6 +443,79 @@ References can be:
 - `timestamp=2024-12-25T12:00:00.000Z` - ISO 8601 timestamp
 - `msgid=AB-1703334400-123` - Message ID
 
+#### S2S P10 Protocol
+
+**Query** - Request history from other servers:
+```
+[SERVER] CH Q <target> <subcmd> <ref> <limit> <reqid>
+```
+
+**Response** - Send messages back to requester:
+```
+[SERVER] CH R <reqid> <msgid> <timestamp> <type> <sender> <account> :<content>
+```
+
+**End** - Signal end of response:
+```
+[SERVER] CH E <reqid> <count>
+```
+
+#### S2S Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| SERVER | String(2) | Server numeric |
+| target | String | Channel name |
+| subcmd | String | LATEST, BEFORE, AFTER, AROUND, BETWEEN |
+| ref | String | Reference (`*`, `timestamp=X`, or `msgid=X`) |
+| limit | Number | Maximum messages requested |
+| reqid | String | Request ID for correlating responses |
+| msgid | String | Unique message ID |
+| timestamp | String | ISO 8601 UTC timestamp |
+| type | Number | Message type (0=PRIVMSG, 1=NOTICE, 2=JOIN, etc.) |
+| sender | String | nick!user@host |
+| account | String | Account name or `*` if none |
+| content | String | Message content |
+
+#### S2S Message Types
+
+| Value | Type | Description |
+|-------|------|-------------|
+| 0 | PRIVMSG | Channel/private message |
+| 1 | NOTICE | Notice |
+| 2 | JOIN | User joined channel |
+| 3 | PART | User left channel |
+| 4 | QUIT | User disconnected |
+| 5 | KICK | User was kicked |
+| 6 | MODE | Channel mode change |
+| 7 | TOPIC | Topic change |
+| 8 | TAGMSG | Tag-only message |
+
+#### S2S Examples
+
+```
+# Server AB requests latest 50 messages for #channel
+AB CH Q #channel LATEST * 50 AB1735300000
+
+# Server CD responds with messages
+CD CH R AB1735300000 CD-1735299000-1 2024-12-27T10:30:00.000Z 0 nick!user@host account :Hello world
+CD CH R AB1735300000 CD-1735299001-2 2024-12-27T10:30:01.000Z 0 other!u@h * :Hi there
+CD CH E AB1735300000 2
+
+# Server EF has no additional messages
+EF CH E AB1735300000 0
+```
+
+#### Federation Flow
+
+1. Client sends `CHATHISTORY LATEST #channel * 50`
+2. Server queries local LMDB, gets N messages
+3. If N < limit or gaps detected, broadcast `CH Q` to all servers
+4. Each server queries its LMDB and responds with `CH R` messages
+5. Requester collects responses until timeout or all `CH E` received
+6. Merge all messages, deduplicate by msgid, sort by timestamp
+7. Send final result batch to client
+
 #### Configuration
 
 | Feature | Default | Description |
@@ -430,6 +524,8 @@ References can be:
 | `FEAT_CHATHISTORY_DB` | "history" | LMDB database directory |
 | `FEAT_CHATHISTORY_RETENTION` | 7 | Days to keep messages (0 = forever) |
 | `FEAT_CHATHISTORY_PRIVATE` | FALSE | Enable private message history |
+| `FEAT_CHATHISTORY_FEDERATION` | TRUE | Enable S2S chathistory queries |
+| `FEAT_CHATHISTORY_TIMEOUT` | 5 | Seconds to wait for S2S responses |
 
 ---
 
@@ -1207,7 +1303,7 @@ All P10 extensions are designed for backward compatibility:
 | SE (SETNAME) | Ignored | Processed | Ignored | Ignored |
 | TM (TAGMSG) | Ignored | Processed | Ignored | Ignored |
 | BT (BATCH) | Ignored | Processed | Ignored | Ignored |
-| CH (CHATHISTORY) | Ignored | Processed | N/A | N/A |
+| CH (CHATHISTORY) | Ignored | Processed | Ignored | Ignored |
 | RD (REDACT) | Ignored | Processed | Ignored | Ignored |
 | RN (RENAME) | Ignored | Processed | Ignored | Processed |
 | MD (METADATA) | Ignored | Processed | Ignored | Processed |
@@ -1237,7 +1333,7 @@ In a network with mixed old/new servers:
 | `SE` | `[NUMERIC] SE :[realname]` | Change realname |
 | `TM` | `[NUMERIC] TM @[tags] [target]` | Tag-only message |
 | `BT` | `[NUMERIC] BT +/-[id] [type] [params]` | Batch coordination |
-| `CH` | (Client command only - no P10 S2S) | Chat history (local LMDB) |
+| `CH` | `[SERVER] CH [Q\|R\|E] [params...]` | S2S chathistory federation |
 | `RD` | `[NUMERIC] RD [target] [msgid] :[reason]` | Message redaction |
 | `RG` | `[SERVER] RG [user] [account] [email] :[pass]` | Account registration |
 | `VF` | `[SERVER] VF [user] [account] [code]` | Verification |
@@ -1329,6 +1425,8 @@ In a network with mixed old/new servers:
 | 1.5 | December 2024 | Added compression passthrough Z flag to MD token for zstd-compressed metadata |
 | 1.6 | December 2024 | Added MULTILINE (ML) token for S2S multiline batch propagation |
 | 1.7 | December 2024 | Corrected CHATHISTORY documentation - local LMDB only, no X3 involvement |
+| 1.8 | December 2024 | Added S2S chathistory federation protocol (CH Q/R/E subcommands) for Phase 32 |
+| 1.9 | December 2024 | Corrected N (NICK) user introduction format - account is a mode parameter for +r, not a fixed position |
 
 ---
 
