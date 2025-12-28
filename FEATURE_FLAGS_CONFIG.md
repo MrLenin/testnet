@@ -72,8 +72,12 @@ Feature flags are configured in the `features {}` block of the IRCd config file.
 | `FEAT_CHATHISTORY_DB` | "history" | LMDB database directory path |
 | `FEAT_CHATHISTORY_RETENTION` | 7 | Days to keep messages (0 = disable purge) |
 | `FEAT_CHATHISTORY_PRIVATE` | FALSE | Enable private message (DM) history |
+| `FEAT_CHATHISTORY_FEDERATION` | TRUE | Enable S2S chathistory queries to other servers |
+| `FEAT_CHATHISTORY_TIMEOUT` | 5 | Seconds to wait for S2S federation responses |
 
 **Retention Purge**: Messages older than `CHATHISTORY_RETENTION` days are automatically deleted via an hourly timer (`history_purge_callback`). Set to 0 to disable automatic purging.
+
+**Federation**: When enabled, if local LMDB results are incomplete (fewer messages than requested or gaps detected), the server will query all other servers for additional messages. Results are merged and deduplicated by msgid before returning to the client. This allows clients to access history even if their connected server was down when messages were sent.
 
 ### Metadata Caching Configuration
 
@@ -166,6 +170,8 @@ features {
     "CHATHISTORY_DB" = "history";
     "CHATHISTORY_RETENTION" = "7";
     "CHATHISTORY_PRIVATE" = "FALSE";
+    "CHATHISTORY_FEDERATION" = "TRUE"; # Enable S2S chathistory queries
+    "CHATHISTORY_TIMEOUT" = "5";       # Seconds to wait for S2S responses
 
     # Metadata caching
     "METADATA_DB" = "metadata";        # LMDB database directory
@@ -759,6 +765,7 @@ In networks with multiple servers between client and X3, each intermediate serve
 | 1.5 | December 2024 | Added Metadata Compression (zstd) documentation |
 | 1.6 | December 2024 | Added FEAT_COMPRESS_THRESHOLD, FEAT_COMPRESS_LEVEL, FEAT_METADATA_DB for Nefarious |
 | 1.7 | December 2024 | Added FEAT_REGISTER_SERVER, FEAT_AWAY_THROTTLE |
+| 1.8 | December 2024 | Added FEAT_CHATHISTORY_FEDERATION, FEAT_CHATHISTORY_TIMEOUT for S2S federation |
 
 ---
 
