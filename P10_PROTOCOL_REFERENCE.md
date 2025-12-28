@@ -172,6 +172,7 @@ AB B #test 1703334400 +nt ABAAB,ABAAC:o :%ABAAD
 | `MD` | METADATA | Both | User/channel metadata (Phase 29) |
 | `MDQ` | METADATAQUERY | Both | Metadata query to services (Phase 29) |
 | `WP` | WEBPUSH | Both | Web push notifications (Phase 30) |
+| `ML` | MULTILINE | Both | S2S multiline batch propagation (Phase 31) |
 
 ### SASL Tokens
 
@@ -902,6 +903,108 @@ Clients with `draft/pre-away` capability can set away state before registration 
 
 ---
 
+### MULTILINE (ML) - Phase 31
+
+**Purpose**: Propagate multiline message batches between servers (S2S relay).
+
+**IRCv3 Spec**: https://ircv3.net/specs/extensions/multiline
+
+#### P10 Format
+
+**Start Batch + First Line**:
+```
+[USER_NUMERIC] ML +batchid target :first_line
+```
+
+**Normal Continuation**:
+```
+[USER_NUMERIC] ML batchid target :line
+```
+
+**Concat Continuation** (line should be concatenated to previous without newline):
+```
+[USER_NUMERIC] ML cbatchid target :line
+```
+
+**End Batch**:
+```
+[USER_NUMERIC] ML -batchid target :
+```
+
+#### Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| USER_NUMERIC | String(5) | 5-character sender numeric |
+| batchid | String | Unique batch identifier |
+| target | String | Channel name or user nick |
+| :line | String | Message text (may be empty for end) |
+
+#### Batch ID Format
+
+```
+[USER_YXXID][TIMESTAMP]
+```
+
+Example: `AzAAB1735308000` (user AzAAB, Unix timestamp)
+
+#### Modifier Prefixes
+
+| Prefix | Meaning |
+|--------|---------|
+| `+` | Start new batch (includes first message) |
+| `-` | End batch (text may be empty) |
+| `c` | Concat continuation (no newline separator) |
+| (none) | Normal continuation (newline separator) |
+
+#### Examples
+
+```
+# User ABAAB sends multiline to #channel
+ABAAB ML +ABAAB1735308000 #channel :First line of message
+ABAAB ML ABAAB1735308000 #channel :Second line
+ABAAB ML cABAB1735308000 #channel :continued without newline
+ABAAB ML -ABAAB1735308000 #channel :
+
+# User ABAAB sends multiline to user BBAAC
+ABAAB ML +ABAAB1735308001 BBAAC :Hello
+ABAAB ML ABAAB1735308001 BBAAC :This is a multiline message
+ABAAB ML -ABAAB1735308001 BBAAC :
+```
+
+#### Processing
+
+**Sender (Nefarious - originating server)**:
+1. Client completes multiline BATCH with `-batchid`
+2. `process_multiline_batch()` validates target and permissions
+3. Delivers to local clients (as BATCH for multiline-capable, individual PRIVMSG otherwise)
+4. Sends `ML +batchid target :first_line` to all other servers
+5. Sends continuation lines with `ML batchid` or `ML cbatchid`
+6. Sends `ML -batchid target :` to end batch
+
+**Receiver (Nefarious - remote server)**:
+1. `ms_multiline()` receives ML command
+2. Propagates to other servers (except source)
+3. On `+`: Creates `S2SMultilineBatch` struct, stores first line
+4. On normal/concat: Adds line to batch with concat flag
+5. On `-`: Delivers batch to local clients via `deliver_s2s_multiline_batch()`
+6. Frees batch structure
+
+**Batch Storage**:
+- Pending batches stored in `s2s_ml_batches[]` array
+- Maximum `MAXCONNECTIONS` concurrent batches
+- Batches include: sender, target, message list, concat flags
+
+#### Related Configuration
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `FEAT_MULTILINE_MAX_BYTES` | 4096 | Maximum total bytes in multiline message |
+| `FEAT_MULTILINE_MAX_LINES` | 100 | Maximum lines in multiline message |
+| `FEAT_CLIENT_BATCH_TIMEOUT` | 60 | Seconds before client batch times out |
+
+---
+
 ## SASL Protocol
 
 ### Overview
@@ -1091,6 +1194,7 @@ All P10 extensions are designed for backward compatibility:
 | MR (MARKREAD) | Ignored | Processed | Ignored | Processed |
 | WP (WEBPUSH) | Ignored | Processed | N/A | Processed |
 | SA M (mechanisms) | Ignored | Processed | N/A | Sent |
+| ML (MULTILINE) | Ignored | Processed | Ignored | Ignored |
 | @tags prefix | Possible error | Parsed & skipped | Error | Skipped |
 
 ### Mixed Network Behavior
@@ -1123,6 +1227,7 @@ In a network with mixed old/new servers:
 | `MD` | `[SOURCE] MD [target] [key] [vis] :[value]` | Metadata (vis: `*` or `P`) |
 | `MDQ` | `[SOURCE] MDQ [target] [key\|*]` | Metadata query to X3 |
 | `WP` | `[SOURCE] WP [subcmd] [params...]` | Web push |
+| `ML` | `[NUMERIC] ML [+\|-\|c]batchid target :[text]` | S2S multiline batch |
 
 ### New SASL Subcmds
 
@@ -1202,6 +1307,7 @@ In a network with mixed old/new servers:
 | 1.3 | December 2024 | Added METADATAQUERY (MDQ) token documentation with multi-hop routing |
 | 1.4 | December 2024 | Updated MARKREAD (MR) to route through X3 with S/G/R subcommands and broadcast |
 | 1.5 | December 2024 | Added compression passthrough Z flag to MD token for zstd-compressed metadata |
+| 1.6 | December 2024 | Added MULTILINE (ML) token for S2S multiline batch propagation |
 
 ---
 

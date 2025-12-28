@@ -51,6 +51,7 @@ Feature flags are configured in the `features {}` block of the IRCd config file.
 | `FEAT_CAP_event_playback` | TRUE | Enable `draft/event-playback` capability |
 | `FEAT_CAP_message_redaction` | TRUE | Enable `draft/message-redaction` capability |
 | `FEAT_CAP_account_registration` | TRUE | Enable `draft/account-registration` capability |
+| `FEAT_REGISTER_SERVER` | "*" | Target server for REGISTER command routing (use `*` for auto-detect services) |
 | `FEAT_CAP_read_marker` | TRUE | Enable `draft/read-marker` capability |
 | `FEAT_CAP_channel_rename` | TRUE | Enable `draft/channel-rename` capability |
 | `FEAT_CAP_metadata` | TRUE | Enable `draft/metadata-2` capability |
@@ -117,6 +118,7 @@ This eliminates unnecessary decompress/recompress cycles between services.
 |---------|---------|-------------|
 | `FEAT_PRESENCE_AGGREGATION` | FALSE | Enable multi-connection presence aggregation |
 | `FEAT_AWAY_STAR_MSG` | "Away" | Fallback message stored for away-star connections |
+| `FEAT_AWAY_THROTTLE` | 0 | Minimum seconds between AWAY status changes (0 = disabled) |
 
 **Presence Aggregation**: When enabled, the IRCd tracks all connections per account and computes an "effective" presence using "most-present-wins" logic:
 1. If any connection is PRESENT → account is PRESENT
@@ -124,6 +126,8 @@ This eliminates unnecessary decompress/recompress cycles between services.
 3. If all connections are AWAY-STAR → account is hidden
 
 **Away-Star**: Special away state (`AWAY *`) for hidden/background connections (e.g., mobile apps when backgrounded). These don't count toward presence.
+
+**Away Throttle**: When `AWAY_THROTTLE` is set to a value > 0, users are rate-limited on how frequently they can change their away status. This prevents abuse and reduces network traffic from clients that rapidly toggle away state. The value represents the minimum seconds between AWAY command changes.
 
 **LMDB Persistence**: The `last_present` timestamp for each account is persisted via the METADATA LMDB backend using the reserved key `$last_present`.
 
@@ -174,6 +178,11 @@ features {
     # Presence Aggregation
     "PRESENCE_AGGREGATION" = "FALSE";  # Enable for multi-connection presence
     "AWAY_STAR_MSG" = "Away";          # Fallback for away-star storage
+    "AWAY_THROTTLE" = "0";             # Seconds between AWAY changes (0 = disabled)
+
+    # Account Registration
+    "CAP_account_registration" = "TRUE";
+    "REGISTER_SERVER" = "*";           # Services server for REGISTER (* = auto-detect)
 };
 ```
 
@@ -749,6 +758,7 @@ In networks with multiple servers between client and X3, each intermediate serve
 | 1.4 | December 2024 | Added X3 SSL/TLS S2S connection documentation |
 | 1.5 | December 2024 | Added Metadata Compression (zstd) documentation |
 | 1.6 | December 2024 | Added FEAT_COMPRESS_THRESHOLD, FEAT_COMPRESS_LEVEL, FEAT_METADATA_DB for Nefarious |
+| 1.7 | December 2024 | Added FEAT_REGISTER_SERVER, FEAT_AWAY_THROTTLE |
 
 ---
 
