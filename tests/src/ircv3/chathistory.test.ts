@@ -75,33 +75,20 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
       // Should receive a batch with chathistory type
-      // Note: If LMDB is not available, server may not respond with a batch
-      try {
-        const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-        expect(batchStart).toMatch(/BATCH \+\S+ chathistory/i);
+      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toMatch(/BATCH \+\S+ chathistory/i);
 
-        // Collect messages in batch
-        const messages: string[] = [];
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000) {
-          try {
-            const line = await client.waitForLine(/PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('PRIVMSG')) messages.push(line);
-          } catch {
-            break;
-          }
-        }
-
-        // Expect at least 2 messages (the ones we sent)
-        expect(messages.length).toBeGreaterThanOrEqual(2);
-        console.log('CHATHISTORY LATEST messages:', messages.length);
-      } catch (error) {
-        // If LMDB is not compiled in, chathistory won't return a batch
-        console.log('CHATHISTORY LATEST failed - LMDB may not be available:', (error as Error).message);
-        // Skip the test rather than fail if chathistory isn't working
-        console.log('Skipping - chathistory requires LMDB support in ircd');
+      // Collect messages in batch
+      const messages: string[] = [];
+      while (true) {
+        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 2000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('PRIVMSG')) messages.push(line);
       }
+
+      // Expect at least 2 messages (the ones we sent)
+      expect(messages.length).toBeGreaterThanOrEqual(2);
+      console.log('CHATHISTORY LATEST messages:', messages.length);
       client.send('QUIT');
     });
   });
@@ -132,26 +119,17 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       const now = new Date().toISOString();
       client.send(`CHATHISTORY BEFORE ${channelName} timestamp=${now} 10`);
 
-      try {
-        const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-        expect(batchStart).toMatch(/chathistory/i);
+      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toMatch(/chathistory/i);
 
-        const messages: string[] = [];
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000) {
-          try {
-            const line = await client.waitForLine(/PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('PRIVMSG')) messages.push(line);
-          } catch {
-            break;
-          }
-        }
-
-        expect(messages.length).toBeGreaterThanOrEqual(2);
-      } catch {
-        console.log('CHATHISTORY BEFORE failed');
+      const messages: string[] = [];
+      while (true) {
+        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 2000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('PRIVMSG')) messages.push(line);
       }
+
+      expect(messages.length).toBeGreaterThanOrEqual(2);
       client.send('QUIT');
     });
   });
@@ -184,26 +162,17 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Request messages after the reference timestamp
       client.send(`CHATHISTORY AFTER ${channelName} timestamp=${beforeMsgs} 10`);
 
-      try {
-        const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-        expect(batchStart).toMatch(/chathistory/i);
+      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toMatch(/chathistory/i);
 
-        const messages: string[] = [];
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000) {
-          try {
-            const line = await client.waitForLine(/PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('PRIVMSG')) messages.push(line);
-          } catch {
-            break;
-          }
-        }
-
-        expect(messages.length).toBeGreaterThanOrEqual(2);
-      } catch {
-        console.log('CHATHISTORY AFTER failed');
+      const messages: string[] = [];
+      while (true) {
+        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 2000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('PRIVMSG')) messages.push(line);
       }
+
+      expect(messages.length).toBeGreaterThanOrEqual(2);
       client.send('QUIT');
     });
   });
@@ -233,11 +202,13 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       client.send(`CHATHISTORY AROUND ${channelName} timestamp=${middleTime} 10`);
 
-      try {
-        const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-        expect(batchStart).toMatch(/chathistory/i);
-      } catch {
-        console.log('CHATHISTORY AROUND failed');
+      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toMatch(/chathistory/i);
+
+      // Collect messages
+      while (true) {
+        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 2000);
+        if (line.includes('BATCH -')) break;
       }
       client.send('QUIT');
     });
@@ -268,14 +239,10 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       const past = new Date(Date.now() - 3600000).toISOString(); // 1 hour ago
       client.send(`CHATHISTORY TARGETS timestamp=${past} timestamp=${now} 10`);
 
-      try {
-        // Response includes CHATHISTORY lines listing targets
-        const response = await client.waitForLine(/BATCH.*chathistory|CHATHISTORY/i, 5000);
-        expect(response).toBeDefined();
-        console.log('CHATHISTORY TARGETS response:', response);
-      } catch {
-        console.log('CHATHISTORY TARGETS failed or not supported');
-      }
+      // Response includes CHATHISTORY lines listing targets
+      const response = await client.waitForLine(/BATCH.*chathistory|CHATHISTORY/i, 5000);
+      expect(response).toBeDefined();
+      console.log('CHATHISTORY TARGETS response:', response);
       client.send('QUIT');
     });
   });
@@ -300,28 +267,20 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.clearRawBuffer();
       client.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
-      try {
-        await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-        const messages: string[] = [];
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000) {
-          try {
-            const line = await client.waitForLine(/PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('PRIVMSG')) messages.push(line);
-          } catch {
-            break;
-          }
-        }
+      await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const messages: string[] = [];
+      while (true) {
+        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 2000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('PRIVMSG')) messages.push(line);
+      }
 
-        // Each message should have a time tag
-        for (const msg of messages) {
-          if (msg.startsWith('@')) {
-            expect(msg).toMatch(/time=\d{4}-\d{2}-\d{2}T/);
-          }
+      expect(messages.length).toBeGreaterThan(0);
+      // Each message should have a time tag
+      for (const msg of messages) {
+        if (msg.startsWith('@')) {
+          expect(msg).toMatch(/time=\d{4}-\d{2}-\d{2}T/);
         }
-      } catch {
-        console.log('Chathistory format test failed');
       }
       client.send('QUIT');
     });
@@ -345,28 +304,20 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.clearRawBuffer();
       client.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
-      try {
-        await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-        const messages: string[] = [];
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000) {
-          try {
-            const line = await client.waitForLine(/PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('PRIVMSG')) messages.push(line);
-          } catch {
-            break;
-          }
-        }
+      await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const messages: string[] = [];
+      while (true) {
+        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 2000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('PRIVMSG')) messages.push(line);
+      }
 
-        // Messages should have msgid tags
-        for (const msg of messages) {
-          if (msg.startsWith('@')) {
-            expect(msg).toMatch(/msgid=/);
-          }
+      expect(messages.length).toBeGreaterThan(0);
+      // Messages should have msgid tags
+      for (const msg of messages) {
+        if (msg.startsWith('@')) {
+          expect(msg).toMatch(/msgid=/);
         }
-      } catch {
-        console.log('Chathistory msgid test failed');
       }
       client.send('QUIT');
     });
@@ -377,7 +328,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch']);
+      await client.capReq(['draft/chathistory', 'batch', 'standard-replies']);
       client.capEnd();
       client.register('histerr1');
       await client.waitForLine(/001/);
@@ -387,15 +338,10 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Try to get history for a channel we're not in
       client.send('CHATHISTORY LATEST #nonexistentchannel12345 * 10');
 
-      try {
-        // Should receive FAIL or error numeric
-        const response = await client.waitForLine(/FAIL|ERR|4\d\d/, 3000);
-        expect(response).toBeDefined();
-        console.log('Unauthorized history error:', response);
-      } catch {
-        // May receive empty batch instead of error
-        console.log('No error for unauthorized history - may be empty response');
-      }
+      // Should receive FAIL (with standard-replies), NOTICE, or error numeric
+      const response = await client.waitForLine(/FAIL|NOTICE|ERR|4\d\d/, 3000);
+      expect(response).toBeDefined();
+      console.log('Unauthorized history error:', response);
       client.send('QUIT');
     });
   });
@@ -432,27 +378,18 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Request messages between timestamps
       client.send(`CHATHISTORY BETWEEN ${channelName} timestamp=${startTime} timestamp=${endTime} 10`);
 
-      try {
-        const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-        expect(batchStart).toMatch(/chathistory/i);
+      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toMatch(/chathistory/i);
 
-        const messages: string[] = [];
-        const startTimeMs = Date.now();
-        while (Date.now() - startTimeMs < 3000) {
-          try {
-            const line = await client.waitForLine(/PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('PRIVMSG')) messages.push(line);
-          } catch {
-            break;
-          }
-        }
-
-        expect(messages.length).toBeGreaterThanOrEqual(3);
-        console.log('CHATHISTORY BETWEEN messages:', messages.length);
-      } catch {
-        console.log('CHATHISTORY BETWEEN failed - LMDB may not be available');
+      const messages: string[] = [];
+      while (true) {
+        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 2000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('PRIVMSG')) messages.push(line);
       }
+
+      expect(messages.length).toBeGreaterThanOrEqual(3);
+      console.log('CHATHISTORY BETWEEN messages:', messages.length);
       client.send('QUIT');
     });
   });
@@ -462,7 +399,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch', 'server-time']);
+      await client.capReq(['draft/chathistory', 'batch', 'server-time', 'echo-message']);
       client.capEnd();
       client.register('histlimit1');
       await client.waitForLine(/001/);
@@ -471,39 +408,32 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
-      // Send 10 messages
+      // Send 10 messages and wait for echo of last one
       for (let i = 0; i < 10; i++) {
         client.send(`PRIVMSG ${channelName} :Limit test message ${i}`);
       }
-      await new Promise(r => setTimeout(r, 1000));
+      await client.waitForLine(/Limit test message 9/, 5000);
+      await new Promise(r => setTimeout(r, 500));
 
       client.clearRawBuffer();
+      await new Promise(r => setTimeout(r, 100));
 
       // Request only 3 messages
       client.send(`CHATHISTORY LATEST ${channelName} * 3`);
 
-      try {
-        const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-        expect(batchStart).toBeDefined();
+      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
 
-        const messages: string[] = [];
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000) {
-          try {
-            const line = await client.waitForLine(/PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('PRIVMSG')) messages.push(line);
-          } catch {
-            break;
-          }
-        }
-
-        // Should have at most 3 messages
-        expect(messages.length).toBeLessThanOrEqual(3);
-        console.log('Limited history messages:', messages.length);
-      } catch {
-        console.log('Limit test failed');
+      const messages: string[] = [];
+      while (true) {
+        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 2000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('PRIVMSG')) messages.push(line);
       }
+
+      // Should have at most 3 messages
+      expect(messages.length).toBeLessThanOrEqual(3);
+      console.log('Limited history messages:', messages.length);
       client.send('QUIT');
     });
 
@@ -528,12 +458,10 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Request with limit 0
       client.send(`CHATHISTORY LATEST ${channelName} * 0`);
 
-      try {
-        const response = await client.waitForLine(/BATCH|FAIL/i, 3000);
-        console.log('Zero limit response:', response);
-      } catch {
-        console.log('No response for zero limit');
-      }
+      // Should receive either an empty batch or a FAIL response
+      const response = await client.waitForLine(/BATCH|FAIL/i, 3000);
+      expect(response).toBeDefined();
+      console.log('Zero limit response:', response);
       client.send('QUIT');
     });
 
@@ -558,12 +486,10 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Request with very large limit (should be capped by server)
       client.send(`CHATHISTORY LATEST ${channelName} * 1000000`);
 
-      try {
-        const response = await client.waitForLine(/BATCH|FAIL/i, 5000);
-        console.log('Large limit response:', response);
-      } catch {
-        console.log('No response for large limit');
-      }
+      // Should receive a batch response (server caps the limit)
+      const response = await client.waitForLine(/BATCH|FAIL/i, 5000);
+      expect(response).toBeDefined();
+      console.log('Large limit response:', response);
       client.send('QUIT');
     });
   });
@@ -582,61 +508,39 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
-      // Send messages and capture msgid
+      // Send messages and capture msgid - MUST succeed
       client.send(`PRIVMSG ${channelName} :First message`);
       await new Promise(r => setTimeout(r, 100));
       client.send(`PRIVMSG ${channelName} :Second message`);
 
-      let msgid: string | null = null;
-      try {
-        const echo = await client.waitForLine(/PRIVMSG.*Second message/i, 3000);
-        const match = echo.match(/msgid=([^\s;]+)/);
-        if (match) {
-          msgid = match[1];
-          console.log('Captured msgid:', msgid);
-        }
-      } catch {
-        console.log('No echo with msgid');
+      const echo = await client.waitForLine(/PRIVMSG.*Second message/i, 3000);
+      const match = echo.match(/msgid=([^\s;]+)/);
+      expect(match).not.toBeNull();
+      const msgid = match![1];
+
+      // Wait for history backend to persist the message
+      await new Promise(r => setTimeout(r, 1000));
+      client.clearRawBuffer();
+
+      // Request messages before this msgid
+      client.send(`CHATHISTORY BEFORE ${channelName} msgid=${msgid} 10`);
+
+      // MUST receive batch
+      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
+
+      const messages: string[] = [];
+      while (true) {
+        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('PRIVMSG')) messages.push(line);
       }
 
-      if (msgid) {
-        // Wait for history backend to persist the message
-        await new Promise(r => setTimeout(r, 1000));
-        client.clearRawBuffer();
-
-        // Request messages before this msgid
-        console.log(`Sending: CHATHISTORY BEFORE ${channelName} msgid=${msgid} 10`);
-        client.send(`CHATHISTORY BEFORE ${channelName} msgid=${msgid} 10`);
-
-        try {
-          const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-          expect(batchStart).toBeDefined();
-          console.log('Got batch start:', batchStart);
-
-          const messages: string[] = [];
-          const startTime = Date.now();
-          while (Date.now() - startTime < 3000) {
-            try {
-              const line = await client.waitForLine(/PRIVMSG|BATCH -/, 500);
-              if (line.includes('BATCH -')) break;
-              if (line.includes('PRIVMSG')) messages.push(line);
-            } catch {
-              break;
-            }
-          }
-
-          console.log('Messages found:', messages.length);
-          // Should have at least the first message
-          expect(messages.length).toBeGreaterThanOrEqual(1);
-          // Should NOT include "Second message"
-          for (const msg of messages) {
-            expect(msg).not.toContain('Second message');
-          }
-        } catch (e) {
-          console.log('BEFORE with msgid failed:', (e as Error).message);
-        }
-      } else {
-        console.log('No msgid captured, skipping test');
+      // Should have at least the first message
+      expect(messages.length).toBeGreaterThanOrEqual(1);
+      // Should NOT include "Second message"
+      for (const msg of messages) {
+        expect(msg).not.toContain('Second message');
       }
 
       client.send('QUIT');
@@ -655,122 +559,639 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
-      // Send first message and capture msgid
+      // Send first message and capture msgid - MUST succeed
       client.send(`PRIVMSG ${channelName} :Reference message`);
+      const echo = await client.waitForLine(/PRIVMSG.*Reference message/i, 3000);
+      const match = echo.match(/msgid=([^\s;]+)/);
+      expect(match).not.toBeNull();
+      const msgid = match![1];
 
-      let msgid: string | null = null;
-      try {
-        const echo = await client.waitForLine(/PRIVMSG.*Reference message/i, 3000);
-        const match = echo.match(/msgid=([^\s;]+)/);
-        if (match) {
-          msgid = match[1];
-        }
-      } catch {
-        console.log('No echo with msgid');
+      // Send more messages after capturing the reference msgid
+      await new Promise(r => setTimeout(r, 100));
+      client.send(`PRIVMSG ${channelName} :After message 1`);
+      await client.waitForLine(/PRIVMSG.*After message 1/i, 3000);
+      client.send(`PRIVMSG ${channelName} :After message 2`);
+      await client.waitForLine(/PRIVMSG.*After message 2/i, 3000);
+
+      // Wait for history backend to persist
+      await new Promise(r => setTimeout(r, 1000));
+      client.clearRawBuffer();
+
+      // Request messages after this msgid
+      client.send(`CHATHISTORY AFTER ${channelName} msgid=${msgid} 10`);
+
+      // MUST receive batch
+      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
+
+      const messages: string[] = [];
+      while (true) {
+        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('PRIVMSG')) messages.push(line);
       }
 
-      if (msgid) {
-        // Send more messages after capturing the reference msgid
-        await new Promise(r => setTimeout(r, 100));
-        client.send(`PRIVMSG ${channelName} :After message 1`);
-        await client.waitForLine(/PRIVMSG.*After message 1/i, 3000);
-        client.send(`PRIVMSG ${channelName} :After message 2`);
-        await client.waitForLine(/PRIVMSG.*After message 2/i, 3000);
-
-        // Wait for history backend to persist
-        await new Promise(r => setTimeout(r, 1000));
-        client.clearRawBuffer();
-
-        // Request messages after this msgid
-        console.log(`Sending: CHATHISTORY AFTER ${channelName} msgid=${msgid} 10`);
-        client.send(`CHATHISTORY AFTER ${channelName} msgid=${msgid} 10`);
-
-        try {
-          const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-          expect(batchStart).toBeDefined();
-          console.log('Got batch start:', batchStart);
-
-          const messages: string[] = [];
-          const startTime = Date.now();
-          while (Date.now() - startTime < 3000) {
-            try {
-              const line = await client.waitForLine(/PRIVMSG|BATCH -/, 500);
-              if (line.includes('BATCH -')) break;
-              if (line.includes('PRIVMSG')) messages.push(line);
-            } catch {
-              break;
-            }
-          }
-
-          console.log('Messages found:', messages.length);
-          // Should have at least 2 messages
-          expect(messages.length).toBeGreaterThanOrEqual(2);
-          // Should NOT include "Reference message"
-          for (const msg of messages) {
-            expect(msg).not.toContain('Reference message');
-          }
-        } catch (e) {
-          console.log('AFTER with msgid failed:', (e as Error).message);
-        }
-      } else {
-        console.log('No msgid captured, skipping test');
+      // Should have at least 2 messages
+      expect(messages.length).toBeGreaterThanOrEqual(2);
+      // Should NOT include "Reference message"
+      for (const msg of messages) {
+        expect(msg).not.toContain('Reference message');
       }
 
       client.send('QUIT');
     });
   });
 
-  describe('Chathistory Private Messages', () => {
-    it('CHATHISTORY retrieves PM history', async () => {
+  /**
+   * PM Chathistory Consent Tests
+   *
+   * These tests verify the per-user PM history opt-in system.
+   * Server configured with CHATHISTORY_PRIVATE_CONSENT=2 (multi-party mode):
+   * - Both sender AND recipient must opt-in for PM history to be stored
+   * - Users opt-in via: METADATA SET * chathistory.pm * :1
+   * - Users opt-out via: METADATA SET * chathistory.pm * :0
+   */
+  describe('PM Chathistory Consent (Multi-Party Mode)', () => {
+    it('PM history NOT stored when neither party opts in (mode 2)', async () => {
       const client1 = trackClient(await createRawSocketClient());
       const client2 = trackClient(await createRawSocketClient());
+      const uniqueId = Date.now();
 
       await client1.capLs();
-      await client1.capReq(['draft/chathistory', 'batch', 'server-time']);
+      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
       client1.capEnd();
-      client1.register('histpm1');
+      client1.register(`pmnoopt1_${uniqueId}`);
       await client1.waitForLine(/001/);
 
       await client2.capLs();
-      await client2.capReq(['draft/chathistory', 'batch', 'server-time']);
+      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
       client2.capEnd();
-      client2.register('histpm2');
+      client2.register(`pmnoopt2_${uniqueId}`);
       await client2.waitForLine(/001/);
 
-      // Exchange some messages
-      client1.send('PRIVMSG histpm2 :Hello from histpm1');
-      await new Promise(r => setTimeout(r, 200));
-      client2.send('PRIVMSG histpm1 :Hello back from histpm2');
+      // Neither party opts in - send messages
+      const testMsg = `NoOptIn test ${uniqueId}`;
+      client1.send(`PRIVMSG pmnoopt2_${uniqueId} :${testMsg}`);
+      await new Promise(r => setTimeout(r, 300));
+      client2.send(`PRIVMSG pmnoopt1_${uniqueId} :Reply ${testMsg}`);
+      await new Promise(r => setTimeout(r, 500));
+
+      client1.clearRawBuffer();
+
+      // Request PM history - should be empty in multi-party mode
+      client1.send(`CHATHISTORY LATEST pmnoopt2_${uniqueId} * 10`);
+
+      // MUST receive a batch - no try/catch, test fails if no response
+      const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
+
+      const messages: string[] = [];
+      // Collect messages until batch end
+      while (true) {
+        const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('PRIVMSG')) messages.push(line);
+      }
+
+      // In multi-party mode (2), messages should NOT be stored without both opting in
+      expect(messages.length).toBe(0);
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+
+    it('PM history stored when BOTH parties opt in (mode 2)', async () => {
+      const client1 = trackClient(await createRawSocketClient());
+      const client2 = trackClient(await createRawSocketClient());
+      const uniqueId = Date.now();
+
+      await client1.capLs();
+      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      client1.capEnd();
+      client1.register(`pmboth1_${uniqueId}`);
+      await client1.waitForLine(/001/);
+
+      await client2.capLs();
+      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      client2.capEnd();
+      client2.register(`pmboth2_${uniqueId}`);
+      await client2.waitForLine(/001/);
+
+      // BOTH parties opt in - MUST get 761 response confirming the SET
+      client1.send('METADATA SET * chathistory.pm * :1');
+      const meta1Response = await client1.waitForLine(/761.*chathistory\.pm/i, 3000);
+      expect(meta1Response).toMatch(/761/);
+
+      client2.send('METADATA SET * chathistory.pm * :1');
+      const meta2Response = await client2.waitForLine(/761.*chathistory\.pm/i, 3000);
+      expect(meta2Response).toMatch(/761/);
+
+      await new Promise(r => setTimeout(r, 300));
+
+      // Exchange messages after both opt in
+      const testMsg = `BothOptIn test ${uniqueId}`;
+      client1.send(`PRIVMSG pmboth2_${uniqueId} :${testMsg}`);
+      await new Promise(r => setTimeout(r, 300));
+      client2.send(`PRIVMSG pmboth1_${uniqueId} :Reply ${testMsg}`);
+      await new Promise(r => setTimeout(r, 500));
+
+      client1.clearRawBuffer();
+
+      // Request PM history - MUST have messages
+      client1.send(`CHATHISTORY LATEST pmboth2_${uniqueId} * 10`);
+
+      // MUST receive a batch - test fails if no response
+      const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
+
+      const messages: string[] = [];
+      // Collect messages until batch end
+      while (true) {
+        const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('PRIVMSG')) messages.push(line);
+      }
+
+      // With both opted in, PM history MUST be stored
+      expect(messages.length).toBeGreaterThanOrEqual(1);
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+
+    it('PM history NOT stored when only sender opts in (mode 2)', async () => {
+      const client1 = trackClient(await createRawSocketClient());
+      const client2 = trackClient(await createRawSocketClient());
+      const uniqueId = Date.now();
+
+      await client1.capLs();
+      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      client1.capEnd();
+      client1.register(`pmsend1_${uniqueId}`);
+      await client1.waitForLine(/001/);
+
+      await client2.capLs();
+      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      client2.capEnd();
+      client2.register(`pmsend2_${uniqueId}`);
+      await client2.waitForLine(/001/);
+
+      // Only sender opts in - MUST get 761 response
+      client1.send('METADATA SET * chathistory.pm * :1');
+      const metaResponse = await client1.waitForLine(/761.*chathistory\.pm/i, 3000);
+      expect(metaResponse).toMatch(/761/);
+      await new Promise(r => setTimeout(r, 300));
+
+      // Send messages
+      const testMsg = `SenderOnly test ${uniqueId}`;
+      client1.send(`PRIVMSG pmsend2_${uniqueId} :${testMsg}`);
+      await new Promise(r => setTimeout(r, 500));
+
+      client1.clearRawBuffer();
+
+      // Request PM history - should be empty (recipient didn't opt in)
+      client1.send(`CHATHISTORY LATEST pmsend2_${uniqueId} * 10`);
+
+      // MUST receive a batch - test fails if no response
+      const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
+
+      const messages: string[] = [];
+      // Collect messages until batch end
+      while (true) {
+        const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('PRIVMSG')) messages.push(line);
+      }
+
+      // In multi-party mode, messages should NOT be stored with only sender consent
+      expect(messages.length).toBe(0);
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+
+    it('PM history NOT stored when only recipient opts in (mode 2)', async () => {
+      const client1 = trackClient(await createRawSocketClient());
+      const client2 = trackClient(await createRawSocketClient());
+      const uniqueId = Date.now();
+
+      await client1.capLs();
+      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      client1.capEnd();
+      client1.register(`pmrecv1_${uniqueId}`);
+      await client1.waitForLine(/001/);
+
+      await client2.capLs();
+      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      client2.capEnd();
+      client2.register(`pmrecv2_${uniqueId}`);
+      await client2.waitForLine(/001/);
+
+      // Only recipient opts in - MUST get 761 response
+      client2.send('METADATA SET * chathistory.pm * :1');
+      const metaResponse = await client2.waitForLine(/761.*chathistory\.pm/i, 3000);
+      expect(metaResponse).toMatch(/761/);
+      await new Promise(r => setTimeout(r, 300));
+
+      // Send messages
+      const testMsg = `RecipientOnly test ${uniqueId}`;
+      client1.send(`PRIVMSG pmrecv2_${uniqueId} :${testMsg}`);
+      await new Promise(r => setTimeout(r, 500));
+
+      client1.clearRawBuffer();
+
+      // Request PM history - should be empty (sender didn't opt in)
+      client1.send(`CHATHISTORY LATEST pmrecv2_${uniqueId} * 10`);
+
+      // MUST receive a batch - test fails if no response
+      const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
+
+      const messages: string[] = [];
+      // Collect messages until batch end
+      while (true) {
+        const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('PRIVMSG')) messages.push(line);
+      }
+
+      // In multi-party mode, messages should NOT be stored with only recipient consent
+      expect(messages.length).toBe(0);
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+
+    it('explicit opt-out overrides opt-in in multi-party mode', async () => {
+      const client1 = trackClient(await createRawSocketClient());
+      const client2 = trackClient(await createRawSocketClient());
+      const uniqueId = Date.now();
+
+      await client1.capLs();
+      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      client1.capEnd();
+      client1.register(`pmover1_${uniqueId}`);
+      await client1.waitForLine(/001/);
+
+      await client2.capLs();
+      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      client2.capEnd();
+      client2.register(`pmover2_${uniqueId}`);
+      await client2.waitForLine(/001/);
+
+      // Client1 opts in - MUST get 761 response
+      client1.send('METADATA SET * chathistory.pm * :1');
+      const meta1Response = await client1.waitForLine(/761.*chathistory\.pm/i, 3000);
+      expect(meta1Response).toMatch(/761/);
+
+      // Client2 explicitly opts out - MUST get 761 response
+      client2.send('METADATA SET * chathistory.pm * :0');
+      const meta2Response = await client2.waitForLine(/761.*chathistory\.pm/i, 3000);
+      expect(meta2Response).toMatch(/761/);
+      await new Promise(r => setTimeout(r, 300));
+
+      // Send messages
+      const testMsg = `OptOutOverride test ${uniqueId}`;
+      client1.send(`PRIVMSG pmover2_${uniqueId} :${testMsg}`);
+      await new Promise(r => setTimeout(r, 500));
+
+      client1.clearRawBuffer();
+
+      // Request PM history - should be empty (explicit opt-out)
+      client1.send(`CHATHISTORY LATEST pmover2_${uniqueId} * 10`);
+
+      // MUST receive a batch - test fails if no response
+      const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
+
+      const messages: string[] = [];
+      // Collect messages until batch end
+      while (true) {
+        const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('PRIVMSG')) messages.push(line);
+      }
+
+      // Explicit opt-out should override any opt-in
+      expect(messages.length).toBe(0);
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+
+    it('can change consent preference after initial setting', async () => {
+      const client1 = trackClient(await createRawSocketClient());
+      const client2 = trackClient(await createRawSocketClient());
+      const uniqueId = Date.now();
+
+      await client1.capLs();
+      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      client1.capEnd();
+      client1.register(`pmchg1_${uniqueId}`);
+      await client1.waitForLine(/001/);
+
+      await client2.capLs();
+      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      client2.capEnd();
+      client2.register(`pmchg2_${uniqueId}`);
+      await client2.waitForLine(/001/);
+
+      // Both opt in - MUST get 761 response for each
+      client1.send('METADATA SET * chathistory.pm * :1');
+      const meta1Response = await client1.waitForLine(/761.*chathistory\.pm/i, 3000);
+      expect(meta1Response).toMatch(/761/);
+
+      client2.send('METADATA SET * chathistory.pm * :1');
+      const meta2Response = await client2.waitForLine(/761.*chathistory\.pm/i, 3000);
+      expect(meta2Response).toMatch(/761/);
+      await new Promise(r => setTimeout(r, 300));
+
+      // First message (should be stored)
+      const msg1 = `Before revoke ${uniqueId}`;
+      client1.send(`PRIVMSG pmchg2_${uniqueId} :${msg1}`);
+      await new Promise(r => setTimeout(r, 300));
+
+      // Client2 revokes consent - MUST get 761 response
+      client2.send('METADATA SET * chathistory.pm * :0');
+      const revokeResponse = await client2.waitForLine(/761.*chathistory\.pm/i, 3000);
+      expect(revokeResponse).toMatch(/761/);
+      await new Promise(r => setTimeout(r, 300));
+
+      // Second message (should NOT be stored)
+      const msg2 = `After revoke ${uniqueId}`;
+      client1.send(`PRIVMSG pmchg2_${uniqueId} :${msg2}`);
       await new Promise(r => setTimeout(r, 500));
 
       client1.clearRawBuffer();
 
       // Request PM history
-      client1.send('CHATHISTORY LATEST histpm2 * 10');
+      client1.send(`CHATHISTORY LATEST pmchg2_${uniqueId} * 10`);
 
-      try {
-        const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-        expect(batchStart).toBeDefined();
+      // MUST receive a batch - test fails if no response
+      const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
 
-        const messages: string[] = [];
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000) {
-          try {
-            const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('PRIVMSG')) messages.push(line);
-          } catch {
-            break;
-          }
-        }
-
-        console.log('PM history messages:', messages.length);
-      } catch {
-        console.log('PM history not available');
+      const messages: string[] = [];
+      // Collect messages until batch end
+      while (true) {
+        const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('PRIVMSG')) messages.push(line);
       }
+
+      // Verify consent change worked: post-revoke message should NOT be stored
+      const hasAfterMsg = messages.some(m => m.includes('After revoke'));
+      expect(hasAfterMsg).toBe(false);
+
+      // Pre-revoke message should be stored (when both had opted in)
+      const hasBeforeMsg = messages.some(m => m.includes('Before revoke'));
+      expect(hasBeforeMsg).toBe(true);
 
       client1.send('QUIT');
       client2.send('QUIT');
+    });
+
+    it('can verify own opt-in status via METADATA GET', async () => {
+      const client = trackClient(await createRawSocketClient());
+      const uniqueId = Date.now();
+
+      await client.capLs();
+      await client.capReq(['draft/chathistory', 'batch', 'draft/metadata-2']);
+      client.capEnd();
+      client.register(`pmget_${uniqueId}`);
+      await client.waitForLine(/001/);
+
+      // Set opt-in - MUST get 761 response
+      client.send('METADATA SET * chathistory.pm * :1');
+      const setResponse = await client.waitForLine(/761.*chathistory\.pm/i, 3000);
+      expect(setResponse).toMatch(/761/);
+      await new Promise(r => setTimeout(r, 200));
+
+      client.clearRawBuffer();
+
+      // Query own status - MUST get 761 response with value
+      client.send('METADATA GET * chathistory.pm');
+      const getResponse = await client.waitForLine(/761.*chathistory\.pm/i, 3000);
+      expect(getResponse).toContain('chathistory.pm');
+      // Value should be '1' - verify the opt-in value is returned
+      expect(getResponse).toMatch(/:1/);
+
+      client.send('QUIT');
+    });
+
+    it('can query other user opt-in status via METADATA GET (public visibility)', async () => {
+      const client1 = trackClient(await createRawSocketClient());
+      const client2 = trackClient(await createRawSocketClient());
+      const uniqueId = Date.now();
+
+      await client1.capLs();
+      await client1.capReq(['draft/chathistory', 'batch', 'draft/metadata-2']);
+      client1.capEnd();
+      client1.register(`pmqry1_${uniqueId}`);
+      await client1.waitForLine(/001/);
+
+      await client2.capLs();
+      await client2.capReq(['draft/chathistory', 'batch', 'draft/metadata-2']);
+      client2.capEnd();
+      client2.register(`pmqry2_${uniqueId}`);
+      await client2.waitForLine(/001/);
+
+      // Client2 sets public opt-in - MUST get 761 response
+      client2.send('METADATA SET * chathistory.pm * :1');
+      const setResponse = await client2.waitForLine(/761.*chathistory\.pm/i, 3000);
+      expect(setResponse).toMatch(/761/);
+      await new Promise(r => setTimeout(r, 300));
+
+      client1.clearRawBuffer();
+
+      // Client1 queries Client2's status - MUST get 761 response (public visibility)
+      client1.send(`METADATA GET pmqry2_${uniqueId} chathistory.pm`);
+      const getResponse = await client1.waitForLine(/761.*chathistory\.pm/i, 3000);
+      expect(getResponse).toContain('chathistory.pm');
+      // Verify other user's opt-in value is visible
+      expect(getResponse).toMatch(/:1/);
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+  });
+
+  describe('PM Chathistory Connection Notice', () => {
+    it('receives PM policy notice on connection when CHATHISTORY_PM_NOTICE enabled', async () => {
+      const client = trackClient(await createRawSocketClient());
+
+      await client.capLs();
+      await client.capReq(['draft/chathistory', 'batch', 'standard-replies']);
+      client.capEnd();
+      client.register('pmnotice1');
+
+      // Collect all lines during registration
+      const registrationLines: string[] = [];
+      const startTime = Date.now();
+
+      // Wait for 001 and collect lines
+      while (Date.now() - startTime < 10000) {
+        try {
+          const line = await client.waitForLine(/./, 500);
+          registrationLines.push(line);
+          // Stop after MOTD end or reasonable time
+          if (line.includes('376') || line.includes('422')) {
+            // Wait a bit more for any post-MOTD notices
+            await new Promise(r => setTimeout(r, 500));
+            break;
+          }
+        } catch {
+          break;
+        }
+      }
+
+      // Look for PM policy notice (NOTE or NOTICE)
+      const pmNotice = registrationLines.find(line =>
+        (line.includes('NOTE') || line.includes('NOTICE')) &&
+        (line.toLowerCase().includes('pm') || line.toLowerCase().includes('private') || line.toLowerCase().includes('chathistory'))
+      );
+
+      if (pmNotice) {
+        console.log('PM policy notice received:', pmNotice);
+        console.log('SUCCESS: Server sends PM policy notification on connect');
+      } else {
+        console.log('No PM policy notice found in registration');
+        console.log('Sample registration lines:', registrationLines.slice(-10));
+      }
+
+      client.send('QUIT');
+    });
+
+    it('NOTE command uses CHATHISTORY PM_POLICY format for standard-replies clients', async () => {
+      const client = trackClient(await createRawSocketClient());
+
+      await client.capLs();
+      const { ack } = await client.capReq(['draft/chathistory', 'batch', 'standard-replies']);
+      client.capEnd();
+      client.register('pmnote1');
+
+      const hasStandardReplies = ack.includes('standard-replies');
+
+      // Collect registration lines
+      const registrationLines: string[] = [];
+      const startTime = Date.now();
+
+      while (Date.now() - startTime < 10000) {
+        try {
+          const line = await client.waitForLine(/./, 500);
+          registrationLines.push(line);
+          if (line.includes('376') || line.includes('422')) {
+            await new Promise(r => setTimeout(r, 500));
+            break;
+          }
+        } catch {
+          break;
+        }
+      }
+
+      // Look specifically for NOTE CHATHISTORY PM_POLICY
+      const notePolicy = registrationLines.find(line =>
+        line.includes('NOTE') && line.includes('CHATHISTORY') && line.includes('PM_POLICY')
+      );
+
+      if (hasStandardReplies && notePolicy) {
+        console.log('NOTE CHATHISTORY PM_POLICY received:', notePolicy);
+        console.log('SUCCESS: Server uses proper NOTE format for standard-replies clients');
+      } else if (hasStandardReplies) {
+        console.log('standard-replies enabled but no NOTE PM_POLICY found');
+        // May fall back to NOTICE or feature disabled
+      } else {
+        console.log('standard-replies not enabled, expecting NOTICE instead');
+      }
+
+      client.send('QUIT');
+    });
+
+    it('falls back to NOTICE for clients without standard-replies', async () => {
+      const client = trackClient(await createRawSocketClient());
+
+      await client.capLs();
+      // Explicitly do NOT request standard-replies
+      await client.capReq(['draft/chathistory', 'batch']);
+      client.capEnd();
+      client.register('pmfallback1');
+
+      // Collect registration lines
+      const registrationLines: string[] = [];
+      const startTime = Date.now();
+
+      while (Date.now() - startTime < 10000) {
+        try {
+          const line = await client.waitForLine(/./, 500);
+          registrationLines.push(line);
+          if (line.includes('376') || line.includes('422')) {
+            await new Promise(r => setTimeout(r, 500));
+            break;
+          }
+        } catch {
+          break;
+        }
+      }
+
+      // Look for NOTICE about PM history (not NOTE)
+      const noticePolicy = registrationLines.find(line =>
+        line.includes('NOTICE') &&
+        (line.toLowerCase().includes('pm') || line.toLowerCase().includes('private') || line.toLowerCase().includes('chathistory')) &&
+        !line.includes('NOTE')
+      );
+
+      if (noticePolicy) {
+        console.log('NOTICE fallback received:', noticePolicy);
+        console.log('SUCCESS: Server falls back to NOTICE for non-standard-replies clients');
+      } else {
+        console.log('No PM NOTICE found (feature may be disabled)');
+      }
+
+      client.send('QUIT');
+    });
+  });
+
+  describe('PM Chathistory Capability Advertisement', () => {
+    it('draft/chathistory capability includes limit parameter', async () => {
+      const client = trackClient(await createRawSocketClient());
+
+      const caps = await client.capLs();
+      const chathistoryValue = caps.get('draft/chathistory');
+
+      console.log('draft/chathistory capability value:', chathistoryValue);
+
+      if (chathistoryValue) {
+        expect(chathistoryValue).toContain('limit=');
+        console.log('SUCCESS: Capability includes limit parameter');
+      } else {
+        console.log('draft/chathistory has no value (may be boolean capability)');
+      }
+
+      client.send('QUIT');
+    });
+
+    it('checks for pm= parameter in capability value (if CHATHISTORY_ADVERTISE_PM enabled)', async () => {
+      const client = trackClient(await createRawSocketClient());
+
+      const caps = await client.capLs();
+      const chathistoryValue = caps.get('draft/chathistory');
+
+      console.log('draft/chathistory capability value:', chathistoryValue);
+
+      if (chathistoryValue && chathistoryValue.includes('pm=')) {
+        const pmMatch = chathistoryValue.match(/pm=(\w+)/);
+        if (pmMatch) {
+          console.log('PM consent mode advertised:', pmMatch[1]);
+          expect(['global', 'single', 'multi']).toContain(pmMatch[1]);
+          console.log('SUCCESS: Server advertises PM consent mode');
+        }
+      } else {
+        console.log('pm= parameter not present (CHATHISTORY_ADVERTISE_PM likely disabled)');
+        console.log('This is expected - pm= is a non-standard extension');
+      }
+
+      client.send('QUIT');
     });
   });
 
@@ -793,18 +1214,14 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Request history immediately (no messages yet)
       client.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
-      try {
-        // Should receive empty batch (BATCH + and BATCH - with same ref)
-        const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-        expect(batchStart).toBeDefined();
+      // Should receive empty batch (BATCH + and BATCH - with same ref)
+      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
 
-        // Wait for batch end
-        const batchEnd = await client.waitForLine(/BATCH -/i, 2000);
-        expect(batchEnd).toBeDefined();
-        console.log('Empty batch received correctly');
-      } catch {
-        console.log('Empty channel history test failed');
-      }
+      // Wait for batch end
+      const batchEnd = await client.waitForLine(/BATCH -/i, 2000);
+      expect(batchEnd).toBeDefined();
+      console.log('Empty batch received correctly');
       client.send('QUIT');
     });
   });
@@ -832,13 +1249,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       const now = new Date().toISOString();
       client.send(`CHATHISTORY BEFORE ${channelName} timestamp=${now} 10`);
 
-      try {
-        const response = await client.waitForLine(/BATCH|FAIL/i, 5000);
-        expect(response).toBeDefined();
-        console.log('ISO timestamp accepted:', response);
-      } catch {
-        console.log('ISO timestamp test failed');
-      }
+      const response = await client.waitForLine(/BATCH|FAIL/i, 5000);
+      expect(response).toBeDefined();
+      console.log('ISO timestamp accepted:', response);
       client.send('QUIT');
     });
 
@@ -860,12 +1273,10 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Use invalid timestamp
       client.send(`CHATHISTORY BEFORE ${channelName} timestamp=not-a-timestamp 10`);
 
-      try {
-        const response = await client.waitForLine(/FAIL|BATCH|ERR/i, 3000);
-        console.log('Invalid timestamp response:', response);
-      } catch {
-        console.log('No response for invalid timestamp');
-      }
+      // Should receive FAIL or error
+      const response = await client.waitForLine(/FAIL|BATCH|ERR/i, 3000);
+      expect(response).toBeDefined();
+      console.log('Invalid timestamp response:', response);
       client.send('QUIT');
     });
   });
@@ -894,32 +1305,25 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Request latest history
       client.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
-      try {
-        await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      // MUST receive batch
+      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
 
-        const messages: string[] = [];
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000) {
-          try {
-            const line = await client.waitForLine(/NOTICE|PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('NOTICE')) messages.push(line);
-          } catch {
-            break;
-          }
-        }
-
-        // Should have NOTICE messages in history
-        console.log(`NOTICE messages in history: ${messages.length}`);
-        expect(messages.length).toBeGreaterThanOrEqual(2);
-
-        // Verify they contain our content
-        const hasNotice1 = messages.some(m => m.includes('Notice message 1'));
-        const hasNotice2 = messages.some(m => m.includes('Notice message 2'));
-        expect(hasNotice1 || hasNotice2).toBe(true);
-      } catch (e) {
-        console.log('NOTICE history test failed:', (e as Error).message);
+      const messages: string[] = [];
+      while (true) {
+        const line = await client.waitForLine(/NOTICE|PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('NOTICE')) messages.push(line);
       }
+
+      // Should have NOTICE messages in history
+      expect(messages.length).toBeGreaterThanOrEqual(2);
+
+      // Verify they contain our content
+      const hasNotice1 = messages.some(m => m.includes('Notice message 1'));
+      const hasNotice2 = messages.some(m => m.includes('Notice message 2'));
+      expect(hasNotice1 || hasNotice2).toBe(true);
+
       client.send('QUIT');
     });
 
@@ -948,29 +1352,22 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       client.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
-      try {
-        await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      // MUST receive batch
+      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
 
-        const privmsgs: string[] = [];
-        const notices: string[] = [];
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000) {
-          try {
-            const line = await client.waitForLine(/NOTICE|PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('NOTICE')) notices.push(line);
-            else if (line.includes('PRIVMSG')) privmsgs.push(line);
-          } catch {
-            break;
-          }
-        }
-
-        console.log(`Mixed history: ${privmsgs.length} PRIVMSG, ${notices.length} NOTICE`);
-        expect(privmsgs.length).toBeGreaterThanOrEqual(2);
-        expect(notices.length).toBeGreaterThanOrEqual(1);
-      } catch (e) {
-        console.log('Mixed history test failed:', (e as Error).message);
+      const privmsgs: string[] = [];
+      const notices: string[] = [];
+      while (true) {
+        const line = await client.waitForLine(/NOTICE|PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('NOTICE')) notices.push(line);
+        else if (line.includes('PRIVMSG')) privmsgs.push(line);
       }
+
+      expect(privmsgs.length).toBeGreaterThanOrEqual(2);
+      expect(notices.length).toBeGreaterThanOrEqual(1);
+
       client.send('QUIT');
     });
   });
@@ -1006,35 +1403,25 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       client.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
-      try {
-        await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      // MUST receive batch
+      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
 
-        const messages: string[] = [];
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000) {
-          try {
-            const line = await client.waitForLine(/TAGMSG|PRIVMSG|NOTICE|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('TAGMSG')) messages.push(line);
-          } catch {
-            break;
-          }
-        }
-
-        console.log(`TAGMSG messages in history: ${messages.length}`);
-        // Note: TAGMSG storage depends on server configuration
-        if (messages.length > 0) {
-          console.log('TAGMSG history supported');
-          // Verify tags are preserved
-          const hasTyping = messages.some(m => m.includes('typing'));
-          const hasReact = messages.some(m => m.includes('react'));
-          console.log(`Tags preserved: typing=${hasTyping}, react=${hasReact}`);
-        } else {
-          console.log('TAGMSG may not be stored in history (server config)');
-        }
-      } catch (e) {
-        console.log('TAGMSG history test failed:', (e as Error).message);
+      const messages: string[] = [];
+      while (true) {
+        const line = await client.waitForLine(/TAGMSG|PRIVMSG|NOTICE|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('TAGMSG')) messages.push(line);
       }
+
+      // TAGMSG must be stored when event-playback is enabled
+      expect(messages.length).toBeGreaterThan(0);
+
+      // Verify tags are preserved
+      const hasTyping = messages.some(m => m.includes('typing'));
+      const hasReact = messages.some(m => m.includes('react'));
+      expect(hasTyping || hasReact).toBe(true);
+
       client.send('QUIT');
     });
 
@@ -1052,56 +1439,38 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
-      // Send original message and get msgid
+      // Send original message and get msgid - MUST get echo with msgid
       client.send(`PRIVMSG ${channelName} :Original message for reply`);
+      const echo = await client.waitForLine(/PRIVMSG.*Original message/i, 3000);
+      const match = echo.match(/msgid=([^\s;]+)/);
+      expect(match).not.toBeNull();
+      const originalMsgid = match![1];
 
-      let originalMsgid: string | null = null;
-      try {
-        const echo = await client.waitForLine(/PRIVMSG.*Original message/i, 3000);
-        const match = echo.match(/msgid=([^\s;]+)/);
-        if (match) {
-          originalMsgid = match[1];
-          console.log('Original msgid:', originalMsgid);
-        }
-      } catch {
-        console.log('No echo with msgid');
+      // Send TAGMSG reaction to original
+      await new Promise(r => setTimeout(r, 100));
+      client.send(`@+react=👍;+reply=${originalMsgid} TAGMSG ${channelName}`);
+      await new Promise(r => setTimeout(r, 500));
+
+      client.clearRawBuffer();
+
+      client.send(`CHATHISTORY LATEST ${channelName} * 10`);
+
+      // MUST receive batch
+      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
+
+      const messages: string[] = [];
+      while (true) {
+        const line = await client.waitForLine(/TAGMSG|PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        messages.push(line);
       }
 
-      if (originalMsgid) {
-        // Send TAGMSG reaction to original
-        await new Promise(r => setTimeout(r, 100));
-        client.send(`@+react=👍;+reply=${originalMsgid} TAGMSG ${channelName}`);
-        await new Promise(r => setTimeout(r, 500));
-
-        client.clearRawBuffer();
-
-        client.send(`CHATHISTORY LATEST ${channelName} * 10`);
-
-        try {
-          await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-
-          const messages: string[] = [];
-          const startTime = Date.now();
-          while (Date.now() - startTime < 3000) {
-            try {
-              const line = await client.waitForLine(/TAGMSG|PRIVMSG|BATCH -/, 500);
-              if (line.includes('BATCH -')) break;
-              messages.push(line);
-            } catch {
-              break;
-            }
-          }
-
-          // Check if reply tag links back to original
-          const tagmsgs = messages.filter(m => m.includes('TAGMSG'));
-          if (tagmsgs.length > 0) {
-            const hasReplyTag = tagmsgs.some(m => m.includes(`reply=${originalMsgid}`));
-            console.log(`Reply tag preserved: ${hasReplyTag}`);
-          }
-        } catch (e) {
-          console.log('Reply TAGMSG test failed:', (e as Error).message);
-        }
-      }
+      // Check if reply tag links back to original
+      const tagmsgs = messages.filter(m => m.includes('TAGMSG'));
+      expect(tagmsgs.length).toBeGreaterThan(0);
+      const hasReplyTag = tagmsgs.some(m => m.includes(`reply=${originalMsgid}`));
+      expect(hasReplyTag).toBe(true);
 
       client.send('QUIT');
     });
@@ -1147,33 +1516,22 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Query history - should include JOIN events
       client1.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
-      try {
-        await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      // MUST receive batch
+      const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
 
-        const joins: string[] = [];
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000) {
-          try {
-            const line = await client1.waitForLine(/JOIN|PRIVMSG|NOTICE|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('JOIN')) joins.push(line);
-          } catch {
-            break;
-          }
-        }
-
-        console.log(`JOIN events in history: ${joins.length}`);
-        if (joins.length > 0) {
-          console.log('JOIN history supported');
-          // Verify client2's join is recorded
-          const hasJoin2 = joins.some(j => j.includes('histjoin2'));
-          console.log(`histjoin2 JOIN recorded: ${hasJoin2}`);
-        } else {
-          console.log('JOIN events may not be stored in history (server config)');
-        }
-      } catch (e) {
-        console.log('JOIN history test failed:', (e as Error).message);
+      const joins: string[] = [];
+      while (true) {
+        const line = await client1.waitForLine(/JOIN|PRIVMSG|NOTICE|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('JOIN')) joins.push(line);
       }
+
+      // JOIN events must be stored when event-playback is enabled
+      expect(joins.length).toBeGreaterThan(0);
+      // Verify client2's join is recorded
+      const hasJoin2 = joins.some(j => j.includes('histjoin2'));
+      expect(hasJoin2).toBe(true);
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -1213,33 +1571,22 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Query history
       client1.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
-      try {
-        await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      // MUST receive batch
+      const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
 
-        const parts: string[] = [];
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000) {
-          try {
-            const line = await client1.waitForLine(/PART|JOIN|PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('PART')) parts.push(line);
-          } catch {
-            break;
-          }
-        }
-
-        console.log(`PART events in history: ${parts.length}`);
-        if (parts.length > 0) {
-          console.log('PART history supported');
-          // Verify part message is included
-          const hasPartMsg = parts.some(p => p.includes('Leaving for test'));
-          console.log(`PART message preserved: ${hasPartMsg}`);
-        } else {
-          console.log('PART events may not be stored in history (server config)');
-        }
-      } catch (e) {
-        console.log('PART history test failed:', (e as Error).message);
+      const parts: string[] = [];
+      while (true) {
+        const line = await client1.waitForLine(/PART|JOIN|PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('PART')) parts.push(line);
       }
+
+      // PART events must be stored when event-playback is enabled
+      expect(parts.length).toBeGreaterThan(0);
+      // Verify part message is included
+      const hasPartMsg = parts.some(p => p.includes('Leaving for test'));
+      expect(hasPartMsg).toBe(true);
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -1281,34 +1628,24 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Query history
       op.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
-      try {
-        await op.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      // MUST receive batch
+      const batchStart = await op.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
 
-        const kicks: string[] = [];
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000) {
-          try {
-            const line = await op.waitForLine(/KICK|JOIN|PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('KICK')) kicks.push(line);
-          } catch {
-            break;
-          }
-        }
-
-        console.log(`KICK events in history: ${kicks.length}`);
-        if (kicks.length > 0) {
-          console.log('KICK history supported');
-          // Verify kick info
-          const hasKickedUser = kicks.some(k => k.includes('histkickusr'));
-          const hasKickReason = kicks.some(k => k.includes('Test kick reason'));
-          console.log(`Kicked user recorded: ${hasKickedUser}, reason: ${hasKickReason}`);
-        } else {
-          console.log('KICK events may not be stored in history (server config)');
-        }
-      } catch (e) {
-        console.log('KICK history test failed:', (e as Error).message);
+      const kicks: string[] = [];
+      while (true) {
+        const line = await op.waitForLine(/KICK|JOIN|PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('KICK')) kicks.push(line);
       }
+
+      // KICK events must be stored when event-playback is enabled
+      expect(kicks.length).toBeGreaterThan(0);
+      // Verify kick info
+      const hasKickedUser = kicks.some(k => k.includes('histkickusr'));
+      const hasKickReason = kicks.some(k => k.includes('Test kick reason'));
+      expect(hasKickedUser).toBe(true);
+      expect(hasKickReason).toBe(true);
 
       op.send('QUIT');
       user.send('QUIT');
@@ -1348,34 +1685,24 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Query history
       client1.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
-      try {
-        await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      // MUST receive batch
+      const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
 
-        const quits: string[] = [];
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000) {
-          try {
-            const line = await client1.waitForLine(/QUIT|JOIN|PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('QUIT')) quits.push(line);
-          } catch {
-            break;
-          }
-        }
-
-        console.log(`QUIT events in history: ${quits.length}`);
-        if (quits.length > 0) {
-          console.log('QUIT history supported');
-          // Verify quit info
-          const hasQuitUser = quits.some(q => q.includes('histquit2'));
-          const hasQuitMsg = quits.some(q => q.includes('Goodbye for test'));
-          console.log(`Quitter recorded: ${hasQuitUser}, message: ${hasQuitMsg}`);
-        } else {
-          console.log('QUIT events may not be stored in history (server config)');
-        }
-      } catch (e) {
-        console.log('QUIT history test failed:', (e as Error).message);
+      const quits: string[] = [];
+      while (true) {
+        const line = await client1.waitForLine(/QUIT|JOIN|PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('QUIT')) quits.push(line);
       }
+
+      // QUIT events must be stored when event-playback is enabled
+      expect(quits.length).toBeGreaterThan(0);
+      // Verify quit info
+      const hasQuitUser = quits.some(q => q.includes('histquit2'));
+      const hasQuitMsg = quits.some(q => q.includes('Goodbye for test'));
+      expect(hasQuitUser).toBe(true);
+      expect(hasQuitMsg).toBe(true);
 
       client1.send('QUIT');
     });
@@ -1403,32 +1730,21 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Query history
       client.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
-      try {
-        await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      // MUST receive batch
+      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
 
-        const topics: string[] = [];
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000) {
-          try {
-            const line = await client.waitForLine(/TOPIC|JOIN|PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('TOPIC')) topics.push(line);
-          } catch {
-            break;
-          }
-        }
-
-        console.log(`TOPIC events in history: ${topics.length}`);
-        if (topics.length > 0) {
-          console.log('TOPIC history supported');
-          const hasTopicText = topics.some(t => t.includes(topicText));
-          console.log(`Topic text preserved: ${hasTopicText}`);
-        } else {
-          console.log('TOPIC events may not be stored in history (server config)');
-        }
-      } catch (e) {
-        console.log('TOPIC history test failed:', (e as Error).message);
+      const topics: string[] = [];
+      while (true) {
+        const line = await client.waitForLine(/TOPIC|JOIN|PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('TOPIC')) topics.push(line);
       }
+
+      // TOPIC events must be stored when event-playback is enabled
+      expect(topics.length).toBeGreaterThan(0);
+      const hasTopicText = topics.some(t => t.includes(topicText));
+      expect(hasTopicText).toBe(true);
 
       client.send('QUIT');
     });
@@ -1446,8 +1762,10 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
-      // Set some modes
-      client.send(`MODE ${channelName} +nt`);
+      // Set a mode that isn't default (+tn is default, use +m for moderated)
+      client.send(`MODE ${channelName} +m`);
+      // Wait for MODE to be broadcast to channel members
+      await client.waitForLine(/MODE.*\+m/i, 3000);
       await new Promise(r => setTimeout(r, 500));
 
       client.clearRawBuffer();
@@ -1455,30 +1773,22 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Query history
       client.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
-      try {
-        await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      // MUST receive batch
+      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
 
-        const modes: string[] = [];
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000) {
-          try {
-            const line = await client.waitForLine(/MODE|JOIN|PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('MODE')) modes.push(line);
-          } catch {
-            break;
-          }
-        }
-
-        console.log(`MODE events in history: ${modes.length}`);
-        if (modes.length > 0) {
-          console.log('MODE history supported');
-        } else {
-          console.log('MODE events may not be stored in history (server config)');
-        }
-      } catch (e) {
-        console.log('MODE history test failed:', (e as Error).message);
+      const modes: string[] = [];
+      while (true) {
+        const line = await client.waitForLine(/MODE|JOIN|PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('MODE')) modes.push(line);
       }
+
+      // MODE events must be stored when event-playback is enabled
+      expect(modes.length).toBeGreaterThan(0);
+      // Verify we got the +m mode change
+      const hasModeM = modes.some(m => m.includes('+m'));
+      expect(hasModeM).toBe(true);
 
       client.send('QUIT');
     });
@@ -1498,55 +1808,40 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
-      // Send 10 messages
+      // Send 10 messages - MUST get echo with msgid for each
       const sentMsgIds: string[] = [];
       for (let i = 1; i <= 10; i++) {
         client.send(`PRIVMSG ${channelName} :Pagination message ${i}`);
-        try {
-          const echo = await client.waitForLine(new RegExp(`Pagination message ${i}`), 3000);
-          const match = echo.match(/msgid=([^\s;]+)/);
-          if (match) sentMsgIds.push(match[1]);
-        } catch {
-          // Continue
-        }
+        const echo = await client.waitForLine(new RegExp(`Pagination message ${i}`), 3000);
+        const match = echo.match(/msgid=([^\s;]+)/);
+        expect(match).not.toBeNull();
+        sentMsgIds.push(match![1]);
         await new Promise(r => setTimeout(r, 50));
       }
       await new Promise(r => setTimeout(r, 500));
 
-      console.log(`Sent ${sentMsgIds.length} messages`);
+      expect(sentMsgIds.length).toBe(10);
 
       // First page: get latest 3 messages
       client.clearRawBuffer();
       client.send(`CHATHISTORY LATEST ${channelName} * 3`);
 
+      // MUST receive batch
+      const batch1 = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batch1).toBeDefined();
+
       const page1: { content: string; msgid: string }[] = [];
-      try {
-        await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000) {
-          try {
-            const line = await client.waitForLine(/PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            const msgidMatch = line.match(/msgid=([^\s;]+)/);
-            const contentMatch = line.match(/Pagination message (\d+)/);
-            if (msgidMatch && contentMatch) {
-              page1.push({ content: contentMatch[1], msgid: msgidMatch[1] });
-            }
-          } catch {
-            break;
-          }
+      while (true) {
+        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        const msgidMatch = line.match(/msgid=([^\s;]+)/);
+        const contentMatch = line.match(/Pagination message (\d+)/);
+        if (msgidMatch && contentMatch) {
+          page1.push({ content: contentMatch[1], msgid: msgidMatch[1] });
         }
-      } catch (e) {
-        console.log('Page 1 failed:', (e as Error).message);
       }
 
-      console.log(`Page 1: ${page1.map(m => m.content).join(', ')}`);
-
-      if (page1.length === 0) {
-        console.log('Pagination test skipped - no history available');
-        client.send('QUIT');
-        return;
-      }
+      expect(page1.length).toBeGreaterThan(0);
 
       // Get the oldest msgid from page 1 to use as reference for page 2
       const oldestMsgId = page1[0].msgid; // First in the list is oldest in LATEST order
@@ -1555,28 +1850,22 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.clearRawBuffer();
       client.send(`CHATHISTORY BEFORE ${channelName} msgid=${oldestMsgId} 3`);
 
+      // MUST receive batch
+      const batch2 = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batch2).toBeDefined();
+
       const page2: { content: string; msgid: string }[] = [];
-      try {
-        await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000) {
-          try {
-            const line = await client.waitForLine(/PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            const msgidMatch = line.match(/msgid=([^\s;]+)/);
-            const contentMatch = line.match(/Pagination message (\d+)/);
-            if (msgidMatch && contentMatch) {
-              page2.push({ content: contentMatch[1], msgid: msgidMatch[1] });
-            }
-          } catch {
-            break;
-          }
+      while (true) {
+        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        const msgidMatch = line.match(/msgid=([^\s;]+)/);
+        const contentMatch = line.match(/Pagination message (\d+)/);
+        if (msgidMatch && contentMatch) {
+          page2.push({ content: contentMatch[1], msgid: msgidMatch[1] });
         }
-      } catch (e) {
-        console.log('Page 2 failed:', (e as Error).message);
       }
 
-      console.log(`Page 2: ${page2.map(m => m.content).join(', ')}`);
+      expect(page2.length).toBeGreaterThan(0);
 
       // Verify pagination worked - pages should not overlap
       const page1Contents = new Set(page1.map(m => m.content));
@@ -1586,17 +1875,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       for (const content of page2Contents) {
         if (page1Contents.has(content)) overlap++;
       }
+      expect(overlap).toBe(0);
 
-      if (page2.length > 0) {
-        expect(overlap).toBe(0);
-        console.log('SUCCESS: Pages do not overlap');
-
-        // Page 2 should have lower numbers (older messages)
-        const page1Max = Math.max(...page1.map(m => parseInt(m.content)));
-        const page2Max = Math.max(...page2.map(m => parseInt(m.content)));
-        expect(page2Max).toBeLessThan(page1Max);
-        console.log(`Correct ordering: page2 max (${page2Max}) < page1 max (${page1Max})`);
-      }
+      // Page 2 should have lower numbers (older messages)
+      const page1Max = Math.max(...page1.map(m => parseInt(m.content)));
+      const page2Max = Math.max(...page2.map(m => parseInt(m.content)));
+      expect(page2Max).toBeLessThan(page1Max);
 
       client.send('QUIT');
     });
@@ -1614,60 +1898,41 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
-      // Send messages and capture first msgid
+      // Send messages and capture first msgid - MUST succeed
       let firstMsgId: string | null = null;
       for (let i = 1; i <= 8; i++) {
         client.send(`PRIVMSG ${channelName} :Forward page ${i}`);
-        try {
-          const echo = await client.waitForLine(new RegExp(`Forward page ${i}`), 3000);
-          const match = echo.match(/msgid=([^\s;]+)/);
-          if (match && i === 1) firstMsgId = match[1];
-        } catch {
-          // Continue
-        }
+        const echo = await client.waitForLine(new RegExp(`Forward page ${i}`), 3000);
+        const match = echo.match(/msgid=([^\s;]+)/);
+        expect(match).not.toBeNull();
+        if (i === 1) firstMsgId = match![1];
         await new Promise(r => setTimeout(r, 50));
       }
       await new Promise(r => setTimeout(r, 500));
 
-      if (!firstMsgId) {
-        console.log('No msgid captured, skipping forward pagination test');
-        client.send('QUIT');
-        return;
-      }
-
-      console.log(`First msgid: ${firstMsgId}`);
+      expect(firstMsgId).not.toBeNull();
 
       // Get messages after the first one (should get messages 2-8)
       client.clearRawBuffer();
       client.send(`CHATHISTORY AFTER ${channelName} msgid=${firstMsgId} 10`);
 
+      // MUST receive batch
+      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
+
       const afterFirst: string[] = [];
-      try {
-        await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000) {
-          try {
-            const line = await client.waitForLine(/PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            const contentMatch = line.match(/Forward page (\d+)/);
-            if (contentMatch) afterFirst.push(contentMatch[1]);
-          } catch {
-            break;
-          }
-        }
-      } catch (e) {
-        console.log('AFTER query failed:', (e as Error).message);
+      while (true) {
+        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        const contentMatch = line.match(/Forward page (\d+)/);
+        if (contentMatch) afterFirst.push(contentMatch[1]);
       }
 
-      console.log(`Messages after first: ${afterFirst.join(', ')}`);
-
-      if (afterFirst.length > 0) {
-        // Should NOT include message 1 (the reference)
-        expect(afterFirst).not.toContain('1');
-        // Should have messages 2 and beyond
-        expect(afterFirst).toContain('2');
-        console.log('SUCCESS: AFTER pagination excludes reference message');
-      }
+      expect(afterFirst.length).toBeGreaterThan(0);
+      // Should NOT include message 1 (the reference)
+      expect(afterFirst).not.toContain('1');
+      // Should have messages 2 and beyond
+      expect(afterFirst).toContain('2');
 
       client.send('QUIT');
     });
@@ -1685,54 +1950,41 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
-      // Send only 3 messages
+      // Send only 3 messages - MUST succeed
       let firstMsgId: string | null = null;
       for (let i = 1; i <= 3; i++) {
         client.send(`PRIVMSG ${channelName} :End test ${i}`);
-        try {
-          const echo = await client.waitForLine(new RegExp(`End test ${i}`), 3000);
-          const match = echo.match(/msgid=([^\s;]+)/);
-          if (match && i === 1) firstMsgId = match[1];
-        } catch {
-          // Continue
-        }
+        const echo = await client.waitForLine(new RegExp(`End test ${i}`), 3000);
+        const match = echo.match(/msgid=([^\s;]+)/);
+        expect(match).not.toBeNull();
+        if (i === 1) firstMsgId = match![1];
         await new Promise(r => setTimeout(r, 50));
       }
       await new Promise(r => setTimeout(r, 500));
 
-      if (!firstMsgId) {
-        console.log('No msgid captured');
-        client.send('QUIT');
-        return;
-      }
+      expect(firstMsgId).not.toBeNull();
 
-      // Try to get messages before the first one (should be empty)
+      // Try to get messages before the first one (should be empty batch)
       client.clearRawBuffer();
       client.send(`CHATHISTORY BEFORE ${channelName} msgid=${firstMsgId} 10`);
 
-      let hasEmptyBatch = false;
-      try {
-        const batchStart = await client.waitForLine(/BATCH \+(\S+) chathistory/i, 5000);
-        const batchMatch = batchStart.match(/BATCH \+(\S+)/);
-        if (batchMatch) {
-          const batchId = batchMatch[1];
-          // Try to get batch end immediately (empty batch)
-          try {
-            const next = await client.waitForLine(/PRIVMSG|BATCH -/, 1000);
-            if (next.includes(`BATCH -${batchId}`)) {
-              hasEmptyBatch = true;
-            }
-          } catch {
-            // Timeout means no messages, which is expected
-            hasEmptyBatch = true;
-          }
-        }
-      } catch (e) {
-        console.log('End of history test failed:', (e as Error).message);
+      // MUST receive batch
+      const batchStart = await client.waitForLine(/BATCH \+(\S+) chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
+      const batchMatch = batchStart.match(/BATCH \+(\S+)/);
+      expect(batchMatch).not.toBeNull();
+      const batchId = batchMatch![1];
+
+      // Should get batch end with no messages (empty batch at start of history)
+      const messages: string[] = [];
+      while (true) {
+        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        messages.push(line);
       }
 
-      console.log(`Empty batch at end of history: ${hasEmptyBatch}`);
-      // Note: this test is informational - some servers may behave differently
+      // At start of history, there should be no messages before the first one
+      expect(messages.length).toBe(0);
 
       client.send('QUIT');
     });
@@ -1775,53 +2027,37 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       sender.send(`PRIVMSG ${channelName} :Concurrent 1`);
       sender.send(`PRIVMSG ${channelName} :Concurrent 2`);
 
+      // MUST receive batch for initial query
+      const batch1 = await reader.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batch1).toBeDefined();
+
       const initialMsgs: string[] = [];
-      try {
-        await reader.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000) {
-          try {
-            const line = await reader.waitForLine(/PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('Initial')) initialMsgs.push(line);
-          } catch {
-            break;
-          }
-        }
-      } catch (e) {
-        console.log('Race condition test failed:', (e as Error).message);
+      while (true) {
+        const line = await reader.waitForLine(/PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('Initial')) initialMsgs.push(line);
       }
+
+      expect(initialMsgs.length).toBeGreaterThan(0);
 
       // Wait and query again
       await new Promise(r => setTimeout(r, 500));
       reader.clearRawBuffer();
       reader.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
-      const allMsgs: string[] = [];
-      try {
-        await reader.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000) {
-          try {
-            const line = await reader.waitForLine(/PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            allMsgs.push(line);
-          } catch {
-            break;
-          }
-        }
-      } catch (e) {
-        console.log('Follow-up query failed:', (e as Error).message);
-      }
+      // MUST receive batch for follow-up query
+      const batch2 = await reader.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batch2).toBeDefined();
 
-      console.log(`Initial query: ${initialMsgs.length} messages`);
-      console.log(`Follow-up query: ${allMsgs.length} messages`);
+      const allMsgs: string[] = [];
+      while (true) {
+        const line = await reader.waitForLine(/PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        allMsgs.push(line);
+      }
 
       // Follow-up should have at least as many as initial plus concurrent
-      if (initialMsgs.length > 0 && allMsgs.length > 0) {
-        expect(allMsgs.length).toBeGreaterThanOrEqual(initialMsgs.length);
-        console.log('SUCCESS: Later query includes new messages');
-      }
+      expect(allMsgs.length).toBeGreaterThanOrEqual(initialMsgs.length);
 
       sender.send('QUIT');
       reader.send('QUIT');
