@@ -21,3 +21,28 @@ export {
   type CapState,
   type ServerConfig,
 } from './ircv3-client.js';
+
+export {
+  // P10 base64 character encoding
+  b64CharToValue,
+  valueToB64Char,
+  // IP address encoding/decoding
+  decodeIP,
+  encodeIP,
+  decodeIPv4,
+  encodeIPv4,
+  decodeIPv6,
+  encodeIPv6,
+  isIPv4Mapped,
+  extractIPv4FromMapped,
+  // Word-level encoding
+  decodeWord,
+  encodeWord,
+  // Numeric encoding
+  decodeServerNumeric,
+  encodeServerNumeric,
+  decodeUserNumeric,
+  encodeUserNumeric,
+  decodeFullNumeric,
+  encodeFullNumeric,
+} from './p10-utils.js';

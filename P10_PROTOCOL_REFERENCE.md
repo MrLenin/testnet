@@ -91,9 +91,9 @@ Base64:  AAAAAA → ... → encoded value
 IPv6 addresses use a variable-length encoding with optional compression.
 
 **Word Encoding**:
-- Each 16-bit word is encoded as **3 base64 characters** (18 bits)
-- First character uses only lower 2 bits (values 0-3 → A-D)
-- Full words: `[2-bit][6-bit][6-bit]` → 18 bits per 3 characters
+- Each 16-bit word is encoded as **3 base64 characters** (18 bits capacity)
+- First character uses only lower 4 bits (upper 2 bits ignored)
+- Full words: `[4-bit][6-bit][6-bit]` = 16 bits within 18-bit capacity
 
 **Compression Marker**: The underscore `_` character represents one or more consecutive zero 16-bit words, similar to `::` in IPv6 text notation.
 
@@ -149,12 +149,14 @@ Each 3-character group decodes to a 16-bit word:
 
 ```
 Characters: [C1][C2][C3]
-Bits:       [2-bit][6-bit][6-bit] = 14 effective bits + 4 unused
+Bits:       [4-bit][6-bit][6-bit] = 16 bits (2 upper bits of C1 ignored)
 
-Value = ((val(C1) & 0x03) << 12) | (val(C2) << 6) | val(C3)
+Value = ((val(C1) & 0x0F) << 12) | (val(C2) << 6) | val(C3)
 ```
 
 Where `val(c)` returns 0-63 based on the base64 alphabet position.
+
+Note: 3 chars × 6 bits = 18 bits available, but only 16 bits are used for the word value. The upper 2 bits of the first character are ignored during decoding.
 
 ### Implementation Notes
 
