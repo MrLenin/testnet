@@ -60,14 +60,14 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
         await createRawSocketClient()
       );
 
-      client.send('CAP LS 302');
-      await client.waitForLine(/CAP.*LS/i);
+      // Use capLs() to properly consume all CAP LS lines (may be multi-line with *)
+      const caps = await client.capLs();
+      expect(caps.has('draft/multiline')).toBe(true);
 
-      client.send('CAP REQ :draft/multiline batch');
-      const ack = await client.waitForLine(/CAP.*ACK/i);
+      const result = await client.capReq(['draft/multiline', 'batch']);
 
-      expect(ack).toMatch(/draft\/multiline/i);
-      expect(ack).toMatch(/batch/i);
+      expect(result.ack).toContain('draft/multiline');
+      expect(result.ack).toContain('batch');
       client.send('QUIT');
     });
   });
@@ -119,29 +119,20 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send(`BATCH -${batchId}`);
 
       // Client2 should receive the batch
-      try {
-        const batchStart = await client2.waitForLine(/BATCH \+.*multiline/i, 3000);
-        expect(batchStart).toContain('multiline');
-        console.log('Received multiline batch start:', batchStart);
+      const batchStart = await client2.waitForLine(/BATCH \+.*multiline/i, 3000);
+      expect(batchStart).toContain('multiline');
+      console.log('Received multiline batch start:', batchStart);
 
-        // Collect all messages in the batch
-        const messages: string[] = [];
-        const startTime = Date.now();
-        while (Date.now() - startTime < 2000) {
-          try {
-            const line = await client2.waitForLine(/PRIVMSG|BATCH/, 500);
-            messages.push(line);
-            if (line.includes('BATCH -')) break;
-          } catch {
-            break;
-          }
-        }
-        console.log('Multiline messages:', messages);
-
-        expect(messages.length).toBeGreaterThanOrEqual(3);
-      } catch {
-        console.log('Multiline batch not received - may not be fully implemented');
+      // Collect all messages in the batch
+      const messages: string[] = [];
+      while (true) {
+        const line = await client2.waitForLine(/PRIVMSG|BATCH -/, 2000);
+        messages.push(line);
+        if (line.includes('BATCH -')) break;
       }
+      console.log('Multiline messages:', messages);
+
+      expect(messages.length).toBeGreaterThanOrEqual(3);
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -177,36 +168,22 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client.send(`BATCH -${batchId}`);
 
       // With echo-message, we should see our own message back as a batch
-      // Collect lines immediately - echo should come right after BATCH -
+      // Collect lines until we get BATCH - (end of echo batch)
       const allLines: string[] = [];
-      const startTime = Date.now();
-      while (Date.now() - startTime < 3000) {
-        try {
-          const line = await client.waitForLine(/./, 300);
-          allLines.push(line);
-          // Stop once we get a BATCH - (end of echo batch)
-          if (line.includes('BATCH -')) break;
-        } catch {
-          // No more lines, continue waiting
-          if (Date.now() - startTime > 1000) break;
-        }
+      const batchStartEcho = await client.waitForLine(/BATCH \+.*multiline/i, 3000);
+      allLines.push(batchStartEcho);
+      expect(batchStartEcho).toContain('multiline');
+      console.log('Multiline echo batch start:', batchStartEcho);
+
+      while (true) {
+        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 2000);
+        allLines.push(line);
+        if (line.includes('BATCH -')) break;
       }
       console.log('All lines received:', allLines);
 
-      // Check if we got a batch echo
-      const hasEcho = allLines.some(l => l.includes('BATCH +') && l.includes('multiline'));
-      if (hasEcho) {
-        console.log('Multiline echo received successfully');
-        expect(hasEcho).toBe(true);
-      } else {
-        console.log('No multiline echo received - checking for fallback PRIVMSG');
-        const hasFallback = allLines.some(l => l.includes('PRIVMSG') && l.includes('First line'));
-        if (hasFallback) {
-          console.log('Received fallback PRIVMSG echo');
-        } else {
-          console.log('No echo at all - server may not echo multiline batches');
-        }
-      }
+      // Should have at least BATCH +, one or more PRIVMSGs, and BATCH -
+      expect(allLines.length).toBeGreaterThanOrEqual(3);
 
       client.send('QUIT');
     });
@@ -291,16 +268,10 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
 
       client.send(`BATCH -${batchId}`);
 
-      // Should receive an error or the batch should be truncated
-      try {
-        // FAIL or some error numeric
-        const response = await client.waitForLine(/FAIL|ERR|4\d\d/, 3000);
-        console.log('Oversized batch response:', response);
-        expect(response).toBeDefined();
-      } catch {
-        // Server may silently truncate or not send error
-        console.log('No error for oversized batch - may truncate silently');
-      }
+      // Should receive an error for oversized batch
+      const response = await client.waitForLine(/FAIL|ERR|4\d\d/, 3000);
+      console.log('Oversized batch response:', response);
+      expect(response).toMatch(/FAIL|ERR|4\d\d/);
 
       client.send('QUIT');
     });
@@ -325,6 +296,10 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
+      // Wait for post-join messages to complete
+      await new Promise(r => setTimeout(r, 300));
+      client.clearRawBuffer();
+
       // Send multiline with label
       const label = `label${Date.now()}`;
       const batchId = `lblml${Date.now()}`;
@@ -334,14 +309,27 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client.send(`@batch=${batchId} PRIVMSG ${channelName} :Labeled line 2`);
       client.send(`BATCH -${batchId}`);
 
-      // Response should include our label
-      try {
-        const response = await client.waitForLine(new RegExp(label), 3000);
-        expect(response).toContain(label);
-        console.log('Labeled multiline response:', response);
-      } catch {
-        console.log('Labeled multiline not supported or no response');
+      // With echo-message, we should receive the multiline batch back
+      const batchStart = await client.waitForLine(/BATCH \+.*multiline/i, 3000);
+      expect(batchStart).toContain('multiline');
+      console.log('Labeled multiline batch start:', batchStart);
+
+      // Check if label is echoed (server may or may not support labels on multiline batches)
+      if (batchStart.includes(label)) {
+        console.log('Label echoed in multiline batch');
+      } else {
+        console.log('Label not echoed - server may not support labels on multiline batches');
       }
+
+      // Collect rest of batch to verify multiline works
+      const messages: string[] = [];
+      while (true) {
+        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 2000);
+        messages.push(line);
+        if (line.includes('BATCH -')) break;
+      }
+      expect(messages.length).toBeGreaterThanOrEqual(3); // 2 PRIVMSG + BATCH -
+      console.log('Labeled multiline messages:', messages);
 
       client.send('QUIT');
     });
@@ -363,10 +351,10 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('USER mlmsgid1 0 * :mlmsgid1');
       await client1.waitForLine(/001/);
 
-      // Client2 needs both draft/multiline AND batch to receive as a batch
+      // Client2 needs draft/multiline, batch AND message-tags to receive msgid
       client2.send('CAP LS 302');
       await client2.waitForLine(/CAP.*LS/i);
-      client2.send('CAP REQ :draft/multiline batch');
+      client2.send('CAP REQ :draft/multiline batch message-tags');
       await client2.waitForLine(/CAP.*ACK/i);
       client2.send('CAP END');
       client2.send('NICK mlmsgid2');
@@ -374,13 +362,15 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       await client2.waitForLine(/001/);
 
       const channelName = `#mlmsgid${Date.now()}`;
+      // Join client1 first, then client2 to avoid race condition
       client1.send(`JOIN ${channelName}`);
-      client2.send(`JOIN ${channelName}`);
       await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+      // Now join client2 - it will see client1 in NAMES
+      client2.send(`JOIN ${channelName}`);
       await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
-      // Wait for client2 to see client1's join
-      await client2.waitForLine(/JOIN.*mlmsgid1/i, 2000).catch(() => {});
-      await new Promise(r => setTimeout(r, 200));
+      // Wait for NAMES list to confirm both in channel
+      await client2.waitForLine(/366.*End of.*NAMES/i, 2000);
 
       // Clear buffer before sending
       client2.clearRawBuffer();
@@ -391,35 +381,27 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send(`@batch=${batchId} PRIVMSG ${channelName} :Message with msgid`);
       client1.send(`BATCH -${batchId}`);
 
-      // Client2 should receive the batch first, then individual messages may have msgid
-      try {
-        const batchStart = await client2.waitForLine(/BATCH \+.*multiline/i, 3000);
-        console.log('Multiline batch start:', batchStart);
+      // Client2 should receive the batch
+      const batchStart = await client2.waitForLine(/BATCH \+.*multiline/i, 3000);
+      console.log('Multiline batch start:', batchStart);
+      expect(batchStart).toContain('multiline');
 
-        // Now look for PRIVMSG with msgid tag
-        const messages: string[] = [];
-        const startTime = Date.now();
-        while (Date.now() - startTime < 2000) {
-          try {
-            const line = await client2.waitForLine(/PRIVMSG|BATCH -/, 500);
-            messages.push(line);
-            if (line.includes('BATCH -')) break;
-          } catch {
-            break;
-          }
-        }
-        console.log('Multiline messages:', messages);
-
-        // Check if any message has msgid
-        const hasMsgid = messages.some(m => m.includes('msgid='));
-        if (hasMsgid) {
-          console.log('Found msgid in multiline messages');
-        } else {
-          console.log('No msgid on multiline messages (server may not add msgid to batched messages)');
-        }
-      } catch {
-        console.log('No multiline batch received');
+      // Collect messages until BATCH -
+      const messages: string[] = [];
+      while (true) {
+        const line = await client2.waitForLine(/PRIVMSG|BATCH -/, 2000);
+        messages.push(line);
+        if (line.includes('BATCH -')) break;
       }
+      console.log('Multiline messages:', messages);
+
+      // Should have at least one PRIVMSG and BATCH -
+      expect(messages.length).toBeGreaterThanOrEqual(2);
+
+      // Check if any message has msgid (server should add msgid to batched messages)
+      const hasMsgid = messages.some(m => m.includes('msgid='));
+      expect(hasMsgid).toBe(true);
+      console.log('Found msgid in multiline messages');
 
       client1.send('QUIT');
       client2.send('QUIT');
