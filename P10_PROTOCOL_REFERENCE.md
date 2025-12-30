@@ -52,6 +52,122 @@ abcdefghijklmnopqrstuvwxyz
 0123456789[]
 ```
 
+Index values: A=0, B=1, ..., Z=25, a=26, ..., z=51, 0=52, ..., 9=61, [=62, ]=63
+
+---
+
+## IP Address Encoding
+
+P10 encodes IP addresses in a compact base64 format for the N (NICK) command's B64IP field.
+
+### Base64 IP Alphabet
+
+Same as the standard P10 base64 alphabet:
+```
+ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789[]
+```
+
+### IPv4 Encoding
+
+IPv4 addresses are encoded as **6 base64 characters** (36 bits, using only 32).
+
+**Encoding Algorithm**:
+```
+1. Convert IPv4 to 32-bit integer (network byte order)
+2. Encode as 6 base64 characters (most significant first)
+3. Only the lower 32 bits are used; upper 4 bits are zero
+```
+
+**Example**: `192.0.2.1`
+```
+Integer: 3221225985 (0xC0000201)
+Base64:  AAAAAA → ... → encoded value
+```
+
+**Storage**: IPv4 addresses are internally stored as IPv4-mapped IPv6 addresses (`::ffff:x.x.x.x`).
+
+### IPv6 Encoding
+
+IPv6 addresses use a variable-length encoding with optional compression.
+
+**Word Encoding**:
+- Each 16-bit word is encoded as **3 base64 characters** (18 bits)
+- First character uses only lower 2 bits (values 0-3 → A-D)
+- Full words: `[2-bit][6-bit][6-bit]` → 18 bits per 3 characters
+
+**Compression Marker**: The underscore `_` character represents one or more consecutive zero 16-bit words, similar to `::` in IPv6 text notation.
+
+**Encoding Rules**:
+1. Find the longest run of consecutive zero words
+2. Replace that run with a single `_` character
+3. Encode remaining non-zero words as 3 base64 characters each
+4. `_` can appear at start, middle, or end of the encoded string
+
+**Decoding Algorithm**:
+```python
+# Pseudo-code for decoding
+def decode_b64_ip(encoded):
+    if len(encoded) == 6:
+        # IPv4: decode 6 chars to 32-bit int
+        # Return as IPv4-mapped: ::ffff:x.x.x.x
+
+    # IPv6: split on '_' if present
+    if '_' in encoded:
+        left, right = split on '_'
+        left_words = decode each 3-char group
+        right_words = decode each 3-char group
+        zero_count = 8 - len(left_words) - len(right_words)
+        words = left_words + [0] * zero_count + right_words
+    else:
+        words = decode all 3-char groups (must be 8 words)
+
+    return IPv6 from words
+```
+
+### Examples
+
+| IP Address | Base64 Encoded | Notes |
+|------------|----------------|-------|
+| `0.0.0.0` | `AAAAAA` | IPv4 all zeros (6 chars) |
+| `::` | `_` | IPv6 all zeros (compression only) |
+| `::` | `AAA_AAA` | IPv6 all zeros (explicit zero words) |
+| `1000::1000` | `BAA_BAA` | IPv6 with compression |
+| `1000:1000:1000:1000:1000:1000:1000:1000` | `BAABAABAABAABAABAABAABAA` | Full IPv6 (24 chars, 8 words) |
+| `::1` | `_AAB` | IPv6 loopback (7 zero words compressed) |
+
+**Verified Decoding** (from Jobe's Python tests):
+```
+p10_b64toip('_')        → :: (all zeros)
+p10_b64toip('AAA_AAA')  → :: (all zeros - explicit form)
+p10_b64toip('BAA_BAA')  → 1000::1000
+p10_b64toip('BAABAABAABAABAABAABAABAA') → 1000:1000:1000:1000:1000:1000:1000:1000
+```
+
+### Word Value Mapping
+
+Each 3-character group decodes to a 16-bit word:
+
+```
+Characters: [C1][C2][C3]
+Bits:       [2-bit][6-bit][6-bit] = 14 effective bits + 4 unused
+
+Value = ((val(C1) & 0x03) << 12) | (val(C2) << 6) | val(C3)
+```
+
+Where `val(c)` returns 0-63 based on the base64 alphabet position.
+
+### Implementation Notes
+
+- **6-character encoding always indicates IPv4** (stored as IPv4-mapped IPv6)
+- **Presence of `_` indicates IPv6 compression** was used
+- **Exactly 8 words must result** after decoding (IPv6 = 128 bits = 8 × 16-bit words)
+- **Leading zeros in words are not special** - each word is always 3 characters unless compressed to `_`
+- **Only one `_` can appear** (like `::` in IPv6 - only one compression allowed)
+
+### Reference Implementation
+
+See Jobe's Python reference: https://jobe.users.mdbnet.net/p10b64ipv6decode.txt
+
 ---
 
 ## Message Format
@@ -1476,6 +1592,7 @@ In a network with mixed old/new servers:
 | 1.10 | December 2024 | Added N token nick change format; S2S commands use Unix timestamps (ISO 8601 only in message tags per IRCv3) |
 | 1.11 | December 2024 | Optimized CHATHISTORY S2S format: single-char subcmds (L/B/A/R/W/T), compact refs |
 | 1.12 | December 2024 | Removed T/M prefixes from CHATHISTORY refs - timestamps start with digit, msgids start with server numeric |
+| 1.13 | December 2024 | Added IP Address Encoding section documenting P10 base64 IPv4/IPv6 encoding with compression marker |
 
 ---
 
