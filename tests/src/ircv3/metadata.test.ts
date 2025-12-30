@@ -63,17 +63,12 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.waitForLine(/001/);
 
       // Try to set avatar metadata
-      client.send('METADATA * SET avatar :https://example.com/avatar.png');
+      client.send('METADATA SET * avatar :https://example.com/avatar.png');
 
       // Should receive confirmation or error
-      try {
-        const response = await client.waitForLine(/METADATA|761|762|764|765|766|767/, 3000);
-        expect(response).toBeDefined();
-        console.log('METADATA SET response:', response);
-      } catch {
-        // Some implementations may not respond for self-set
-        console.log('No METADATA SET response received');
-      }
+      const response = await client.waitForLine(/METADATA|761|762|764|765|766|767/, 3000);
+      expect(response).toBeDefined();
+      console.log('METADATA SET response:', response);
 
       client.send('QUIT');
     });
@@ -89,20 +84,16 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.waitForLine(/001/);
 
       // First set some metadata
-      client.send('METADATA * SET testkey :testvalue123');
+      client.send('METADATA SET * testkey :testvalue123');
       await new Promise(r => setTimeout(r, 500));
 
       // Then try to get it
-      client.send('METADATA * GET testkey');
+      client.send('METADATA GET * testkey');
 
-      try {
-        // 761 = RPL_KEYVALUE (metadata value response)
-        const response = await client.waitForLine(/761|METADATA.*testkey/, 3000);
-        expect(response).toBeDefined();
-        console.log('METADATA GET response:', response);
-      } catch {
-        console.log('No METADATA GET response - may need authentication');
-      }
+      // 761 = RPL_KEYVALUE (metadata value response)
+      const response = await client.waitForLine(/761|METADATA.*testkey/, 3000);
+      expect(response).toBeDefined();
+      console.log('METADATA GET response:', response);
 
       client.send('QUIT');
     });
@@ -117,7 +108,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.register('metalist1');
       await client.waitForLine(/001/);
 
-      client.send('METADATA * LIST');
+      client.send('METADATA LIST *');
 
       try {
         // 761 = RPL_KEYVALUE, 762 = RPL_METADATAEND
@@ -156,9 +147,9 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.waitForLine(/001/);
 
       // Set then clear
-      client.send('METADATA * SET cleartest :value');
+      client.send('METADATA SET * cleartest :value');
       await new Promise(r => setTimeout(r, 500));
-      client.send('METADATA * CLEAR cleartest');
+      client.send('METADATA CLEAR * cleartest');
 
       try {
         const response = await client.waitForLine(/761|766|METADATA/, 3000);
@@ -189,7 +180,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
       // Try to set channel metadata
-      client.send(`METADATA ${channelName} SET url :https://example.com`);
+      client.send(`METADATA SET ${channelName} url :https://example.com`);
 
       try {
         const response = await client.waitForLine(/761|764|METADATA/, 3000);
@@ -217,9 +208,9 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
       // Set then get
-      client.send(`METADATA ${channelName} SET testchankey :testvalue`);
+      client.send(`METADATA SET ${channelName} testchankey :testvalue`);
       await new Promise(r => setTimeout(r, 500));
-      client.send(`METADATA ${channelName} GET testchankey`);
+      client.send(`METADATA GET ${channelName} testchankey`);
 
       try {
         const response = await client.waitForLine(/761|METADATA/, 3000);
@@ -271,7 +262,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.waitForLine(/001/);
 
       // Try to get non-existent key
-      client.send('METADATA * GET nonexistentkey12345');
+      client.send('METADATA GET * nonexistentkey12345');
 
       try {
         // 765 = ERR_KEYNOTSET, 766 = ERR_KEYNOPERM
@@ -297,7 +288,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.waitForLine(/001/);
 
       // Try to get metadata for non-existent user
-      client.send('METADATA nonexistentnick12345 GET avatar');
+      client.send('METADATA GET nonexistentnick12345 avatar');
 
       try {
         // 401 = ERR_NOSUCHNICK, 764 = ERR_TARGETINVALID
@@ -324,9 +315,9 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.register('stdmeta1');
       await client.waitForLine(/001/);
 
-      client.send('METADATA * SET avatar :https://example.com/myavatar.png');
+      client.send('METADATA SET * avatar :https://example.com/myavatar.png');
       await new Promise(r => setTimeout(r, 500));
-      client.send('METADATA * GET avatar');
+      client.send('METADATA GET * avatar');
 
       try {
         const response = await client.waitForLine(/761.*avatar|METADATA.*avatar/, 3000);
@@ -349,9 +340,9 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.register('stdmeta2');
       await client.waitForLine(/001/);
 
-      client.send('METADATA * SET pronouns :they/them');
+      client.send('METADATA SET * pronouns :they/them');
       await new Promise(r => setTimeout(r, 500));
-      client.send('METADATA * GET pronouns');
+      client.send('METADATA GET * pronouns');
 
       try {
         const response = await client.waitForLine(/761.*pronouns|METADATA.*pronouns/, 3000);
@@ -374,9 +365,9 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.register('stdmeta3');
       await client.waitForLine(/001/);
 
-      client.send('METADATA * SET bot :1');
+      client.send('METADATA SET * bot :1');
       await new Promise(r => setTimeout(r, 500));
-      client.send('METADATA * GET bot');
+      client.send('METADATA GET * bot');
 
       try {
         const response = await client.waitForLine(/761.*bot|METADATA.*bot/, 3000);
@@ -402,7 +393,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
 
       // Create a very large value (exceeds typical limits)
       const largeValue = 'x'.repeat(100000);
-      client.send(`METADATA * SET largetest :${largeValue}`);
+      client.send(`METADATA SET * largetest :${largeValue}`);
 
       try {
         // Should receive 766 ERR_KEYINVALID or FAIL
@@ -426,9 +417,9 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.waitForLine(/001/);
 
       // Keys with dots are typically used for namespacing
-      client.send('METADATA * SET example.org/customkey :value');
+      client.send('METADATA SET * example.org/customkey :value');
       await new Promise(r => setTimeout(r, 500));
-      client.send('METADATA * GET example.org/customkey');
+      client.send('METADATA GET * example.org/customkey');
 
       try {
         const response = await client.waitForLine(/761|METADATA|766|FAIL/i, 3000);
@@ -451,7 +442,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.waitForLine(/001/);
 
       // Empty key
-      client.send('METADATA * SET  :value');
+      client.send('METADATA SET *  :value');
 
       try {
         const response = await client.waitForLine(/766|FAIL|ERR|461/i, 3000);
@@ -483,11 +474,11 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await other.waitForLine(/001/);
 
       // Owner sets private metadata (if supported)
-      owner.send('METADATA * SET privatekey :secretvalue');
+      owner.send('METADATA SET * privatekey :secretvalue');
       await new Promise(r => setTimeout(r, 500));
 
       // Other tries to get it
-      other.send('METADATA metapriv1 GET privatekey');
+      other.send('METADATA GET metapriv1 privatekey');
 
       try {
         const response = await other.waitForLine(/761|765|766|FAIL/i, 3000);
@@ -519,11 +510,11 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await getter.waitForLine(/001/);
 
       // Setter sets a public key (avatar is typically public)
-      setter.send('METADATA * SET avatar :https://example.com/public.png');
+      setter.send('METADATA SET * avatar :https://example.com/public.png');
       await new Promise(r => setTimeout(r, 500));
 
       // Getter retrieves it
-      getter.send('METADATA metapub1 GET avatar');
+      getter.send('METADATA GET metapub1 avatar');
 
       try {
         const response = await getter.waitForLine(/761.*avatar|765/i, 3000);
@@ -630,7 +621,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
 
       // Set metadata
       const testValue = `persist_${Date.now()}`;
-      client1.send(`METADATA * SET testpersist :${testValue}`);
+      client1.send(`METADATA SET * testpersist :${testValue}`);
       await new Promise(r => setTimeout(r, 500));
 
       client1.send('QUIT');
@@ -660,7 +651,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client2.waitForLine(/001/);
 
       // Try to get the metadata we set
-      client2.send('METADATA * GET testpersist');
+      client2.send('METADATA GET * testpersist');
 
       try {
         const response = await client2.waitForLine(/761.*testpersist/i, 3000);
@@ -687,14 +678,14 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
 
       // Send many rapid metadata requests
       for (let i = 0; i < 20; i++) {
-        client.send(`METADATA * SET ratetest${i} :value${i}`);
+        client.send(`METADATA SET * ratetest${i} :value${i}`);
       }
 
       await new Promise(r => setTimeout(r, 1000));
 
       // Check if any rate limiting occurred
       // Server may respond with FAIL or silently drop some
-      client.send('METADATA * LIST');
+      client.send('METADATA LIST *');
 
       try {
         const response = await client.waitForLine(/761|762|FAIL|METADATA/i, 5000);

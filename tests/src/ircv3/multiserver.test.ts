@@ -300,7 +300,7 @@ describe('Multi-Server IRC', () => {
       // Set metadata on client 1 (on primary server)
       const testKey = 'testkey';
       const testValue = `testvalue-${Date.now()}`;
-      client1.send(`METADATA * SET ${testKey} :${testValue}`);
+      client1.send(`METADATA SET * ${testKey} :${testValue}`);
 
       // Wait for metadata to propagate
       await new Promise(r => setTimeout(r, 1000));
@@ -308,7 +308,7 @@ describe('Multi-Server IRC', () => {
       // Query metadata from client 2 (on secondary server)
       // Note: This may or may not work depending on how metadata is implemented
       // Just checking that the command doesn't crash
-      client2.send(`METADATA metauser1 GET ${testKey}`);
+      client2.send(`METADATA GET metauser1 ${testKey}`);
 
       // Give it time to respond
       await new Promise(r => setTimeout(r, 500));
@@ -1406,13 +1406,13 @@ describe('Multi-Server IRC', () => {
       await new Promise(r => setTimeout(r, 500));
 
       // Set metadata on primary server
-      setter.send('METADATA * SET testkey :testvalue');
+      setter.send('METADATA SET * testkey :testvalue');
       await new Promise(r => setTimeout(r, 500));
 
       querier.clearRawBuffer();
 
       // Query metadata from secondary server
-      querier.send('METADATA metaset1 GET testkey');
+      querier.send('METADATA GET metaset1 testkey');
 
       try {
         const response = await querier.waitForLine(/METADATA.*testkey/i, 5000);
@@ -1464,7 +1464,7 @@ describe('Multi-Server IRC', () => {
       subscriber.clearRawBuffer();
 
       // Setter sets the key
-      setter.send('METADATA * SET avatar :https://example.com/avatar.png');
+      setter.send('METADATA SET * avatar :https://example.com/avatar.png');
 
       // Subscriber should receive notification
       try {
@@ -1744,6 +1744,305 @@ describe('Multi-Server IRC', () => {
 
       sender1.send('QUIT');
       sender2.send('QUIT');
+    });
+  });
+
+  /**
+   * Cross-Server PM Chathistory Consent Tests
+   *
+   * These tests verify that PM history consent (metadata) works correctly
+   * when users are on different linked servers. The consent check should
+   * work identically for local and remote users due to metadata propagation
+   * via S2S (MD token in P10 protocol).
+   */
+  describe('Cross-Server PM Chathistory Consent', () => {
+    it('PM history stored when both users opt in (cross-server)', async () => {
+      if (await skipIfNoSecondary()) return;
+
+      const sender = trackClient(await createClientOnServer(PRIMARY_SERVER));
+      const receiver = trackClient(await createClientOnServer(SECONDARY_SERVER));
+      const uniqueId = Date.now();
+
+      await sender.capLs();
+      await sender.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      sender.capEnd();
+      sender.register(`xspm1_${uniqueId}`);
+      await sender.waitForLine(/001/);
+
+      await receiver.capLs();
+      await receiver.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      receiver.capEnd();
+      receiver.register(`xspm2_${uniqueId}`);
+      await receiver.waitForLine(/001/);
+
+      // Wait for user visibility across servers
+      await new Promise(r => setTimeout(r, 500));
+
+      // Both parties opt in - MUST get 761 response
+      sender.send('METADATA SET * chathistory.pm * :1');
+      const senderMeta = await sender.waitForLine(/761.*chathistory\.pm/i, 3000);
+      expect(senderMeta).toMatch(/761/);
+      receiver.send('METADATA SET * chathistory.pm * :1');
+      const receiverMeta = await receiver.waitForLine(/761.*chathistory\.pm/i, 3000);
+      expect(receiverMeta).toMatch(/761/);
+
+      // Wait for metadata propagation across servers
+      await new Promise(r => setTimeout(r, 1000));
+
+      // Send PM across servers
+      const testMsg = `CrossServer PM ${uniqueId}`;
+      sender.send(`PRIVMSG xspm2_${uniqueId} :${testMsg}`);
+      await new Promise(r => setTimeout(r, 500));
+
+      sender.clearRawBuffer();
+
+      // Request PM history
+      sender.send(`CHATHISTORY LATEST xspm2_${uniqueId} * 10`);
+
+      // MUST receive batch
+      const batchStart = await sender.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
+
+      const messages: string[] = [];
+      while (true) {
+        const line = await sender.waitForLine(/PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('PRIVMSG')) messages.push(line);
+      }
+
+      // Cross-server PM must be stored with mutual consent
+      expect(messages.length).toBeGreaterThanOrEqual(1);
+
+      sender.send('QUIT');
+      receiver.send('QUIT');
+    });
+
+    it('PM history NOT stored when remote user has not opted in', async () => {
+      if (await skipIfNoSecondary()) return;
+
+      const sender = trackClient(await createClientOnServer(PRIMARY_SERVER));
+      const receiver = trackClient(await createClientOnServer(SECONDARY_SERVER));
+      const uniqueId = Date.now();
+
+      await sender.capLs();
+      await sender.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      sender.capEnd();
+      sender.register(`xsno1_${uniqueId}`);
+      await sender.waitForLine(/001/);
+
+      await receiver.capLs();
+      await receiver.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      receiver.capEnd();
+      receiver.register(`xsno2_${uniqueId}`);
+      await receiver.waitForLine(/001/);
+
+      await new Promise(r => setTimeout(r, 500));
+
+      // Only sender opts in - remote receiver does NOT - MUST get 761 response
+      sender.send('METADATA SET * chathistory.pm * :1');
+      const senderMeta = await sender.waitForLine(/761.*chathistory\.pm/i, 3000);
+      expect(senderMeta).toMatch(/761/);
+      await new Promise(r => setTimeout(r, 500));
+
+      // Send PM across servers
+      const testMsg = `CrossServer NoOpt ${uniqueId}`;
+      sender.send(`PRIVMSG xsno2_${uniqueId} :${testMsg}`);
+      await new Promise(r => setTimeout(r, 500));
+
+      sender.clearRawBuffer();
+
+      // Request PM history - should be empty
+      sender.send(`CHATHISTORY LATEST xsno2_${uniqueId} * 10`);
+
+      // MUST receive batch
+      const batchStart = await sender.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
+
+      const messages: string[] = [];
+      while (true) {
+        const line = await sender.waitForLine(/PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('PRIVMSG')) messages.push(line);
+      }
+
+      // PM NOT stored without remote consent
+      expect(messages.length).toBe(0);
+
+      sender.send('QUIT');
+      receiver.send('QUIT');
+    });
+
+    it('metadata propagates correctly for consent check (cross-server METADATA GET)', async () => {
+      if (await skipIfNoSecondary()) return;
+
+      const setter = trackClient(await createClientOnServer(PRIMARY_SERVER));
+      const querier = trackClient(await createClientOnServer(SECONDARY_SERVER));
+      const uniqueId = Date.now();
+
+      await setter.capLs();
+      await setter.capReq(['draft/metadata-2']);
+      setter.capEnd();
+      setter.register(`xsmd1_${uniqueId}`);
+      await setter.waitForLine(/001/);
+
+      await querier.capLs();
+      await querier.capReq(['draft/metadata-2']);
+      querier.capEnd();
+      querier.register(`xsmd2_${uniqueId}`);
+      await querier.waitForLine(/001/);
+
+      await new Promise(r => setTimeout(r, 500));
+
+      // Setter on primary sets opt-in - MUST get 761 response
+      setter.send('METADATA SET * chathistory.pm * :1');
+      const setterMeta = await setter.waitForLine(/761.*chathistory\.pm/i, 3000);
+      expect(setterMeta).toMatch(/761/);
+
+      // Wait for metadata to propagate via S2S
+      await new Promise(r => setTimeout(r, 1000));
+
+      querier.clearRawBuffer();
+
+      // Querier on secondary checks setter's metadata - MUST get 761 response
+      querier.send(`METADATA GET xsmd1_${uniqueId} chathistory.pm`);
+      const response = await querier.waitForLine(/761.*chathistory\.pm/i, 5000);
+      expect(response).toContain('chathistory.pm');
+
+      setter.send('QUIT');
+      querier.send('QUIT');
+    });
+
+    it('remote explicit opt-out prevents PM storage', async () => {
+      if (await skipIfNoSecondary()) return;
+
+      const sender = trackClient(await createClientOnServer(PRIMARY_SERVER));
+      const receiver = trackClient(await createClientOnServer(SECONDARY_SERVER));
+      const uniqueId = Date.now();
+
+      await sender.capLs();
+      await sender.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      sender.capEnd();
+      sender.register(`xsout1_${uniqueId}`);
+      await sender.waitForLine(/001/);
+
+      await receiver.capLs();
+      await receiver.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      receiver.capEnd();
+      receiver.register(`xsout2_${uniqueId}`);
+      await receiver.waitForLine(/001/);
+
+      await new Promise(r => setTimeout(r, 500));
+
+      // Sender opts in, remote receiver explicitly opts out - MUST get 761 responses
+      sender.send('METADATA SET * chathistory.pm * :1');
+      const senderMeta = await sender.waitForLine(/761.*chathistory\.pm/i, 3000);
+      expect(senderMeta).toMatch(/761/);
+      receiver.send('METADATA SET * chathistory.pm * :0');
+      const receiverMeta = await receiver.waitForLine(/761.*chathistory\.pm/i, 3000);
+      expect(receiverMeta).toMatch(/761/);
+
+      // Wait for metadata propagation
+      await new Promise(r => setTimeout(r, 1000));
+
+      // Send PM across servers
+      const testMsg = `CrossServer OptOut ${uniqueId}`;
+      sender.send(`PRIVMSG xsout2_${uniqueId} :${testMsg}`);
+      await new Promise(r => setTimeout(r, 500));
+
+      sender.clearRawBuffer();
+
+      // Request PM history - should be empty
+      sender.send(`CHATHISTORY LATEST xsout2_${uniqueId} * 10`);
+
+      // MUST receive batch
+      const batchStart = await sender.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
+
+      const messages: string[] = [];
+      while (true) {
+        const line = await sender.waitForLine(/PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('PRIVMSG')) messages.push(line);
+      }
+
+      // Remote opt-out prevents PM storage
+      expect(messages.length).toBe(0);
+
+      sender.send('QUIT');
+      receiver.send('QUIT');
+    });
+
+    it('PM stored on both ends with mutual consent (bidirectional)', async () => {
+      if (await skipIfNoSecondary()) return;
+
+      const client1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
+      const client2 = trackClient(await createClientOnServer(SECONDARY_SERVER));
+      const uniqueId = Date.now();
+
+      await client1.capLs();
+      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      client1.capEnd();
+      client1.register(`xsbi1_${uniqueId}`);
+      await client1.waitForLine(/001/);
+
+      await client2.capLs();
+      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      client2.capEnd();
+      client2.register(`xsbi2_${uniqueId}`);
+      await client2.waitForLine(/001/);
+
+      await new Promise(r => setTimeout(r, 500));
+
+      // Both opt in - MUST get 761 responses
+      client1.send('METADATA SET * chathistory.pm * :1');
+      const meta1 = await client1.waitForLine(/761.*chathistory\.pm/i, 3000);
+      expect(meta1).toMatch(/761/);
+      client2.send('METADATA SET * chathistory.pm * :1');
+      const meta2 = await client2.waitForLine(/761.*chathistory\.pm/i, 3000);
+      expect(meta2).toMatch(/761/);
+
+      await new Promise(r => setTimeout(r, 1000));
+
+      // Exchange messages both directions
+      client1.send(`PRIVMSG xsbi2_${uniqueId} :From primary to secondary`);
+      await new Promise(r => setTimeout(r, 300));
+      client2.send(`PRIVMSG xsbi1_${uniqueId} :From secondary to primary`);
+      await new Promise(r => setTimeout(r, 500));
+
+      // Check history from client1's perspective - MUST receive batch
+      client1.clearRawBuffer();
+      client1.send(`CHATHISTORY LATEST xsbi2_${uniqueId} * 10`);
+
+      const batch1 = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batch1).toBeDefined();
+
+      const client1Messages: string[] = [];
+      while (true) {
+        const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('PRIVMSG')) client1Messages.push(line);
+      }
+
+      // Check history from client2's perspective - MUST receive batch
+      client2.clearRawBuffer();
+      client2.send(`CHATHISTORY LATEST xsbi1_${uniqueId} * 10`);
+
+      const batch2 = await client2.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batch2).toBeDefined();
+
+      const client2Messages: string[] = [];
+      while (true) {
+        const line = await client2.waitForLine(/PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('PRIVMSG')) client2Messages.push(line);
+      }
+
+      // Both should have history (bidirectional PM storage)
+      expect(client1Messages.length).toBeGreaterThan(0);
+      expect(client2Messages.length).toBeGreaterThan(0);
+
+      client1.send('QUIT');
+      client2.send('QUIT');
     });
   });
 });

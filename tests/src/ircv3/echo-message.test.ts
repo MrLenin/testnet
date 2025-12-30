@@ -223,19 +223,11 @@ describe('IRCv3 Echo Message', () => {
       const label = `lbl${Date.now()}`;
       client.send(`@label=${label} PRIVMSG ${channelName} :Labeled message`);
 
-      try {
-        const echo = await client.waitForLine(/PRIVMSG.*Labeled message/, 3000);
-        console.log('Labeled echo:', echo);
+      const echo = await client.waitForLine(/PRIVMSG.*Labeled message/, 3000);
+      console.log('Labeled echo:', echo);
 
-        // Echo should include our label
-        if (echo.includes(label)) {
-          expect(echo).toContain(label);
-        } else {
-          console.log('Label not in echo - may be in batch wrapper');
-        }
-      } catch {
-        console.log('No labeled echo received');
-      }
+      // Echo should include our label
+      expect(echo).toContain(label);
       client.send('QUIT');
     });
   });
@@ -285,13 +277,15 @@ describe('IRCv3 TAGMSG', () => {
     await client2.waitForLine(/001/);
 
     const channelName = `#tagmsg${Date.now()}`;
+    // Join client1 first, then client2 so client2 sees client1's JOIN
     client1.send(`JOIN ${channelName}`);
-    client2.send(`JOIN ${channelName}`);
     await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+    // Now join client2 - it will see client1 in NAMES
+    client2.send(`JOIN ${channelName}`);
     await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
-    // Wait for client2 to see client1's join notification
-    await client2.waitForLine(/JOIN.*tagmsg1/i, 2000).catch(() => {});
-    await new Promise(r => setTimeout(r, 200));
+    // Verify client1 is in channel via NAMES (shows as @tagmsg1)
+    await client2.waitForLine(/366.*End of.*NAMES/i, 2000);
 
     // Clear buffer before sending TAGMSG
     client2.clearRawBuffer();
@@ -299,13 +293,9 @@ describe('IRCv3 TAGMSG', () => {
     // Send TAGMSG with typing indicator
     client1.send(`@+typing=active TAGMSG ${channelName}`);
 
-    try {
-      const received = await client2.waitForLine(/TAGMSG/i, 3000);
-      expect(received).toContain('TAGMSG');
-      console.log('TAGMSG received:', received);
-    } catch {
-      console.log('TAGMSG not received - may not be supported');
-    }
+    const received = await client2.waitForLine(/TAGMSG/i, 3000);
+    expect(received).toContain('TAGMSG');
+    console.log('TAGMSG received:', received);
     client1.send('QUIT');
     client2.send('QUIT');
   });
@@ -332,13 +322,9 @@ describe('IRCv3 TAGMSG', () => {
 
     client.send(`@+react=👍 TAGMSG ${channelName}`);
 
-    try {
-      const echo = await client.waitForLine(/TAGMSG.*#tagecho/i, 3000);
-      expect(echo).toContain('TAGMSG');
-      console.log('TAGMSG echo:', echo);
-    } catch {
-      console.log('TAGMSG echo not received');
-    }
+    const echo = await client.waitForLine(/TAGMSG.*#tagecho/i, 3000);
+    expect(echo).toContain('TAGMSG');
+    console.log('TAGMSG echo:', echo);
     client.send('QUIT');
   });
 });
@@ -382,14 +368,9 @@ describe('IRCv3 Labeled Response', () => {
     const label = `who${Date.now()}`;
     client.send(`@label=${label} WHO labeltest2`);
 
-    try {
-      const response = await client.waitForLine(new RegExp(`@.*label=${label}|BATCH.*${label}`), 3000);
-      expect(response).toBeDefined();
-      console.log('Labeled WHO response:', response);
-    } catch {
-      // Response may be in unlabeled format if single-line
-      console.log('No labeled response - may be single reply');
-    }
+    const response = await client.waitForLine(new RegExp(`@.*label=${label}|BATCH.*${label}|352|315`), 3000);
+    expect(response).toBeDefined();
+    console.log('Labeled WHO response:', response);
     client.send('QUIT');
   });
 
@@ -406,14 +387,10 @@ describe('IRCv3 Labeled Response', () => {
     const label = `ack${Date.now()}`;
     client.send(`@label=${label} MODE acktest1 +i`);
 
-    try {
-      // Should get ACK or labeled MODE response
-      const response = await client.waitForLine(new RegExp(`ACK|${label}`), 3000);
-      expect(response).toBeDefined();
-      console.log('ACK/labeled response:', response);
-    } catch {
-      console.log('No ACK received - may not require one');
-    }
+    // Should get ACK or labeled MODE response
+    const response = await client.waitForLine(new RegExp(`ACK|MODE|${label}`), 3000);
+    expect(response).toBeDefined();
+    console.log('ACK/labeled response:', response);
     client.send('QUIT');
   });
 });

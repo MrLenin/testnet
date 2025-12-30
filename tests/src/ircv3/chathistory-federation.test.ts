@@ -226,54 +226,39 @@ describe('IRCv3 Chathistory Federation', () => {
       secondaryClient.send(`CHATHISTORY LATEST ${channelName} * 50`);
 
       // Collect batch response
-      try {
-        const batchStart = await secondaryClient.waitForLine(/BATCH \+\S+ chathistory/i, 10000);
-        console.log('Got batch start:', batchStart);
+      const batchStart = await secondaryClient.waitForLine(/BATCH \+\S+ chathistory/i, 10000);
+      console.log('Got batch start:', batchStart);
+      expect(batchStart).toContain('chathistory');
 
-        const messages: string[] = [];
-        const startTime = Date.now();
-        while (Date.now() - startTime < 8000) {
-          try {
-            const line = await secondaryClient.waitForLine(/PRIVMSG|BATCH -/, 1000);
-            if (line.includes('BATCH -')) {
-              console.log('Got batch end');
-              break;
-            }
-            if (line.includes('PRIVMSG')) {
-              messages.push(line);
-            }
-          } catch {
-            break;
-          }
+      const messages: string[] = [];
+      while (true) {
+        const line = await secondaryClient.waitForLine(/PRIVMSG|BATCH -/, 3000);
+        if (line.includes('BATCH -')) {
+          console.log('Got batch end');
+          break;
         }
-
-        console.log(`Received ${messages.length} messages via federation`);
-
-        // Verify we got the test messages
-        let foundCount = 0;
-        for (const testMsg of testMessages) {
-          const found = messages.some(m => m.includes(testMsg));
-          if (found) {
-            foundCount++;
-            console.log(`  Found: "${testMsg.substring(0, 40)}..."`);
-          } else {
-            console.log(`  MISSING: "${testMsg.substring(0, 40)}..."`);
-          }
+        if (line.includes('PRIVMSG')) {
+          messages.push(line);
         }
-
-        expect(foundCount).toBeGreaterThan(0);
-        console.log(`Federation test: ${foundCount}/${testMessages.length} messages retrieved`);
-
-        if (foundCount === testMessages.length) {
-          console.log('SUCCESS: All messages retrieved via S2S federation!');
-        } else if (foundCount > 0) {
-          console.log('PARTIAL: Some messages retrieved via federation');
-        }
-
-      } catch (e) {
-        console.log('Chathistory query failed:', (e as Error).message);
-        // This could happen if LMDB isn't available or federation isn't working
       }
+
+      console.log(`Received ${messages.length} messages via federation`);
+
+      // Verify we got the test messages
+      let foundCount = 0;
+      for (const testMsg of testMessages) {
+        const found = messages.some(m => m.includes(testMsg));
+        if (found) {
+          foundCount++;
+          console.log(`  Found: "${testMsg.substring(0, 40)}..."`);
+        } else {
+          console.log(`  MISSING: "${testMsg.substring(0, 40)}..."`);
+        }
+      }
+
+      expect(foundCount).toBe(testMessages.length);
+      console.log(`Federation test: ${foundCount}/${testMessages.length} messages retrieved`);
+      console.log('SUCCESS: All messages retrieved via S2S federation!');
 
       // Cleanup
       operClient.send('QUIT');
@@ -321,42 +306,31 @@ describe('IRCv3 Chathistory Federation', () => {
       client2.clearRawBuffer();
       client2.send(`CHATHISTORY LATEST ${channelName} * 50`);
 
-      try {
-        await client2.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStartDedup = await client2.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStartDedup).toContain('chathistory');
 
-        const messages: string[] = [];
-        const msgIds = new Set<string>();
-        const startTime = Date.now();
+      const messages: string[] = [];
+      const msgIds = new Set<string>();
 
-        while (Date.now() - startTime < 5000) {
-          try {
-            const line = await client2.waitForLine(/PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('PRIVMSG')) {
-              messages.push(line);
-              // Extract msgid if present
-              const match = line.match(/msgid=([^\s;]+)/);
-              if (match) {
-                msgIds.add(match[1]);
-              }
-            }
-          } catch {
-            break;
+      while (true) {
+        const line = await client2.waitForLine(/PRIVMSG|BATCH -/, 2000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('PRIVMSG')) {
+          messages.push(line);
+          // Extract msgid if present
+          const match = line.match(/msgid=([^\s;]+)/);
+          if (match) {
+            msgIds.add(match[1]);
           }
         }
-
-        console.log(`Got ${messages.length} messages with ${msgIds.size} unique msgids`);
-
-        // If deduplication works, messages.length should equal msgIds.size
-        // (no duplicate msgids)
-        if (msgIds.size > 0) {
-          expect(messages.length).toBe(msgIds.size);
-          console.log('Deduplication working: no duplicate messages');
-        }
-
-      } catch (e) {
-        console.log('Dedup test failed:', (e as Error).message);
       }
+
+      console.log(`Got ${messages.length} messages with ${msgIds.size} unique msgids`);
+
+      // Deduplication must work: messages.length should equal msgIds.size (no duplicate msgids)
+      expect(msgIds.size).toBeGreaterThan(0);
+      expect(messages.length).toBe(msgIds.size);
+      console.log('Deduplication working: no duplicate messages');
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -386,19 +360,16 @@ describe('IRCv3 Chathistory Federation', () => {
       const sentMsgIds: string[] = [];
       for (let i = 1; i <= 5; i++) {
         client1.send(`PRIVMSG ${channelName} :Consistency test message ${i}`);
-        try {
-          const echo = await client1.waitForLine(new RegExp(`PRIVMSG.*Consistency test message ${i}`, 'i'), 3000);
-          const match = echo.match(/msgid=([^\s;]+)/);
-          if (match) {
-            sentMsgIds.push(match[1]);
-          }
-        } catch {
-          // Continue
+        const echo = await client1.waitForLine(new RegExp(`PRIVMSG.*Consistency test message ${i}`, 'i'), 3000);
+        const match = echo.match(/msgid=([^\s;]+)/);
+        if (match) {
+          sentMsgIds.push(match[1]);
         }
         await new Promise(r => setTimeout(r, 50));
       }
 
       console.log(`Sent ${sentMsgIds.length} messages with msgids`);
+      expect(sentMsgIds.length).toBe(5);
       await new Promise(r => setTimeout(r, 1000));
 
       // Query history from primary
@@ -406,24 +377,18 @@ describe('IRCv3 Chathistory Federation', () => {
       client1.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
       const primaryMsgIds: string[] = [];
-      try {
-        await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-        const startTime = Date.now();
-        while (Date.now() - startTime < 5000) {
-          try {
-            const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            const match = line.match(/msgid=([^\s;]+)/);
-            if (match) primaryMsgIds.push(match[1]);
-          } catch {
-            break;
-          }
-        }
-      } catch (e) {
-        console.log('Primary query failed:', (e as Error).message);
+      const batchStartPrimary = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStartPrimary).toContain('chathistory');
+
+      while (true) {
+        const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 2000);
+        if (line.includes('BATCH -')) break;
+        const match = line.match(/msgid=([^\s;]+)/);
+        if (match) primaryMsgIds.push(match[1]);
       }
 
       console.log(`Primary server returned ${primaryMsgIds.length} messages`);
+      expect(primaryMsgIds.length).toBeGreaterThan(0);
 
       // Now query from secondary
       const client2 = trackClient(await createRawSocketClient(SECONDARY_SERVER.host, SECONDARY_SERVER.port));
@@ -441,40 +406,30 @@ describe('IRCv3 Chathistory Federation', () => {
       client2.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
       const secondaryMsgIds: string[] = [];
-      try {
-        await client2.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-        const startTime = Date.now();
-        while (Date.now() - startTime < 5000) {
-          try {
-            const line = await client2.waitForLine(/PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            const match = line.match(/msgid=([^\s;]+)/);
-            if (match) secondaryMsgIds.push(match[1]);
-          } catch {
-            break;
-          }
-        }
-      } catch (e) {
-        console.log('Secondary query failed:', (e as Error).message);
+      const batchStartSecondary = await client2.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStartSecondary).toContain('chathistory');
+
+      while (true) {
+        const line = await client2.waitForLine(/PRIVMSG|BATCH -/, 2000);
+        if (line.includes('BATCH -')) break;
+        const match = line.match(/msgid=([^\s;]+)/);
+        if (match) secondaryMsgIds.push(match[1]);
       }
 
       console.log(`Secondary server returned ${secondaryMsgIds.length} messages`);
+      expect(secondaryMsgIds.length).toBeGreaterThan(0);
 
-      // Compare results
-      const primarySet = new Set(primaryMsgIds);
+      // Compare results - both should have same messages
       const secondarySet = new Set(secondaryMsgIds);
 
-      // Both should have same messages
       let matches = 0;
       for (const msgid of primaryMsgIds) {
         if (secondarySet.has(msgid)) matches++;
       }
 
       console.log(`Matching msgids: ${matches}/${primaryMsgIds.length}`);
-      if (primaryMsgIds.length > 0 && secondaryMsgIds.length > 0) {
-        expect(matches).toBe(primaryMsgIds.length);
-        console.log('SUCCESS: Both servers return consistent history');
-      }
+      expect(matches).toBe(primaryMsgIds.length);
+      console.log('SUCCESS: Both servers return consistent history');
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -509,24 +464,20 @@ describe('IRCv3 Chathistory Federation', () => {
       client1.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
       const primaryOrder: string[] = [];
-      try {
-        await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-        const startTime = Date.now();
-        while (Date.now() - startTime < 5000) {
-          try {
-            const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('Order test')) {
-              const match = line.match(/Order test (\d+)/);
-              if (match) primaryOrder.push(match[1]);
-            }
-          } catch {
-            break;
-          }
+      const batchStartOrder1 = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStartOrder1).toContain('chathistory');
+
+      while (true) {
+        const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 2000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('Order test')) {
+          const match = line.match(/Order test (\d+)/);
+          if (match) primaryOrder.push(match[1]);
         }
-      } catch (e) {
-        console.log('Primary query failed:', (e as Error).message);
       }
+
+      console.log(`Primary order: ${primaryOrder.join(', ')}`);
+      expect(primaryOrder.length).toBeGreaterThan(0);
 
       // Query from secondary
       const client2 = trackClient(await createRawSocketClient(SECONDARY_SERVER.host, SECONDARY_SERVER.port));
@@ -544,33 +495,24 @@ describe('IRCv3 Chathistory Federation', () => {
       client2.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
       const secondaryOrder: string[] = [];
-      try {
-        await client2.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-        const startTime = Date.now();
-        while (Date.now() - startTime < 5000) {
-          try {
-            const line = await client2.waitForLine(/PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('Order test')) {
-              const match = line.match(/Order test (\d+)/);
-              if (match) secondaryOrder.push(match[1]);
-            }
-          } catch {
-            break;
-          }
+      const batchStartOrder2 = await client2.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStartOrder2).toContain('chathistory');
+
+      while (true) {
+        const line = await client2.waitForLine(/PRIVMSG|BATCH -/, 2000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('Order test')) {
+          const match = line.match(/Order test (\d+)/);
+          if (match) secondaryOrder.push(match[1]);
         }
-      } catch (e) {
-        console.log('Secondary query failed:', (e as Error).message);
       }
 
-      console.log(`Primary order: ${primaryOrder.join(', ')}`);
       console.log(`Secondary order: ${secondaryOrder.join(', ')}`);
+      expect(secondaryOrder.length).toBeGreaterThan(0);
 
-      // Orders should match
-      if (primaryOrder.length > 0 && secondaryOrder.length > 0) {
-        expect(primaryOrder).toEqual(secondaryOrder);
-        console.log('SUCCESS: Message order is consistent');
-      }
+      // Orders must match
+      expect(primaryOrder).toEqual(secondaryOrder);
+      console.log('SUCCESS: Message order is consistent');
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -623,31 +565,22 @@ describe('IRCv3 Chathistory Federation', () => {
       let fromPrimary = 0;
       let fromSecondary = 0;
 
-      try {
-        await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-        const startTime = Date.now();
-        while (Date.now() - startTime < 5000) {
-          try {
-            const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('From primary')) fromPrimary++;
-            if (line.includes('From secondary')) fromSecondary++;
-          } catch {
-            break;
-          }
-        }
-      } catch (e) {
-        console.log('Query failed:', (e as Error).message);
+      const batchStartMixed = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStartMixed).toContain('chathistory');
+
+      while (true) {
+        const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 2000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('From primary')) fromPrimary++;
+        if (line.includes('From secondary')) fromSecondary++;
       }
 
       console.log(`Messages from primary: ${fromPrimary}, from secondary: ${fromSecondary}`);
 
-      // Should have messages from both servers
-      if (fromPrimary > 0 || fromSecondary > 0) {
-        expect(fromPrimary).toBeGreaterThanOrEqual(2);
-        expect(fromSecondary).toBeGreaterThanOrEqual(2);
-        console.log('SUCCESS: History includes messages from both servers');
-      }
+      // Must have messages from both servers
+      expect(fromPrimary).toBeGreaterThanOrEqual(2);
+      expect(fromSecondary).toBeGreaterThanOrEqual(2);
+      console.log('SUCCESS: History includes messages from both servers');
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -752,21 +685,14 @@ describe('IRCv3 Chathistory Federation', () => {
       let beforeCount = 0;
       let duringCount = 0;
 
-      try {
-        await queryClient.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-        const startTime = Date.now();
-        while (Date.now() - startTime < 5000) {
-          try {
-            const line = await queryClient.waitForLine(/PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('Before netsplit')) beforeCount++;
-            if (line.includes('During netsplit')) duringCount++;
-          } catch {
-            break;
-          }
-        }
-      } catch (e) {
-        console.log('Query failed:', (e as Error).message);
+      const batchStartNetsplit = await queryClient.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStartNetsplit).toContain('chathistory');
+
+      while (true) {
+        const line = await queryClient.waitForLine(/PRIVMSG|BATCH -/, 2000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('Before netsplit')) beforeCount++;
+        if (line.includes('During netsplit')) duringCount++;
       }
 
       console.log(`History after netsplit: before=${beforeCount}, during=${duringCount}`);
@@ -870,28 +796,19 @@ describe('IRCv3 Chathistory Federation', () => {
       secondaryClient.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
       let missedCount = 0;
-      try {
-        await secondaryClient.waitForLine(/BATCH \+\S+ chathistory/i, 10000);
-        const startTime = Date.now();
-        while (Date.now() - startTime < 5000) {
-          try {
-            const line = await secondaryClient.waitForLine(/PRIVMSG|BATCH -/, 500);
-            if (line.includes('BATCH -')) break;
-            if (line.includes('Missed message')) missedCount++;
-          } catch {
-            break;
-          }
-        }
-      } catch (e) {
-        console.log('Secondary query failed:', (e as Error).message);
+      const batchStartCatchup = await secondaryClient.waitForLine(/BATCH \+\S+ chathistory/i, 10000);
+      expect(batchStartCatchup).toContain('chathistory');
+
+      while (true) {
+        const line = await secondaryClient.waitForLine(/PRIVMSG|BATCH -/, 2000);
+        if (line.includes('BATCH -')) break;
+        if (line.includes('Missed message')) missedCount++;
       }
 
       console.log(`Secondary retrieved ${missedCount} missed messages`);
 
-      if (missedCount > 0) {
-        expect(missedCount).toBe(5);
-        console.log('SUCCESS: Secondary caught up with missed messages via federation');
-      }
+      expect(missedCount).toBe(5);
+      console.log('SUCCESS: Secondary caught up with missed messages via federation');
 
       operClient.send('QUIT');
       secondaryClient.send('QUIT');
