@@ -462,6 +462,8 @@ References can be:
 
 #### S2S P10 Protocol
 
+The S2S format is optimized for efficiency (single-char subcmd, compact reference format).
+
 **Query** - Request history from other servers:
 ```
 [SERVER] CH Q <target> <subcmd> <ref> <limit> <reqid>
@@ -477,18 +479,37 @@ References can be:
 [SERVER] CH E <reqid> <count>
 ```
 
+#### S2S Subcmd Codes
+
+| Code | Client Command | Description |
+|------|----------------|-------------|
+| `L` | LATEST | Latest messages |
+| `B` | BEFORE | Messages before reference |
+| `A` | AFTER | Messages after reference |
+| `R` | AROUND | Messages around reference |
+| `W` | BETWEEN | Messages between two references |
+| `T` | TARGETS | Channels with recent activity |
+
+#### S2S Reference Format
+
+| Format | Description | Example |
+|--------|-------------|---------|
+| `*` | No reference | `*` |
+| `T<timestamp>` | Unix timestamp | `T1735689600.123` |
+| `M<msgid>` | Message ID | `MAB-1703334400-123` |
+
 #### S2S Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
 | SERVER | String(2) | Server numeric |
 | target | String | Channel name |
-| subcmd | String | LATEST, BEFORE, AFTER, AROUND, BETWEEN |
-| ref | String | Reference (`*`, `timestamp=X`, or `msgid=X`) |
+| subcmd | Char(1) | Single-char code (L/B/A/R/W/T) |
+| ref | String | Compact reference (`*`, `T<ts>`, or `M<msgid>`) |
 | limit | Number | Maximum messages requested |
 | reqid | String | Request ID for correlating responses |
 | msgid | String | Unique message ID |
-| timestamp | Number | Unix timestamp |
+| timestamp | Number | Unix timestamp (seconds.milliseconds) |
 | type | Number | Message type (0=PRIVMSG, 1=NOTICE, 2=JOIN, etc.) |
 | sender | String | nick!user@host |
 | account | String | Account name or `*` if none |
@@ -511,12 +532,18 @@ References can be:
 #### S2S Examples
 
 ```
-# Server AB requests latest 50 messages for #channel
-AB CH Q #channel LATEST * 50 AB1735300000
+# Server AB requests latest 50 messages for #channel (L=LATEST, *=no ref)
+AB CH Q #channel L * 50 AB1735300000
+
+# Server AB requests messages before a timestamp (B=BEFORE, T=timestamp)
+AB CH Q #channel B T1735299000.500 50 AB1735300001
+
+# Server AB requests messages after a msgid (A=AFTER, M=msgid)
+AB CH Q #channel A MCD-1735299000-1 50 AB1735300002
 
 # Server CD responds with messages
-CD CH R AB1735300000 CD-1735299000-1 1735299000 0 nick!user@host account :Hello world
-CD CH R AB1735300000 CD-1735299001-2 1735299001 0 other!u@h * :Hi there
+CD CH R AB1735300000 CD-1735299000-1 1735299000.123 0 nick!user@host account :Hello world
+CD CH R AB1735300000 CD-1735299001-2 1735299001.456 0 other!u@h * :Hi there
 CD CH E AB1735300000 2
 
 # Server EF has no additional messages
@@ -527,7 +554,7 @@ EF CH E AB1735300000 0
 
 1. Client sends `CHATHISTORY LATEST #channel * 50`
 2. Server queries local LMDB, gets N messages
-3. If N < limit or gaps detected, broadcast `CH Q` to all servers
+3. If N < limit or gaps detected, broadcast `CH Q` (with efficient format) to all servers
 4. Each server queries its LMDB and responds with `CH R` messages
 5. Requester collects responses until timeout or all `CH E` received
 6. Merge all messages, deduplicate by msgid, sort by timestamp
@@ -1445,6 +1472,7 @@ In a network with mixed old/new servers:
 | 1.8 | December 2024 | Added S2S chathistory federation protocol (CH Q/R/E subcommands) for Phase 32 |
 | 1.9 | December 2024 | Corrected N (NICK) user introduction format - account is a mode parameter for +r, not a fixed position |
 | 1.10 | December 2024 | Added N token nick change format; S2S commands use Unix timestamps (ISO 8601 only in message tags per IRCv3) |
+| 1.11 | December 2024 | Optimized CHATHISTORY S2S format: single-char subcmds (L/B/A/R/W/T), compact refs (T/M prefix vs timestamp=/msgid=) |
 
 ---
 
