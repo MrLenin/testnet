@@ -495,8 +495,10 @@ The S2S format is optimized for efficiency (single-char subcmd, compact referenc
 | Format | Description | Example |
 |--------|-------------|---------|
 | `*` | No reference | `*` |
-| `T<timestamp>` | Unix timestamp | `T1735689600.123` |
-| `M<msgid>` | Message ID | `MAB-1703334400-123` |
+| `<timestamp>` | Unix timestamp (starts with digit) | `1735689600.123` |
+| `<msgid>` | Message ID (starts with server numeric) | `AB-1703334400-123` |
+
+**Disambiguation**: Timestamps always start with a digit (0-9), while msgids start with a server numeric (A-Z, a-z). No prefix needed.
 
 #### S2S Fields
 
@@ -505,7 +507,7 @@ The S2S format is optimized for efficiency (single-char subcmd, compact referenc
 | SERVER | String(2) | Server numeric |
 | target | String | Channel name |
 | subcmd | Char(1) | Single-char code (L/B/A/R/W/T) |
-| ref | String | Compact reference (`*`, `T<ts>`, or `M<msgid>`) |
+| ref | String | Reference (`*`, timestamp, or msgid) |
 | limit | Number | Maximum messages requested |
 | reqid | String | Request ID for correlating responses |
 | msgid | String | Unique message ID |
@@ -535,11 +537,11 @@ The S2S format is optimized for efficiency (single-char subcmd, compact referenc
 # Server AB requests latest 50 messages for #channel (L=LATEST, *=no ref)
 AB CH Q #channel L * 50 AB1735300000
 
-# Server AB requests messages before a timestamp (B=BEFORE, T=timestamp)
-AB CH Q #channel B T1735299000.500 50 AB1735300001
+# Server AB requests messages before a timestamp (B=BEFORE)
+AB CH Q #channel B 1735299000.500 50 AB1735300001
 
-# Server AB requests messages after a msgid (A=AFTER, M=msgid)
-AB CH Q #channel A MCD-1735299000-1 50 AB1735300002
+# Server AB requests messages after a msgid (A=AFTER)
+AB CH Q #channel A CD-1735299000-1 50 AB1735300002
 
 # Server CD responds with messages
 CD CH R AB1735300000 CD-1735299000-1 1735299000.123 0 nick!user@host account :Hello world
@@ -1472,7 +1474,8 @@ In a network with mixed old/new servers:
 | 1.8 | December 2024 | Added S2S chathistory federation protocol (CH Q/R/E subcommands) for Phase 32 |
 | 1.9 | December 2024 | Corrected N (NICK) user introduction format - account is a mode parameter for +r, not a fixed position |
 | 1.10 | December 2024 | Added N token nick change format; S2S commands use Unix timestamps (ISO 8601 only in message tags per IRCv3) |
-| 1.11 | December 2024 | Optimized CHATHISTORY S2S format: single-char subcmds (L/B/A/R/W/T), compact refs (T/M prefix vs timestamp=/msgid=) |
+| 1.11 | December 2024 | Optimized CHATHISTORY S2S format: single-char subcmds (L/B/A/R/W/T), compact refs |
+| 1.12 | December 2024 | Removed T/M prefixes from CHATHISTORY refs - timestamps start with digit, msgids start with server numeric |
 
 ---
 
