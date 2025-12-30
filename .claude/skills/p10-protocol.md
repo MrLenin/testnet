@@ -521,3 +521,133 @@ AB N TestUser 1 1703345678 user host.com +rxf accountname user@vhost.net AAAAAB 
 ```
 
 **Warning**: Many services break parsing if this order isn't followed, especially when `+h` is present but they don't support it.
+
+---
+
+## Multiline Batch Protocol (ML)
+
+The ML (MULTILINE) command enables S2S relay of multiline batched messages from clients using the IRCv3 `draft/multiline` capability.
+
+### P10 Message Format
+
+```
+[USER_NUMERIC] ML +batchid target :first_line     # Start batch with first line
+[USER_NUMERIC] ML batchid target :line            # Normal continuation
+[USER_NUMERIC] ML cbatchid target :line           # Concat continuation
+[USER_NUMERIC] ML -batchid target :               # End batch
+```
+
+### Parameters
+- **batchid**: Unique identifier for the batch (typically `servernum+timestamp`)
+- **target**: Channel name or user nick
+- **prefix**: `+` (start), none or `c` (continuation), `-` (end)
+
+### Example S2S Flow
+
+```
+ABAAB ML +Bj1703345678 #channel :Line one
+ABAAB ML Bj1703345678 #channel :Line two
+ABAAB ML cBj1703345678 #channel :continued...
+ABAAB ML -Bj1703345678 #channel :
+```
+
+### Token Definition
+
+```c
+// In msg.h
+#define MSG_MULTILINE   "MULTILINE"
+#define TOK_MULTILINE   "ML"
+#define CMD_MULTILINE   MSG_MULTILINE, TOK_MULTILINE
+```
+
+### Client-Facing Multiline Messages
+
+When delivering multiline batches to clients with the `message-tags` capability, messages MUST include `msgid` and `time` tags:
+
+```
+@batch=<batchid>;time=<iso8601>;msgid=<msgid> :sender!user@host PRIVMSG target :text
+```
+
+**Important**: The `msgid` tag is required by the IRCv3 message-ids specification for all PRIVMSGs and NOTICEs sent to clients that have negotiated `message-tags`. This includes messages inside batches.
+
+### Client Capability Requirements
+
+For proper multiline batch delivery:
+
+| Client Caps | Delivery Format |
+|-------------|-----------------|
+| `draft/multiline` + `batch` | BATCH with individual PRIVMSGs |
+| `draft/multiline` + `batch` + `message-tags` | BATCH with PRIVMSGs including `msgid`/`time` |
+| Neither | Fallback to individual PRIVMSGs |
+
+### Implementation Notes
+
+1. **msgid generation**: Each message in the batch gets a unique msgid, generated via `generate_msgid()` in `send.c`
+2. **time tag**: ISO 8601 timestamp with millisecond precision (e.g., `2025-12-30T12:58:45.101Z`)
+3. **concat flag**: Messages with `draft/multiline-concat` tag should be concatenated with the previous line by the receiver
+4. **S2S relay**: The `ML` P10 command propagates multiline batches between servers; receiving servers regenerate client-facing batches with fresh msgids
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `ircd/m_batch.c` | Client BATCH handler, multiline processing, S2S relay |
+| `ircd/send.c` | `generate_msgid()` and tag formatting functions |
+| `include/send.h` | Public API including `generate_msgid()` declaration |
+
+---
+
+## IRCv3 Message Tags in Batched Messages
+
+All IRC messages sent to clients supporting `message-tags` capability MUST include server-generated tags according to the IRCv3 specifications.
+
+### Required Tags for PRIVMSG/NOTICE
+
+| Tag | Required When | Format | Example |
+|-----|---------------|--------|---------|
+| `msgid` | Client has `message-tags` | `msgid=<unique-id>` | `msgid=Bj-1703345678-42` |
+| `time` | Client has `server-time` | `time=<ISO8601>` | `time=2025-12-30T12:58:45.101Z` |
+| `batch` | Inside a batch | `batch=<batchid>` | `batch=Bj127598488` |
+
+### msgid Format
+
+The server generates msgids in the format:
+```
+<server_numeric>-<startup_ts>-<counter>
+```
+
+Example: `Bj-1703345678-42`
+
+### Implementation in m_batch.c
+
+When sending batched messages, the code checks for `CAP_MSGTAGS`:
+
+```c
+int use_tags = CapActive(to, CAP_MSGTAGS);
+
+if (use_tags) {
+    format_time_tag(timebuf, sizeof(timebuf));
+    generate_msgid(msgidbuf, sizeof(msgidbuf));
+    sendrawto_one(to, "@batch=%s;time=%s;msgid=%s :%s!%s@%s PRIVMSG %s :%s",
+                  batchid, timebuf, msgidbuf, ...);
+} else {
+    sendrawto_one(to, "@batch=%s :%s!%s@%s PRIVMSG %s :%s",
+                  batchid, ...);
+}
+```
+
+### Code Paths Requiring msgid
+
+All these code paths MUST include msgid/time when the recipient supports message-tags:
+
+1. **Channel delivery** (`process_multiline_batch`)
+   - Sending to channel members with multiline+batch
+
+2. **Echo-message** (`process_multiline_batch`)
+   - Echo back to sender with echo-message enabled
+
+3. **Private messages** (`process_multiline_batch`)
+   - Direct messages to users with multiline+batch
+
+4. **S2S relay delivery** (`deliver_s2s_multiline_batch`)
+   - When receiving ML from another server and delivering to local clients
