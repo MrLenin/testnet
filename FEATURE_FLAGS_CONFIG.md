@@ -72,12 +72,36 @@ Feature flags are configured in the `features {}` block of the IRCd config file.
 | `FEAT_CHATHISTORY_DB` | "history" | LMDB database directory path |
 | `FEAT_CHATHISTORY_RETENTION` | 7 | Days to keep messages (0 = disable purge) |
 | `FEAT_CHATHISTORY_PRIVATE` | FALSE | Enable private message (DM) history |
+| `FEAT_CHATHISTORY_PRIVATE_CONSENT` | 2 | PM consent mode (0=global, 1=single-party, 2=multi-party) |
+| `FEAT_CHATHISTORY_ADVERTISE_PM` | FALSE | Include `pm=` in capability value |
+| `FEAT_CHATHISTORY_PM_NOTICE` | FALSE | Send policy notice on connect |
 | `FEAT_CHATHISTORY_FEDERATION` | TRUE | Enable S2S chathistory queries to other servers |
 | `FEAT_CHATHISTORY_TIMEOUT` | 5 | Seconds to wait for S2S federation responses |
 
 **Retention Purge**: Messages older than `CHATHISTORY_RETENTION` days are automatically deleted via an hourly timer (`history_purge_callback`). Set to 0 to disable automatic purging.
 
 **Federation**: When enabled, if local LMDB results are incomplete (fewer messages than requested or gaps detected), the server will query all other servers for additional messages. Results are merged and deduplicated by msgid before returning to the client. This allows clients to access history even if their connected server was down when messages were sent.
+
+**PM Consent Modes** (CHATHISTORY_PRIVATE_CONSENT):
+- **0 = Global**: All PMs stored unless either party explicitly opts out via `METADATA * SET chathistory.pm * :0`
+- **1 = Single-party**: Store if sender OR recipient has opted in (explicit opt-out always overrides)
+- **2 = Multi-party (default)**: Store only if BOTH sender AND recipient have opted in (most privacy-respecting)
+
+**User Opt-In/Out**: Users control PM history storage via metadata:
+```
+METADATA * SET chathistory.pm * :1     # Opt-in
+METADATA * SET chathistory.pm * :0     # Explicit opt-out (blocks storage in all modes)
+METADATA * CLEAR chathistory.pm        # Clear preference (use server default)
+```
+
+**PM Policy Advertisement** (CHATHISTORY_ADVERTISE_PM): When enabled, adds `pm=<mode>` to the `draft/chathistory` capability value:
+```
+draft/chathistory=limit=100,pm=multi
+draft/chathistory=limit=100,pm=single
+draft/chathistory=limit=100,pm=global
+```
+
+**Connection Notice** (CHATHISTORY_PM_NOTICE): When enabled, sends a NOTE (standard-replies) or NOTICE on connect informing users of the PM storage policy and how to opt-in/out.
 
 ### Metadata Caching Configuration
 
