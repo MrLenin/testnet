@@ -122,7 +122,22 @@ Mode parameters (when `+modes` present) appear between the modes and the final 3
 
 For example, both `+hr` and `+rh` have parameters in order: account, then vhost.
 
-Examples:
+### Nick Change
+
+```
+[USER] N newnick timestamp
+```
+
+- Source is the user numeric changing their nick
+- Timestamp is when the nick change occurred (Unix timestamp)
+- If nick changes only in case (e.g., "Nick" → "NICK"), the existing TS is preserved
+
+Example:
+```
+ABAAB N NewNick 1703334500
+```
+
+### User Introduction Examples
 ```
 # User without modes
 AB N TestUser 1 1703334400 user example.com AAAAAA ABAAB :Test User
@@ -442,7 +457,7 @@ CHATHISTORY <subcommand> <target> [params...]
 
 References can be:
 - `*` - No reference (for LATEST)
-- `timestamp=2024-12-25T12:00:00.000Z` - ISO 8601 timestamp
+- `timestamp=1735128000` - Unix timestamp
 - `msgid=AB-1703334400-123` - Message ID
 
 #### S2S P10 Protocol
@@ -473,7 +488,7 @@ References can be:
 | limit | Number | Maximum messages requested |
 | reqid | String | Request ID for correlating responses |
 | msgid | String | Unique message ID |
-| timestamp | String | ISO 8601 UTC timestamp |
+| timestamp | Number | Unix timestamp |
 | type | Number | Message type (0=PRIVMSG, 1=NOTICE, 2=JOIN, etc.) |
 | sender | String | nick!user@host |
 | account | String | Account name or `*` if none |
@@ -500,8 +515,8 @@ References can be:
 AB CH Q #channel LATEST * 50 AB1735300000
 
 # Server CD responds with messages
-CD CH R AB1735300000 CD-1735299000-1 2024-12-27T10:30:00.000Z 0 nick!user@host account :Hello world
-CD CH R AB1735300000 CD-1735299001-2 2024-12-27T10:30:01.000Z 0 other!u@h * :Hi there
+CD CH R AB1735300000 CD-1735299000-1 1735299000 0 nick!user@host account :Hello world
+CD CH R AB1735300000 CD-1735299001-2 1735299001 0 other!u@h * :Hi there
 CD CH E AB1735300000 2
 
 # Server EF has no additional messages
@@ -633,7 +648,7 @@ Read markers are routed through X3 as the authoritative storage, enabling natura
 |-------|------|-------------|
 | USER_NUMERIC | String(5) | 5-character user numeric |
 | TARGET | String | Channel name or nick |
-| TIMESTAMP | String | ISO 8601 timestamp (or `*` if unknown) |
+| TIMESTAMP | Number | Unix timestamp (or `*` if unknown) |
 | TARGET_SERVER | String(2) | Server numeric to route reply to |
 | ACCOUNT | String | Account name for broadcast |
 
@@ -641,16 +656,16 @@ Read markers are routed through X3 as the authoritative storage, enabling natura
 
 ```
 # Client sets read marker - Nefarious forwards to X3
-AB MR S ABAAB #channel 2025-01-01T12:00:00.000Z
+AB MR S ABAAB #channel 1735689600
 
 # X3 stores and broadcasts to all servers
-Az MR accountname #channel 2025-01-01T12:00:00.000Z
+Az MR accountname #channel 1735689600
 
 # Client queries read marker - Nefarious forwards to X3
 AB MR G ABAAB #channel
 
 # X3 replies with stored timestamp
-Az MR R AB ABAAB #channel 2025-01-01T12:00:00.000Z
+Az MR R AB ABAAB #channel 1735689600
 ```
 
 #### Multi-Hop Routing
@@ -1429,6 +1444,7 @@ In a network with mixed old/new servers:
 | 1.7 | December 2024 | Corrected CHATHISTORY documentation - local LMDB only, no X3 involvement |
 | 1.8 | December 2024 | Added S2S chathistory federation protocol (CH Q/R/E subcommands) for Phase 32 |
 | 1.9 | December 2024 | Corrected N (NICK) user introduction format - account is a mode parameter for +r, not a fixed position |
+| 1.10 | December 2024 | Added N token nick change format; S2S commands use Unix timestamps (ISO 8601 only in message tags per IRCv3) |
 
 ---
 
