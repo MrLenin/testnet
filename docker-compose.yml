@@ -11,11 +11,21 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        chown -R 1234:1234 /home/nefarious/ircd/history /home/nefarious/ircd/metadata
+        chown -R 1234:1234 /home/nefarious/ircd/history /home/nefarious/ircd/metadata /home/nefarious/ircd/gitsync /home/nefarious/ircd/ssl
+        touch /home/nefarious/ircd/gitsync/gitsync.conf
+        chown 1234:1234 /home/nefarious/ircd/gitsync/gitsync.conf
+        # Generate ECDSA SSL cert if it doesn't exist (ECDSA works with GitHub for SSH)
+        if [ ! -f /home/nefarious/ircd/ssl/ircd.pem ]; then
+          openssl req -new -x509 -days 365 -nodes -out /home/nefarious/ircd/ssl/ircd.pem -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -keyout /home/nefarious/ircd/ssl/ircd.pem -subj "/CN=${IRCD_GENERAL_NAME:-testnet.local}/"
+          chown 1234:1234 /home/nefarious/ircd/ssl/ircd.pem
+          echo "Generated new ECDSA SSL certificate"
+        fi
         echo "Nefarious volume permissions fixed"
     volumes:
       - history_data:/home/nefarious/ircd/history
       - metadata_data:/home/nefarious/ircd/metadata
+      - gitsync_data:/home/nefarious/ircd/gitsync
+      - ssl_data:/home/nefarious/ircd/ssl
 
   nefarious:
     container_name: nefarious
@@ -36,6 +46,8 @@ services:
      - ./data/saslusers:/home/nefarious/ircd/saslusers
      - history_data:/home/nefarious/ircd/history
      - metadata_data:/home/nefarious/ircd/metadata
+     - gitsync_data:/home/nefarious/ircd/gitsync
+     - ssl_data:/home/nefarious/ircd/ssl
     ports:
       - 127.0.0.1:6667:6667
       - 127.0.0.1:6697:6697
@@ -65,11 +77,18 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        chown -R 1234:1234 /home/nefarious/ircd/history /home/nefarious/ircd/metadata
+        chown -R 1234:1234 /home/nefarious/ircd/history /home/nefarious/ircd/metadata /home/nefarious/ircd/ssl
+        # Generate ECDSA SSL cert if it doesn't exist (ECDSA works with GitHub for SSH)
+        if [ ! -f /home/nefarious/ircd/ssl/ircd.pem ]; then
+          openssl req -new -x509 -days 365 -nodes -out /home/nefarious/ircd/ssl/ircd.pem -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -keyout /home/nefarious/ircd/ssl/ircd.pem -subj "/CN=${IRCD_GENERAL_NAME:-leaf.local}/"
+          chown 1234:1234 /home/nefarious/ircd/ssl/ircd.pem
+          echo "Generated new ECDSA SSL certificate"
+        fi
         echo "Nefarious2 volume permissions fixed"
     volumes:
       - history_data2:/home/nefarious/ircd/history
       - metadata_data2:/home/nefarious/ircd/metadata
+      - ssl_data2:/home/nefarious/ircd/ssl
     profiles:
       - linked
 
@@ -92,6 +111,8 @@ services:
      - ./data/saslusers:/home/nefarious/ircd/saslusers
      - history_data2:/home/nefarious/ircd/history
      - metadata_data2:/home/nefarious/ircd/metadata
+     - gitsync_data:/home/nefarious/ircd/gitsync
+     - ssl_data2:/home/nefarious/ircd/ssl
     ports:
       - 127.0.0.1:6668:6667
       - 127.0.0.1:6698:6697
@@ -229,6 +250,9 @@ volumes:
   metadata_data:
   history_data2:
   metadata_data2:
+  gitsync_data:
+  ssl_data:
+  ssl_data2:
   x3_data:
 
 networks:
