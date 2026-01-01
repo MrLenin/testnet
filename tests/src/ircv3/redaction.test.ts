@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel } from '../helpers/index.js';
 
 /**
  * Message Redaction Tests (draft/message-redaction)
@@ -58,7 +58,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       client.register('redact1');
       await client.waitForLine(/001/);
 
-      const channel = `#redact${Date.now()}`;
+      const channel = uniqueChannel('redact');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -110,7 +110,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       receiver.register('redrecv1');
       await receiver.waitForLine(/001/);
 
-      const channel = `#redreason${Date.now()}`;
+      const channel = uniqueChannel('redreason');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
       await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
@@ -169,7 +169,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       attacker.register('redattack1');
       await attacker.waitForLine(/001/);
 
-      const channel = `#redperm${Date.now()}`;
+      const channel = uniqueChannel('redperm');
       sender.send(`JOIN ${channel}`);
       await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -228,7 +228,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       user.register('reduser1');
       await user.waitForLine(/001/);
 
-      const channel = `#redop${Date.now()}`;
+      const channel = uniqueChannel('redop');
       op.send(`JOIN ${channel}`);
       await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -280,7 +280,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       client.register('redinv1');
       await client.waitForLine(/001/);
 
-      const channel = `#redinv${Date.now()}`;
+      const channel = uniqueChannel('redinv');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -308,7 +308,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       client.register('redtwice1');
       await client.waitForLine(/001/);
 
-      const channel = `#redtwice${Date.now()}`;
+      const channel = uniqueChannel('redtwice');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -364,7 +364,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       observer.register('redobs1');
       await observer.waitForLine(/001/);
 
-      const channel = `#rednote${Date.now()}`;
+      const channel = uniqueChannel('rednote');
       redactor.send(`JOIN ${channel}`);
       observer.send(`JOIN ${channel}`);
       await redactor.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));

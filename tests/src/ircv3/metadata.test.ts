@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId } from '../helpers/index.js';
 
 /**
  * Metadata Tests (draft/metadata-2)
@@ -171,7 +171,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.waitForLine(/001/);
 
       // Join channel first (need to be op usually)
-      const channelName = `#metaTest${Date.now()}`;
+      const channelName = uniqueChannel('metaTest');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -195,7 +195,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.register('chanmeta2');
       await client.waitForLine(/001/);
 
-      const channelName = `#metaGet${Date.now()}`;
+      const channelName = uniqueChannel('metaGet');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -608,7 +608,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client1.waitForLine(/001/);
 
       // Set metadata
-      const testValue = `persist_${Date.now()}`;
+      const testValue = `persist_${uniqueId()}`;
       client1.send(`METADATA SET * testpersist :${testValue}`);
       await new Promise(r => setTimeout(r, 500));
 

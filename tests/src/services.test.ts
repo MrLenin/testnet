@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient } from './helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel } from './helpers/index.js';
 
 describe('X3 Services', () => {
   const clients: RawSocketClient[] = [];
@@ -63,7 +63,7 @@ describe('X3 Services', () => {
     await client.waitForLine(/001/);
 
     // First join the channel to become op
-    const channelName = `#testchan${Date.now()}`;
+    const channelName = uniqueChannel('testchan');
     client.send(`JOIN ${channelName}`);
     await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 

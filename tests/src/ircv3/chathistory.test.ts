@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId } from '../helpers/index.js';
 
 /**
  * Chathistory Tests (draft/chathistory)
@@ -60,7 +60,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histlatest1');
       await client.waitForLine(/001/);
 
-      const channelName = `#histlatest${Date.now()}`;
+      const channelName = uniqueChannel('histlatest');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -103,7 +103,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histbefore1');
       await client.waitForLine(/001/);
 
-      const channelName = `#histbefore${Date.now()}`;
+      const channelName = uniqueChannel('histbefore');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -144,7 +144,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histafter1');
       await client.waitForLine(/001/);
 
-      const channelName = `#histafter${Date.now()}`;
+      const channelName = uniqueChannel('histafter');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -187,7 +187,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histaround1');
       await client.waitForLine(/001/);
 
-      const channelName = `#histaround${Date.now()}`;
+      const channelName = uniqueChannel('histaround');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -225,7 +225,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       await client.waitForLine(/001/);
 
       // Join a channel and send a message to create history
-      const channelName = `#histtargets${Date.now()}`;
+      const channelName = uniqueChannel('histtargets');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
       client.send(`PRIVMSG ${channelName} :Targets test message`);
@@ -257,7 +257,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histformat1');
       await client.waitForLine(/001/);
 
-      const channelName = `#histformat${Date.now()}`;
+      const channelName = uniqueChannel('histformat');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -294,7 +294,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histmsgid1');
       await client.waitForLine(/001/);
 
-      const channelName = `#histmsgid${Date.now()}`;
+      const channelName = uniqueChannel('histmsgid');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -356,7 +356,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histbetween1');
       await client.waitForLine(/001/);
 
-      const channelName = `#histbetween${Date.now()}`;
+      const channelName = uniqueChannel('histbetween');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -404,7 +404,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histlimit1');
       await client.waitForLine(/001/);
 
-      const channelName = `#histlimit${Date.now()}`;
+      const channelName = uniqueChannel('histlimit');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -446,7 +446,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histzero1');
       await client.waitForLine(/001/);
 
-      const channelName = `#histzero${Date.now()}`;
+      const channelName = uniqueChannel('histzero');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -474,7 +474,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histlarge1');
       await client.waitForLine(/001/);
 
-      const channelName = `#histlarge${Date.now()}`;
+      const channelName = uniqueChannel('histlarge');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -504,7 +504,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histmsgid2');
       await client.waitForLine(/001/);
 
-      const channelName = `#histmsgid${Date.now()}`;
+      const channelName = uniqueChannel('histmsgid');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -555,7 +555,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histafter2');
       await client.waitForLine(/001/);
 
-      const channelName = `#histafter2${Date.now()}`;
+      const channelName = uniqueChannel('histafter2');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -615,31 +615,31 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     it('PM history NOT stored when neither party opts in (mode 2)', async () => {
       const client1 = trackClient(await createRawSocketClient());
       const client2 = trackClient(await createRawSocketClient());
-      const uniqueId = Date.now();
+      const testId = uniqueId();
 
       await client1.capLs();
       await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
       client1.capEnd();
-      client1.register(`pmnoopt1_${uniqueId}`);
+      client1.register(`pmnoopt1_${testId}`);
       await client1.waitForLine(/001/);
 
       await client2.capLs();
       await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
       client2.capEnd();
-      client2.register(`pmnoopt2_${uniqueId}`);
+      client2.register(`pmnoopt2_${testId}`);
       await client2.waitForLine(/001/);
 
       // Neither party opts in - send messages
-      const testMsg = `NoOptIn test ${uniqueId}`;
-      client1.send(`PRIVMSG pmnoopt2_${uniqueId} :${testMsg}`);
+      const testMsg = `NoOptIn test ${testId}`;
+      client1.send(`PRIVMSG pmnoopt2_${testId} :${testMsg}`);
       await new Promise(r => setTimeout(r, 300));
-      client2.send(`PRIVMSG pmnoopt1_${uniqueId} :Reply ${testMsg}`);
+      client2.send(`PRIVMSG pmnoopt1_${testId} :Reply ${testMsg}`);
       await new Promise(r => setTimeout(r, 500));
 
       client1.clearRawBuffer();
 
       // Request PM history - should be empty in multi-party mode
-      client1.send(`CHATHISTORY LATEST pmnoopt2_${uniqueId} * 10`);
+      client1.send(`CHATHISTORY LATEST pmnoopt2_${testId} * 10`);
 
       // MUST receive a batch - no try/catch, test fails if no response
       const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
@@ -663,18 +663,18 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     it('PM history stored when BOTH parties opt in (mode 2)', async () => {
       const client1 = trackClient(await createRawSocketClient());
       const client2 = trackClient(await createRawSocketClient());
-      const uniqueId = Date.now();
+      const testId = uniqueId();
 
       await client1.capLs();
       await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
       client1.capEnd();
-      client1.register(`pmboth1_${uniqueId}`);
+      client1.register(`pmboth1_${testId}`);
       await client1.waitForLine(/001/);
 
       await client2.capLs();
       await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
       client2.capEnd();
-      client2.register(`pmboth2_${uniqueId}`);
+      client2.register(`pmboth2_${testId}`);
       await client2.waitForLine(/001/);
 
       // BOTH parties opt in - MUST get 761 response confirming the SET
@@ -689,16 +689,16 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       await new Promise(r => setTimeout(r, 300));
 
       // Exchange messages after both opt in
-      const testMsg = `BothOptIn test ${uniqueId}`;
-      client1.send(`PRIVMSG pmboth2_${uniqueId} :${testMsg}`);
+      const testMsg = `BothOptIn test ${testId}`;
+      client1.send(`PRIVMSG pmboth2_${testId} :${testMsg}`);
       await new Promise(r => setTimeout(r, 300));
-      client2.send(`PRIVMSG pmboth1_${uniqueId} :Reply ${testMsg}`);
+      client2.send(`PRIVMSG pmboth1_${testId} :Reply ${testMsg}`);
       await new Promise(r => setTimeout(r, 500));
 
       client1.clearRawBuffer();
 
       // Request PM history - MUST have messages
-      client1.send(`CHATHISTORY LATEST pmboth2_${uniqueId} * 10`);
+      client1.send(`CHATHISTORY LATEST pmboth2_${testId} * 10`);
 
       // MUST receive a batch - test fails if no response
       const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
@@ -722,18 +722,18 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     it('PM history NOT stored when only sender opts in (mode 2)', async () => {
       const client1 = trackClient(await createRawSocketClient());
       const client2 = trackClient(await createRawSocketClient());
-      const uniqueId = Date.now();
+      const testId = uniqueId();
 
       await client1.capLs();
       await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
       client1.capEnd();
-      client1.register(`pmsend1_${uniqueId}`);
+      client1.register(`pmsend1_${testId}`);
       await client1.waitForLine(/001/);
 
       await client2.capLs();
       await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
       client2.capEnd();
-      client2.register(`pmsend2_${uniqueId}`);
+      client2.register(`pmsend2_${testId}`);
       await client2.waitForLine(/001/);
 
       // Only sender opts in - MUST get 761 response
@@ -743,14 +743,14 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       await new Promise(r => setTimeout(r, 300));
 
       // Send messages
-      const testMsg = `SenderOnly test ${uniqueId}`;
-      client1.send(`PRIVMSG pmsend2_${uniqueId} :${testMsg}`);
+      const testMsg = `SenderOnly test ${testId}`;
+      client1.send(`PRIVMSG pmsend2_${testId} :${testMsg}`);
       await new Promise(r => setTimeout(r, 500));
 
       client1.clearRawBuffer();
 
       // Request PM history - should be empty (recipient didn't opt in)
-      client1.send(`CHATHISTORY LATEST pmsend2_${uniqueId} * 10`);
+      client1.send(`CHATHISTORY LATEST pmsend2_${testId} * 10`);
 
       // MUST receive a batch - test fails if no response
       const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
@@ -774,18 +774,18 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     it('PM history NOT stored when only recipient opts in (mode 2)', async () => {
       const client1 = trackClient(await createRawSocketClient());
       const client2 = trackClient(await createRawSocketClient());
-      const uniqueId = Date.now();
+      const testId = uniqueId();
 
       await client1.capLs();
       await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
       client1.capEnd();
-      client1.register(`pmrecv1_${uniqueId}`);
+      client1.register(`pmrecv1_${testId}`);
       await client1.waitForLine(/001/);
 
       await client2.capLs();
       await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
       client2.capEnd();
-      client2.register(`pmrecv2_${uniqueId}`);
+      client2.register(`pmrecv2_${testId}`);
       await client2.waitForLine(/001/);
 
       // Only recipient opts in - MUST get 761 response
@@ -795,14 +795,14 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       await new Promise(r => setTimeout(r, 300));
 
       // Send messages
-      const testMsg = `RecipientOnly test ${uniqueId}`;
-      client1.send(`PRIVMSG pmrecv2_${uniqueId} :${testMsg}`);
+      const testMsg = `RecipientOnly test ${testId}`;
+      client1.send(`PRIVMSG pmrecv2_${testId} :${testMsg}`);
       await new Promise(r => setTimeout(r, 500));
 
       client1.clearRawBuffer();
 
       // Request PM history - should be empty (sender didn't opt in)
-      client1.send(`CHATHISTORY LATEST pmrecv2_${uniqueId} * 10`);
+      client1.send(`CHATHISTORY LATEST pmrecv2_${testId} * 10`);
 
       // MUST receive a batch - test fails if no response
       const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
@@ -826,18 +826,18 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     it('explicit opt-out overrides opt-in in multi-party mode', async () => {
       const client1 = trackClient(await createRawSocketClient());
       const client2 = trackClient(await createRawSocketClient());
-      const uniqueId = Date.now();
+      const testId = uniqueId();
 
       await client1.capLs();
       await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
       client1.capEnd();
-      client1.register(`pmover1_${uniqueId}`);
+      client1.register(`pmover1_${testId}`);
       await client1.waitForLine(/001/);
 
       await client2.capLs();
       await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
       client2.capEnd();
-      client2.register(`pmover2_${uniqueId}`);
+      client2.register(`pmover2_${testId}`);
       await client2.waitForLine(/001/);
 
       // Client1 opts in - MUST get 761 response
@@ -852,14 +852,14 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       await new Promise(r => setTimeout(r, 300));
 
       // Send messages
-      const testMsg = `OptOutOverride test ${uniqueId}`;
-      client1.send(`PRIVMSG pmover2_${uniqueId} :${testMsg}`);
+      const testMsg = `OptOutOverride test ${testId}`;
+      client1.send(`PRIVMSG pmover2_${testId} :${testMsg}`);
       await new Promise(r => setTimeout(r, 500));
 
       client1.clearRawBuffer();
 
       // Request PM history - should be empty (explicit opt-out)
-      client1.send(`CHATHISTORY LATEST pmover2_${uniqueId} * 10`);
+      client1.send(`CHATHISTORY LATEST pmover2_${testId} * 10`);
 
       // MUST receive a batch - test fails if no response
       const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
@@ -883,18 +883,18 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     it('can change consent preference after initial setting', async () => {
       const client1 = trackClient(await createRawSocketClient());
       const client2 = trackClient(await createRawSocketClient());
-      const uniqueId = Date.now();
+      const testId = uniqueId();
 
       await client1.capLs();
       await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
       client1.capEnd();
-      client1.register(`pmchg1_${uniqueId}`);
+      client1.register(`pmchg1_${testId}`);
       await client1.waitForLine(/001/);
 
       await client2.capLs();
       await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
       client2.capEnd();
-      client2.register(`pmchg2_${uniqueId}`);
+      client2.register(`pmchg2_${testId}`);
       await client2.waitForLine(/001/);
 
       // Both opt in - MUST get 761 response for each
@@ -908,8 +908,8 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       await new Promise(r => setTimeout(r, 300));
 
       // First message (should be stored)
-      const msg1 = `Before revoke ${uniqueId}`;
-      client1.send(`PRIVMSG pmchg2_${uniqueId} :${msg1}`);
+      const msg1 = `Before revoke ${testId}`;
+      client1.send(`PRIVMSG pmchg2_${testId} :${msg1}`);
       await new Promise(r => setTimeout(r, 300));
 
       // Client2 revokes consent - MUST get 761 response
@@ -919,14 +919,14 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       await new Promise(r => setTimeout(r, 300));
 
       // Second message (should NOT be stored)
-      const msg2 = `After revoke ${uniqueId}`;
-      client1.send(`PRIVMSG pmchg2_${uniqueId} :${msg2}`);
+      const msg2 = `After revoke ${testId}`;
+      client1.send(`PRIVMSG pmchg2_${testId} :${msg2}`);
       await new Promise(r => setTimeout(r, 500));
 
       client1.clearRawBuffer();
 
       // Request PM history
-      client1.send(`CHATHISTORY LATEST pmchg2_${uniqueId} * 10`);
+      client1.send(`CHATHISTORY LATEST pmchg2_${testId} * 10`);
 
       // MUST receive a batch - test fails if no response
       const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
@@ -954,12 +954,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
     it('can verify own opt-in status via METADATA GET', async () => {
       const client = trackClient(await createRawSocketClient());
-      const uniqueId = Date.now();
+      const testId = uniqueId();
 
       await client.capLs();
       await client.capReq(['draft/chathistory', 'batch', 'draft/metadata-2']);
       client.capEnd();
-      client.register(`pmget_${uniqueId}`);
+      client.register(`pmget_${testId}`);
       await client.waitForLine(/001/);
 
       // Set opt-in - MUST get 761 response
@@ -983,18 +983,18 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     it('can query other user opt-in status via METADATA GET (public visibility)', async () => {
       const client1 = trackClient(await createRawSocketClient());
       const client2 = trackClient(await createRawSocketClient());
-      const uniqueId = Date.now();
+      const testId = uniqueId();
 
       await client1.capLs();
       await client1.capReq(['draft/chathistory', 'batch', 'draft/metadata-2']);
       client1.capEnd();
-      client1.register(`pmqry1_${uniqueId}`);
+      client1.register(`pmqry1_${testId}`);
       await client1.waitForLine(/001/);
 
       await client2.capLs();
       await client2.capReq(['draft/chathistory', 'batch', 'draft/metadata-2']);
       client2.capEnd();
-      client2.register(`pmqry2_${uniqueId}`);
+      client2.register(`pmqry2_${testId}`);
       await client2.waitForLine(/001/);
 
       // Client2 sets public opt-in - MUST get 761 response
@@ -1006,7 +1006,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client1.clearRawBuffer();
 
       // Client1 queries Client2's status - MUST get 761 response (public visibility)
-      client1.send(`METADATA GET pmqry2_${uniqueId} chathistory.pm`);
+      client1.send(`METADATA GET pmqry2_${testId} chathistory.pm`);
       const getResponse = await client1.waitForLine(/761.*chathistory\.pm/i, 3000);
       expect(getResponse).toContain('chathistory.pm');
       // Verify other user's opt-in value is visible
@@ -1205,7 +1205,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histempty1');
       await client.waitForLine(/001/);
 
-      const channelName = `#histempty${Date.now()}`;
+      const channelName = uniqueChannel('histempty');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -1236,7 +1236,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histiso1');
       await client.waitForLine(/001/);
 
-      const channelName = `#histiso${Date.now()}`;
+      const channelName = uniqueChannel('histiso');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -1264,7 +1264,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histbadts1');
       await client.waitForLine(/001/);
 
-      const channelName = `#histbadts${Date.now()}`;
+      const channelName = uniqueChannel('histbadts');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -1291,7 +1291,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histnotice1');
       await client.waitForLine(/001/);
 
-      const channelName = `#histnotice${Date.now()}`;
+      const channelName = uniqueChannel('histnotice');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -1336,7 +1336,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histmixed1');
       await client.waitForLine(/001/);
 
-      const channelName = `#histmixed${Date.now()}`;
+      const channelName = uniqueChannel('histmixed');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -1388,7 +1388,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histtag1');
       await client.waitForLine(/001/);
 
-      const channelName = `#histtag${Date.now()}`;
+      const channelName = uniqueChannel('histtag');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -1435,7 +1435,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histreply1');
       await client.waitForLine(/001/);
 
-      const channelName = `#histreply${Date.now()}`;
+      const channelName = uniqueChannel('histreply');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -1499,7 +1499,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client2.register('histjoin2');
       await client2.waitForLine(/001/);
 
-      const channelName = `#histjoin${Date.now()}`;
+      const channelName = uniqueChannel('histjoin');
 
       // Client1 creates the channel
       client1.send(`JOIN ${channelName}`);
@@ -1553,7 +1553,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client2.register('histpart2');
       await client2.waitForLine(/001/);
 
-      const channelName = `#histpart${Date.now()}`;
+      const channelName = uniqueChannel('histpart');
 
       // Both join the channel
       client1.send(`JOIN ${channelName}`);
@@ -1608,7 +1608,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       user.register('histkickusr');
       await user.waitForLine(/001/);
 
-      const channelName = `#histkick${Date.now()}`;
+      const channelName = uniqueChannel('histkick');
 
       // Op creates channel (gets ops)
       op.send(`JOIN ${channelName}`);
@@ -1667,7 +1667,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client2.register('histquit2');
       await client2.waitForLine(/001/);
 
-      const channelName = `#histquit${Date.now()}`;
+      const channelName = uniqueChannel('histquit');
 
       // Both join the channel
       client1.send(`JOIN ${channelName}`);
@@ -1716,12 +1716,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histtopic1');
       await client.waitForLine(/001/);
 
-      const channelName = `#histtopic${Date.now()}`;
+      const channelName = uniqueChannel('histtopic');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
       // Set a topic
-      const topicText = `Test topic ${Date.now()}`;
+      const topicText = `Test topic ${uniqueId()}`;
       client.send(`TOPIC ${channelName} :${topicText}`);
       await new Promise(r => setTimeout(r, 500));
 
@@ -1758,7 +1758,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histmode1');
       await client.waitForLine(/001/);
 
-      const channelName = `#histmode${Date.now()}`;
+      const channelName = uniqueChannel('histmode');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -1804,7 +1804,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histpage1');
       await client.waitForLine(/001/);
 
-      const channelName = `#histpage${Date.now()}`;
+      const channelName = uniqueChannel('histpage');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -1894,7 +1894,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histfwd1');
       await client.waitForLine(/001/);
 
-      const channelName = `#histfwd${Date.now()}`;
+      const channelName = uniqueChannel('histfwd');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -1946,7 +1946,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histend1');
       await client.waitForLine(/001/);
 
-      const channelName = `#histend${Date.now()}`;
+      const channelName = uniqueChannel('histend');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -2005,7 +2005,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       reader.register('histrace2');
       await reader.waitForLine(/001/);
 
-      const channelName = `#histrace${Date.now()}`;
+      const channelName = uniqueChannel('histrace');
       sender.send(`JOIN ${channelName}`);
       reader.send(`JOIN ${channelName}`);
       await sender.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));

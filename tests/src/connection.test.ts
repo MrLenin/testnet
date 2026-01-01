@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient } from './helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueId } from './helpers/index.js';
 
 describe('IRC Connection', () => {
   const clients: RawSocketClient[] = [];
@@ -91,7 +91,7 @@ describe('IRC Connection', () => {
     await new Promise((r) => setTimeout(r, 500));
 
     // Client 1 sends a message
-    const testMessage = `Hello from test ${Date.now()}`;
+    const testMessage = `Hello from test ${uniqueId()}`;
     client1.send(`PRIVMSG #msgtest :${testMessage}`);
 
     // Client 2 should receive it

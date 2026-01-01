@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId } from '../helpers/index.js';
 
 /**
  * Labeled Response Tests (labeled-response)
@@ -61,7 +61,7 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       client.clearRawBuffer();
 
       // Send a labeled command
-      const label = `test-${Date.now()}`;
+      const label = `test-${uniqueId()}`;
       client.send(`@label=${label} PING :test`);
 
       try {
@@ -90,8 +90,8 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       client.clearRawBuffer();
 
       // Send multiple labeled commands
-      const label1 = `cmd1-${Date.now()}`;
-      const label2 = `cmd2-${Date.now()}`;
+      const label1 = `cmd1-${uniqueId()}`;
+      const label2 = `cmd2-${uniqueId()}`;
 
       client.send(`@label=${label1} PING :first`);
       client.send(`@label=${label2} PING :second`);
@@ -128,14 +128,14 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       client.register('label3');
       await client.waitForLine(/001/);
 
-      const channel = `#labelbatch${Date.now()}`;
+      const channel = uniqueChannel('labelbatch');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
       client.clearRawBuffer();
 
       // WHO returns multiple lines - should be wrapped in batch with label
-      const label = `who-${Date.now()}`;
+      const label = `who-${uniqueId()}`;
       client.send(`@label=${label} WHO ${channel}`);
 
       // Server MUST respond with BATCH or WHO replies (352/315)
@@ -168,13 +168,13 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       client.register('labelecho1');
       await client.waitForLine(/001/);
 
-      const channel = `#labelecho${Date.now()}`;
+      const channel = uniqueChannel('labelecho');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
       client.clearRawBuffer();
 
-      const label = `msg-${Date.now()}`;
+      const label = `msg-${uniqueId()}`;
       client.send(`@label=${label} PRIVMSG ${channel} :Labeled message`);
 
       try {
@@ -277,7 +277,7 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       client.clearRawBuffer();
 
       // Send labeled command anyway
-      const label = `ignore-${Date.now()}`;
+      const label = `ignore-${uniqueId()}`;
       client.send(`@label=${label} PING :test`);
 
       // Server MUST respond to PING
@@ -299,14 +299,14 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       client.register('labelack1');
       await client.waitForLine(/001/);
 
-      const channel = `#labelack${Date.now()}`;
+      const channel = uniqueChannel('labelack');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
       client.clearRawBuffer();
 
       // Some commands produce no output - server should send ACK
-      const label = `ack-${Date.now()}`;
+      const label = `ack-${uniqueId()}`;
       // MODE without parameters typically just shows modes, but setting mode
       // on a channel we created might produce ACK
       client.send(`@label=${label} MODE ${channel} +t`);
@@ -331,7 +331,7 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
 
       client.clearRawBuffer();
 
-      const label = `err-${Date.now()}`;
+      const label = `err-${uniqueId()}`;
       // Try to join an invalid channel name
       client.send(`@label=${label} JOIN invalidchannel`);
 
@@ -405,7 +405,7 @@ describe('IRCv3 Message Tags (message-tags)', () => {
       receiver.register('tagrecv1');
       await receiver.waitForLine(/001/);
 
-      const channel = `#tags${Date.now()}`;
+      const channel = uniqueChannel('tags');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
       await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
@@ -449,7 +449,7 @@ describe('IRCv3 Message Tags (message-tags)', () => {
       receiver.register('tagreact2');
       await receiver.waitForLine(/001/);
 
-      const channel = `#react${Date.now()}`;
+      const channel = uniqueChannel('react');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
       await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
@@ -490,7 +490,7 @@ describe('IRCv3 Message Tags (message-tags)', () => {
       receiver.register('tagmsg2');
       await receiver.waitForLine(/001/);
 
-      const channel = `#tagmsg${Date.now()}`;
+      const channel = uniqueChannel('tagmsg');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
       await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
@@ -531,7 +531,7 @@ describe('IRCv3 Message Tags (message-tags)', () => {
       receiver.register('tagmsg4');
       await receiver.waitForLine(/001/);
 
-      const channel = `#tagmsg2${Date.now()}`;
+      const channel = uniqueChannel('tagmsg2');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
       await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));

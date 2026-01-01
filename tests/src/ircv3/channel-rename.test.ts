@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel } from '../helpers/index.js';
 
 /**
  * Channel Rename Tests (draft/channel-rename)
@@ -58,13 +58,13 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       founder.register('renfound1');
       await founder.waitForLine(/001/);
 
-      const oldName = `#renold${Date.now()}`;
+      const oldName = uniqueChannel('renold');
       founder.send(`JOIN ${oldName}`);
       await founder.waitForLine(new RegExp(`JOIN.*${oldName}`, 'i'));
 
       founder.clearRawBuffer();
 
-      const newName = `#rennew${Date.now()}`;
+      const newName = uniqueChannel('rennew');
       founder.send(`RENAME ${oldName} ${newName} :Rebranding`);
 
       try {
@@ -88,13 +88,13 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       client.register('renreason1');
       await client.waitForLine(/001/);
 
-      const oldName = `#renreas${Date.now()}`;
+      const oldName = uniqueChannel('renreas');
       client.send(`JOIN ${oldName}`);
       await client.waitForLine(new RegExp(`JOIN.*${oldName}`, 'i'));
 
       client.clearRawBuffer();
 
-      const newName = `#rennewreas${Date.now()}`;
+      const newName = uniqueChannel('rennewreas');
       const reason = 'Channel reorganization';
       client.send(`RENAME ${oldName} ${newName} :${reason}`);
 
@@ -129,7 +129,7 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       member.register('renmem1');
       await member.waitForLine(/001/);
 
-      const oldName = `#rennote${Date.now()}`;
+      const oldName = uniqueChannel('rennote');
       op.send(`JOIN ${oldName}`);
       member.send(`JOIN ${oldName}`);
       await op.waitForLine(new RegExp(`JOIN.*${oldName}`, 'i'));
@@ -138,7 +138,7 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
 
       member.clearRawBuffer();
 
-      const newName = `#rennewnote${Date.now()}`;
+      const newName = uniqueChannel('rennewnote');
       op.send(`RENAME ${oldName} ${newName}`);
 
       try {
@@ -172,7 +172,7 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       nocap.register('rennocap1');
       await nocap.waitForLine(/001/);
 
-      const oldName = `#rennocap${Date.now()}`;
+      const oldName = uniqueChannel('rennocap');
       op.send(`JOIN ${oldName}`);
       nocap.send(`JOIN ${oldName}`);
       await op.waitForLine(new RegExp(`JOIN.*${oldName}`, 'i'));
@@ -181,7 +181,7 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
 
       nocap.clearRawBuffer();
 
-      const newName = `#rennocapnew${Date.now()}`;
+      const newName = uniqueChannel('rennocapnew');
       op.send(`RENAME ${oldName} ${newName}`);
 
       // nocap should see PART from old + JOIN to new instead of RENAME
@@ -221,7 +221,7 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       user.register('renuser1');
       await user.waitForLine(/001/);
 
-      const channel = `#renperm${Date.now()}`;
+      const channel = uniqueChannel('renperm');
       op.send(`JOIN ${channel}`);
       await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -257,8 +257,8 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       client.register('renexist1');
       await client.waitForLine(/001/);
 
-      const channel1 = `#renexist1${Date.now()}`;
-      const channel2 = `#renexist2${Date.now()}`;
+      const channel1 = uniqueChannel('renexist1');
+      const channel2 = uniqueChannel('renexist2');
 
       client.send(`JOIN ${channel1}`);
       client.send(`JOIN ${channel2}`);
@@ -291,7 +291,7 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       client.register('renmode1');
       await client.waitForLine(/001/);
 
-      const oldName = `#renmode${Date.now()}`;
+      const oldName = uniqueChannel('renmode');
       client.send(`JOIN ${oldName}`);
       await client.waitForLine(new RegExp(`JOIN.*${oldName}`, 'i'));
 
@@ -299,7 +299,7 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       client.send(`MODE ${oldName} +nt`);
       await new Promise(r => setTimeout(r, 300));
 
-      const newName = `#renmodenew${Date.now()}`;
+      const newName = uniqueChannel('renmodenew');
       client.send(`RENAME ${oldName} ${newName}`);
       await new Promise(r => setTimeout(r, 500));
 

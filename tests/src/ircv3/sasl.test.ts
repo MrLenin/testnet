@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueId } from '../helpers/index.js';
 
 /**
  * SASL Authentication Tests
@@ -228,7 +228,7 @@ describe('IRCv3 SASL Authentication', () => {
       await regClient.waitForLine(/001/);
 
       // Generate unique account name (max 15 chars for ACCOUNTLEN)
-      const uniqueAccount = `sl${Date.now() % 1000000000}`;
+      const uniqueAccount = `sl${uniqueId()}`;
       const uniquePassword = 'testpass123';
 
       // Format per spec: REGISTER <account> <email> <password>

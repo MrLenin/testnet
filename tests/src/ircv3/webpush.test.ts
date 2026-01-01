@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel } from '../helpers/index.js';
 
 /**
  * WebPush Tests (draft/webpush)
@@ -246,7 +246,7 @@ describe('IRCv3 Event Playback (draft/event-playback)', () => {
       client.register('ephistory1');
       await client.waitForLine(/001/);
 
-      const channel = `#ephistory${Date.now()}`;
+      const channel = uniqueChannel('ephistory');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 

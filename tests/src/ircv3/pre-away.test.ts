@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel } from '../helpers/index.js';
 
 /**
  * Pre-Away Tests (draft/pre-away)
@@ -136,7 +136,7 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
       observer.register('paobs1');
       await observer.waitForLine(/001/);
 
-      const channel = `#preaway${Date.now()}`;
+      const channel = uniqueChannel('preaway');
       observer.send(`JOIN ${channel}`);
       await observer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
       await new Promise(r => setTimeout(r, 300));

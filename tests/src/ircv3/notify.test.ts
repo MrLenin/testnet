@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel } from '../helpers/index.js';
 
 /**
  * Away-Notify and Account-Notify Tests
@@ -65,7 +65,7 @@ describe('IRCv3 away-notify', () => {
       await awayer.waitForLine(/001/);
 
       // Both join same channel
-      const channel = `#away${Date.now()}`;
+      const channel = uniqueChannel('away');
       observer.send(`JOIN ${channel}`);
       awayer.send(`JOIN ${channel}`);
       await observer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
@@ -100,7 +100,7 @@ describe('IRCv3 away-notify', () => {
       awayer.register('awayuser2');
       await awayer.waitForLine(/001/);
 
-      const channel = `#awayret${Date.now()}`;
+      const channel = uniqueChannel('awayret');
       observer.send(`JOIN ${channel}`);
       awayer.send(`JOIN ${channel}`);
       await observer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
@@ -182,7 +182,7 @@ describe('IRCv3 away-notify', () => {
       awayer.register('awayuser4');
       await awayer.waitForLine(/001/);
 
-      const channel = `#noaway${Date.now()}`;
+      const channel = uniqueChannel('noaway');
       observer.send(`JOIN ${channel}`);
       awayer.send(`JOIN ${channel}`);
       await observer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
@@ -228,7 +228,7 @@ describe('IRCv3 away-notify', () => {
       await new Promise(r => setTimeout(r, 500));
 
       // Observer joins channel first
-      const channel = `#awayjoin${Date.now()}`;
+      const channel = uniqueChannel('awayjoin');
       observer.send(`JOIN ${channel}`);
       await observer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
       await new Promise(r => setTimeout(r, 300));
@@ -302,7 +302,7 @@ describe('IRCv3 account-notify', () => {
       observer.register('acctobs1');
       await observer.waitForLine(/001/);
 
-      const channel = `#acctnotify${Date.now()}`;
+      const channel = uniqueChannel('acctnotify');
       observer.send(`JOIN ${channel}`);
       await observer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -347,7 +347,7 @@ describe('IRCv3 account-notify', () => {
       client2.register('extjoin2');
       await client2.waitForLine(/001/);
 
-      const channel = `#extjoin${Date.now()}`;
+      const channel = uniqueChannel('extjoin');
       client1.send(`JOIN ${channel}`);
       await client1.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
       await new Promise(r => setTimeout(r, 300));
@@ -423,7 +423,7 @@ describe('IRCv3 invite-notify', () => {
       await invitee.waitForLine(/001/);
 
       // Op creates channel and member joins BEFORE setting +i
-      const channel = `#invite${Date.now()}`;
+      const channel = uniqueChannel('invite');
       op.send(`JOIN ${channel}`);
       await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 

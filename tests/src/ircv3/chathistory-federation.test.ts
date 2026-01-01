@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeAll } from 'vitest';
-import { createRawSocketClient, RawSocketClient, PRIMARY_SERVER, SECONDARY_SERVER } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, PRIMARY_SERVER, SECONDARY_SERVER, uniqueChannel } from '../helpers/index.js';
 
 /**
  * Chathistory Federation Tests
@@ -158,7 +158,7 @@ describe('IRCv3 Chathistory Federation', () => {
       await new Promise(r => setTimeout(r, 2000));
 
       // Step 4: Create a unique channel and send messages
-      const channelName = `#fedhist${Date.now()}`;
+      const channelName = uniqueChannel('fedhist');
       operClient.send(`JOIN ${channelName}`);
       await operClient.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -281,7 +281,7 @@ describe('IRCv3 Chathistory Federation', () => {
       client1.register('dedup1');
       await client1.waitForLine(/001/);
 
-      const channelName = `#dedup${Date.now()}`;
+      const channelName = uniqueChannel('dedup');
       client1.send(`JOIN ${channelName}`);
       await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -352,7 +352,7 @@ describe('IRCv3 Chathistory Federation', () => {
       client1.register('consist1');
       await client1.waitForLine(/001/);
 
-      const channelName = `#consist${Date.now()}`;
+      const channelName = uniqueChannel('consist');
       client1.send(`JOIN ${channelName}`);
       await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -448,7 +448,7 @@ describe('IRCv3 Chathistory Federation', () => {
       client1.register('order1');
       await client1.waitForLine(/001/);
 
-      const channelName = `#order${Date.now()}`;
+      const channelName = uniqueChannel('order');
       client1.send(`JOIN ${channelName}`);
       await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -539,7 +539,7 @@ describe('IRCv3 Chathistory Federation', () => {
       client2.register('mixed2');
       await client2.waitForLine(/001/);
 
-      const channelName = `#mixed${Date.now()}`;
+      const channelName = uniqueChannel('mixed');
 
       client1.send(`JOIN ${channelName}`);
       await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
@@ -620,7 +620,7 @@ describe('IRCv3 Chathistory Federation', () => {
         return;
       }
 
-      const channelName = `#netsplit${Date.now()}`;
+      const channelName = uniqueChannel('netsplit');
       operClient.send(`JOIN ${channelName}`);
       await operClient.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -738,7 +738,7 @@ describe('IRCv3 Chathistory Federation', () => {
         return;
       }
 
-      const channelName = `#catchup${Date.now()}`;
+      const channelName = uniqueChannel('catchup');
       operClient.send(`JOIN ${channelName}`);
       await operClient.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
