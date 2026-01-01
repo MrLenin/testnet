@@ -361,13 +361,12 @@ describe('WebSocket Edge Cases', () => {
   });
 
   describe('Reserved Bits (RSV1-3)', () => {
-    it('should handle frames with RSV bits set (no extensions)', async () => {
+    it('should reject frames with RSV bits set (no extensions)', async () => {
       socket = await createRawTLSConnection();
       await completeHandshake(socket);
 
       // Build frame with RSV1 bit set (0x40)
-      // Per RFC 6455, this MUST fail unless extension is negotiated
-      // However, Nefarious may be lenient
+      // Per RFC 6455 §5.2, this MUST fail unless extension is negotiated
       const payload = Buffer.from('NICK test\r\n', 'utf8');
       const mask = crypto.randomBytes(4);
       const masked = Buffer.alloc(payload.length);
@@ -382,7 +381,7 @@ describe('WebSocket Edge Cases', () => {
 
       socket.write(Buffer.concat([header, masked]));
 
-      // Server may close or ignore RSV bits
+      // Server MUST close connection per RFC 6455
       const result = await new Promise<'closed' | 'alive'>((resolve) => {
         const timeout = setTimeout(() => resolve('alive'), 2000);
         socket!.on('close', () => {
@@ -398,19 +397,17 @@ describe('WebSocket Edge Cases', () => {
         });
       });
 
-      // Document actual behavior
-      expect(['closed', 'alive']).toContain(result);
+      expect(result).toBe('closed');
     });
   });
 
   describe('Invalid Opcodes', () => {
-    it('should handle reserved opcode gracefully', async () => {
+    it('should reject reserved opcode', async () => {
       socket = await createRawTLSConnection();
       await completeHandshake(socket);
 
       // Opcode 0x03-0x07 and 0x0B-0x0F are reserved
-      // Per RFC 6455, server MUST fail the connection
-      // However, Nefarious may be lenient
+      // Per RFC 6455 §5.2, server MUST fail the connection
       const reservedOpcode = 0x03;
       const payload = Buffer.from('test', 'utf8');
       const mask = crypto.randomBytes(4);
@@ -426,7 +423,7 @@ describe('WebSocket Edge Cases', () => {
 
       socket.write(Buffer.concat([header, masked]));
 
-      // Server may close or ignore reserved opcodes
+      // Server MUST close connection per RFC 6455
       const result = await new Promise<'closed' | 'alive'>((resolve) => {
         const timeout = setTimeout(() => resolve('alive'), 2000);
         socket!.on('close', () => {
@@ -442,8 +439,7 @@ describe('WebSocket Edge Cases', () => {
         });
       });
 
-      // Document actual behavior
-      expect(['closed', 'alive']).toContain(result);
+      expect(result).toBe('closed');
     });
   });
 
@@ -458,13 +454,12 @@ describe('WebSocket Edge Cases', () => {
       expect(pong.payload.length).toBe(125);
     });
 
-    it('should handle control frame with >125-byte payload', async () => {
+    it('should reject control frame with >125-byte payload', async () => {
       socket = await createRawTLSConnection();
       await completeHandshake(socket);
 
       // Try to send PING with 126 byte payload (invalid per RFC 6455)
-      // Control frames MUST have payload <= 125 bytes
-      // However, Nefarious may be lenient
+      // Per RFC 6455 §5.5, control frames MUST have payload <= 125 bytes
       const oversizePayload = 'x'.repeat(126);
       const payload = Buffer.from(oversizePayload, 'utf8');
       const mask = crypto.randomBytes(4);
@@ -482,7 +477,7 @@ describe('WebSocket Edge Cases', () => {
 
       socket.write(Buffer.concat([header, masked]));
 
-      // Server may close or process the oversized control frame
+      // Server MUST close connection per RFC 6455
       const result = await new Promise<'closed' | 'alive'>((resolve) => {
         const timeout = setTimeout(() => resolve('alive'), 2000);
         socket!.on('close', () => {
@@ -498,8 +493,7 @@ describe('WebSocket Edge Cases', () => {
         });
       });
 
-      // Document actual behavior
-      expect(['closed', 'alive']).toContain(result);
+      expect(result).toBe('closed');
     });
   });
 
