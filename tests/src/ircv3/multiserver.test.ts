@@ -5,7 +5,8 @@
  * They require the 'linked' docker-compose profile to be active:
  *   docker compose --profile linked up -d
  *
- * Tests in this file will be skipped if the secondary server is not available.
+ * Tests in this file will be SKIPPED (visible in output) if secondary server
+ * is not available. Previously they would silently pass - now they show as skipped.
  */
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import {
@@ -16,31 +17,25 @@ import {
   SECONDARY_SERVER,
 } from '../helpers/index.js';
 
-// Check secondary server availability once at module load time
-let secondaryAvailable: boolean | null = null;
+// Check secondary server availability synchronously at module load time
+// Using top-level await (ESM) to determine skip condition before tests run
+const secondaryAvailable = await isSecondaryServerAvailable();
 
-async function checkSecondary(): Promise<boolean> {
-  if (secondaryAvailable === null) {
-    secondaryAvailable = await isSecondaryServerAvailable();
-    if (!secondaryAvailable) {
-      console.log('Secondary server not available - multi-server tests will be skipped');
-      console.log('Run with: docker compose --profile linked up -d');
-    }
-  }
-  return secondaryAvailable;
+if (!secondaryAvailable) {
+  console.log('\n⚠️  Secondary server not available - multi-server tests will be SKIPPED');
+  console.log('   To run these tests: docker compose --profile linked up -d\n');
 }
 
-describe('Multi-Server IRC', () => {
+// Use describe.skipIf to make skipped tests visible in output
+// This replaces the previous pattern of `if (await skipIfNoSecondary()) return;`
+// which made tests silently pass instead of showing as skipped
+describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
   const clients: RawSocketClient[] = [];
 
   const trackClient = (client: RawSocketClient): RawSocketClient => {
     clients.push(client);
     return client;
   };
-
-  beforeAll(async () => {
-    await checkSecondary();
-  });
 
   afterEach(() => {
     for (const client of clients) {
@@ -53,17 +48,8 @@ describe('Multi-Server IRC', () => {
     clients.length = 0;
   });
 
-  // Helper to skip tests when secondary is not available
-  const skipIfNoSecondary = async () => {
-    if (!(await checkSecondary())) {
-      return true;
-    }
-    return false;
-  };
-
   describe('Server Link Verification', () => {
     it('can connect to secondary server', async () => {
-      if (await skipIfNoSecondary()) return;
       const client = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
       await client.capLs();
@@ -76,7 +62,6 @@ describe('Multi-Server IRC', () => {
     });
 
     it('servers are linked (visible in LINKS)', async () => {
-      if (await skipIfNoSecondary()) return;
       const client = trackClient(await createClientOnServer(PRIMARY_SERVER));
 
       await client.capLs();
@@ -126,7 +111,6 @@ describe('Multi-Server IRC', () => {
 
   describe('Cross-Server Communication', () => {
     it('clients on different servers can message each other in a channel', async () => {
-      if (await skipIfNoSecondary()) return;
       // Client on primary server
       const client1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
       await client1.capLs();
@@ -165,7 +149,6 @@ describe('Multi-Server IRC', () => {
     });
 
     it('WHOIS shows user on remote server', async () => {
-      if (await skipIfNoSecondary()) return;
       // Client on primary server
       const client1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
       await client1.capLs();
@@ -195,7 +178,6 @@ describe('Multi-Server IRC', () => {
     });
 
     it('NICK change is visible across servers', async () => {
-      if (await skipIfNoSecondary()) return;
       // Client on primary server
       const client1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
       await client1.capLs();
@@ -235,7 +217,6 @@ describe('Multi-Server IRC', () => {
 
   describe('Cross-Server Metadata', () => {
     it('SASL authentication works on secondary server', async () => {
-      if (await skipIfNoSecondary()) return;
       // This test requires an account to exist
       // Skip if not set up
       const testAccount = process.env.TEST_ACCOUNT ?? 'testuser';
@@ -274,7 +255,6 @@ describe('Multi-Server IRC', () => {
     });
 
     it('metadata is visible across servers', async () => {
-      if (await skipIfNoSecondary()) return;
       // This test requires metadata capability and an account with metadata
       const client1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const client2 = trackClient(await createClientOnServer(SECONDARY_SERVER));
@@ -320,7 +300,6 @@ describe('Multi-Server IRC', () => {
 
   describe('Cross-Server Channel Operations', () => {
     it('MODE changes propagate across servers', async () => {
-      if (await skipIfNoSecondary()) return;
       const client1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const client2 = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -361,7 +340,6 @@ describe('Multi-Server IRC', () => {
     });
 
     it('KICK works across servers', async () => {
-      if (await skipIfNoSecondary()) return;
       const op = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const user = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -403,7 +381,6 @@ describe('Multi-Server IRC', () => {
     });
 
     it('TOPIC changes propagate across servers', async () => {
-      if (await skipIfNoSecondary()) return;
       const client1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const client2 = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -445,7 +422,6 @@ describe('Multi-Server IRC', () => {
     });
 
     it('PART message propagates across servers', async () => {
-      if (await skipIfNoSecondary()) return;
       const client1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const client2 = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -488,7 +464,6 @@ describe('Multi-Server IRC', () => {
 
   describe('Cross-Server User Operations', () => {
     it('private message works across servers', async () => {
-      if (await skipIfNoSecondary()) return;
       const sender = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const receiver = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -525,7 +500,6 @@ describe('Multi-Server IRC', () => {
     });
 
     it('NOTICE works across servers', async () => {
-      if (await skipIfNoSecondary()) return;
       const sender = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const receiver = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -558,7 +532,6 @@ describe('Multi-Server IRC', () => {
     });
 
     it('QUIT propagates across servers', async () => {
-      if (await skipIfNoSecondary()) return;
       const quitter = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const observer = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -601,7 +574,6 @@ describe('Multi-Server IRC', () => {
 
   describe('Cross-Server IRCv3 Features', () => {
     it('account-tag visible on remote server', async () => {
-      if (await skipIfNoSecondary()) return;
       const client1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const client2 = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -643,7 +615,6 @@ describe('Multi-Server IRC', () => {
     });
 
     it('echo-message works on remote server', async () => {
-      if (await skipIfNoSecondary()) return;
       const client = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
       await client.capLs();
@@ -680,7 +651,6 @@ describe('Multi-Server IRC', () => {
     });
 
     it('server-time capability works on both servers', async () => {
-      if (await skipIfNoSecondary()) return;
       const client1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const client2 = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -729,7 +699,6 @@ describe('Multi-Server IRC', () => {
 
   describe('Cross-Server Channel Rename', () => {
     it('RENAME propagates to remote server', async () => {
-      if (await skipIfNoSecondary()) return;
       const op = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const observer = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -775,7 +744,6 @@ describe('Multi-Server IRC', () => {
 
   describe('Cross-Server Message Redaction', () => {
     it('REDACT propagates to remote server', async () => {
-      if (await skipIfNoSecondary()) return;
       const sender = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const observer = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -835,7 +803,6 @@ describe('Multi-Server IRC', () => {
 
   describe('Cross-Server AWAY Status', () => {
     it('AWAY message propagates across servers', async () => {
-      if (await skipIfNoSecondary()) return;
       const client1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const client2 = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -879,7 +846,6 @@ describe('Multi-Server IRC', () => {
     });
 
     it('AWAY status visible in WHOIS across servers', async () => {
-      if (await skipIfNoSecondary()) return;
       const awayclient = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const querier = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -918,7 +884,6 @@ describe('Multi-Server IRC', () => {
 
   describe('Cross-Server SETNAME', () => {
     it('SETNAME propagates across servers', async () => {
-      if (await skipIfNoSecondary()) return;
       const client1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const client2 = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -965,7 +930,6 @@ describe('Multi-Server IRC', () => {
 
   describe('Cross-Server TAGMSG', () => {
     it('TAGMSG propagates across servers', async () => {
-      if (await skipIfNoSecondary()) return;
       const sender = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const receiver = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -1009,7 +973,6 @@ describe('Multi-Server IRC', () => {
 
   describe('Cross-Server INVITE', () => {
     it('INVITE propagates across servers', async () => {
-      if (await skipIfNoSecondary()) return;
       const op = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const invitee = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -1052,7 +1015,6 @@ describe('Multi-Server IRC', () => {
 
   describe('Cross-Server Read Marker', () => {
     it('MARKREAD syncs across servers for same account', async () => {
-      if (await skipIfNoSecondary()) return;
       // This test requires authentication to the same account on both servers
       const client1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const client2 = trackClient(await createClientOnServer(SECONDARY_SERVER));
@@ -1110,7 +1072,6 @@ describe('Multi-Server IRC', () => {
 
   describe('Cross-Server CHGHOST', () => {
     it('CHGHOST propagates across servers', async () => {
-      if (await skipIfNoSecondary()) return;
       const client1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const client2 = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -1148,7 +1109,6 @@ describe('Multi-Server IRC', () => {
 
   describe('Cross-Server Extended-Join', () => {
     it('extended-join info visible across servers', async () => {
-      if (await skipIfNoSecondary()) return;
       const joiner = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const observer = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -1192,7 +1152,6 @@ describe('Multi-Server IRC', () => {
 
   describe('Cross-Server Batch Operations', () => {
     it('batch capability works on both servers', async () => {
-      if (await skipIfNoSecondary()) return;
       const client1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const client2 = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -1218,7 +1177,6 @@ describe('Multi-Server IRC', () => {
     });
 
     it('multiline BATCH message propagates across servers', async () => {
-      if (await skipIfNoSecondary()) return;
       const sender = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const receiver = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -1305,7 +1263,6 @@ describe('Multi-Server IRC', () => {
     });
 
     it('BATCH chathistory response works on secondary server', async () => {
-      if (await skipIfNoSecondary()) return;
       const sender = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const querier = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -1373,7 +1330,6 @@ describe('Multi-Server IRC', () => {
 
   describe('Cross-Server Metadata', () => {
     it('metadata visible across servers', async () => {
-      if (await skipIfNoSecondary()) return;
       const setter = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const querier = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -1425,7 +1381,6 @@ describe('Multi-Server IRC', () => {
     });
 
     it('metadata subscriptions work cross-server', async () => {
-      if (await skipIfNoSecondary()) return;
       const setter = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const subscriber = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -1480,7 +1435,6 @@ describe('Multi-Server IRC', () => {
 
   describe('Cross-Server Webpush', () => {
     it('webpush capability available on both servers', async () => {
-      if (await skipIfNoSecondary()) return;
       const client1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const client2 = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -1509,7 +1463,6 @@ describe('Multi-Server IRC', () => {
 
   describe('Cross-Server Account-Notify', () => {
     it('account-notify visible cross-server', async () => {
-      if (await skipIfNoSecondary()) return;
       const client1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const client2 = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -1546,7 +1499,6 @@ describe('Multi-Server IRC', () => {
 
   describe('Cross-Server NICK Change', () => {
     it('NICK change propagates across servers', async () => {
-      if (await skipIfNoSecondary()) return;
       const changer = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const observer = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -1591,7 +1543,6 @@ describe('Multi-Server IRC', () => {
 
   describe('Cross-Server WHO/WHOIS', () => {
     it('WHOIS returns info for remote users', async () => {
-      if (await skipIfNoSecondary()) return;
       const target = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const querier = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -1626,7 +1577,6 @@ describe('Multi-Server IRC', () => {
     });
 
     it('WHO returns users from both servers', async () => {
-      if (await skipIfNoSecondary()) return;
       const client1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const client2 = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -1681,7 +1631,6 @@ describe('Multi-Server IRC', () => {
 
   describe('Cross-Server Chathistory', () => {
     it('chathistory includes messages from both servers', async () => {
-      if (await skipIfNoSecondary()) return;
       const sender1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const sender2 = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
@@ -1756,7 +1705,6 @@ describe('Multi-Server IRC', () => {
    */
   describe('Cross-Server PM Chathistory Consent', () => {
     it('PM history stored when both users opt in (cross-server)', async () => {
-      if (await skipIfNoSecondary()) return;
 
       const sender = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const receiver = trackClient(await createClientOnServer(SECONDARY_SERVER));
@@ -1817,7 +1765,6 @@ describe('Multi-Server IRC', () => {
     });
 
     it('PM history NOT stored when remote user has not opted in', async () => {
-      if (await skipIfNoSecondary()) return;
 
       const sender = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const receiver = trackClient(await createClientOnServer(SECONDARY_SERVER));
@@ -1872,7 +1819,6 @@ describe('Multi-Server IRC', () => {
     });
 
     it('metadata propagates correctly for consent check (cross-server METADATA GET)', async () => {
-      if (await skipIfNoSecondary()) return;
 
       const setter = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const querier = trackClient(await createClientOnServer(SECONDARY_SERVER));
@@ -1912,7 +1858,6 @@ describe('Multi-Server IRC', () => {
     });
 
     it('remote explicit opt-out prevents PM storage', async () => {
-      if (await skipIfNoSecondary()) return;
 
       const sender = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const receiver = trackClient(await createClientOnServer(SECONDARY_SERVER));
@@ -1972,7 +1917,6 @@ describe('Multi-Server IRC', () => {
     });
 
     it('PM stored on both ends with mutual consent (bidirectional)', async () => {
-      if (await skipIfNoSecondary()) return;
 
       const client1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const client2 = trackClient(await createClientOnServer(SECONDARY_SERVER));
