@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient } from './helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel } from './helpers/index.js';
 
 /**
  * Error Condition Tests
@@ -225,7 +225,7 @@ describe('Error Conditions', () => {
       await target.waitForLine(/001/);
 
       // Target joins a channel
-      const channel = `#kicknoton${Date.now()}`;
+      const channel = uniqueChannel('kicknoton');
       target.send(`JOIN ${channel}`);
       await target.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -264,7 +264,7 @@ describe('Error Conditions', () => {
       user2.register('target1');
       await user2.waitForLine(/001/);
 
-      const channel = `#opneeded${Date.now()}`;
+      const channel = uniqueChannel('opneeded');
       op.send(`JOIN ${channel}`);
       await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -308,7 +308,7 @@ describe('Error Conditions', () => {
       target.register('target2');
       await target.waitForLine(/001/);
 
-      const channel = `#kickprivs${Date.now()}`;
+      const channel = uniqueChannel('kickprivs');
       op.send(`JOIN ${channel}`);
       await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -348,7 +348,7 @@ describe('Error Conditions', () => {
       outside.register('outside1');
       await outside.waitForLine(/001/);
 
-      const channel = `#kicknothere${Date.now()}`;
+      const channel = uniqueChannel('kicknothere');
       op.send(`JOIN ${channel}`);
       await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -451,7 +451,7 @@ describe('Error Conditions', () => {
       user.register('inviteuser1');
       await user.waitForLine(/001/);
 
-      const channel = `#inviteonly${Date.now()}`;
+      const channel = uniqueChannel('inviteonly');
       op.send(`JOIN ${channel}`);
       await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -488,7 +488,7 @@ describe('Error Conditions', () => {
       user.register('limituser1');
       await user.waitForLine(/001/);
 
-      const channel = `#limited${Date.now()}`;
+      const channel = uniqueChannel('limited');
       op.send(`JOIN ${channel}`);
       await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -525,7 +525,7 @@ describe('Error Conditions', () => {
       user.register('banned1');
       await user.waitForLine(/001/);
 
-      const channel = `#banned${Date.now()}`;
+      const channel = uniqueChannel('banned');
       op.send(`JOIN ${channel}`);
       await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -562,7 +562,7 @@ describe('Error Conditions', () => {
       user.register('keyuser1');
       await user.waitForLine(/001/);
 
-      const channel = `#keyed${Date.now()}`;
+      const channel = uniqueChannel('keyed');
       op.send(`JOIN ${channel}`);
       await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -599,7 +599,7 @@ describe('Error Conditions', () => {
       outside.register('outside2');
       await outside.waitForLine(/001/);
 
-      const channel = `#noexternal${Date.now()}`;
+      const channel = uniqueChannel('noexternal');
       inside.send(`JOIN ${channel}`);
       await inside.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 

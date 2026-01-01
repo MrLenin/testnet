@@ -1,3 +1,5 @@
+import { randomUUID } from 'crypto';
+
 /**
  * IRCv3 Capability Bundles
  *
@@ -61,4 +63,26 @@ export function getMergedCaps(...bundles: CapBundle[]): string[] {
     }
   }
   return [...caps];
+}
+
+/**
+ * Generate a unique ID for test isolation.
+ * Use this instead of Date.now() to avoid collisions between parallel tests.
+ */
+export function uniqueId(): string {
+  return randomUUID().slice(0, 8);
+}
+
+/**
+ * Generate a unique channel name for test isolation.
+ */
+export function uniqueChannel(prefix = 'test'): string {
+  return `#${prefix}-${uniqueId()}`;
+}
+
+/**
+ * Generate a unique nickname for test isolation.
+ */
+export function uniqueNick(prefix = 'user'): string {
+  return `${prefix}${uniqueId().slice(0, 5)}`;
 }
