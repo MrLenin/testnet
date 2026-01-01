@@ -154,15 +154,10 @@ describe('IRCv3 SASL Authentication', () => {
       const payload = Buffer.from(`${TEST_ACCOUNT}\0${TEST_ACCOUNT}\0${TEST_PASSWORD}`).toString('base64');
       client.send(`AUTHENTICATE ${payload}`);
 
-      try {
-        // 900 = RPL_LOGGEDIN (success indicator before 903)
-        // 903 = RPL_SASLSUCCESS
-        const result = await client.waitForLine(/(900|903)/, 3000);
-        expect(result).toMatch(/(900|903)/);
-      } catch {
-        // May fail if account doesn't exist
-        console.log('SASL 900/903 not received - test account may not exist');
-      }
+      // Server MUST send 900 (RPL_LOGGEDIN) or 903 (RPL_SASLSUCCESS)
+      // Test will fail if account doesn't exist - that's expected
+      const result = await client.waitForLine(/(900|903)/, 5000);
+      expect(result).toMatch(/(900|903)/);
       client.send('QUIT');
     });
   });
@@ -173,24 +168,15 @@ describe('IRCv3 SASL Authentication', () => {
 
       await client.capLs();
       const result = await client.capReq(['sasl']);
-
-      if (!result.ack.includes('sasl')) {
-        client.send('QUIT');
-        return; // SASL not available
-      }
+      expect(result.ack).toContain('sasl');
 
       // Try EXTERNAL without certificate
       client.send('AUTHENTICATE EXTERNAL');
 
-      // Should fail - we don't have a client cert
-      try {
-        const response = await client.waitForLine(/(AUTHENTICATE|90[0-9])/, 3000);
-        // Either server doesn't support EXTERNAL (will send error)
-        // or it expects a cert we don't have
-        expect(response).toBeDefined();
-      } catch {
-        // Timeout is acceptable - server may ignore unsupported mechanism
-      }
+      // Server should respond - either with AUTHENTICATE continuation or error
+      // Without a client cert, we expect either 904/908 (failed) or AUTHENTICATE +
+      const response = await client.waitForLine(/(AUTHENTICATE|90[048])/, 5000);
+      expect(response).toBeDefined();
       client.send('QUIT');
     });
   });
@@ -203,12 +189,8 @@ describe('IRCv3 SASL Authentication', () => {
       await client.capReq(['sasl', 'extended-join', 'account-tag']);
 
       const success = await saslPlain(client, TEST_ACCOUNT, TEST_PASSWORD);
-
-      if (!success) {
-        console.log('Skipping account tag test - SASL auth failed');
-        client.send('QUIT');
-        return;
-      }
+      // This test REQUIRES SASL to work - fail if it doesn't
+      expect(success).toBe(true);
 
       client.capEnd();
       client.register('accttest1');
@@ -223,7 +205,6 @@ describe('IRCv3 SASL Authentication', () => {
       // With extended-join, JOIN includes account name
       // Format: :nick!user@host JOIN #channel accountname :realname
       // Or with account-tag: @account=name :nick!user@host JOIN #channel
-      console.log('JOIN message:', joinMsg);
       client.send('QUIT');
     });
   });
@@ -343,14 +324,9 @@ describe('SASL Error Handling', () => {
     // Abort authentication
     client.send('AUTHENTICATE *');
 
-    // Should receive 906 (RPL_SASLABORTED)
-    try {
-      const response = await client.waitForLine(/906/i, 3000);
-      expect(response).toMatch(/906/);
-    } catch {
-      // Some implementations may just silently allow re-auth
-      console.log('No explicit abort response');
-    }
+    // Server MUST send 906 (RPL_SASLABORTED)
+    const response = await client.waitForLine(/906/i, 5000);
+    expect(response).toMatch(/906/);
     client.send('QUIT');
   });
 
@@ -399,14 +375,10 @@ describe('SASL Error Handling', () => {
 
     client.send('AUTHENTICATE PLAIN');
 
-    // Should receive error - SASL not enabled
-    try {
-      const response = await client.waitForLine(/90[0-9]|4\d\d|FAIL/i, 3000);
-      expect(response).toBeDefined();
-      console.log('AUTHENTICATE without sasl cap:', response);
-    } catch {
-      // Some servers may just ignore
-    }
+    // Server MUST respond with error - SASL not enabled
+    // 904 = ERR_SASLFAIL, 410 = ERR_INVALIDCAPCMD
+    const response = await client.waitForLine(/90[0-9]|4\d\d|FAIL/i, 5000);
+    expect(response).toBeDefined();
     client.send('QUIT');
   });
 
