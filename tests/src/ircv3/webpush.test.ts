@@ -63,12 +63,11 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
       // Real format: WEBPUSH REGISTER <endpoint> <p256dh> <auth>
       client.send('WEBPUSH REGISTER https://push.example.com/endpoint dummy-p256dh-key dummy-auth-key');
 
-      try {
-        const response = await client.waitForLine(/WEBPUSH|FAIL|4\d\d/i, 5000);
-        console.log('WEBPUSH REGISTER response:', response);
-      } catch {
-        console.log('No WEBPUSH response - may require authentication');
-      }
+      // Server MUST respond to WEBPUSH command - either success or error
+      const response = await client.waitForLine(/WEBPUSH|FAIL|4\d\d|900|ACCOUNT/i, 5000);
+      // Response should indicate success, failure, or authentication requirement
+      expect(response).toBeDefined();
+      expect(response.length).toBeGreaterThan(0);
 
       client.send('QUIT');
     });
@@ -84,19 +83,18 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
 
       // First register
       client.send('WEBPUSH REGISTER https://push.example.com/test dummy-key dummy-auth');
-      await new Promise(r => setTimeout(r, 500));
+      // Wait for registration response
+      await client.waitForLine(/WEBPUSH|FAIL|4\d\d|ACCOUNT/i, 5000);
 
       client.clearRawBuffer();
 
       // Then unregister
       client.send('WEBPUSH UNREGISTER https://push.example.com/test');
 
-      try {
-        const response = await client.waitForLine(/WEBPUSH|FAIL|4\d\d/i, 5000);
-        console.log('WEBPUSH UNREGISTER response:', response);
-      } catch {
-        console.log('No WEBPUSH UNREGISTER response');
-      }
+      // Server MUST respond to UNREGISTER command
+      const response = await client.waitForLine(/WEBPUSH|FAIL|4\d\d|ACCOUNT/i, 5000);
+      expect(response).toBeDefined();
+      expect(response.length).toBeGreaterThan(0);
 
       client.send('QUIT');
     });
@@ -114,12 +112,10 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
 
       client.send('WEBPUSH LIST');
 
-      try {
-        const response = await client.waitForLine(/WEBPUSH|FAIL|4\d\d/i, 5000);
-        console.log('WEBPUSH LIST response:', response);
-      } catch {
-        console.log('No WEBPUSH LIST response');
-      }
+      // Server MUST respond to LIST command
+      const response = await client.waitForLine(/WEBPUSH|FAIL|4\d\d|ACCOUNT/i, 5000);
+      expect(response).toBeDefined();
+      expect(response.length).toBeGreaterThan(0);
 
       client.send('QUIT');
     });
@@ -137,16 +133,13 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
 
       client.clearRawBuffer();
 
-      // Try to register without being authenticated
+      // Try to register without being authenticated to a services account
       client.send('WEBPUSH REGISTER https://push.example.com/unauth dummy dummy');
 
-      try {
-        const response = await client.waitForLine(/WEBPUSH|FAIL|ACCOUNT_REQUIRED|4\d\d/i, 3000);
-        console.log('Unauthenticated WEBPUSH response:', response);
-        // May require authentication
-      } catch {
-        console.log('No response for unauthenticated WEBPUSH');
-      }
+      // Server MUST respond - either success or error requiring authentication
+      const response = await client.waitForLine(/WEBPUSH|FAIL|ACCOUNT|4\d\d/i, 5000);
+      expect(response).toBeDefined();
+      expect(response.length).toBeGreaterThan(0);
 
       client.send('QUIT');
     });
@@ -164,16 +157,13 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
 
       client.clearRawBuffer();
 
-      // Invalid endpoint (not https)
+      // Invalid endpoint (not https) - server should reject or handle gracefully
       client.send('WEBPUSH REGISTER http://insecure.example.com/push dummy dummy');
 
-      try {
-        const response = await client.waitForLine(/WEBPUSH|FAIL|4\d\d/i, 3000);
-        console.log('Invalid endpoint response:', response);
-        // Should fail - endpoints must be https
-      } catch {
-        console.log('No response for invalid endpoint');
-      }
+      // Server MUST respond - either rejection or graceful handling
+      const response = await client.waitForLine(/WEBPUSH|FAIL|4\d\d|ACCOUNT/i, 5000);
+      expect(response).toBeDefined();
+      expect(response.length).toBeGreaterThan(0);
 
       client.send('QUIT');
     });
@@ -192,12 +182,10 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
       // Unregister something that doesn't exist
       client.send('WEBPUSH UNREGISTER https://nonexistent.example.com/push');
 
-      try {
-        const response = await client.waitForLine(/WEBPUSH|FAIL|4\d\d/i, 3000);
-        console.log('Nonexistent subscription response:', response);
-      } catch {
-        console.log('No response for nonexistent unregister');
-      }
+      // Server MUST respond - either error or graceful handling
+      const response = await client.waitForLine(/WEBPUSH|FAIL|4\d\d|ACCOUNT/i, 5000);
+      expect(response).toBeDefined();
+      expect(response.length).toBeGreaterThan(0);
 
       client.send('QUIT');
     });
@@ -272,31 +260,27 @@ describe('IRCv3 Event Playback (draft/event-playback)', () => {
       // Request history - with event-playback, should include JOINs, etc.
       client.send(`CHATHISTORY LATEST ${channel} * 20`);
 
-      try {
-        const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-        expect(batchStart).toBeDefined();
+      // Server MUST respond with batch start
+      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      expect(batchStart).toBeDefined();
+      expect(batchStart).toMatch(/BATCH \+\S+ chathistory/i);
 
-        // Collect messages until BATCH end
-        let messages: string[] = [];
-        let done = false;
-        const startTime = Date.now();
-        while (!done && Date.now() - startTime < 3000) {
-          try {
-            const line = await client.waitForLine(/PRIVMSG|JOIN|PART|MODE|BATCH/, 500);
-            messages.push(line);
-            if (line.match(/BATCH -/)) {
-              done = true;
-            }
-          } catch {
-            break;
-          }
+      // Collect messages until BATCH end
+      const messages: string[] = [];
+      let done = false;
+      const startTime = Date.now();
+      while (!done && Date.now() - startTime < 3000) {
+        const line = await client.waitForLine(/PRIVMSG|JOIN|PART|MODE|BATCH/, 1000).catch(() => null);
+        if (!line) break;
+        messages.push(line);
+        if (line.match(/BATCH -/)) {
+          done = true;
         }
-
-        console.log('Event playback messages:', messages.length);
-        // With event-playback, history may include JOIN events
-      } catch {
-        console.log('Event playback history retrieval failed');
       }
+
+      // Should have received batch end and at least some messages
+      expect(done).toBe(true);
+      expect(messages.length).toBeGreaterThan(0);
 
       client.send('QUIT');
     });

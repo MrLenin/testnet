@@ -240,13 +240,11 @@ describe('IRCv3 away-notify', () => {
       await awayer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
       // Observer should receive AWAY notification when awayer joins
-      try {
-        const awayMsg = await observer.waitForLine(/AWAY.*awayuser5/i, 3000);
-        expect(awayMsg).toContain('Already away');
-      } catch {
-        // Some implementations only send AWAY on status change, not on join
-        console.log('No AWAY on join - may be implementation-specific');
-      }
+      // Per IRCv3 spec, servers SHOULD send AWAY status for users who are away on JOIN
+      const awayMsg = await observer.waitForLine(/AWAY.*awayuser5/i, 5000);
+      expect(awayMsg).toBeDefined();
+      expect(awayMsg).toContain('Already away');
+
       observer.send('QUIT');
       awayer.send('QUIT');
     });
@@ -443,14 +441,13 @@ describe('IRCv3 invite-notify', () => {
       // Op invites invitee
       op.send(`INVITE invitee1 ${channel}`);
 
-      // Member should see the INVITE (with invite-notify)
-      try {
-        const inviteMsg = await member.waitForLine(/INVITE.*invitee1/i, 5000);
-        expect(inviteMsg).toContain('invitee1');
-        expect(inviteMsg).toContain(channel);
-      } catch {
-        console.log('invite-notify may require op status to see invites');
-      }
+      // Member should see the INVITE (with invite-notify capability enabled)
+      // Per IRCv3 spec, channel members with invite-notify see invites
+      const inviteMsg = await member.waitForLine(/INVITE.*invitee1/i, 5000);
+      expect(inviteMsg).toBeDefined();
+      expect(inviteMsg).toContain('invitee1');
+      expect(inviteMsg).toContain(channel);
+
       op.send('QUIT');
       member.send('QUIT');
       invitee.send('QUIT');
