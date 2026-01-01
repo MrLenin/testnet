@@ -1,5 +1,5 @@
-import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient, CAP_BUNDLES } from './helpers/index.js';
+import { describe, it, expect, afterEach } from 'vitest';
+import { createRawSocketClient, RawSocketClient, uniqueChannel } from './helpers/index.js';
 
 /**
  * Core IRC Command Tests
@@ -35,7 +35,7 @@ describe('Core IRC Commands', () => {
       client.register('modetest1');
       await client.waitForLine(/001/);
 
-      const channel = `#mode${Date.now()}`;
+      const channel = uniqueChannel('mode');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -59,7 +59,7 @@ describe('Core IRC Commands', () => {
       client.register('modetest2');
       await client.waitForLine(/001/);
 
-      const channel = `#modem${Date.now()}`;
+      const channel = uniqueChannel('modem');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -87,7 +87,7 @@ describe('Core IRC Commands', () => {
       user.register('newop1');
       await user.waitForLine(/001/);
 
-      const channel = `#modeo${Date.now()}`;
+      const channel = uniqueChannel('modeo');
       op.send(`JOIN ${channel}`);
       await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -123,7 +123,7 @@ describe('Core IRC Commands', () => {
       user.register('nonop1');
       await user.waitForLine(/001/);
 
-      const channel = `#moderej${Date.now()}`;
+      const channel = uniqueChannel('moderej');
       op.send(`JOIN ${channel}`);
       await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -152,7 +152,7 @@ describe('Core IRC Commands', () => {
       client.register('modequery1');
       await client.waitForLine(/001/);
 
-      const channel = `#modeq${Date.now()}`;
+      const channel = uniqueChannel('modeq');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -188,7 +188,7 @@ describe('Core IRC Commands', () => {
       user.register('kicked1');
       await user.waitForLine(/001/);
 
-      const channel = `#kick${Date.now()}`;
+      const channel = uniqueChannel('kick');
       op.send(`JOIN ${channel}`);
       await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -231,7 +231,7 @@ describe('Core IRC Commands', () => {
       user2.register('target1');
       await user2.waitForLine(/001/);
 
-      const channel = `#kickrej${Date.now()}`;
+      const channel = uniqueChannel('kickrej');
       op.send(`JOIN ${channel}`);
       await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -275,7 +275,7 @@ describe('Core IRC Commands', () => {
       observer.register('observer1');
       await observer.waitForLine(/001/);
 
-      const channel = `#kickbc${Date.now()}`;
+      const channel = uniqueChannel('kickbc');
       op.send(`JOIN ${channel}`);
       await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -310,7 +310,7 @@ describe('Core IRC Commands', () => {
       client.register('topicset1');
       await client.waitForLine(/001/);
 
-      const channel = `#topic${Date.now()}`;
+      const channel = uniqueChannel('topic');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -333,7 +333,7 @@ describe('Core IRC Commands', () => {
       client.register('topicq1');
       await client.waitForLine(/001/);
 
-      const channel = `#topicq${Date.now()}`;
+      const channel = uniqueChannel('topicq');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -369,7 +369,7 @@ describe('Core IRC Commands', () => {
       user.register('topicuser1');
       await user.waitForLine(/001/);
 
-      const channel = `#topict${Date.now()}`;
+      const channel = uniqueChannel('topict');
       op.send(`JOIN ${channel}`);
       await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -410,7 +410,7 @@ describe('Core IRC Commands', () => {
       invitee.register('invitee1');
       await invitee.waitForLine(/001/);
 
-      const channel = `#invite${Date.now()}`;
+      const channel = uniqueChannel('invite');
       inviter.send(`JOIN ${channel}`);
       await inviter.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -443,7 +443,7 @@ describe('Core IRC Commands', () => {
       user.register('invitejoin1');
       await user.waitForLine(/001/);
 
-      const channel = `#invitei${Date.now()}`;
+      const channel = uniqueChannel('invitei');
       op.send(`JOIN ${channel}`);
       await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -511,7 +511,7 @@ describe('Core IRC Commands', () => {
       await target.waitForLine(/001/);
 
       // Target joins a channel
-      const channel = `#whoischan${Date.now()}`;
+      const channel = uniqueChannel('whoischan');
       target.send(`JOIN ${channel}`);
       await target.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
       await new Promise(r => setTimeout(r, 300));
@@ -565,7 +565,7 @@ describe('Core IRC Commands', () => {
       client2.register('whouser2');
       await client2.waitForLine(/001/);
 
-      const channel = `#who${Date.now()}`;
+      const channel = uniqueChannel('who');
       client1.send(`JOIN ${channel}`);
       client2.send(`JOIN ${channel}`);
       await client1.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
@@ -596,7 +596,7 @@ describe('Core IRC Commands', () => {
       await client.waitForLine(/001/);
 
       // Create a channel
-      const channel = `#list${Date.now()}`;
+      const channel = uniqueChannel('list');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -622,7 +622,7 @@ describe('Core IRC Commands', () => {
       client.register('partuser1');
       await client.waitForLine(/001/);
 
-      const channel = `#part${Date.now()}`;
+      const channel = uniqueChannel('part');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -651,7 +651,7 @@ describe('Core IRC Commands', () => {
       stayer.register('stayer1');
       await stayer.waitForLine(/001/);
 
-      const channel = `#partbc${Date.now()}`;
+      const channel = uniqueChannel('partbc');
       leaver.send(`JOIN ${channel}`);
       stayer.send(`JOIN ${channel}`);
       await leaver.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
@@ -687,7 +687,7 @@ describe('Core IRC Commands', () => {
       observer.register('quitobs1');
       await observer.waitForLine(/001/);
 
-      const channel = `#quit${Date.now()}`;
+      const channel = uniqueChannel('quit');
       quitter.send(`JOIN ${channel}`);
       observer.send(`JOIN ${channel}`);
       await quitter.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));

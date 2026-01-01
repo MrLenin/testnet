@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient } from './helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId } from './helpers/index.js';
 
 /**
  * Edge Case Tests
@@ -41,7 +41,7 @@ describe('Edge Cases', () => {
       receiver.register('emptyrecv1');
       await receiver.waitForLine(/001/);
 
-      const channel = `#empty${Date.now()}`;
+      const channel = uniqueChannel('empty');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
       await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
@@ -77,7 +77,7 @@ describe('Edge Cases', () => {
       receiver.register('longrecv1');
       await receiver.waitForLine(/001/);
 
-      const channel = `#long${Date.now()}`;
+      const channel = uniqueChannel('long');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
       await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
@@ -115,7 +115,7 @@ describe('Edge Cases', () => {
       receiver.register('unirecv1');
       await receiver.waitForLine(/001/);
 
-      const channel = `#unicode${Date.now()}`;
+      const channel = uniqueChannel('unicode');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
       await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
@@ -150,7 +150,7 @@ describe('Edge Cases', () => {
       receiver.register('colrecv1');
       await receiver.waitForLine(/001/);
 
-      const channel = `#colons${Date.now()}`;
+      const channel = uniqueChannel('colons');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
       await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
@@ -294,7 +294,7 @@ describe('Edge Cases', () => {
       client.register('rapidjp1');
       await client.waitForLine(/001/);
 
-      const channel = `#rapid${Date.now()}`;
+      const channel = uniqueChannel('rapid');
 
       // Rapidly join and part
       for (let i = 0; i < 5; i++) {
@@ -329,7 +329,7 @@ describe('Edge Cases', () => {
       receiver.register('rapidrecv1');
       await receiver.waitForLine(/001/);
 
-      const channel = `#rapidmsg${Date.now()}`;
+      const channel = uniqueChannel('rapidmsg');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
       await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
@@ -368,7 +368,7 @@ describe('Edge Cases', () => {
       // Join multiple channels
       const channels = [];
       for (let i = 0; i < 5; i++) {
-        const channel = `#multi${Date.now()}${i}`;
+        const channel = `#multi-${uniqueId()}`;
         channels.push(channel);
         client.send(`JOIN ${channel}`);
       }
@@ -395,7 +395,7 @@ describe('Edge Cases', () => {
       client.register('samemode1');
       await client.waitForLine(/001/);
 
-      const channel = `#samemode${Date.now()}`;
+      const channel = uniqueChannel('samemode');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -420,7 +420,7 @@ describe('Edge Cases', () => {
       client.register('unsetmode1');
       await client.waitForLine(/001/);
 
-      const channel = `#unsetmode${Date.now()}`;
+      const channel = uniqueChannel('unsetmode');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -477,7 +477,7 @@ describe('Edge Cases', () => {
       receiver.register('actionrecv1');
       await receiver.waitForLine(/001/);
 
-      const channel = `#action${Date.now()}`;
+      const channel = uniqueChannel('action');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
       await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));

@@ -26,6 +26,9 @@ export {
   CAP_BUNDLES,
   getCaps,
   getMergedCaps,
+  uniqueId,
+  uniqueChannel,
+  uniqueNick,
   type CapBundle,
 } from './cap-bundles.js';
 
