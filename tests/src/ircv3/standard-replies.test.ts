@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel } from '../helpers/index.js';
 
 /**
  * Standard Replies Tests (standard-replies)
@@ -202,7 +202,7 @@ describe('IRCv3 Standard Replies', () => {
       client.register('srlong1');
       await client.waitForLine(/001/);
 
-      const channel = `#srlong${Date.now()}`;
+      const channel = uniqueChannel('srlong');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 

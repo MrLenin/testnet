@@ -27,6 +27,7 @@ import {
   parseFrame,
   WS_OPCODE,
 } from '../helpers/websocket-client';
+import { uniqueId } from '../helpers/index';
 
 const WS_HOST = process.env.IRC_HOST ?? 'nefarious';
 const WS_PORT = parseInt(process.env.WS_PORT ?? '8443');
@@ -417,7 +418,7 @@ describe('WebSocket Support', () => {
       client = await createWebSocketClient();
 
       // Send WebSocket PING
-      const pingPayload = 'test-ping-' + Date.now();
+      const pingPayload = 'test-ping-' + uniqueId();
       client.ping(pingPayload);
 
       // Wait for PONG response

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel } from '../helpers/index.js';
 
 /**
  * Read Marker Tests (draft/read-marker)
@@ -58,7 +58,7 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       client.register('rmset1');
       await client.waitForLine(/001/);
 
-      const channel = `#rmset${Date.now()}`;
+      const channel = uniqueChannel('rmset');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -93,7 +93,7 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       client.register('rmquery1');
       await client.waitForLine(/001/);
 
-      const channel = `#rmquery${Date.now()}`;
+      const channel = uniqueChannel('rmquery');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -123,7 +123,7 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       client.register('rmmsgid1');
       await client.waitForLine(/001/);
 
-      const channel = `#rmmsgid${Date.now()}`;
+      const channel = uniqueChannel('rmmsgid');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
@@ -221,7 +221,7 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       client.register('rmerr2');
       await client.waitForLine(/001/);
 
-      const channel = `#rmerr${Date.now()}`;
+      const channel = uniqueChannel('rmerr');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 

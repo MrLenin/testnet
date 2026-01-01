@@ -7,7 +7,7 @@
  * These tests require X3 services to be running for account management.
  */
 import { describe, it, expect, afterEach, beforeAll } from 'vitest';
-import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueId } from '../helpers/index.js';
 
 describe('IRCv3 Account Registration (draft/account-registration)', () => {
   const clients: RawSocketClient[] = [];
@@ -76,7 +76,7 @@ describe('IRCv3 Account Registration (draft/account-registration)', () => {
       await client.capReq(['draft/account-registration', 'standard-replies']);
 
       // Don't send CAP END yet - still in pre-registration
-      const uniqueAccount = `regtest_${Date.now()}`;
+      const uniqueAccount = `regtest_${uniqueId()}`;
       client.send(`REGISTER ${uniqueAccount} * testpassword123`);
 
       // Should get some response (success, failure, or verification needed)
@@ -157,7 +157,7 @@ describe('IRCv3 Account Registration (draft/account-registration)', () => {
       await client.capLs();
       await client.capReq(['draft/account-registration', 'standard-replies']);
 
-      const uniqueAccount = `emailtest_${Date.now()}`;
+      const uniqueAccount = `emailtest_${uniqueId()}`;
       client.send(`REGISTER ${uniqueAccount} test@example.com testpassword123`);
 
       // Should get some response (REGISTER success/verify or FAIL)
@@ -172,7 +172,7 @@ describe('IRCv3 Account Registration (draft/account-registration)', () => {
       await client.capLs();
       await client.capReq(['draft/account-registration', 'standard-replies']);
 
-      const uniqueAccount = `noemail_${Date.now()}`;
+      const uniqueAccount = `noemail_${uniqueId()}`;
       client.send(`REGISTER ${uniqueAccount} * testpassword123`);
 
       // Should get some response
@@ -196,7 +196,7 @@ describe('IRCv3 Account Registration (draft/account-registration)', () => {
       await client.waitForLine(/001/);
 
       // Try to REGISTER while already connected
-      const uniqueAccount = `afterauth_${Date.now()}`;
+      const uniqueAccount = `afterauth_${uniqueId()}`;
       client.send(`REGISTER ${uniqueAccount} * testpassword123`);
 
       // Should get FAIL ALREADY_AUTHENTICATED or similar
@@ -280,7 +280,7 @@ describe('IRCv3 Account Registration (draft/account-registration)', () => {
       await client2.capLs();
       await client2.capReq(['draft/account-registration', 'standard-replies']);
 
-      const testAccount = `duptest_${Date.now()}`;
+      const testAccount = `duptest_${uniqueId()}`;
 
       // First registration attempt
       client1.send(`REGISTER ${testAccount} * testpassword123`);

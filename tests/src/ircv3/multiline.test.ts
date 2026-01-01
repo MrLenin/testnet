@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient, createIRCv3Client, IRCv3TestClient } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, createIRCv3Client, IRCv3TestClient, uniqueChannel, uniqueId } from '../helpers/index.js';
 
 /**
  * Multiline Message Tests (draft/multiline)
@@ -103,7 +103,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       await client2.waitForLine(/001/);
 
       // Both join channel
-      const channelName = `#mltest${Date.now()}`;
+      const channelName = uniqueChannel('mltest');
       client1.send(`JOIN ${channelName}`);
       client2.send(`JOIN ${channelName}`);
       await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
@@ -111,7 +111,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       await new Promise(r => setTimeout(r, 500));
 
       // Send multiline message using BATCH
-      const batchId = `ml${Date.now()}`;
+      const batchId = `ml${uniqueId()}`;
       client1.send(`BATCH +${batchId} draft/multiline ${channelName}`);
       client1.send(`@batch=${batchId} PRIVMSG ${channelName} :Line 1 of message`);
       client1.send(`@batch=${batchId} PRIVMSG ${channelName} :Line 2 of message`);
@@ -152,7 +152,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client.send('USER mlcont1 0 * :mlcont1');
       await client.waitForLine(/001/);
 
-      const channelName = `#mlcont${Date.now()}`;
+      const channelName = uniqueChannel('mlcont');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
       // Wait for all post-join messages
@@ -161,7 +161,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client.clearRawBuffer();
 
       // Send multiline with continuation marker
-      const batchId = `mlc${Date.now()}`;
+      const batchId = `mlc${uniqueId()}`;
       client.send(`BATCH +${batchId} draft/multiline ${channelName}`);
       client.send(`@batch=${batchId} PRIVMSG ${channelName} :First line`);
       client.send(`@batch=${batchId};draft/multiline-concat PRIVMSG ${channelName} :continued...`);
@@ -254,12 +254,12 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client.send('USER mlover1 0 * :mlover1');
       await client.waitForLine(/001/);
 
-      const channelName = `#mlover${Date.now()}`;
+      const channelName = uniqueChannel('mlover');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
       // Send more lines than allowed
-      const batchId = `over${Date.now()}`;
+      const batchId = `over${uniqueId()}`;
       client.send(`BATCH +${batchId} draft/multiline ${channelName}`);
 
       for (let i = 0; i < maxLines + 10; i++) {
@@ -292,7 +292,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client.send('USER mllabel1 0 * :mllabel1');
       await client.waitForLine(/001/);
 
-      const channelName = `#mllabel${Date.now()}`;
+      const channelName = uniqueChannel('mllabel');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -301,8 +301,8 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client.clearRawBuffer();
 
       // Send multiline with label
-      const label = `label${Date.now()}`;
-      const batchId = `lblml${Date.now()}`;
+      const label = `label${uniqueId()}`;
+      const batchId = `lblml${uniqueId()}`;
 
       client.send(`@label=${label} BATCH +${batchId} draft/multiline ${channelName}`);
       client.send(`@batch=${batchId} PRIVMSG ${channelName} :Labeled line 1`);
@@ -361,7 +361,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send('USER mlmsgid2 0 * :mlmsgid2');
       await client2.waitForLine(/001/);
 
-      const channelName = `#mlmsgid${Date.now()}`;
+      const channelName = uniqueChannel('mlmsgid');
       // Join client1 first, then client2 to avoid race condition
       client1.send(`JOIN ${channelName}`);
       await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
@@ -376,7 +376,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.clearRawBuffer();
 
       // Send multiline message
-      const batchId = `msgidml${Date.now()}`;
+      const batchId = `msgidml${uniqueId()}`;
       client1.send(`BATCH +${batchId} draft/multiline ${channelName}`);
       client1.send(`@batch=${batchId} PRIVMSG ${channelName} :Message with msgid`);
       client1.send(`BATCH -${batchId}`);

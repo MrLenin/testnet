@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel } from '../helpers/index.js';
 
 /**
  * User Change Tests
@@ -87,7 +87,7 @@ describe('IRCv3 setname', () => {
       observer.register('snobserver1');
       await observer.waitForLine(/001/);
 
-      const channel = `#snnotify${Date.now()}`;
+      const channel = uniqueChannel('snnotify');
       changer.send(`JOIN ${channel}`);
       observer.send(`JOIN ${channel}`);
       await changer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
@@ -150,7 +150,7 @@ describe('IRCv3 setname', () => {
       observer.register('snnocapobs1');
       await observer.waitForLine(/001/);
 
-      const channel = `#snnocap${Date.now()}`;
+      const channel = uniqueChannel('snnocap');
       changer.send(`JOIN ${channel}`);
       observer.send(`JOIN ${channel}`);
       await changer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
@@ -398,7 +398,7 @@ describe('IRCv3 account-tag', () => {
       receiver.register('atrecv2');
       await receiver.waitForLine(/001/);
 
-      const channel = `#attag${Date.now()}`;
+      const channel = uniqueChannel('attag');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
       await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));

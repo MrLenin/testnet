@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId } from '../helpers/index.js';
 
 /**
  * Echo Message Tests (echo-message capability)
@@ -55,11 +55,11 @@ describe('IRCv3 Echo Message', () => {
       client.register('echomsg1');
       await client.waitForLine(/001/);
 
-      const channelName = `#echo${Date.now()}`;
+      const channelName = uniqueChannel('echo');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
-      const testMsg = `Echo test ${Date.now()}`;
+      const testMsg = `Echo test ${uniqueId()}`;
       client.send(`PRIVMSG ${channelName} :${testMsg}`);
 
       // Should receive our own message back
@@ -85,7 +85,7 @@ describe('IRCv3 Echo Message', () => {
       client2.register('echorecv1');
       await client2.waitForLine(/001/);
 
-      const testMsg = `Private echo ${Date.now()}`;
+      const testMsg = `Private echo ${uniqueId()}`;
       client1.send(`PRIVMSG echorecv1 :${testMsg}`);
 
       // Sender should receive echo
@@ -105,7 +105,7 @@ describe('IRCv3 Echo Message', () => {
       client.register('echotime1');
       await client.waitForLine(/001/);
 
-      const channelName = `#echotime${Date.now()}`;
+      const channelName = uniqueChannel('echotime');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -132,7 +132,7 @@ describe('IRCv3 Echo Message', () => {
       client.register('echoid1');
       await client.waitForLine(/001/);
 
-      const channelName = `#echoid${Date.now()}`;
+      const channelName = uniqueChannel('echoid');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -161,11 +161,11 @@ describe('IRCv3 Echo Message', () => {
       client.register('echonotice1');
       await client.waitForLine(/001/);
 
-      const channelName = `#echonotice${Date.now()}`;
+      const channelName = uniqueChannel('echonotice');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
-      const testNotice = `Notice test ${Date.now()}`;
+      const testNotice = `Notice test ${uniqueId()}`;
       client.send(`NOTICE ${channelName} :${testNotice}`);
 
       const echo = await client.waitForLine(new RegExp(`NOTICE.*${testNotice}`));
@@ -186,11 +186,11 @@ describe('IRCv3 Echo Message', () => {
       client.register('noecho1');
       await client.waitForLine(/001/);
 
-      const channelName = `#noecho${Date.now()}`;
+      const channelName = uniqueChannel('noecho');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
-      const testMsg = `No echo test ${Date.now()}`;
+      const testMsg = `No echo test ${uniqueId()}`;
       client.send(`PRIVMSG ${channelName} :${testMsg}`);
 
       // Should NOT receive echo - expect timeout
@@ -214,11 +214,11 @@ describe('IRCv3 Echo Message', () => {
       client.register('echolabel1');
       await client.waitForLine(/001/);
 
-      const channelName = `#echolabel${Date.now()}`;
+      const channelName = uniqueChannel('echolabel');
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
-      const label = `lbl${Date.now()}`;
+      const label = `lbl${uniqueId()}`;
       client.send(`@label=${label} PRIVMSG ${channelName} :Labeled message`);
 
       const echo = await client.waitForLine(/PRIVMSG.*Labeled message/, 3000);
@@ -274,7 +274,7 @@ describe('IRCv3 TAGMSG', () => {
     client2.register('tagmsg2');
     await client2.waitForLine(/001/);
 
-    const channelName = `#tagmsg${Date.now()}`;
+    const channelName = uniqueChannel('tagmsg');
     // Join client1 first, then client2 so client2 sees client1's JOIN
     client1.send(`JOIN ${channelName}`);
     await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
@@ -314,7 +314,7 @@ describe('IRCv3 TAGMSG', () => {
     client.register('tagecho1');
     await client.waitForLine(/001/);
 
-    const channelName = `#tagecho${Date.now()}`;
+    const channelName = uniqueChannel('tagecho');
     client.send(`JOIN ${channelName}`);
     await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
@@ -363,7 +363,7 @@ describe('IRCv3 Labeled Response', () => {
     await client.waitForLine(/001/);
 
     // Send WHO with label
-    const label = `who${Date.now()}`;
+    const label = `who${uniqueId()}`;
     client.send(`@label=${label} WHO labeltest2`);
 
     const response = await client.waitForLine(new RegExp(`@.*label=${label}|BATCH.*${label}|352|315`), 3000);
@@ -382,7 +382,7 @@ describe('IRCv3 Labeled Response', () => {
     await client.waitForLine(/001/);
 
     // Send command that produces no output
-    const label = `ack${Date.now()}`;
+    const label = `ack${uniqueId()}`;
     client.send(`@label=${label} MODE acktest1 +i`);
 
     // Should get ACK or labeled MODE response

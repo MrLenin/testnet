@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient, uniqueChannel } from './helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId } from './helpers/index.js';
 
 /**
  * Core IRC Command Tests
@@ -316,7 +316,7 @@ describe('Core IRC Commands', () => {
 
       client.clearRawBuffer();
 
-      const topic = `Test topic ${Date.now()}`;
+      const topic = `Test topic ${uniqueId()}`;
       client.send(`TOPIC ${channel} :${topic}`);
 
       const topicResponse = await client.waitForLine(/TOPIC|332/i, 5000);

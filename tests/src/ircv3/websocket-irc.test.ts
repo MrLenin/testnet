@@ -207,7 +207,7 @@ describe('IRC-over-WebSocket Protocol', () => {
 
     it('should send and receive PRIVMSG in channel', async () => {
       const channel = uniqueChannel();
-      const message = `Hello from WebSocket ${Date.now()}`;
+      const message = `Hello from WebSocket ${randomUUID().slice(0, 8)}`;
 
       // Two clients in same channel
       const client1 = trackClient(await createWebSocketClient());
@@ -332,7 +332,7 @@ describe('IRC-over-WebSocket Protocol', () => {
       const client2 = trackClient(await createWebSocketClient());
       const nick1 = uniqueNick('wsdm1');
       const nick2 = uniqueNick('wsdm2');
-      const message = `Private message ${Date.now()}`;
+      const message = `Private message ${randomUUID().slice(0, 8)}`;
 
       await client1.register(nick1);
       await client2.register(nick2);
@@ -354,7 +354,7 @@ describe('IRC-over-WebSocket Protocol', () => {
       const client2 = trackClient(await createWebSocketClient());
       const nick1 = uniqueNick('wsnot1');
       const nick2 = uniqueNick('wsnot2');
-      const notice = `Notice ${Date.now()}`;
+      const notice = `Notice ${randomUUID().slice(0, 8)}`;
 
       await client1.register(nick1);
       await client2.register(nick2);

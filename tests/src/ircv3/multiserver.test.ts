@@ -15,6 +15,8 @@ import {
   isSecondaryServerAvailable,
   PRIMARY_SERVER,
   SECONDARY_SERVER,
+  uniqueChannel,
+  uniqueId,
 } from '../helpers/index.js';
 
 // Check secondary server availability synchronously at module load time
@@ -137,7 +139,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await new Promise(r => setTimeout(r, 1000));
 
       // Client 1 sends a message
-      const testMessage = `cross-server-test-${Date.now()}`;
+      const testMessage = `cross-server-test-${uniqueId()}`;
       client1.send(`PRIVMSG ${channel} :${testMessage}`);
 
       // Client 2 should receive it despite being on a different server
@@ -279,7 +281,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
 
       // Set metadata on client 1 (on primary server)
       const testKey = 'testkey';
-      const testValue = `testvalue-${Date.now()}`;
+      const testValue = `testvalue-${uniqueId()}`;
       client1.send(`METADATA SET * ${testKey} :${testValue}`);
 
       // Wait for metadata to propagate
@@ -313,7 +315,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client2.register('modeobs1');
       await client2.waitForLine(/001/);
 
-      const channel = `#modetest${Date.now()}`;
+      const channel = uniqueChannel('modetest');
       client1.send(`JOIN ${channel}`);
       client2.send(`JOIN ${channel}`);
 
@@ -353,7 +355,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       user.register('kickuser1');
       await user.waitForLine(/001/);
 
-      const channel = `#kicktest${Date.now()}`;
+      const channel = uniqueChannel('kicktest');
       op.send(`JOIN ${channel}`);
       await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
       await new Promise(r => setTimeout(r, 300));
@@ -394,7 +396,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client2.register('topicobs1');
       await client2.waitForLine(/001/);
 
-      const channel = `#topictest${Date.now()}`;
+      const channel = uniqueChannel('topictest');
       client1.send(`JOIN ${channel}`);
       client2.send(`JOIN ${channel}`);
 
@@ -405,7 +407,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client2.clearRawBuffer();
 
       // Set topic from primary server
-      const newTopic = `Cross-server topic test ${Date.now()}`;
+      const newTopic = `Cross-server topic test ${uniqueId()}`;
       client1.send(`TOPIC ${channel} :${newTopic}`);
 
       // Client 2 should see TOPIC change
@@ -435,7 +437,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client2.register('partobs1');
       await client2.waitForLine(/001/);
 
-      const channel = `#parttest${Date.now()}`;
+      const channel = uniqueChannel('parttest');
       client1.send(`JOIN ${channel}`);
       client2.send(`JOIN ${channel}`);
 
@@ -483,7 +485,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       receiver.clearRawBuffer();
 
       // Send PM across servers
-      const testMsg = `Private message test ${Date.now()}`;
+      const testMsg = `Private message test ${uniqueId()}`;
       sender.send(`PRIVMSG pmrecver1 :${testMsg}`);
 
       // Receiver should get the message
@@ -516,7 +518,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await new Promise(r => setTimeout(r, 500));
       receiver.clearRawBuffer();
 
-      const testNotice = `Notice test ${Date.now()}`;
+      const testNotice = `Notice test ${uniqueId()}`;
       sender.send(`NOTICE noticerecv1 :${testNotice}`);
 
       try {
@@ -546,7 +548,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await observer.waitForLine(/001/);
 
       // Both join same channel
-      const channel = `#quittest${Date.now()}`;
+      const channel = uniqueChannel('quittest');
       quitter.send(`JOIN ${channel}`);
       observer.send(`JOIN ${channel}`);
 
@@ -589,7 +591,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client2.register('acctag2');
       await client2.waitForLine(/001/);
 
-      const channel = `#acctag${Date.now()}`;
+      const channel = uniqueChannel('acctag');
       client1.send(`JOIN ${channel}`);
       client2.send(`JOIN ${channel}`);
 
@@ -629,13 +631,13 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client.register('echo1');
       await client.waitForLine(/001/);
 
-      const channel = `#echotest${Date.now()}`;
+      const channel = uniqueChannel('echotest');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
       client.clearRawBuffer();
 
-      const testMsg = `Echo test ${Date.now()}`;
+      const testMsg = `Echo test ${uniqueId()}`;
       client.send(`PRIVMSG ${channel} :${testMsg}`);
 
       // Should receive own message back
@@ -666,7 +668,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client2.register('time2');
       await client2.waitForLine(/001/);
 
-      const channel = `#timetest${Date.now()}`;
+      const channel = uniqueChannel('timetest');
       client1.send(`JOIN ${channel}`);
       client2.send(`JOIN ${channel}`);
 
@@ -714,8 +716,8 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       observer.register('renameobs1');
       await observer.waitForLine(/001/);
 
-      const oldChannel = `#renold${Date.now()}`;
-      const newChannel = `#rennew${Date.now()}`;
+      const oldChannel = uniqueChannel('renold');
+      const newChannel = uniqueChannel('rennew');
 
       op.send(`JOIN ${oldChannel}`);
       observer.send(`JOIN ${oldChannel}`);
@@ -759,7 +761,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       observer.register('redactobs1');
       await observer.waitForLine(/001/);
 
-      const channel = `#redactcross${Date.now()}`;
+      const channel = uniqueChannel('redactcross');
       sender.send(`JOIN ${channel}`);
       observer.send(`JOIN ${channel}`);
 
@@ -819,7 +821,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client2.waitForLine(/001/);
 
       // Both join same channel for away-notify
-      const channel = `#awaytest${Date.now()}`;
+      const channel = uniqueChannel('awaytest');
       client1.send(`JOIN ${channel}`);
       client2.send(`JOIN ${channel}`);
 
@@ -900,7 +902,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client2.waitForLine(/001/);
 
       // Both join channel
-      const channel = `#setname${Date.now()}`;
+      const channel = uniqueChannel('setname');
       client1.send(`JOIN ${channel}`);
       client2.send(`JOIN ${channel}`);
 
@@ -911,7 +913,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client2.clearRawBuffer();
 
       // Client 1 changes realname
-      const newName = `New Realname ${Date.now()}`;
+      const newName = `New Realname ${uniqueId()}`;
       client1.send(`SETNAME :${newName}`);
 
       // Client 2 should see SETNAME
@@ -945,7 +947,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       receiver.register('tagmsg2');
       await receiver.waitForLine(/001/);
 
-      const channel = `#tagmsgtest${Date.now()}`;
+      const channel = uniqueChannel('tagmsgtest');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
 
@@ -988,7 +990,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await invitee.waitForLine(/001/);
 
       // Op creates invite-only channel
-      const channel = `#invitetest${Date.now()}`;
+      const channel = uniqueChannel('invitetest');
       op.send(`JOIN ${channel}`);
       await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
       op.send(`MODE ${channel} +i`);
@@ -1038,7 +1040,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client2.waitForLine(/001/);
 
       // Verify read-marker works on both servers
-      const channel = `#readmarktest${Date.now()}`;
+      const channel = uniqueChannel('readmarktest');
       client1.send(`JOIN ${channel}`);
       client2.send(`JOIN ${channel}`);
 
@@ -1088,7 +1090,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client2.waitForLine(/001/);
 
       // Both join channel
-      const channel = `#chghost${Date.now()}`;
+      const channel = uniqueChannel('chghost');
       client1.send(`JOIN ${channel}`);
       client2.send(`JOIN ${channel}`);
 
@@ -1124,7 +1126,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await observer.waitForLine(/001/);
 
       // Observer creates channel first
-      const channel = `#extjoin${Date.now()}`;
+      const channel = uniqueChannel('extjoin');
       observer.send(`JOIN ${channel}`);
       await observer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
       await new Promise(r => setTimeout(r, 300));
@@ -1207,7 +1209,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await receiver.waitForLine(/001/);
 
       // Both join channel
-      const channel = `#mlcross${Date.now()}`;
+      const channel = uniqueChannel('mlcross');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
       await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
@@ -1217,8 +1219,8 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       receiver.clearRawBuffer();
 
       // Send multiline BATCH from primary server
-      const batchId = `ml${Date.now()}`;
-      const uniqueMarker = `MLTEST${Date.now()}`;
+      const batchId = `ml${uniqueId()}`;
+      const uniqueMarker = `MLTEST${uniqueId()}`;
       sender.send(`BATCH +${batchId} draft/multiline ${channel}`);
       sender.send(`@batch=${batchId} PRIVMSG ${channel} :${uniqueMarker} line 1`);
       sender.send(`@batch=${batchId} PRIVMSG ${channel} :${uniqueMarker} line 2`);
@@ -1286,7 +1288,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await querier.waitForLine(/001/);
 
       // Both join channel
-      const channel = `#chbatch${Date.now()}`;
+      const channel = uniqueChannel('chbatch');
       sender.send(`JOIN ${channel}`);
       querier.send(`JOIN ${channel}`);
       await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
@@ -1294,7 +1296,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await new Promise(r => setTimeout(r, 500));
 
       // Sender sends messages from primary
-      const marker = `batchtest${Date.now()}`;
+      const marker = `batchtest${uniqueId()}`;
       sender.send(`PRIVMSG ${channel} :${marker} message 1`);
       sender.send(`PRIVMSG ${channel} :${marker} message 2`);
       await new Promise(r => setTimeout(r, 1000));
@@ -1352,7 +1354,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await querier.waitForLine(/001/);
 
       // Both join channel
-      const channel = `#metadata${Date.now()}`;
+      const channel = uniqueChannel('metadata');
       setter.send(`JOIN ${channel}`);
       querier.send(`JOIN ${channel}`);
 
@@ -1403,7 +1405,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await subscriber.waitForLine(/001/);
 
       // Both join channel
-      const channel = `#metasub${Date.now()}`;
+      const channel = uniqueChannel('metasub');
       setter.send(`JOIN ${channel}`);
       subscriber.send(`JOIN ${channel}`);
 
@@ -1479,7 +1481,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client2.waitForLine(/001/);
 
       // Both join channel
-      const channel = `#accnotify${Date.now()}`;
+      const channel = uniqueChannel('accnotify');
       client1.send(`JOIN ${channel}`);
       client2.send(`JOIN ${channel}`);
 
@@ -1513,7 +1515,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await observer.waitForLine(/001/);
 
       // Both join channel
-      const channel = `#nicktest${Date.now()}`;
+      const channel = uniqueChannel('nicktest');
       changer.send(`JOIN ${channel}`);
       observer.send(`JOIN ${channel}`);
 
@@ -1524,7 +1526,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       observer.clearRawBuffer();
 
       // Change nick
-      const newNick = `nicknew${Date.now() % 10000}`;
+      const newNick = `nicknew${uniqueId().slice(0,4)}`;
       changer.send(`NICK ${newNick}`);
 
       // Observer should see NICK change
@@ -1591,7 +1593,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client2.waitForLine(/001/);
 
       // Both join same channel
-      const channel = `#whotest${Date.now()}`;
+      const channel = uniqueChannel('whotest');
       client1.send(`JOIN ${channel}`);
       client2.send(`JOIN ${channel}`);
 
@@ -1647,7 +1649,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await sender2.waitForLine(/001/);
 
       // Both join same channel
-      const channel = `#chathist${Date.now()}`;
+      const channel = uniqueChannel('chathist');
       sender1.send(`JOIN ${channel}`);
       sender2.send(`JOIN ${channel}`);
 
@@ -1708,7 +1710,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
 
       const sender = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const receiver = trackClient(await createClientOnServer(SECONDARY_SERVER));
-      const uniqueId = Date.now();
+      const testId = uniqueId();
 
       await sender.capLs();
       await sender.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
@@ -1768,7 +1770,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
 
       const sender = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const receiver = trackClient(await createClientOnServer(SECONDARY_SERVER));
-      const uniqueId = Date.now();
+      const testId = uniqueId();
 
       await sender.capLs();
       await sender.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
@@ -1822,7 +1824,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
 
       const setter = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const querier = trackClient(await createClientOnServer(SECONDARY_SERVER));
-      const uniqueId = Date.now();
+      const testId = uniqueId();
 
       await setter.capLs();
       await setter.capReq(['draft/metadata-2']);
@@ -1861,7 +1863,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
 
       const sender = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const receiver = trackClient(await createClientOnServer(SECONDARY_SERVER));
-      const uniqueId = Date.now();
+      const testId = uniqueId();
 
       await sender.capLs();
       await sender.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
@@ -1920,7 +1922,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
 
       const client1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
       const client2 = trackClient(await createClientOnServer(SECONDARY_SERVER));
-      const uniqueId = Date.now();
+      const testId = uniqueId();
 
       await client1.capLs();
       await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);

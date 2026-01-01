@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId } from '../helpers/index.js';
 
 /**
  * Keycloak Integration Tests
@@ -635,7 +635,7 @@ describe('Keycloak Integration', () => {
       }
 
       // Create unique Keycloak user
-      const uniqueUser = `kcauto${Date.now() % 100000}`;
+      const uniqueUser = `kcauto${uniqueId().slice(0,5)}`;
       const uniqueEmail = `${uniqueUser}@example.com`;
       const uniquePass = 'testpass123';
 
@@ -1483,7 +1483,7 @@ async function authenticateSecondUser(
 
     await client.waitForLine(/903/, 5000);
     client.capEnd();
-    client.register(`${username.slice(0, 7)}${Date.now() % 1000}`);
+    client.register(`${username.slice(0, 7)}${uniqueId().slice(0,3)}`);
     await client.waitForLine(/001/);
 
     return client;
@@ -1549,7 +1549,7 @@ describe('Keycloak Bidirectional Sync', () => {
         return;
       }
 
-      const channelName = `#bidisync${Date.now() % 100000}`;
+      const channelName = uniqueChannel('bidisync');
       const groupName = channelName.replace('#', '');
 
       // Cleanup any existing group first
@@ -1574,7 +1574,7 @@ describe('Keycloak Bidirectional Sync', () => {
       }
 
       client.capEnd();
-      client.register(`bisync${Date.now() % 10000}`);
+      client.register(`bisync${uniqueId().slice(0,4)}`);
       await client.waitForLine(/001/);
 
       // Register channel (becomes owner - should create Keycloak group)
@@ -1628,7 +1628,7 @@ describe('Keycloak Bidirectional Sync', () => {
       }
 
       // Create a second Keycloak user for this test
-      const secondUser = `bisyncadd${Date.now() % 100000}`;
+      const secondUser = `bisyncadd${uniqueId().slice(0,5)}`;
       const secondEmail = `${secondUser}@example.com`;
       const secondPass = 'testpass123';
 
@@ -1638,7 +1638,7 @@ describe('Keycloak Bidirectional Sync', () => {
         return;
       }
 
-      const channelName = `#bisyncadd${Date.now() % 100000}`;
+      const channelName = uniqueChannel('bisyncadd');
 
       try {
         // Connect as first user and register channel
@@ -1660,7 +1660,7 @@ describe('Keycloak Bidirectional Sync', () => {
         }
 
         ownerClient.capEnd();
-        ownerClient.register(`bisown${Date.now() % 10000}`);
+        ownerClient.register(`bisown${uniqueId().slice(0,4)}`);
         await ownerClient.waitForLine(/001/);
 
         // Register channel
@@ -1734,7 +1734,7 @@ describe('Keycloak Bidirectional Sync', () => {
       }
 
       // Create a second Keycloak user
-      const secondUser = `bisyncclvl${Date.now() % 100000}`;
+      const secondUser = `bisyncclvl${uniqueId().slice(0,5)}`;
       const secondEmail = `${secondUser}@example.com`;
       const secondPass = 'testpass123';
 
@@ -1744,7 +1744,7 @@ describe('Keycloak Bidirectional Sync', () => {
         return;
       }
 
-      const channelName = `#bisyncclvl${Date.now() % 100000}`;
+      const channelName = uniqueChannel('bisyncclvl');
 
       try {
         // Connect as owner
@@ -1766,7 +1766,7 @@ describe('Keycloak Bidirectional Sync', () => {
         }
 
         ownerClient.capEnd();
-        ownerClient.register(`clvl${Date.now() % 10000}`);
+        ownerClient.register(`clvl${uniqueId().slice(0,4)}`);
         await ownerClient.waitForLine(/001/);
 
         // Register channel
@@ -1835,7 +1835,7 @@ describe('Keycloak Bidirectional Sync', () => {
       }
 
       // Create a second user
-      const secondUser = `bisyncdel${Date.now() % 100000}`;
+      const secondUser = `bisyncdel${uniqueId().slice(0,5)}`;
       const secondEmail = `${secondUser}@example.com`;
       const secondPass = 'testpass123';
 
@@ -1845,7 +1845,7 @@ describe('Keycloak Bidirectional Sync', () => {
         return;
       }
 
-      const channelName = `#bisyncdel${Date.now() % 100000}`;
+      const channelName = uniqueChannel('bisyncdel');
 
       try {
         const ownerClient = trackClient(await createRawSocketClient());
@@ -1866,7 +1866,7 @@ describe('Keycloak Bidirectional Sync', () => {
         }
 
         ownerClient.capEnd();
-        ownerClient.register(`delown${Date.now() % 10000}`);
+        ownerClient.register(`delown${uniqueId().slice(0,4)}`);
         await ownerClient.waitForLine(/001/);
 
         // Register channel and add user
@@ -1931,7 +1931,7 @@ describe('Keycloak Bidirectional Sync', () => {
         return;
       }
 
-      const channelName = `#bisyncunreg${Date.now() % 100000}`;
+      const channelName = uniqueChannel('bisyncunreg');
 
       const client = trackClient(await createRawSocketClient());
       await client.capLs();
@@ -1951,7 +1951,7 @@ describe('Keycloak Bidirectional Sync', () => {
       }
 
       client.capEnd();
-      client.register(`unreg${Date.now() % 10000}`);
+      client.register(`unreg${uniqueId().slice(0,4)}`);
       await client.waitForLine(/001/);
 
       // Register channel
@@ -2009,10 +2009,10 @@ describe('Keycloak Bidirectional Sync', () => {
       const client = trackClient(await createRawSocketClient());
       await client.capLs();
       client.capEnd();
-      client.register(`synerr${Date.now() % 10000}`);
+      client.register(`synerr${uniqueId().slice(0,4)}`);
       await client.waitForLine(/001/);
 
-      const channelName = `#syncerr${Date.now() % 100000}`;
+      const channelName = uniqueChannel('syncerr');
 
       // Join and register without authentication
       client.send(`JOIN ${channelName}`);

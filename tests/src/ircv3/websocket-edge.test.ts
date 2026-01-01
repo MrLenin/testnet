@@ -28,6 +28,7 @@ import {
   getFrameSize,
   WS_OPCODE,
 } from '../helpers/websocket-client';
+import { uniqueChannel } from '../helpers/index';
 
 const WS_HOST = process.env.IRC_HOST ?? 'nefarious';
 const WS_PORT = parseInt(process.env.WS_PORT ?? '8443');
@@ -521,7 +522,7 @@ describe('WebSocket Edge Cases', () => {
     it('should handle burst of text frames', async () => {
       client = await createWebSocketClient();
       const nick = uniqueNick('wsburst');
-      const channel = `#burst${Date.now()}`;
+      const channel = uniqueChannel('burst');
       await client.register(nick);
 
       client.send(`JOIN ${channel}`);
