@@ -96,29 +96,23 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       client.send(`@label=${label1} PING :first`);
       client.send(`@label=${label2} PING :second`);
 
-      try {
-        // Collect responses
-        const responses: string[] = [];
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000 && responses.length < 2) {
-          try {
-            const line = await client.waitForLine(/PONG|label=/i, 500);
-            responses.push(line);
-          } catch {
-            break;
-          }
+      // Collect at least 2 PONG responses
+      const responses: string[] = [];
+      const startTime = Date.now();
+      while (Date.now() - startTime < 5000 && responses.length < 2) {
+        try {
+          const line = await client.waitForLine(/PONG|label=/i, 1000);
+          responses.push(line);
+        } catch {
+          // Continue collecting until timeout
         }
-
-        console.log('Labeled responses:', responses);
-        // Verify labels are correctly matched
-        if (responses.length >= 2) {
-          // Both responses should contain their respective labels
-          expect(responses.some(r => r.includes(label1) || r.includes('first'))).toBe(true);
-          expect(responses.some(r => r.includes(label2) || r.includes('second'))).toBe(true);
-        }
-      } catch {
-        console.log('Multiple labeled responses failed');
       }
+
+      // Server MUST respond to both PING commands
+      expect(responses.length).toBeGreaterThanOrEqual(2);
+      // Both responses should contain their respective labels or payloads
+      expect(responses.some(r => r.includes(label1) || r.includes('first'))).toBe(true);
+      expect(responses.some(r => r.includes(label2) || r.includes('second'))).toBe(true);
 
       client.send('QUIT');
     });
@@ -144,24 +138,20 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       const label = `who-${Date.now()}`;
       client.send(`@label=${label} WHO ${channel}`);
 
-      try {
-        // May receive BATCH start with labeled-response type
-        const response = await client.waitForLine(/BATCH|352|315|label=/i, 5000);
-        console.log('WHO response with label:', response);
+      // Server MUST respond with BATCH or WHO replies (352/315)
+      const response = await client.waitForLine(/BATCH|352|315|label=/i, 5000);
+      expect(response).toBeDefined();
 
-        // Collect remaining WHO responses
-        const startTime = Date.now();
-        while (Date.now() - startTime < 3000) {
-          try {
-            const line = await client.waitForLine(/352|315|BATCH/i, 500);
-            if (line.includes('315')) break; // End of WHO
-            if (line.includes('BATCH -')) break;
-          } catch {
-            break;
-          }
+      // Collect remaining WHO responses until end (315)
+      const startTime = Date.now();
+      while (Date.now() - startTime < 5000) {
+        try {
+          const line = await client.waitForLine(/352|315|BATCH/i, 1000);
+          if (line.includes('315')) break; // End of WHO
+          if (line.includes('BATCH -')) break;
+        } catch {
+          break;
         }
-      } catch {
-        console.log('Labeled WHO failed');
       }
 
       client.send('QUIT');
@@ -217,12 +207,9 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       // Empty label value
       client.send('@label= PING :test');
 
-      try {
-        const response = await client.waitForLine(/PONG|FAIL/i, 3000);
-        console.log('Empty label response:', response);
-      } catch {
-        console.log('No response for empty label');
-      }
+      // Server MUST respond to PING (even with empty label)
+      const response = await client.waitForLine(/PONG|FAIL/i, 5000);
+      expect(response).toBeDefined();
 
       client.send('QUIT');
     });
@@ -242,12 +229,9 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       const longLabel = 'x'.repeat(100);
       client.send(`@label=${longLabel} PING :test`);
 
-      try {
-        const response = await client.waitForLine(/PONG|FAIL/i, 3000);
-        console.log('Long label response:', response);
-      } catch {
-        console.log('No response for long label');
-      }
+      // Server MUST respond to PING
+      const response = await client.waitForLine(/PONG|FAIL/i, 5000);
+      expect(response).toBeDefined();
 
       client.send('QUIT');
     });
@@ -267,14 +251,12 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       const specialLabel = 'test-123_abc';
       client.send(`@label=${specialLabel} PING :test`);
 
-      try {
-        const response = await client.waitForLine(/PONG|label=/i, 3000);
-        if (response.includes('label=')) {
-          expect(response).toContain(specialLabel);
-        }
-        console.log('Special char label response:', response);
-      } catch {
-        console.log('No response for special label');
+      // Server MUST respond to PING
+      const response = await client.waitForLine(/PONG|label=/i, 5000);
+      expect(response).toBeDefined();
+      // If response includes label, it should match
+      if (response.includes('label=')) {
+        expect(response).toContain(specialLabel);
       }
 
       client.send('QUIT');
@@ -298,14 +280,10 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       const label = `ignore-${Date.now()}`;
       client.send(`@label=${label} PING :test`);
 
-      try {
-        const response = await client.waitForLine(/PONG/i, 3000);
-        // Response should NOT contain label when capability not enabled
-        expect(response).not.toContain('label=');
-        console.log('Response without label cap:', response);
-      } catch {
-        console.log('No PONG received');
-      }
+      // Server MUST respond to PING
+      const response = await client.waitForLine(/PONG/i, 5000);
+      // Response should NOT contain label when capability not enabled
+      expect(response).not.toContain('label=');
 
       client.send('QUIT');
     });
@@ -333,12 +311,9 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       // on a channel we created might produce ACK
       client.send(`@label=${label} MODE ${channel} +t`);
 
-      try {
-        const response = await client.waitForLine(/ACK|MODE|label=/i, 3000);
-        console.log('ACK/MODE response:', response);
-      } catch {
-        console.log('No ACK response');
-      }
+      // Server MUST respond with ACK or MODE response
+      const response = await client.waitForLine(/ACK|MODE|label=/i, 5000);
+      expect(response).toBeDefined();
 
       client.send('QUIT');
     });
@@ -360,13 +335,9 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       // Try to join an invalid channel name
       client.send(`@label=${label} JOIN invalidchannel`);
 
-      try {
-        const response = await client.waitForLine(/4\d\d|JOIN|label=/i, 3000);
-        console.log('Error response with label:', response);
-        // Error should include label
-      } catch {
-        console.log('No error response');
-      }
+      // Server MUST respond with error or JOIN response
+      const response = await client.waitForLine(/4\d\d|JOIN|label=/i, 5000);
+      expect(response).toBeDefined();
 
       client.send('QUIT');
     });
