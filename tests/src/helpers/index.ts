@@ -23,6 +23,13 @@ export {
 } from './ircv3-client.js';
 
 export {
+  CAP_BUNDLES,
+  getCaps,
+  getMergedCaps,
+  type CapBundle,
+} from './cap-bundles.js';
+
+export {
   // P10 base64 character encoding
   b64CharToValue,
   valueToB64Char,
