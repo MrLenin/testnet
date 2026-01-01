@@ -7,11 +7,12 @@
  * - Frame encoding/decoding (masked frames, control frames)
  * - Error handling (malformed requests, missing headers)
  *
- * COMPLIANCE NOTES:
- * Some tests accept lenient behavior where Nefarious doesn't strictly enforce
- * RFC 6455 requirements. See WEBSOCKET-COMPLIANCE.md for details on:
- * - Default subprotocol sent without client request (§4.2.2)
- * - Unmasked client frames accepted (§5.1)
+ * Nefarious strictly enforces RFC 6455 compliance including:
+ * - §4.2.2: No Sec-WebSocket-Protocol unless client requests one
+ * - §5.1: Client frames MUST be masked
+ * - §5.2: RSV bits MUST be 0 unless extension negotiated
+ * - §5.2: Reserved opcodes cause connection failure
+ * - §5.5: Control frame payload ≤125 bytes
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -136,7 +137,7 @@ describe('WebSocket Support', () => {
       expect(response).toContain(`Sec-WebSocket-Accept: ${expectedAccept}`);
     });
 
-    it('should accept handshake without subprotocol', async () => {
+    it('should NOT send Sec-WebSocket-Protocol when client does not request one (RFC 6455 §4.2.2)', async () => {
       socket = await createRawTLSConnection();
       const key = generateWebSocketKey();
 
@@ -155,8 +156,8 @@ describe('WebSocket Support', () => {
       const response = await waitForHTTPResponse(socket);
 
       expect(response).toContain('HTTP/1.1 101');
-      // Note: Nefarious sends a default protocol even when not requested
-      // This is technically non-compliant with RFC 6455 but harmless
+      // RFC 6455 §4.2.2: Server MUST NOT send Sec-WebSocket-Protocol unless client requested
+      expect(response).not.toContain('Sec-WebSocket-Protocol');
     });
 
     it('should handle multiple subprotocol options', async () => {
@@ -557,7 +558,7 @@ describe('WebSocket Support', () => {
       expect(registered).toBe(true);
     });
 
-    it('should handle unmasked client frames', async () => {
+    it('should reject unmasked client frames', async () => {
       socket = await createRawTLSConnection();
       const key = generateWebSocketKey();
 
@@ -577,12 +578,11 @@ describe('WebSocket Support', () => {
       await waitForHTTPResponse(socket);
 
       // Send an UNMASKED frame (violation of RFC 6455)
-      // Per RFC 6455, server MUST close connection, but Nefarious is lenient
+      // Per RFC 6455 §5.1, server MUST close connection
       const unmaskedFrame = buildUnmaskedFrame('NICK badmask\r\n');
       socket.write(unmaskedFrame);
 
-      // Server may either close connection or process the frame
-      // Wait briefly to see if connection is still alive
+      // Server MUST close connection per RFC 6455
       const result = await new Promise<'closed' | 'alive'>((resolve) => {
         const timeout = setTimeout(() => resolve('alive'), 2000);
         socket!.on('close', () => {
@@ -598,8 +598,7 @@ describe('WebSocket Support', () => {
         });
       });
 
-      // Either behavior is acceptable - document actual behavior
-      expect(['closed', 'alive']).toContain(result);
+      expect(result).toBe('closed');
     });
 
     it('should send unmasked frames to client (server-to-client)', async () => {
