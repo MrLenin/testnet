@@ -245,6 +245,32 @@ services:
       retries: 12
       start_period: 30s
 
+  # Auto-setup Keycloak realm, clients, and test users after Keycloak is healthy
+  keycloak-setup:
+    container_name: keycloak-setup
+    image: curlimages/curl:8.11.0
+    networks:
+      irc_net:
+        ipv4_address: 172.29.0.11
+    environment:
+      - KEYCLOAK_URL=http://keycloak:8080
+      - KEYCLOAK_ADMIN=admin
+      - KEYCLOAK_ADMIN_PASSWORD=admin
+    volumes:
+      - ./scripts/setup-keycloak.sh:/setup-keycloak.sh:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for Keycloak to be ready..."
+        until curl -sf http://keycloak:8080/realms/master >/dev/null 2>&1; do
+          sleep 2
+        done
+        echo "Keycloak is ready, running setup..."
+        /bin/sh /setup-keycloak.sh
+    depends_on:
+      keycloak:
+        condition: service_healthy
+
 volumes:
   keycloak_data:
   history_data:

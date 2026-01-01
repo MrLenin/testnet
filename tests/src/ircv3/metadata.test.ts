@@ -151,13 +151,9 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await new Promise(r => setTimeout(r, 500));
       client.send('METADATA CLEAR * cleartest');
 
-      try {
-        const response = await client.waitForLine(/761|766|METADATA/, 3000);
-        expect(response).toBeDefined();
-        console.log('METADATA CLEAR response:', response);
-      } catch {
-        console.log('No METADATA CLEAR response');
-      }
+      // Server MUST respond with 761 (value cleared) or 766 (permission error)
+      const response = await client.waitForLine(/761|766|METADATA/, 3000);
+      expect(response).toBeDefined();
 
       client.send('QUIT');
     });
@@ -182,13 +178,9 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       // Try to set channel metadata
       client.send(`METADATA SET ${channelName} url :https://example.com`);
 
-      try {
-        const response = await client.waitForLine(/761|764|METADATA/, 3000);
-        expect(response).toBeDefined();
-        console.log('Channel METADATA SET response:', response);
-      } catch {
-        console.log('No channel METADATA SET response - may need op status');
-      }
+      // Server MUST respond with 761 (success) or 764 (error)
+      const response = await client.waitForLine(/761|764|766|METADATA/, 3000);
+      expect(response).toBeDefined();
 
       client.send('QUIT');
     });
@@ -212,13 +204,9 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await new Promise(r => setTimeout(r, 500));
       client.send(`METADATA GET ${channelName} testchankey`);
 
-      try {
-        const response = await client.waitForLine(/761|METADATA/, 3000);
-        expect(response).toBeDefined();
-        console.log('Channel METADATA GET response:', response);
-      } catch {
-        console.log('No channel METADATA GET response');
-      }
+      // Server MUST respond with 761 (value) or error
+      const response = await client.waitForLine(/761|765|METADATA/, 3000);
+      expect(response).toBeDefined();
 
       client.send('QUIT');
     });
