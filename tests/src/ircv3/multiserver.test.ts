@@ -1284,22 +1284,21 @@ describe('Multi-Server IRC', () => {
       const hasLine1 = received.some(l => l.includes(`${uniqueMarker} line 1`));
       const hasLine2 = received.some(l => l.includes(`${uniqueMarker} line 2`));
       const hasLine3 = received.some(l => l.includes(`${uniqueMarker} line 3`));
+      const hasAnyMarker = received.some(l => l.includes(uniqueMarker));
       const hasBatch = received.some(l => l.includes('BATCH'));
 
-      // At minimum, some form of the message should propagate
-      // It may arrive as a batch, as individual PRIVMSGs, or concatenated
-      if (hasLine1 || hasLine2 || hasLine3) {
-        console.log(`Multiline cross-server: ${received.length} msgs, batch=${hasBatch}, L1=${hasLine1}, L2=${hasLine2}, L3=${hasLine3}`);
-        expect(true).toBe(true);
-      } else if (received.some(l => l.includes(uniqueMarker))) {
-        // Messages may be concatenated or reformatted
-        console.log(`Multiline cross-server: messages received in different format`);
-        expect(true).toBe(true);
-      } else {
-        // P10 may not support multiline propagation - this is informational
-        console.log('Multiline messages may not propagate across P10 server links');
-        console.log('Raw received:', received.slice(0, 3));
-      }
+      console.log(
+        `Multiline cross-server: ${received.length} msgs, batch=${hasBatch}, ` +
+        `L1=${hasLine1}, L2=${hasLine2}, L3=${hasLine3}, anyMarker=${hasAnyMarker}`
+      );
+
+      // Messages MUST propagate across server links in some form
+      // They may arrive as batch, individual PRIVMSGs, or concatenated
+      expect(hasAnyMarker).toBe(true);
+
+      // Verify at least some lines were received
+      const lineCount = [hasLine1, hasLine2, hasLine3].filter(Boolean).length;
+      expect(lineCount).toBeGreaterThanOrEqual(1);
 
       sender.send('QUIT');
       receiver.send('QUIT');

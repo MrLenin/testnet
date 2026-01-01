@@ -193,15 +193,13 @@ describe('IRCv3 Echo Message', () => {
       const testMsg = `No echo test ${Date.now()}`;
       client.send(`PRIVMSG ${channelName} :${testMsg}`);
 
-      // Should NOT receive echo
-      try {
-        await client.waitForLine(new RegExp(`PRIVMSG.*${testMsg}`), 1000);
-        // If we get here, we received an echo when we shouldn't have
-        console.log('Unexpected echo received');
-      } catch {
-        // Expected - no echo should be received
-        expect(true).toBe(true);
-      }
+      // Should NOT receive echo - expect timeout
+      const receivedUnexpectedEcho = await client
+        .waitForLine(new RegExp(`PRIVMSG.*${testMsg}`), 1000)
+        .then(() => true)
+        .catch(() => false);
+
+      expect(receivedUnexpectedEcho).toBe(false);
       client.send('QUIT');
     });
   });
