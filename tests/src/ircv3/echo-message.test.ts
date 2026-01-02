@@ -1,5 +1,16 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId, CAP_BUNDLES } from '../helpers/index.js';
+import {
+  createRawSocketClient,
+  RawSocketClient,
+  uniqueChannel,
+  uniqueId,
+  CAP_BUNDLES,
+  parseIRCMessage,
+  assertPrivmsg,
+  assertTag,
+  getServerTime,
+  getMsgId,
+} from '../helpers/index.js';
 
 /**
  * Echo Message Tests (echo-message capability)
@@ -113,11 +124,17 @@ describe('IRCv3 Echo Message', () => {
       client.send(`PRIVMSG ${channelName} :Time tagged message`);
 
       const echo = await client.waitForLine(/PRIVMSG.*Time tagged/);
+      const parsed = parseIRCMessage(echo);
 
-      // Must have @time= tag (server-time capability is enabled)
-      expect(echo).toMatch(/^@/);  // Must start with tags
-      expect(echo).toMatch(/@.*time=/);
-      console.log('Echo with time:', echo);
+      // Validate using structured parser
+      assertPrivmsg(parsed, { target: channelName, text: 'Time tagged' });
+      assertTag(parsed, 'time');
+
+      // Validate time is a proper Date
+      const serverTime = getServerTime(parsed);
+      expect(serverTime).toBeInstanceOf(Date);
+      console.log('Echo with time:', serverTime?.toISOString());
+
       client.send('QUIT');
     });
 
@@ -138,11 +155,18 @@ describe('IRCv3 Echo Message', () => {
       client.send(`PRIVMSG ${channelName} :Message ID test`);
 
       const echo = await client.waitForLine(/PRIVMSG.*Message ID test/);
+      const parsed = parseIRCMessage(echo);
 
-      // Must have @msgid tag (message-tags capability is enabled)
-      expect(echo).toMatch(/^@/);  // Must start with tags
-      expect(echo).toMatch(/@.*msgid=/);
-      console.log('Echo with msgid:', echo);
+      // Validate using structured parser
+      assertPrivmsg(parsed, { target: channelName, text: 'Message ID test' });
+      assertTag(parsed, 'msgid');
+
+      // Validate msgid is present and non-empty
+      const msgid = getMsgId(parsed);
+      expect(msgid).toBeTruthy();
+      expect(msgid!.length).toBeGreaterThan(0);
+      console.log('Echo with msgid:', msgid);
+
       client.send('QUIT');
     });
   });

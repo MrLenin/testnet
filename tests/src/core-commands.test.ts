@@ -1,5 +1,14 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId } from './helpers/index.js';
+import {
+  createRawSocketClient,
+  RawSocketClient,
+  uniqueChannel,
+  uniqueId,
+  parseIRCMessage,
+  assertMode,
+  assertKick,
+  assertNumeric,
+} from './helpers/index.js';
 
 /**
  * Core IRC Command Tests
@@ -107,8 +116,8 @@ describe('Core IRC Commands', () => {
       op.send(`MODE ${channel} +o newop1`);
 
       const modeResponse = await op.waitForLine(/MODE.*\+o.*newop1/i, 5000);
-      expect(modeResponse).toContain('+o');
-      expect(modeResponse).toContain('newop1');
+      const parsed = parseIRCMessage(modeResponse);
+      assertMode(parsed, { target: channel, modes: '+o', args: ['newop1'] });
 
       op.send('QUIT');
       user.send('QUIT');
@@ -143,7 +152,8 @@ describe('Core IRC Commands', () => {
 
       // Should get ERR_CHANOPRIVSNEEDED (482)
       const errorResponse = await user.waitForLine(/482/i, 5000);
-      expect(errorResponse).toMatch(/482/);
+      const parsed = parseIRCMessage(errorResponse);
+      assertNumeric(parsed, 482);
 
       op.send('QUIT');
       user.send('QUIT');
@@ -209,8 +219,8 @@ describe('Core IRC Commands', () => {
 
       // Both should see the KICK
       const kickResponse = await op.waitForLine(/KICK.*kicked1/i, 5000);
-      expect(kickResponse).toContain('KICK');
-      expect(kickResponse).toContain('kicked1');
+      const parsed = parseIRCMessage(kickResponse);
+      assertKick(parsed, { channel, kicked: 'kicked1', reason: 'Test kick' });
 
       op.send('QUIT');
       user.send('QUIT');
@@ -253,7 +263,8 @@ describe('Core IRC Commands', () => {
 
       // Should get ERR_CHANOPRIVSNEEDED (482)
       const errorResponse = await user1.waitForLine(/482/i, 5000);
-      expect(errorResponse).toMatch(/482/);
+      const parsed = parseIRCMessage(errorResponse);
+      assertNumeric(parsed, 482);
 
       op.send('QUIT');
       user1.send('QUIT');
