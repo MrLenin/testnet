@@ -316,6 +316,30 @@ services:
       - x3_data:/x3/data
       - ./data/x3.conf:/x3/x3.conf
 
+  # Auto-create X3 admin account after X3 starts (first oper gets olevel 1000)
+  x3-admin-init:
+    container_name: x3-admin-init
+    image: alpine
+    networks:
+      - irc_net
+    depends_on:
+      - x3
+    environment:
+      - IRC_HOST=nefarious
+      - OPER_NAME=oper
+      - OPER_PASS=shmoo
+      - X3_ADMIN=testadmin
+      - X3_ADMIN_PASS=testadmin123
+      - X3_ADMIN_EMAIL=admin@test.local
+    volumes:
+      - ./scripts/x3-ensure-admin.sh:/ensure-admin.sh:ro
+      - ./data:/data
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apk add --no-cache netcat-openbsd bash
+        bash /ensure-admin.sh
+
   integration-tests:
     container_name: integration-tests
     build:

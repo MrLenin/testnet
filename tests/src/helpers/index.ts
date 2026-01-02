@@ -139,8 +139,12 @@ export {
   createX3Client,
   createAuthenticatedX3Client,
   createTestAccount,
+  createOperClient,
   // Access level constants
   ACCESS_LEVELS,
+  // Admin/Oper credentials
+  X3_ADMIN,
+  IRC_OPER,
   // Types
   type ServiceResponse,
 } from './x3-client.js';

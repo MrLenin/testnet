@@ -7,6 +7,11 @@
  *   Client → Service:  PRIVMSG <Service> :<command>
  *   Service → Client:  NOTICE <nick> :<response>
  *
+ * IMPORTANT - Name Resolution:
+ *   X3 interprets names as NICKS by default. To specify an ACCOUNT name,
+ *   prefix with '*'. Example: ADDUSER #chan *accountname 200
+ *   Methods in this class handle this automatically where appropriate.
+ *
  * Access Level System:
  *   1-99:   Peon/Voice - Basic channel access
  *   100-199: HalfOp - Limited moderation
@@ -22,6 +27,23 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
+
+/**
+ * X3 Admin account credentials (created by x3-admin-init on first startup).
+ * First oper to register gets olevel 1000.
+ */
+export const X3_ADMIN = {
+  account: process.env.X3_ADMIN || 'testadmin',
+  password: process.env.X3_ADMIN_PASS || 'testadmin123',
+};
+
+/**
+ * IRC Oper credentials (from ircd.conf).
+ */
+export const IRC_OPER = {
+  name: process.env.OPER_NAME || 'oper',
+  password: process.env.OPER_PASS || 'shmoo',
+};
 
 /**
  * Access levels for ChanServ.
@@ -544,11 +566,13 @@ export class X3Client extends RawSocketClient {
 
   /**
    * Get OpServ access level.
+   * Returns the oper level (0-1000) for the authenticated user.
    */
   async myAccess(): Promise<number> {
-    const lines = await this.serviceCmd('O3', 'MYACCESS');
+    const lines = await this.serviceCmd('O3', 'ACCESS');
     for (const line of lines) {
-      const match = line.match(/level\s*[:\s]*(\d+)/i);
+      // Match "has X access" format from O3
+      const match = line.match(/has\s+(\d+)\s+access/i);
       if (match) {
         return parseInt(match[1], 10);
       }
@@ -624,4 +648,37 @@ export async function createTestAccount(): Promise<{ account: string; password: 
     password: `pass${id}`,
     email: `test${id}@example.com`,
   };
+}
+
+/**
+ * Create an oper client that's authenticated with AuthServ.
+ * Uses IRC_OPER for oper access and X3_ADMIN for AuthServ.
+ * This gives access to O3 (OpServ) commands.
+ */
+export async function createOperClient(nick?: string): Promise<X3Client> {
+  const client = new X3Client();
+  await client.connect(PRIMARY_SERVER.host, PRIMARY_SERVER.port);
+
+  await client.capLs();
+  client.capEnd();
+  client.register(nick || `oper${uniqueId().slice(0, 5)}`);
+  await client.waitForLine(/001/);
+
+  // Oper up
+  client.send(`OPER ${IRC_OPER.name} ${IRC_OPER.password}`);
+  try {
+    await client.waitForLine(/381/, 5000); // RPL_YOUREOPER
+  } catch {
+    console.warn('Failed to oper up - may affect O3 commands');
+  }
+
+  // Auth with X3 admin account
+  client.send(`PRIVMSG AuthServ :AUTH ${X3_ADMIN.account} ${X3_ADMIN.password}`);
+  try {
+    await client.waitForLine(/I recognize you|authenticated/i, 5000);
+  } catch {
+    console.warn('Failed to auth with X3 - O3 commands may fail');
+  }
+
+  return client;
 }
