@@ -8,22 +8,40 @@
 import { RawSocketClient, createClientOnServer, PRIMARY_SERVER, SECONDARY_SERVER, ServerConfig } from './ircv3-client.js';
 
 /**
- * Server topology for multi-server testing.
- * Mirrors AfterNET's tree structure where each server has one uplink.
+ * Server configurations for multi-server testing.
+ *
+ * Topology with linked profile (2 servers):
+ *   hub1 --- leaf1
+ *
+ * Topology with multi profile (4 servers):
+ *   hub1 --- hub2 --- leaf2
+ *     |
+ *   leaf1
  */
-export const SERVERS = {
-  hub1: PRIMARY_SERVER,   // nefarious - testnet.fractalrealities.net
-  leaf1: SECONDARY_SERVER, // nefarious2 - leaf.fractalrealities.net
-  // Future: hub2, leaf2 for 4-server topology
+export const SERVERS: Record<string, ServerConfig> = {
+  hub1: PRIMARY_SERVER,    // nefarious - testnet.fractalrealities.net (port 6667)
+  leaf1: SECONDARY_SERVER, // nefarious2 - leaf.fractalrealities.net (port 6668)
+  hub2: {                  // nefarious3 - hub2.fractalrealities.net (port 6669)
+    host: 'localhost',
+    port: 6669,
+    ssl: false,
+  },
+  leaf2: {                 // nefarious4 - leaf2.fractalrealities.net (port 6670)
+    host: 'localhost',
+    port: 6670,
+    ssl: false,
+  },
 };
 
 /**
  * Tree structure for routing tests.
- * hub1 is the root, leaf1 connects to hub1.
+ * Describes the uplink/downlink relationships.
  */
-export const TOPOLOGY = {
-  hub1: { uplink: null, downlinks: ['leaf1'] },
+export const TOPOLOGY: Record<string, { uplink: string | null; downlinks: string[] }> = {
+  hub1: { uplink: null, downlinks: ['leaf1', 'hub2'] },
   leaf1: { uplink: 'hub1', downlinks: [] },
+  hub2: { uplink: 'hub1', downlinks: ['leaf2'] },
+  leaf2: { uplink: 'hub2', downlinks: [] },
 };
 
 /**
@@ -216,14 +234,33 @@ export function getHopCount(from: keyof typeof TOPOLOGY, to: keyof typeof TOPOLO
 export async function getAvailableServers(): Promise<string[]> {
   const available: string[] = ['hub1']; // Primary always assumed available
 
-  // Check secondary
-  try {
-    const client = await createClientOnServer(SECONDARY_SERVER);
-    client.close();
-    available.push('leaf1');
-  } catch {
-    // Secondary not available
+  // Check each additional server
+  const serversToCheck = ['leaf1', 'hub2', 'leaf2'] as const;
+
+  for (const serverName of serversToCheck) {
+    try {
+      const client = await createClientOnServer(SERVERS[serverName]);
+      client.close();
+      available.push(serverName);
+    } catch {
+      // Server not available
+    }
   }
 
   return available;
+}
+
+/**
+ * Check if a specific server is available.
+ */
+export async function isServerAvailable(serverName: keyof typeof SERVERS): Promise<boolean> {
+  if (serverName === 'hub1') return true; // Primary always available
+
+  try {
+    const client = await createClientOnServer(SERVERS[serverName]);
+    client.close();
+    return true;
+  } catch {
+    return false;
+  }
 }

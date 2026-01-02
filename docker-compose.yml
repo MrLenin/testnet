@@ -137,6 +137,144 @@ services:
     profiles:
       - linked
 
+  nefarious3-init:
+    container_name: nefarious3-init
+    build:
+        context: ./nefarious
+        dockerfile: Dockerfile
+        additional_contexts:
+          - data=./data
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        chown -R 1234:1234 /home/nefarious/ircd/history /home/nefarious/ircd/metadata /home/nefarious/ircd/ssl
+        if [ ! -f /home/nefarious/ircd/ssl/ircd.pem ]; then
+          openssl req -new -x509 -days 365 -nodes -out /home/nefarious/ircd/ssl/ircd.pem -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -keyout /home/nefarious/ircd/ssl/ircd.pem -subj "/CN=hub2.fractalrealities.net/"
+          chown 1234:1234 /home/nefarious/ircd/ssl/ircd.pem
+          echo "Generated new ECDSA SSL certificate"
+        fi
+        echo "Nefarious3 volume permissions fixed"
+    volumes:
+      - history_data3:/home/nefarious/ircd/history
+      - metadata_data3:/home/nefarious/ircd/metadata
+      - ssl_data3:/home/nefarious/ircd/ssl
+    profiles:
+      - multi
+
+  nefarious3:
+    container_name: nefarious3
+    build:
+        context: ./nefarious
+        dockerfile: Dockerfile
+        additional_contexts:
+          - data=./data
+    user: "1234:1234"
+    networks:
+      irc_net:
+        ipv4_address: 172.29.0.6
+        aliases:
+          - hub2.fractalrealities.net
+    command: ["/home/nefarious/bin/ircd", "-n", "-x", "8", "-f", "ircd.conf"]
+    volumes:
+     - ./data/ircd3.conf:/home/nefarious/ircd/local.conf
+     - ./data/saslusers:/home/nefarious/ircd/saslusers
+     - history_data3:/home/nefarious/ircd/history
+     - metadata_data3:/home/nefarious/ircd/metadata
+     - gitsync_data:/home/nefarious/ircd/gitsync
+     - ssl_data3:/home/nefarious/ircd/ssl
+    ports:
+      - 127.0.0.1:6669:6667
+      - 127.0.0.1:6699:6697
+    env_file:
+      - .env
+      - .env.local
+    environment:
+      - IRCD_GENERAL_NAME=hub2.fractalrealities.net
+      - IRCD_GENERAL_NUMERIC=3
+    depends_on:
+      nefarious:
+        condition: service_healthy
+      nefarious3-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "pgrep", "-x", "ircd"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    profiles:
+      - multi
+
+  nefarious4-init:
+    container_name: nefarious4-init
+    build:
+        context: ./nefarious
+        dockerfile: Dockerfile
+        additional_contexts:
+          - data=./data
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        chown -R 1234:1234 /home/nefarious/ircd/history /home/nefarious/ircd/metadata /home/nefarious/ircd/ssl
+        if [ ! -f /home/nefarious/ircd/ssl/ircd.pem ]; then
+          openssl req -new -x509 -days 365 -nodes -out /home/nefarious/ircd/ssl/ircd.pem -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -keyout /home/nefarious/ircd/ssl/ircd.pem -subj "/CN=leaf2.fractalrealities.net/"
+          chown 1234:1234 /home/nefarious/ircd/ssl/ircd.pem
+          echo "Generated new ECDSA SSL certificate"
+        fi
+        echo "Nefarious4 volume permissions fixed"
+    volumes:
+      - history_data4:/home/nefarious/ircd/history
+      - metadata_data4:/home/nefarious/ircd/metadata
+      - ssl_data4:/home/nefarious/ircd/ssl
+    profiles:
+      - multi
+
+  nefarious4:
+    container_name: nefarious4
+    build:
+        context: ./nefarious
+        dockerfile: Dockerfile
+        additional_contexts:
+          - data=./data
+    user: "1234:1234"
+    networks:
+      irc_net:
+        ipv4_address: 172.29.0.7
+        aliases:
+          - leaf2.fractalrealities.net
+    command: ["/home/nefarious/bin/ircd", "-n", "-x", "8", "-f", "ircd.conf"]
+    volumes:
+     - ./data/ircd4.conf:/home/nefarious/ircd/local.conf
+     - ./data/saslusers:/home/nefarious/ircd/saslusers
+     - history_data4:/home/nefarious/ircd/history
+     - metadata_data4:/home/nefarious/ircd/metadata
+     - gitsync_data:/home/nefarious/ircd/gitsync
+     - ssl_data4:/home/nefarious/ircd/ssl
+    ports:
+      - 127.0.0.1:6670:6667
+      - 127.0.0.1:6700:6697
+    env_file:
+      - .env
+      - .env.local
+    environment:
+      - IRCD_GENERAL_NAME=leaf2.fractalrealities.net
+      - IRCD_GENERAL_NUMERIC=4
+    depends_on:
+      nefarious3:
+        condition: service_healthy
+      nefarious4-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "pgrep", "-x", "ircd"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    profiles:
+      - multi
+
   x3-init:
     container_name: x3-init
     build:
@@ -277,9 +415,15 @@ volumes:
   metadata_data:
   history_data2:
   metadata_data2:
+  history_data3:
+  metadata_data3:
+  history_data4:
+  metadata_data4:
   gitsync_data:
   ssl_data:
   ssl_data2:
+  ssl_data3:
+  ssl_data4:
   x3_data:
 
 networks:
