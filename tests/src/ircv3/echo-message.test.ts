@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId, CAP_BUNDLES } from '../helpers/index.js';
 
 /**
  * Echo Message Tests (echo-message capability)
@@ -100,7 +100,8 @@ describe('IRCv3 Echo Message', () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['echo-message', 'server-time']);
+      // Use full messaging bundle for complete tag support
+      await client.capReq(CAP_BUNDLES.messaging);
       client.capEnd();
       client.register('echotime1');
       await client.waitForLine(/001/);
@@ -113,13 +114,10 @@ describe('IRCv3 Echo Message', () => {
 
       const echo = await client.waitForLine(/PRIVMSG.*Time tagged/);
 
-      // Should have @time= tag
-      if (echo.startsWith('@')) {
-        expect(echo).toMatch(/@.*time=/);
-        console.log('Echo with time:', echo);
-      } else {
-        console.log('Echo without tags:', echo);
-      }
+      // Must have @time= tag (server-time capability is enabled)
+      expect(echo).toMatch(/^@/);  // Must start with tags
+      expect(echo).toMatch(/@.*time=/);
+      console.log('Echo with time:', echo);
       client.send('QUIT');
     });
 
@@ -127,7 +125,8 @@ describe('IRCv3 Echo Message', () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['echo-message']);
+      // message-tags required to receive @msgid tag, echo-message required for echo
+      await client.capReq(CAP_BUNDLES.messaging);
       client.capEnd();
       client.register('echoid1');
       await client.waitForLine(/001/);
@@ -140,13 +139,10 @@ describe('IRCv3 Echo Message', () => {
 
       const echo = await client.waitForLine(/PRIVMSG.*Message ID test/);
 
-      // Should have msgid tag
-      if (echo.startsWith('@')) {
-        expect(echo).toMatch(/@.*msgid=/);
-        console.log('Echo with msgid:', echo);
-      } else {
-        console.log('Echo without msgid:', echo);
-      }
+      // Must have @msgid tag (message-tags capability is enabled)
+      expect(echo).toMatch(/^@/);  // Must start with tags
+      expect(echo).toMatch(/@.*msgid=/);
+      console.log('Echo with msgid:', echo);
       client.send('QUIT');
     });
   });
@@ -209,7 +205,8 @@ describe('IRCv3 Echo Message', () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['echo-message', 'labeled-response']);
+      // Combine messaging (echo, tags) + batching (labeled-response) capabilities
+      await client.capReq([...CAP_BUNDLES.messaging, 'labeled-response', 'batch']);
       client.capEnd();
       client.register('echolabel1');
       await client.waitForLine(/001/);
@@ -357,7 +354,7 @@ describe('IRCv3 Labeled Response', () => {
     const client = trackClient(await createRawSocketClient());
 
     await client.capLs();
-    await client.capReq(['labeled-response']);
+    await client.capReq(CAP_BUNDLES.batching);
     client.capEnd();
     client.register('labeltest2');
     await client.waitForLine(/001/);
@@ -376,7 +373,7 @@ describe('IRCv3 Labeled Response', () => {
     const client = trackClient(await createRawSocketClient());
 
     await client.capLs();
-    await client.capReq(['labeled-response']);
+    await client.capReq(CAP_BUNDLES.batching);
     client.capEnd();
     client.register('acktest1');
     await client.waitForLine(/001/);

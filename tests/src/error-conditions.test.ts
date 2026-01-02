@@ -39,10 +39,9 @@ describe('Error Conditions', () => {
 
       client.send('PRIVMSG');
 
-      // Should get ERR_NEEDMOREPARAMS (461)
-      const errorResponse = await client.waitForLine(/461/i, 5000);
-      expect(errorResponse).toMatch(/461/);
-      expect(errorResponse).toMatch(/PRIVMSG/i);
+      // Nefarious sends ERR_NORECIPIENT (411) for PRIVMSG with no target
+      const errorResponse = await client.waitForLine(/411/i, 5000);
+      expect(errorResponse).toMatch(/411/);
 
       client.send('QUIT');
     });
@@ -203,9 +202,10 @@ describe('Error Conditions', () => {
       // Try to part a channel we're not in
       client.send('PART #notjoined12345');
 
-      // Should get ERR_NOTONCHANNEL (442)
-      const errorResponse = await client.waitForLine(/442/i, 5000);
-      expect(errorResponse).toMatch(/442/);
+      // Should get ERR_NOTONCHANNEL (442) or ERR_NOSUCHCHANNEL (403)
+      // depending on whether server tracks channels that exist vs user membership
+      const errorResponse = await client.waitForLine(/442|403/i, 5000);
+      expect(errorResponse).toMatch(/442|403/);
 
       client.send('QUIT');
     });

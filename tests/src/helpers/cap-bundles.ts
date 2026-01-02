@@ -11,7 +11,7 @@ import { randomUUID } from 'crypto';
  * Capability bundles for common use cases.
  * Each bundle includes the primary capability and its dependencies.
  */
-export const CAP_BUNDLES = {
+export const CAP_BUNDLES: Record<string, string[]> = {
   /** For testing echo-message - needs tags and server-time for full validation */
   messaging: ['message-tags', 'server-time', 'echo-message'],
 
@@ -41,7 +41,7 @@ export const CAP_BUNDLES = {
 
   /** Common base capabilities for most tests */
   base: ['message-tags', 'server-time', 'multi-prefix'],
-} as const;
+};
 
 export type CapBundle = keyof typeof CAP_BUNDLES;
 
@@ -62,7 +62,7 @@ export function getMergedCaps(...bundles: CapBundle[]): string[] {
       caps.add(cap);
     }
   }
-  return [...caps];
+  return Array.from(caps);
 }
 
 /**

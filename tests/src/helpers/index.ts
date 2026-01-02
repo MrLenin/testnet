@@ -56,3 +56,10 @@ export {
   decodeFullNumeric,
   encodeFullNumeric,
 } from './p10-utils.js';
+
+export {
+  checkKeycloakAvailable,
+  isKeycloakAvailable,
+  KEYCLOAK_SKIP_REASON,
+  resetKeycloakCheck,
+} from '../setup/keycloak-check.js';
