@@ -157,12 +157,44 @@ docker compose --profile linked --profile multi up -d  # Full multiserver
 
 ## P10 Protocol
 
-Server-to-server protocol between Nefarious and X3. See `.claude/skills/p10-protocol.md` for full reference.
+Server-to-server protocol between Nefarious and X3. See `P10_PROTOCOL_REFERENCE.md` for comprehensive documentation.
 
 Key points:
-- Uses 2-char server numerics and 5-char user numerics
-- Token-based commands (N=NICK, B=BURST, AC=ACCOUNT, etc.)
+- Uses 2-char server numerics and 5-char user numerics (base64: A-Z, a-z, 0-9, [, ])
+- Token-based commands (N=NICK, B=BURST, AC=ACCOUNT, P=PRIVMSG, etc.)
 - SASL flows through P10 with subcmds: S(start), H(host), C(continue), D(done), L(login)
+
+### P10 Extensions for IRCv3
+- **MD/MDQ** - Metadata sync between IRCd and services
+- **MR** - Read marker synchronization with X3 as authoritative store
+- **TG** - TAGMSG for sending message tags without content
+- **SASL** - Full SASL authentication flow with mechanism negotiation
+
+### IP Encoding
+IPv4: 6 base64 chars, IPv6: variable length with `_` for zero compression
+```
+192.0.2.1  → AAAAAA (6 chars)
+::1        → _AAB (compressed)
+```
+
+## IRCv3 Feature Flags
+
+See `FEATURE_FLAGS_CONFIG.md` for comprehensive feature flag and configuration reference.
+
+### Nefarious Features (in features {} block)
+- **Core**: `MSGID`, `SERVERTIME`
+- **Capabilities**: `CAP_setname`, `CAP_batch`, `CAP_labeled_response`, `CAP_echo_message`
+- **Draft Extensions**: `CAP_chathistory`, `CAP_multiline`, `CAP_metadata`, `CAP_webpush`, `CAP_read_marker`
+- **Chat History**: `CHATHISTORY_MAX`, `CHATHISTORY_DB`, `CHATHISTORY_RETENTION`, `CHATHISTORY_FEDERATION`
+- **Metadata**: `METADATA_DB`, `METADATA_BURST`, `METADATA_X3_TIMEOUT`
+- **Compression**: `COMPRESS_THRESHOLD`, `COMPRESS_LEVEL` (requires --with-zstd)
+
+### X3 Configuration
+- **Keycloak**: `keycloak_enable`, `keycloak_url`, `keycloak_realm`, `keycloak_client_id`
+- **SASL**: `sasl_enable`, `sasl_timeout`
+- **Metadata TTL**: `metadata_ttl_enabled`, `metadata_default_ttl`, `metadata_immutable_keys`
+- **Compression**: `metadata_compress_threshold`, `metadata_compress_level`
+- **ChanServ Group Sync**: `keycloak_access_sync`, `keycloak_bidirectional_sync`
 
 ## Key Files
 
@@ -176,10 +208,14 @@ Key points:
 - `scripts/irc-test.sh` - Quick IRC testing from command line
 - `scripts/x3-ensure-admin.sh` - Auto-create admin account on startup
 
-### Documentation
+### Reference Documentation
+- `P10_PROTOCOL_REFERENCE.md` - Comprehensive P10 S2S protocol reference (message format, tokens, IP encoding, SASL, IRCv3 extensions)
+- `FEATURE_FLAGS_CONFIG.md` - All IRCv3 feature flags, capability enums, X3 config options, Keycloak integration, metadata/compression settings
+- `.claude/skills/p10-protocol.md` - P10 quick reference for Claude sessions
+
+### Investigation/Planning Docs
 - `docs/investigations/` - IRCv3 capability investigation results
 - `docs/plans/` - Implementation plans
-- `.claude/skills/p10-protocol.md` - P10 protocol reference
 
 ## Common Issues
 
