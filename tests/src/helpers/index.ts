@@ -132,3 +132,15 @@ export {
   assertBurstModes,
   assertBurstBans,
 } from './p10-protocol.js';
+
+export {
+  // X3 service client
+  X3Client,
+  createX3Client,
+  createAuthenticatedX3Client,
+  createTestAccount,
+  // Access level constants
+  ACCESS_LEVELS,
+  // Types
+  type ServiceResponse,
+} from './x3-client.js';
