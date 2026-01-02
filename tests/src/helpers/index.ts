@@ -74,6 +74,7 @@ export {
   verifyChannelSync,
   getHopCount,
   getAvailableServers,
+  isServerAvailable,
   type MultiServerContext,
 } from './multiserver.js';
 
@@ -102,3 +103,32 @@ export {
   isBatchEnd,
   getBatchId,
 } from './message-parser.js';
+
+export {
+  // P10 message parsing
+  parseP10Message,
+  parseBurst,
+  parseNick,
+  type P10Message,
+  type P10Burst,
+  type P10Nick,
+  type ServerNode,
+  // Docker log parsing
+  getP10Logs,
+  getBurstLogs,
+  getNickLogs,
+  // Burst order validation
+  BurstPhase,
+  validateBurstOrder,
+  // TS comparison rules
+  compareTimestamps,
+  nickCollisionWinner,
+  channelTsWinner,
+  // Numeric utilities
+  getServerFromNumeric,
+  isFromServer,
+  // Assertions
+  assertBurstUsers,
+  assertBurstModes,
+  assertBurstBans,
+} from './p10-protocol.js';

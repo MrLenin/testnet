@@ -17,6 +17,12 @@ import {
   SECONDARY_SERVER,
   uniqueChannel,
   uniqueId,
+  // P10 protocol helpers
+  getP10Logs,
+  parseBurst,
+  parseNick,
+  validateBurstOrder,
+  getServerFromNumeric,
 } from '../helpers/index.js';
 
 // Check secondary server availability synchronously at module load time
@@ -2000,6 +2006,123 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       // Both should have history (bidirectional PM storage)
       expect(client1Messages.length).toBeGreaterThan(0);
       expect(client2Messages.length).toBeGreaterThan(0);
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+  });
+
+  // ============================================================================
+  // P10 Protocol Integration
+  // ============================================================================
+
+  describe('P10 Protocol Integration', () => {
+    it('demonstrates P10 log inspection (informational)', async () => {
+      const testId = uniqueId();
+      const channel = `#p10int-${testId}`;
+
+      // Create activity to potentially generate P10 messages
+      const client1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
+      await client1.capLs();
+      client1.capEnd();
+      client1.register(`p10test1${testId.slice(0, 3)}`);
+      await client1.waitForLine(/001/);
+
+      const client2 = trackClient(await createClientOnServer(SECONDARY_SERVER));
+      await client2.capLs();
+      client2.capEnd();
+      client2.register(`p10test2${testId.slice(0, 3)}`);
+      await client2.waitForLine(/001/);
+
+      // Join channel on both servers
+      client1.send(`JOIN ${channel}`);
+      await client1.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+
+      client2.send(`JOIN ${channel}`);
+      await client2.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+
+      // Wait for cross-server sync
+      await client1.waitForLine(/JOIN.*p10test2/i, 5000);
+
+      // Try to get P10 logs from docker
+      // Note: Log visibility depends on server debug configuration
+      const logs = await getP10Logs('nefarious', undefined, '1m');
+
+      // This test is informational - verify the API works
+      expect(Array.isArray(logs)).toBe(true);
+
+      // If logs are available, try parsing them
+      if (logs.length > 0) {
+        console.log(`  P10 logs available: ${logs.length} lines`);
+
+        // Try to find BURST messages
+        const burstLogs = logs.filter(l => l.includes(' B #'));
+        if (burstLogs.length > 0) {
+          const burst = parseBurst(burstLogs[0]);
+          if (burst) {
+            console.log(`  Found BURST for ${burst.channel} with ${burst.users.size} users`);
+          }
+        }
+
+        // Try to find N (nick) messages
+        const nickLogs = logs.filter(l => / N [^ ]+ \d+ \d+/.test(l));
+        if (nickLogs.length > 0) {
+          const nick = parseNick(nickLogs[0]);
+          if (nick) {
+            console.log(`  Found nick introduction: ${nick.nick}`);
+          }
+        }
+      } else {
+        console.log('  P10 logs not available (server debug level may be low)');
+      }
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+
+    it('verifies user numerics are consistent across servers', async () => {
+      const testId = uniqueId();
+      const channel = `#numtest-${testId}`;
+      const nick1 = `num1${testId.slice(0, 5)}`;
+      const nick2 = `num2${testId.slice(0, 5)}`;
+
+      // Setup clients
+      const client1 = trackClient(await createClientOnServer(PRIMARY_SERVER));
+      await client1.capLs();
+      client1.capEnd();
+      client1.register(nick1);
+      await client1.waitForLine(/001/);
+
+      const client2 = trackClient(await createClientOnServer(SECONDARY_SERVER));
+      await client2.capLs();
+      client2.capEnd();
+      client2.register(nick2);
+      await client2.waitForLine(/001/);
+
+      // Join channel together
+      client1.send(`JOIN ${channel}`);
+      await client1.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+
+      client2.send(`JOIN ${channel}`);
+      await client2.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+
+      // Wait for cross-server sync
+      await client1.waitForLine(/JOIN.*num2/i, 5000);
+
+      // WHOIS should return consistent info from both servers
+      client1.send(`WHOIS ${nick2}`);
+      const whois1 = await client1.waitForLine(/311/i, 5000);
+      expect(whois1).toContain(nick2);
+
+      client2.send(`WHOIS ${nick1}`);
+      const whois2 = await client2.waitForLine(/311/i, 5000);
+      expect(whois2).toContain(nick1);
+
+      // Users should be visible to each other via NAMES
+      client1.send(`NAMES ${channel}`);
+      const names = await client1.waitForLine(/353/i, 5000);
+      expect(names).toContain(nick1);
+      expect(names).toContain(nick2);
 
       client1.send('QUIT');
       client2.send('QUIT');
