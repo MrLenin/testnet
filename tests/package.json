@@ -8,6 +8,9 @@
     "test:verbose": "VITEST_VERBOSE=1 vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
+    "test:multiserver": "vitest run src/ircv3/multiserver.test.ts",
+    "test:websocket": "vitest run src/ircv3/websocket*.test.ts",
+    "test:keycloak": "vitest run src/keycloak/",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

@@ -63,3 +63,42 @@ export {
   KEYCLOAK_SKIP_REASON,
   resetKeycloakCheck,
 } from '../setup/keycloak-check.js';
+
+export {
+  SERVERS,
+  TOPOLOGY,
+  createMultiServerClients,
+  waitForCrossServerSync,
+  expectCrossServerSync,
+  collectMultipleLines,
+  verifyChannelSync,
+  getHopCount,
+  getAvailableServers,
+  type MultiServerContext,
+} from './multiserver.js';
+
+export {
+  // Core parsing
+  parseIRCMessage,
+  type ParsedMessage,
+  type MessageSource,
+  // Assertion helpers
+  assertPrivmsg,
+  assertNumeric,
+  assertJoin,
+  assertMode,
+  assertKick,
+  assertTag,
+  // Non-throwing checks
+  isCommand,
+  isNumeric,
+  // Value extractors
+  getMessageText,
+  getServerTime,
+  getMsgId,
+  getAccount,
+  // Batch helpers
+  parseBatchStart,
+  isBatchEnd,
+  getBatchId,
+} from './message-parser.js';
