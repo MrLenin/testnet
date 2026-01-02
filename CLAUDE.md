@@ -105,6 +105,32 @@ IRC_HOST=localhost npm test -- src/path/to/test.ts  # Run specific test
 - First oper to register gets olevel 1000 (root access to O3)
 - Credentials: X3_ADMIN=testadmin, X3_ADMIN_PASS=testadmin123
 
+## Development Guidelines
+
+### Plan File Maintenance
+When implementing features from a plan file (`.claude/plans/*.md`):
+- Keep the plan file updated with progress as work is completed
+- Mark completed items with ✅
+- Add notes about implementation decisions or deviations
+- Update "Future Work" sections as new issues are discovered
+
+### Divergent Behavior Documentation
+When testing reveals behavior that differs from specifications:
+- Document the divergence in the plan file's "Divergent Behaviors" section
+- Include: location, expected behavior, actual behavior, root cause (if known)
+- Note whether it's a bug to fix or intentional design
+- Add workarounds used in tests
+
+Example format:
+```
+### X.X Issue Title
+**Location**: `tests/src/path/to/test.ts:line`
+**Expected**: Description of spec behavior
+**Actual**: What actually happens
+**Root Cause**: Why (if known)
+**Workaround**: How tests handle it
+```
+
 ## X3 Services Architecture
 
 ### Service Bots
