@@ -17,13 +17,25 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import {
-  createRawSocketClient,
+  createClientOnServer,
   RawSocketClient,
   isSecondaryServerAvailable,
   PRIMARY_SERVER,
   SECONDARY_SERVER,
   uniqueId,
 } from '../helpers/index.js';
+
+/**
+ * Create a connected and registered client on a server.
+ */
+async function createRegisteredClient(server: typeof PRIMARY_SERVER, nick: string): Promise<RawSocketClient> {
+  const client = await createClientOnServer(server);
+  await client.capLs();
+  client.capEnd();
+  client.register(nick);
+  await client.waitForLine(/001/, 5000);
+  return client;
+}
 
 // Track all clients for cleanup
 const activeClients: RawSocketClient[] = [];
@@ -72,11 +84,7 @@ describe.skipIf(!secondaryAvailable)('Server Topology', () => {
     const testId = uniqueId();
     const nick = `links${testId.slice(0, 5)}`;
 
-    const client = trackClient(await createRawSocketClient({
-      ...PRIMARY_SERVER,
-      nick,
-    }));
-    await client.waitForLine(/001/, 5000);
+    const client = trackClient(await createRegisteredClient(PRIMARY_SERVER, nick));
 
     // LINKS shows server topology
     client.send('LINKS');
@@ -103,11 +111,7 @@ describe.skipIf(!secondaryAvailable)('Server Topology', () => {
     const testId = uniqueId();
     const nick = `mapper${testId.slice(0, 4)}`;
 
-    const client = trackClient(await createRawSocketClient({
-      ...PRIMARY_SERVER,
-      nick,
-    }));
-    await client.waitForLine(/001/, 5000);
+    const client = trackClient(await createRegisteredClient(PRIMARY_SERVER, nick));
 
     // MAP shows server tree (if available)
     client.send('MAP');
@@ -123,11 +127,7 @@ describe.skipIf(!secondaryAvailable)('Server Topology', () => {
     const testId = uniqueId();
     const nick = `admin${testId.slice(0, 5)}`;
 
-    const client = trackClient(await createRawSocketClient({
-      ...SECONDARY_SERVER,
-      nick,
-    }));
-    await client.waitForLine(/001/, 5000);
+    const client = trackClient(await createRegisteredClient(SECONDARY_SERVER, nick));
 
     // ADMIN shows server information
     client.send('ADMIN');
@@ -161,18 +161,10 @@ describe.skipIf(!secondaryAvailable)('Cross-Server User Visibility', () => {
     const localNick = `local${testId.slice(0, 5)}`;
 
     // Create user on secondary (remote)
-    const remote = trackClient(await createRawSocketClient({
-      ...SECONDARY_SERVER,
-      nick: remoteNick,
-    }));
-    await remote.waitForLine(/001/, 5000);
+    const remote = trackClient(await createRegisteredClient(SECONDARY_SERVER, remoteNick));
 
     // Create user on primary (local)
-    const local = trackClient(await createRawSocketClient({
-      ...PRIMARY_SERVER,
-      nick: localNick,
-    }));
-    await local.waitForLine(/001/, 5000);
+    const local = trackClient(await createRegisteredClient(PRIMARY_SERVER, localNick));
 
     // WHOIS the remote user from local
     local.send(`WHOIS ${remoteNick}`);
@@ -187,18 +179,10 @@ describe.skipIf(!secondaryAvailable)('Cross-Server User Visibility', () => {
     const localNick = `localsrv${testId.slice(0, 4)}`;
 
     // Create user on secondary
-    const remote = trackClient(await createRawSocketClient({
-      ...SECONDARY_SERVER,
-      nick: remoteNick,
-    }));
-    await remote.waitForLine(/001/, 5000);
+    const remote = trackClient(await createRegisteredClient(SECONDARY_SERVER, remoteNick));
 
     // Create user on primary
-    const local = trackClient(await createRawSocketClient({
-      ...PRIMARY_SERVER,
-      nick: localNick,
-    }));
-    await local.waitForLine(/001/, 5000);
+    const local = trackClient(await createRegisteredClient(PRIMARY_SERVER, localNick));
 
     // WHOIS shows server in 312 numeric
     local.send(`WHOIS ${remoteNick}`);
@@ -236,17 +220,8 @@ describe.skipIf(!secondaryAvailable)('Disconnect Detection', () => {
     const localNick = `watcher${testId.slice(0, 4)}`;
 
     // Setup: both users in same channel
-    const remote = trackClient(await createRawSocketClient({
-      ...SECONDARY_SERVER,
-      nick: remoteNick,
-    }));
-    await remote.waitForLine(/001/, 5000);
-
-    const local = trackClient(await createRawSocketClient({
-      ...PRIMARY_SERVER,
-      nick: localNick,
-    }));
-    await local.waitForLine(/001/, 5000);
+    const remote = trackClient(await createRegisteredClient(SECONDARY_SERVER, remoteNick));
+    const local = trackClient(await createRegisteredClient(PRIMARY_SERVER, localNick));
 
     // Join channel
     remote.send(`JOIN ${channel}`);
@@ -282,11 +257,7 @@ describe.skipIf(!secondaryAvailable)('Disconnect Detection', () => {
     const localNick = `mqwatch${testId.slice(0, 3)}`;
 
     // Create local watcher
-    const local = trackClient(await createRawSocketClient({
-      ...PRIMARY_SERVER,
-      nick: localNick,
-    }));
-    await local.waitForLine(/001/, 5000);
+    const local = trackClient(await createRegisteredClient(PRIMARY_SERVER, localNick));
 
     local.send(`JOIN ${channel}`);
     await local.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
@@ -294,11 +265,7 @@ describe.skipIf(!secondaryAvailable)('Disconnect Detection', () => {
     // Create multiple remote users
     const remoteClients: RawSocketClient[] = [];
     for (const nick of remoteNicks) {
-      const client = trackClient(await createRawSocketClient({
-        ...SECONDARY_SERVER,
-        nick,
-      }));
-      await client.waitForLine(/001/, 5000);
+      const client = trackClient(await createRegisteredClient(SECONDARY_SERVER, nick));
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
       remoteClients.push(client);
@@ -341,11 +308,7 @@ describe.skipIf(!secondaryAvailable)('State After Reconnection', () => {
     const nick = `restore${testId.slice(0, 4)}`;
 
     // Connect and join channel
-    let client = trackClient(await createRawSocketClient({
-      ...PRIMARY_SERVER,
-      nick,
-    }));
-    await client.waitForLine(/001/, 5000);
+    let client = trackClient(await createRegisteredClient(PRIMARY_SERVER, nick));
 
     client.send(`JOIN ${channel}`);
     await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
@@ -359,11 +322,7 @@ describe.skipIf(!secondaryAvailable)('State After Reconnection', () => {
     await new Promise(r => setTimeout(r, 500));
 
     // Reconnect
-    client = trackClient(await createRawSocketClient({
-      ...PRIMARY_SERVER,
-      nick,
-    }));
-    await client.waitForLine(/001/, 5000);
+    client = trackClient(await createRegisteredClient(PRIMARY_SERVER, nick));
 
     // Should need to rejoin (not automatically in channel)
     client.send(`NAMES ${channel}`);
@@ -393,11 +352,7 @@ describe.skipIf(!secondaryAvailable)('State After Reconnection', () => {
     const nick2 = `burst2${testId.slice(0, 4)}`;
 
     // Create channel with specific modes on primary
-    const primary = trackClient(await createRawSocketClient({
-      ...PRIMARY_SERVER,
-      nick: nick1,
-    }));
-    await primary.waitForLine(/001/, 5000);
+    const primary = trackClient(await createRegisteredClient(PRIMARY_SERVER, nick1));
 
     primary.send(`JOIN ${channel}`);
     await primary.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
@@ -406,11 +361,7 @@ describe.skipIf(!secondaryAvailable)('State After Reconnection', () => {
     await primary.waitForLine(/MODE.*\+[ms]/i, 3000).catch(() => null);
 
     // Connect from secondary and join
-    const secondary = trackClient(await createRawSocketClient({
-      ...SECONDARY_SERVER,
-      nick: nick2,
-    }));
-    await secondary.waitForLine(/001/, 5000);
+    const secondary = trackClient(await createRegisteredClient(SECONDARY_SERVER, nick2));
 
     secondary.send(`JOIN ${channel}`);
     await secondary.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
@@ -433,11 +384,7 @@ describe.skipIf(!secondaryAvailable)('Network Statistics', () => {
     const testId = uniqueId();
     const nick = `lusers${testId.slice(0, 4)}`;
 
-    const client = trackClient(await createRawSocketClient({
-      ...PRIMARY_SERVER,
-      nick,
-    }));
-    await client.waitForLine(/001/, 5000);
+    const client = trackClient(await createRegisteredClient(PRIMARY_SERVER, nick));
 
     client.send('LUSERS');
 
@@ -469,11 +416,7 @@ describe.skipIf(!secondaryAvailable)('Network Statistics', () => {
     const nick2 = `stat2${testId.slice(0, 5)}`;
 
     // First user
-    const client1 = trackClient(await createRawSocketClient({
-      ...PRIMARY_SERVER,
-      nick: nick1,
-    }));
-    await client1.waitForLine(/001/, 5000);
+    const client1 = trackClient(await createRegisteredClient(PRIMARY_SERVER, nick1));
 
     // Get initial stats
     client1.send('LUSERS');
@@ -482,11 +425,7 @@ describe.skipIf(!secondaryAvailable)('Network Statistics', () => {
     const initialUsers = initialMatch ? parseInt(initialMatch[1], 10) : 0;
 
     // Second user joins
-    const client2 = trackClient(await createRawSocketClient({
-      ...SECONDARY_SERVER,
-      nick: nick2,
-    }));
-    await client2.waitForLine(/001/, 5000);
+    const client2 = trackClient(await createRegisteredClient(SECONDARY_SERVER, nick2));
 
     // Wait for stats to update
     await new Promise(r => setTimeout(r, 300));

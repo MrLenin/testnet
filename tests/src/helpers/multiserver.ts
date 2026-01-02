@@ -24,12 +24,12 @@ export const SERVERS: Record<string, ServerConfig> = {
   hub2: {                  // nefarious3 - hub2.fractalrealities.net (port 6669)
     host: 'localhost',
     port: 6669,
-    ssl: false,
+    name: 'hub2.fractalrealities.net',
   },
   leaf2: {                 // nefarious4 - leaf2.fractalrealities.net (port 6670)
     host: 'localhost',
     port: 6670,
-    ssl: false,
+    name: 'leaf2.fractalrealities.net',
   },
 };
 

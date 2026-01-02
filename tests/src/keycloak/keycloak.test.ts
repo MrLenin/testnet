@@ -443,24 +443,20 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
       const payload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
       client.send(`AUTHENTICATE ${payload}`);
 
-      try {
-        const result = await client.waitForLine(/90[03]/, 5000);
-        expect(result).toMatch(/90[03]/);
-        console.log('SASL PLAIN auth result:', result);
+      // Wait for SASL result - should succeed with proper Keycloak user
+      const result = await client.waitForLine(/90[03]/, 5000);
+      expect(result).toMatch(/90[03]/);
+      console.log('SASL PLAIN auth result:', result);
 
-        // Complete connection
-        client.capEnd();
-        client.register('kctest1');
-        await client.waitForLine(/001/);
+      // Complete connection
+      client.capEnd();
+      client.register('kctest1');
+      await client.waitForLine(/001/);
 
-        // Check logged in
-        client.send('WHOIS kctest1');
-        const whois = await client.waitForLine(/330|311/, 3000);
-        console.log('WHOIS response:', whois);
-      } catch (e) {
-        console.log('SASL auth failed:', e);
-        // May fail if test user not set up
-      }
+      // Check logged in
+      client.send('WHOIS kctest1');
+      const whois = await client.waitForLine(/330|311/, 3000);
+      console.log('WHOIS response:', whois);
 
       client.send('QUIT');
     });

@@ -15,7 +15,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import {
-  createRawSocketClient,
+  createClientOnServer,
   RawSocketClient,
   isSecondaryServerAvailable,
   PRIMARY_SERVER,
@@ -30,6 +30,18 @@ import {
   encodeServerNumeric,
   encodeUserNumeric,
 } from '../helpers/index.js';
+
+/**
+ * Create a connected and registered client on a server.
+ */
+async function createRegisteredClient(server: typeof PRIMARY_SERVER, nick: string): Promise<RawSocketClient> {
+  const client = await createClientOnServer(server);
+  await client.capLs();
+  client.capEnd();
+  client.register(nick);
+  await client.waitForLine(/001/, 5000);
+  return client;
+}
 
 // Track all clients for cleanup
 const activeClients: RawSocketClient[] = [];
@@ -227,19 +239,10 @@ describe.skipIf(!secondaryAvailable)('Nick Collision Handling', () => {
     const duplicateNick = `dupnick${testId.slice(0, 4)}`;
 
     // Connect first user on primary
-    const primary = trackClient(await createRawSocketClient({
-      ...PRIMARY_SERVER,
-      nick: duplicateNick,
-    }));
-    await primary.waitForLine(/001/, 5000);
+    const primary = trackClient(await createRegisteredClient(PRIMARY_SERVER, duplicateNick));
 
-    // Track if primary gets killed
+    // Track if primary gets killed via buffer inspection
     let primaryKilled = false;
-    primary.on('line', (line: string) => {
-      if (line.includes('KILL') || line.includes('ERROR') || line.includes('Killed')) {
-        primaryKilled = true;
-      }
-    });
 
     // Try to connect second user with same nick on secondary
     // This should trigger nick collision
@@ -247,25 +250,10 @@ describe.skipIf(!secondaryAvailable)('Nick Collision Handling', () => {
     let secondaryKilled = false;
 
     try {
-      const secondary = await createRawSocketClient({
-        ...SECONDARY_SERVER,
-        nick: duplicateNick,
-      });
-
-      // Wait for either success or kill
-      const result = await Promise.race([
-        secondary.waitForLine(/001/, 5000).then(() => 'connected'),
-        secondary.waitForLine(/KILL|ERROR|Killed|433/i, 5000).then(() => 'killed'),
-        new Promise<string>(r => setTimeout(() => r('timeout'), 6000)),
-      ]);
-
-      if (result === 'connected') {
-        secondaryConnected = true;
-        trackClient(secondary);
-      } else {
-        secondaryKilled = true;
-        secondary.close();
-      }
+      // This will throw if registration fails due to nick collision
+      const secondary = await createRegisteredClient(SECONDARY_SERVER, duplicateNick);
+      secondaryConnected = true;
+      trackClient(secondary);
     } catch {
       secondaryKilled = true;
     }
@@ -285,17 +273,8 @@ describe.skipIf(!secondaryAvailable)('Nick Collision Handling', () => {
     const nick2 = `user${testId.slice(0, 4)}B`;
 
     // These are different nicks, should both connect fine
-    const primary = trackClient(await createRawSocketClient({
-      ...PRIMARY_SERVER,
-      nick: nick1,
-    }));
-    await primary.waitForLine(/001/, 5000);
-
-    const secondary = trackClient(await createRawSocketClient({
-      ...SECONDARY_SERVER,
-      nick: nick2,
-    }));
-    await secondary.waitForLine(/001/, 5000);
+    const primary = trackClient(await createRegisteredClient(PRIMARY_SERVER, nick1));
+    const secondary = trackClient(await createRegisteredClient(SECONDARY_SERVER, nick2));
 
     // Both should be connected
     expect(primary).toBeDefined();
@@ -320,11 +299,7 @@ describe.skipIf(!secondaryAvailable)('Nick Collision Handling', () => {
     const initialNick = `rapid${testId.slice(0, 4)}`;
     const newNick = `changed${testId.slice(0, 3)}`;
 
-    const client = trackClient(await createRawSocketClient({
-      ...PRIMARY_SERVER,
-      nick: initialNick,
-    }));
-    await client.waitForLine(/001/, 5000);
+    const client = trackClient(await createRegisteredClient(PRIMARY_SERVER, initialNick));
 
     // Change nick rapidly
     client.send(`NICK ${newNick}`);
@@ -351,17 +326,8 @@ describe.skipIf(!secondaryAvailable)('Nick Change Propagation', () => {
     const nick2 = `nickp2${testId.slice(0, 4)}`;
 
     // Setup: two users in same channel on different servers
-    const primary = trackClient(await createRawSocketClient({
-      ...PRIMARY_SERVER,
-      nick: nick1,
-    }));
-    await primary.waitForLine(/001/, 5000);
-
-    const secondary = trackClient(await createRawSocketClient({
-      ...SECONDARY_SERVER,
-      nick: nick2,
-    }));
-    await secondary.waitForLine(/001/, 5000);
+    const primary = trackClient(await createRegisteredClient(PRIMARY_SERVER, nick1));
+    const secondary = trackClient(await createRegisteredClient(SECONDARY_SERVER, nick2));
 
     // Join channel on both
     primary.send(`JOIN ${channel}`);
@@ -396,17 +362,8 @@ describe.skipIf(!secondaryAvailable)('Nick Change Propagation', () => {
     const nick2 = `watcher${testId.slice(0, 3)}`;
 
     // Setup: two users in same channel
-    const primary = trackClient(await createRawSocketClient({
-      ...PRIMARY_SERVER,
-      nick: nick1,
-    }));
-    await primary.waitForLine(/001/, 5000);
-
-    const secondary = trackClient(await createRawSocketClient({
-      ...SECONDARY_SERVER,
-      nick: nick2,
-    }));
-    await secondary.waitForLine(/001/, 5000);
+    const primary = trackClient(await createRegisteredClient(PRIMARY_SERVER, nick1));
+    const secondary = trackClient(await createRegisteredClient(SECONDARY_SERVER, nick2));
 
     // Join channel on both
     primary.send(`JOIN ${channel}`);

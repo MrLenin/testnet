@@ -82,7 +82,8 @@ if [ "$REALM_EXISTS" = "200" ]; then
       "waitIncrementSeconds": 60,
       "quickLoginCheckMilliSeconds": 1000,
       "maxDeltaTimeSeconds": 43200,
-      "failureFactor": 30
+      "failureFactor": 30,
+      "requiredActions": []
     }'
   echo "Realm updated"
 else
@@ -107,7 +108,8 @@ else
       "waitIncrementSeconds": 60,
       "quickLoginCheckMilliSeconds": 1000,
       "maxDeltaTimeSeconds": 43200,
-      "failureFactor": 30
+      "failureFactor": 30,
+      "requiredActions": []
     }'
   echo "Realm created"
 fi
