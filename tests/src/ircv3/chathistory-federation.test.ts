@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeAll } from 'vitest';
-import { createRawSocketClient, RawSocketClient, PRIMARY_SERVER, SECONDARY_SERVER, uniqueChannel } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, PRIMARY_SERVER, SECONDARY_SERVER, uniqueChannel, IRC_OPER } from '../helpers/index.js';
 
 /**
  * Chathistory Federation Tests
@@ -137,7 +137,7 @@ describe('IRCv3 Chathistory Federation', () => {
       await operClient.waitForLine(/001/);
 
       // Become oper
-      operClient.send('OPER oper shmoo');
+      operClient.send(`OPER ${IRC_OPER.name} ${IRC_OPER.password}`);
       try {
         await operClient.waitForLine(/381/, 5000); // RPL_YOUREOPER
         console.log('Authenticated as oper');
@@ -603,7 +603,7 @@ describe('IRCv3 Chathistory Federation', () => {
       await operClient.waitForLine(/001/);
 
       // Become oper
-      operClient.send('OPER oper shmoo');
+      operClient.send(`OPER ${IRC_OPER.name} ${IRC_OPER.password}`);
       try {
         await operClient.waitForLine(/381/, 5000);
       } catch {
@@ -721,7 +721,7 @@ describe('IRCv3 Chathistory Federation', () => {
       operClient.register('catchup1');
       await operClient.waitForLine(/001/);
 
-      operClient.send('OPER oper shmoo');
+      operClient.send(`OPER ${IRC_OPER.name} ${IRC_OPER.password}`);
       try {
         await operClient.waitForLine(/381/, 5000);
       } catch {

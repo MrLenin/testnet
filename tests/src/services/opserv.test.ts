@@ -28,10 +28,8 @@ import { describe, it, expect, afterEach } from 'vitest';
 import {
   X3Client,
   createX3Client,
-  createAuthenticatedX3Client,
-  createTestAccount,
+  createOperClient,
   uniqueId,
-  isKeycloakAvailable,
 } from '../helpers/index.js';
 
 describe('OpServ (O3)', () => {
@@ -75,28 +73,14 @@ describe('OpServ (O3)', () => {
     });
 
     it('should report higher access for authenticated oper user', async () => {
-      // This test requires a Keycloak user with x3_opserv_level set
-      if (!isKeycloakAvailable()) {
-        console.log('Skipping - Keycloak not available');
-        return;
-      }
+      // Use createOperClient which auths with X3_ADMIN (olevel 1000)
+      const client = trackClient(await createOperClient());
 
-      try {
-        // Try to authenticate as oper user (testoper with x3_opserv_level=500)
-        const client = trackClient(
-          await createAuthenticatedX3Client('testoper', 'testpass')
-        );
+      const level = await client.myAccess();
+      console.log('Oper MYACCESS level:', level);
 
-        const level = await client.myAccess();
-        console.log('Oper MYACCESS level:', level);
-
-        // If properly set up, should have oper level
-        if (level > 0) {
-          expect(level).toBeGreaterThanOrEqual(100);
-        }
-      } catch (e) {
-        console.log('Could not authenticate as oper user:', e);
-      }
+      // X3_ADMIN (first oper to register) should have olevel 1000
+      expect(level).toBeGreaterThanOrEqual(100);
     });
   });
 
@@ -114,107 +98,70 @@ describe('OpServ (O3)', () => {
     });
 
     it('should allow GLINE from oper user', async () => {
-      // This requires an authenticated oper user
-      if (!isKeycloakAvailable()) {
-        console.log('Skipping - Keycloak not available');
-        return;
-      }
+      // Use createOperClient which auths with X3_ADMIN (olevel 1000)
+      const client = trackClient(await createOperClient());
 
-      try {
-        const client = trackClient(
-          await createAuthenticatedX3Client('testoper', 'testpass')
-        );
+      const level = await client.myAccess();
+      console.log('Oper level:', level);
+      expect(level).toBeGreaterThanOrEqual(200);
 
-        const level = await client.myAccess();
-        if (level < 200) {
-          console.log('Skipping - insufficient oper level:', level);
-          return;
-        }
+      // Add a test GLINE
+      const testMask = `*!*@glinetest-${uniqueId().slice(0, 8)}.example.com`;
+      const result = await client.gline(testMask, '1m', 'Test gline from tests');
+      console.log('Oper GLINE response:', result.lines);
 
-        // Add a test GLINE
-        const testMask = `*!*@glinetest-${uniqueId().slice(0, 8)}.example.com`;
-        const result = await client.gline(testMask, '1m', 'Test gline from tests');
-        console.log('Oper GLINE response:', result.lines);
+      expect(result.success).toBe(true);
 
-        expect(result.success).toBe(true);
-
-        // Clean up
-        await client.ungline(testMask);
-      } catch (e) {
-        console.log('Could not test oper GLINE:', e);
-      }
+      // Clean up
+      await client.ungline(testMask);
     });
 
     it('should remove GLINE with UNGLINE', async () => {
-      if (!isKeycloakAvailable()) {
-        console.log('Skipping - Keycloak not available');
-        return;
-      }
+      // Use createOperClient which auths with X3_ADMIN (olevel 1000)
+      const client = trackClient(await createOperClient());
 
-      try {
-        const client = trackClient(
-          await createAuthenticatedX3Client('testoper', 'testpass')
-        );
+      const level = await client.myAccess();
+      console.log('Oper level:', level);
+      expect(level).toBeGreaterThanOrEqual(200);
 
-        const level = await client.myAccess();
-        if (level < 200) {
-          console.log('Skipping - insufficient oper level');
-          return;
-        }
+      // Add then remove a GLINE
+      const testMask = `*!*@ungline-${uniqueId().slice(0, 8)}.example.com`;
+      await client.gline(testMask, '1h', 'Test for ungline');
 
-        // Add then remove a GLINE
-        const testMask = `*!*@ungline-${uniqueId().slice(0, 8)}.example.com`;
-        await client.gline(testMask, '1h', 'Test for ungline');
+      const result = await client.ungline(testMask);
+      console.log('UNGLINE response:', result.lines);
 
-        const result = await client.ungline(testMask);
-        console.log('UNGLINE response:', result.lines);
-
-        expect(result.success).toBe(true);
-      } catch (e) {
-        console.log('Could not test UNGLINE:', e);
-      }
+      expect(result.success).toBe(true);
     });
   });
 
   describe('User Operations', () => {
     it('should allow oper to force-join user to channel', async () => {
-      if (!isKeycloakAvailable()) {
-        console.log('Skipping - Keycloak not available');
-        return;
-      }
+      // Use createOperClient which auths with X3_ADMIN (olevel 1000)
+      const operClient = trackClient(await createOperClient());
 
-      try {
-        const operClient = trackClient(
-          await createAuthenticatedX3Client('testoper', 'testpass')
-        );
+      const level = await operClient.myAccess();
+      console.log('Oper level:', level);
+      expect(level).toBeGreaterThanOrEqual(200);
 
-        const level = await operClient.myAccess();
-        if (level < 200) {
-          console.log('Skipping - insufficient oper level');
-          return;
-        }
+      // Create a target user
+      const targetClient = trackClient(await createX3Client());
+      const targetNick = `target${uniqueId().slice(0, 5)}`;
 
-        // Create a target user
-        const targetClient = trackClient(await createX3Client());
-        const targetNick = `target${uniqueId().slice(0, 5)}`;
+      // Register target with a known nick
+      targetClient.send(`NICK ${targetNick}`);
+      await new Promise(r => setTimeout(r, 500));
 
-        // Register target with a known nick
-        targetClient.send(`NICK ${targetNick}`);
-        await new Promise(r => setTimeout(r, 500));
+      // Force join target to a channel
+      const channel = `#optest${uniqueId().slice(0, 5)}`;
+      const result = await operClient.forceJoin(targetNick, channel);
+      console.log('FORCEJOIN response:', result.lines);
 
-        // Force join target to a channel
-        const channel = `#optest${uniqueId().slice(0, 5)}`;
-        const result = await operClient.forceJoin(targetNick, channel);
-        console.log('FORCEJOIN response:', result.lines);
-
-        // Check if target is in channel
-        targetClient.clearRawBuffer();
-        targetClient.send(`NAMES ${channel}`);
-        const namesResponse = await targetClient.waitForLine(/353|366/, 3000);
-        console.log('NAMES after forcejoin:', namesResponse);
-      } catch (e) {
-        console.log('Could not test force-join:', e);
-      }
+      // Check if target is in channel
+      targetClient.clearRawBuffer();
+      targetClient.send(`NAMES ${channel}`);
+      const namesResponse = await targetClient.waitForLine(/353|366/, 3000);
+      console.log('NAMES after forcejoin:', namesResponse);
     });
   });
 
