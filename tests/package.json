@@ -18,7 +18,8 @@
     "infra:linked": "cd .. && docker compose --profile linked up -d --wait",
     "infra:multi": "cd .. && docker compose --profile linked --profile multi up -d --wait",
     "infra:down": "cd .. && docker compose --profile linked --profile multi down",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "cleanup": "npx tsx src/scripts/cleanup-tests.ts"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
