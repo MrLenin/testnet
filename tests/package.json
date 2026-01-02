@@ -8,9 +8,13 @@
     "test:verbose": "VITEST_VERBOSE=1 vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
-    "test:multiserver": "vitest run src/ircv3/multiserver.test.ts",
+    "test:multiserver": "npm run infra:linked && vitest run src/ircv3/multiserver.test.ts",
     "test:websocket": "vitest run src/ircv3/websocket*.test.ts",
     "test:keycloak": "vitest run src/keycloak/",
+    "test:linked": "npm run infra:linked && vitest run",
+    "infra:up": "cd .. && docker compose up -d --wait",
+    "infra:linked": "cd .. && docker compose --profile linked up -d --wait",
+    "infra:down": "cd .. && docker compose --profile linked down",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
