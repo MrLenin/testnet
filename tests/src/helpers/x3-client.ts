@@ -99,9 +99,11 @@ export class X3Client extends RawSocketClient {
           Math.min(2000, timeout - (Date.now() - startTime))
         );
 
-        // Only collect lines from the target service
-        if (line.toLowerCase().includes(service.toLowerCase()) ||
-            line.includes('NOTICE')) {
+        // Only collect lines from X3 services (AuthServ, ChanServ, O3, etc.)
+        // X3 services have format: :ServiceName!ServiceName@x3.services NOTICE nick :message
+        // Exclude server notices like: :testnet.fractalrealities.net NOTICE nick :...
+        if (line.includes('x3.services') ||
+            line.toLowerCase().includes(service.toLowerCase() + '!')) {
           lines.push(line);
         }
       } catch {
@@ -216,6 +218,7 @@ export class X3Client extends RawSocketClient {
       l.includes('already authed')  // Already authenticated from previous auth/activation
     );
     const error = lines.find(l =>
+      l.includes('Incorrect password') ||  // X3's actual message
       l.includes('incorrect') ||
       l.includes('invalid') ||
       l.includes('denied') ||
@@ -498,11 +501,12 @@ export class X3Client extends RawSocketClient {
    * Ban a user from channel.
    */
   async ban(channel: string, target: string, reason?: string): Promise<ServiceResponse> {
-    const cmd = reason ? `BAN ${channel} ${target} ${reason}` : `BAN ${channel} ${target}`;
+    // X3 uses ADDLAMER command to add bans
+    const cmd = reason ? `ADDLAMER ${channel} ${target} ${reason}` : `ADDLAMER ${channel} ${target}`;
     const lines = await this.serviceCmd('ChanServ', cmd);
     const success = lines.some(l =>
+      l.includes('LAMER') ||
       l.includes('banned') ||
-      l.includes('ban') ||
       l.includes('added')
     );
     return { lines, success };
