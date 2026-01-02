@@ -5,24 +5,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 Afternet Testnet is a Docker-based IRC test environment running:
-- **Nefarious IRCd** - IRC server daemon (git submodule from evilnet/nefarious2)
-- **X3 Services** - Channel/nickname services (git submodule from evilnet/x3, branch `rubin-add_docker`)
+- **Nefarious IRCd** - IRC server daemon with IRCv3.2+ extensions (git submodule from evilnet/nefarious2)
+- **X3 Services** - Channel/nick services with SASL/Keycloak support (git submodule from evilnet/x3)
+- **Keycloak** - OAuth/OIDC identity provider for SASL authentication
+
+Supports single-server, 2-server linked, and 4-server multi topology for testing.
 
 ## Build & Run Commands
 
 ```bash
-# Build and start
-docker compose build
+# Basic (nefarious + x3 + keycloak)
 docker compose up -d
 
+# Linked (adds nefarious2 for 2-server testing)
+docker compose --profile linked up -d
+
+# Multi (4 servers: nefarious, nefarious2, nefarious3, nefarious4)
+docker compose --profile linked --profile multi up -d
+
 # View logs
-docker compose logs -f
-docker compose logs nefarious
+docker compose logs -f nefarious
 docker compose logs x3
 
-# Stop
-docker compose down
+# Stop all
+docker compose --profile linked --profile multi down
 ```
+
+**Note for Claude sessions**: Do NOT run `docker compose build` - it takes too long and eats tokens.
 
 ## Submodule Management
 
@@ -45,29 +54,32 @@ git commit -m "Update nefarious submodule"
 ## Architecture
 
 ### Configuration System
-Both services use environment variable templating:
-1. Template files (`.conf-dist`) contain `%VARIABLE_NAME%` placeholders
-2. Docker entry points (`dockerentrypoint.sh`) substitute environment variables via sed
-3. Final configs written at container startup
+Config files are mounted directly from `data/` directory:
+- `data/ircd.conf` - Primary Nefarious IRCd config
+- `data/ircd2.conf`, `ircd3.conf`, `ircd4.conf` - Multi-server configs
+- `data/x3.conf` - X3 services config
+- `.env` / `.env.local` - Environment variables for containers
 
-Key config files:
-- `.env` - X3 environment variables
-- `nefarious/tools/docker/base.conf-dist` - IRCd config template
-- `x3/docker/x3.conf-dist` - X3 config template
+Init containers handle permissions and SSL cert generation before services start.
 
 ### Docker Structure
-- Both containers built on Debian 12 using GNU Autotools
+- Containers built on Debian 12 using GNU Autotools
 - Run as non-root user (UID/GID 1234)
-- Docker bridge network: IPv4 10.1.2.0/24, IPv6 fec0:3200::1/64
+- Docker bridge network: `irc_net` (172.29.0.0/24)
+- Named volumes for persistent data (history, metadata, x3_data, keycloak_data)
 
-### Ports
-- 6667: IRC (plaintext)
-- 4497: IRC (SSL)
-- 9998: Services link
-
-### Entry Points
-- `nefarious/tools/docker/dockerentrypoint.sh` - Generates SSL certs, substitutes config
-- `x3/docker/dockerentrypoint.sh` - Substitutes config
+### Ports (localhost only)
+| Port | Service | Description |
+|------|---------|-------------|
+| 6667 | nefarious | IRC plaintext |
+| 6697 | nefarious | IRC SSL/TLS |
+| 4497 | nefarious | IRC SSL (legacy) |
+| 8443 | nefarious | WebSocket SSL |
+| 9998 | nefarious | Services link (P10) |
+| 6668 | nefarious2 | IRC plaintext (linked profile) |
+| 6669 | nefarious3 | IRC plaintext (multi profile) |
+| 6670 | nefarious4 | IRC plaintext (multi profile) |
+| 8080 | keycloak | Keycloak admin UI |
 
 ## Testing
 
@@ -143,17 +155,14 @@ PRIVMSG O3 :REHASH                    # Reload config
 ## Docker Network
 
 ### Container IPs (irc_net: 172.29.0.0/24)
-- nefarious: 172.29.0.2
-- x3: 172.29.0.3
-- nefarious2 (linked profile): 172.29.0.5
-- keycloak: 172.29.0.10
-
-### Profiles
-```bash
-docker compose up -d                              # Basic (nefarious + x3)
-docker compose --profile linked up -d             # Add nefarious2
-docker compose --profile linked --profile multi up -d  # Full multiserver
-```
+| Container | IP | Profile | Server Name |
+|-----------|-----|---------|-------------|
+| nefarious | 172.29.0.2 | default | testnet.fractalrealities.net |
+| x3 | 172.29.0.3 | default | x3.fractalrealities.services |
+| nefarious2 | 172.29.0.5 | linked | leaf.fractalrealities.net |
+| nefarious3 | 172.29.0.6 | multi | hub2.fractalrealities.net |
+| nefarious4 | 172.29.0.7 | multi | leaf2.fractalrealities.net |
+| keycloak | 172.29.0.10 | default | - |
 
 ## P10 Protocol
 
@@ -234,5 +243,8 @@ See `FEATURE_FLAGS_CONFIG.md` for comprehensive feature flag and configuration r
 
 ## Project Status
 
-Work in progress - recently converted to git submodules. The `archive/` directory contains pre-submodule versions (can be ignored). X3 tracks a custom fork branch (`rubin-add_docker`) with Docker enhancements.
-- dont build the containers yourself, it eats too much tokens watching make go by
+Active development - IRCv3.2+ upgrade project with comprehensive test suite. Nefarious and X3 are git submodules tracking custom forks with enhancements:
+- Nefarious: Full IRCv3.2+ support (CAP, SASL, chathistory, metadata, multiline, etc.)
+- X3: Keycloak integration, LMDB caching, P10 protocol extensions
+
+**For Claude sessions**: Don't build containers - it uses too many tokens. Use pre-built images.
