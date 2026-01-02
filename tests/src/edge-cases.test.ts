@@ -51,13 +51,15 @@ describe('Edge Cases', () => {
       receiver.clearRawBuffer();
 
       // Send empty message (just the colon)
+      sender.clearRawBuffer();
       sender.send(`PRIVMSG ${channel} :`);
 
-      // Server should either deliver empty message or ignore it
-      // Give a short timeout since it may be ignored
-      const response = await receiver.waitForLine(/PRIVMSG/i, 2000).catch(() => null);
-      // Either we receive it or we don't - both are acceptable
-      expect(true).toBe(true); // Test that we didn't crash
+      // DOCUMENTED BEHAVIOR:
+      // Nefarious returns ERR_NOTEXTTOSEND (412) for empty messages
+      // per RFC 1459: "No text to send"
+      // The message is NOT relayed - this is correct per spec
+      const errorResponse = await sender.waitForLine(/412/i, 5000);
+      expect(errorResponse).toMatch(/412/);
 
       sender.send('QUIT');
       receiver.send('QUIT');
@@ -239,10 +241,11 @@ describe('Edge Cases', () => {
       await client.capLs();
       client.capEnd();
       client.register('user12345');
-      await client.waitForLine(/001/);
+      const welcome = await client.waitForLine(/001/);
 
-      // Successfully registered with numbers in nick
-      expect(true).toBe(true);
+      // Verify the nick was accepted with numbers
+      expect(welcome).toContain('001');
+      expect(welcome).toContain('user12345');
 
       client.send('QUIT');
     });
@@ -260,9 +263,12 @@ describe('Edge Cases', () => {
       // Try to change to the same nick
       client.send('NICK samenick1');
 
-      // Should either succeed silently or return error - both acceptable
-      await new Promise(r => setTimeout(r, 500));
-      expect(true).toBe(true); // Didn't crash
+      // Server should either: silently ignore, send NICK confirmation, or error
+      // Verify we can still operate by sending PING
+      await new Promise(r => setTimeout(r, 300));
+      client.send('PING :sametest');
+      const pong = await client.waitForLine(/PONG.*sametest/i, 5000);
+      expect(pong).toContain('PONG');
 
       client.send('QUIT');
     });
@@ -398,16 +404,25 @@ describe('Edge Cases', () => {
       const channel = uniqueChannel('samemode');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await new Promise(r => setTimeout(r, 300));
 
-      // Set +n twice
-      client.send(`MODE ${channel} +n`);
-      await client.waitForLine(/MODE.*\+n/i, 5000).catch(() => {});
+      // First remove +m so we can set it, then set twice
+      client.send(`MODE ${channel} -m`);
+      await new Promise(r => setTimeout(r, 200));
+      client.clearRawBuffer();
 
-      client.send(`MODE ${channel} +n`);
+      client.send(`MODE ${channel} +m`);
+      await client.waitForLine(/MODE.*\+m/i, 5000);
 
-      // Should either succeed or be ignored - both acceptable
-      await new Promise(r => setTimeout(r, 500));
-      expect(true).toBe(true); // Didn't crash
+      client.clearRawBuffer();
+      client.send(`MODE ${channel} +m`);
+
+      // Second set of same mode should be silently ignored (no MODE echo)
+      // Verify by checking we can still query modes
+      await new Promise(r => setTimeout(r, 300));
+      client.send(`MODE ${channel}`);
+      const modeResponse = await client.waitForLine(/324|MODE/i, 5000);
+      expect(modeResponse).toBeDefined();
 
       client.send('QUIT');
     });
@@ -423,13 +438,22 @@ describe('Edge Cases', () => {
       const channel = uniqueChannel('unsetmode');
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await new Promise(r => setTimeout(r, 300));
 
-      // Try to unset mode that may not be set
+      // Ensure -m is not set first, then try to unset it again
+      client.send(`MODE ${channel} -m`);
+      await new Promise(r => setTimeout(r, 200));
+      client.clearRawBuffer();
+
+      // Try to unset mode that is definitely not set
       client.send(`MODE ${channel} -m`);
 
-      // Should be handled gracefully
-      await new Promise(r => setTimeout(r, 500));
-      expect(true).toBe(true); // Didn't crash
+      // Server should silently ignore or no-op
+      // Verify by checking we can still query modes
+      await new Promise(r => setTimeout(r, 300));
+      client.send(`MODE ${channel}`);
+      const modeResponse = await client.waitForLine(/324|MODE/i, 5000);
+      expect(modeResponse).toBeDefined();
 
       client.send('QUIT');
     });

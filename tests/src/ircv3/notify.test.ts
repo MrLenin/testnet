@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient, uniqueChannel } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel, CAP_BUNDLES } from '../helpers/index.js';
 
 /**
  * Away-Notify and Account-Notify Tests
@@ -51,9 +51,9 @@ describe('IRCv3 away-notify', () => {
       const observer = trackClient(await createRawSocketClient());
       const awayer = trackClient(await createRawSocketClient());
 
-      // Observer enables away-notify
+      // Observer enables account notifications bundle (away-notify, account-notify, extended-join)
       await observer.capLs();
-      await observer.capReq(['away-notify']);
+      await observer.capReq(CAP_BUNDLES.accounts);
       observer.capEnd();
       observer.register('awayobs1');
       await observer.waitForLine(/001/);
@@ -90,7 +90,7 @@ describe('IRCv3 away-notify', () => {
       const awayer = trackClient(await createRawSocketClient());
 
       await observer.capLs();
-      await observer.capReq(['away-notify']);
+      await observer.capReq(CAP_BUNDLES.accounts);
       observer.capEnd();
       observer.register('awayobs2');
       await observer.waitForLine(/001/);
@@ -130,7 +130,7 @@ describe('IRCv3 away-notify', () => {
       const awayer = trackClient(await createRawSocketClient());
 
       await observer.capLs();
-      await observer.capReq(['away-notify']);
+      await observer.capReq(CAP_BUNDLES.accounts);
       observer.capEnd();
       observer.register('awayobs3');
       await observer.waitForLine(/001/);
@@ -209,11 +209,14 @@ describe('IRCv3 away-notify', () => {
 
   describe('AWAY on JOIN', () => {
     it('receives AWAY status when user joins while already away', async () => {
+      // Note: IRCv3 spec says servers SHOULD (not MUST) send AWAY status on JOIN
+      // Nefarious does not implement this optional behavior
+      // Test verifies the observer at least receives the JOIN notification
       const observer = trackClient(await createRawSocketClient());
       const awayer = trackClient(await createRawSocketClient());
 
       await observer.capLs();
-      await observer.capReq(['away-notify']);
+      await observer.capReq(CAP_BUNDLES.accounts);
       observer.capEnd();
       observer.register('awayobs5');
       await observer.waitForLine(/001/);
@@ -239,10 +242,14 @@ describe('IRCv3 away-notify', () => {
       awayer.send(`JOIN ${channel}`);
       await awayer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
-      // Observer should receive AWAY notification when awayer joins
-      // Per IRCv3 spec, servers SHOULD send AWAY status for users who are away on JOIN
-      const awayMsg = await observer.waitForLine(/AWAY.*awayuser5/i, 5000);
-      expect(awayMsg).toBeDefined();
+      // Per IRCv3 spec, servers MUST send AWAY status for users who are away on JOIN
+      // First we should see the JOIN
+      const joinMsg = await observer.waitForLine(/:awayuser5.*JOIN/i, 5000);
+      expect(joinMsg).toContain('JOIN');
+
+      // Then we should see AWAY notification (spec says "will be sent")
+      const awayMsg = await observer.waitForLine(/:awayuser5.*AWAY/i, 3000);
+      expect(awayMsg).toContain('AWAY');
       expect(awayMsg).toContain('Already away');
 
       observer.send('QUIT');
@@ -297,7 +304,7 @@ describe('IRCv3 account-notify', () => {
       const observer = trackClient(await createRawSocketClient());
 
       await observer.capLs();
-      await observer.capReq(['account-notify', 'sasl']);
+      await observer.capReq([...CAP_BUNDLES.accounts, 'sasl']);
       observer.capEnd();
       observer.register('acctobs1');
       await observer.waitForLine(/001/);
@@ -319,7 +326,7 @@ describe('IRCv3 account-notify', () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['account-notify']);
+      await client.capReq(CAP_BUNDLES.accounts);
       client.capEnd();
       client.register('accttest3');
       await client.waitForLine(/001/);
@@ -337,7 +344,7 @@ describe('IRCv3 account-notify', () => {
       const client2 = trackClient(await createRawSocketClient());
 
       await client1.capLs();
-      await client1.capReq(['extended-join']);
+      await client1.capReq(CAP_BUNDLES.accounts);
       client1.capEnd();
       client1.register('extjoin1');
       await client1.waitForLine(/001/);

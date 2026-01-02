@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId, CAP_BUNDLES } from '../helpers/index.js';
 
 /**
  * Labeled Response Tests (labeled-response)
@@ -53,7 +53,7 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['labeled-response']);
+      await client.capReq(CAP_BUNDLES.batching);
       client.capEnd();
       client.register('label1');
       await client.waitForLine(/001/);
@@ -64,16 +64,12 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       const label = `test-${uniqueId()}`;
       client.send(`@label=${label} PING :test`);
 
-      try {
-        // Should receive PONG with same label
-        const response = await client.waitForLine(/PONG|label=/i, 3000);
-        if (response.includes('label=')) {
-          expect(response).toContain(`label=${label}`);
-        }
-        console.log('Labeled response:', response);
-      } catch {
-        console.log('No labeled response received');
-      }
+      // Should receive PONG with same label
+      const response = await client.waitForLine(/PONG/i, 3000);
+      expect(response).toBeDefined();
+      // Server must respond to PING - label may or may not be echoed for PING specifically
+      expect(response).toContain('PONG');
+      console.log('Labeled response:', response);
 
       client.send('QUIT');
     });
@@ -82,7 +78,7 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['labeled-response']);
+      await client.capReq(CAP_BUNDLES.batching);
       client.capEnd();
       client.register('label2');
       await client.waitForLine(/001/);
@@ -123,7 +119,7 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['labeled-response', 'batch']);
+      await client.capReq(CAP_BUNDLES.batching);
       client.capEnd();
       client.register('label3');
       await client.waitForLine(/001/);
@@ -163,7 +159,8 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['labeled-response', 'echo-message']);
+      // Combine batching (labeled-response) and messaging (echo-message)
+      await client.capReq([...CAP_BUNDLES.batching, ...CAP_BUNDLES.messaging]);
       client.capEnd();
       client.register('labelecho1');
       await client.waitForLine(/001/);
@@ -177,16 +174,15 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       const label = `msg-${uniqueId()}`;
       client.send(`@label=${label} PRIVMSG ${channel} :Labeled message`);
 
-      try {
-        // With echo-message, should receive our own message back with label
-        const response = await client.waitForLine(/PRIVMSG.*Labeled message|label=/i, 3000);
-        console.log('Echo with label:', response);
-        if (response.includes('label=')) {
-          expect(response).toContain(`label=${label}`);
-        }
-      } catch {
-        console.log('Labeled echo failed');
+      // With echo-message, should receive our own message back with label
+      const response = await client.waitForLine(/PRIVMSG.*Labeled message/i, 3000);
+      expect(response).toContain('PRIVMSG');
+      expect(response).toContain('Labeled message');
+      // If response includes label tag, verify it matches
+      if (response.includes('label=')) {
+        expect(response).toContain(`label=${label}`);
       }
+      console.log('Echo with label:', response);
 
       client.send('QUIT');
     });
@@ -197,7 +193,7 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['labeled-response']);
+      await client.capReq(CAP_BUNDLES.batching);
       client.capEnd();
       client.register('labelempty1');
       await client.waitForLine(/001/);
@@ -218,7 +214,7 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['labeled-response']);
+      await client.capReq(CAP_BUNDLES.batching);
       client.capEnd();
       client.register('labellong1');
       await client.waitForLine(/001/);
@@ -240,7 +236,7 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['labeled-response']);
+      await client.capReq(CAP_BUNDLES.batching);
       client.capEnd();
       client.register('labelspec1');
       await client.waitForLine(/001/);
@@ -294,7 +290,7 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['labeled-response']);
+      await client.capReq(CAP_BUNDLES.batching);
       client.capEnd();
       client.register('labelack1');
       await client.waitForLine(/001/);
@@ -305,14 +301,18 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
 
       client.clearRawBuffer();
 
+      // First remove +m (in case it's somehow set), then set it
+      client.send(`MODE ${channel} -m`);
+      await new Promise(r => setTimeout(r, 300));
+      client.clearRawBuffer();
+
       // Some commands produce no output - server should send ACK
       const label = `ack-${uniqueId()}`;
-      // MODE without parameters typically just shows modes, but setting mode
-      // on a channel we created might produce ACK
-      client.send(`@label=${label} MODE ${channel} +t`);
+      // Setting +m mode on the channel
+      client.send(`@label=${label} MODE ${channel} +m`);
 
-      // Server MUST respond with ACK or MODE response
-      const response = await client.waitForLine(/ACK|MODE|label=/i, 5000);
+      // Server MUST respond with ACK or MODE response with our label
+      const response = await client.waitForLine(/ACK|MODE.*\+m|label=/i, 5000);
       expect(response).toBeDefined();
 
       client.send('QUIT');
@@ -324,7 +324,7 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['labeled-response']);
+      await client.capReq(CAP_BUNDLES.batching);
       client.capEnd();
       client.register('labelerr1');
       await client.waitForLine(/001/);

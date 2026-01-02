@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId, isKeycloakAvailable } from '../helpers/index.js';
 
 /**
  * Keycloak Integration Tests
@@ -394,30 +394,13 @@ async function addUserToGroup(
   }
 }
 
-describe('Keycloak Integration', () => {
+describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
   const clients: RawSocketClient[] = [];
-  let keycloakAvailable = false;
 
   const trackClient = (client: RawSocketClient): RawSocketClient => {
     clients.push(client);
     return client;
   };
-
-  beforeAll(async () => {
-    // Check if Keycloak is available
-    try {
-      const response = await fetch(`${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}`, {
-        signal: AbortSignal.timeout(5000),
-      });
-      keycloakAvailable = response.ok;
-    } catch {
-      keycloakAvailable = false;
-    }
-
-    if (!keycloakAvailable) {
-      console.log('Keycloak not available - some tests will be skipped');
-    }
-  });
 
   afterEach(() => {
     for (const client of clients) {
@@ -448,11 +431,6 @@ describe('Keycloak Integration', () => {
     });
 
     it('authenticates with Keycloak credentials', async () => {
-      if (!keycloakAvailable) {
-        console.log('Skipping - Keycloak not available');
-        return;
-      }
-
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
@@ -488,11 +466,6 @@ describe('Keycloak Integration', () => {
     });
 
     it('rejects invalid Keycloak credentials', async () => {
-      if (!keycloakAvailable) {
-        console.log('Skipping - Keycloak not available');
-        return;
-      }
-
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
@@ -533,11 +506,6 @@ describe('Keycloak Integration', () => {
     });
 
     it('authenticates with OAuth2 bearer token', async () => {
-      if (!keycloakAvailable) {
-        console.log('Skipping - Keycloak not available');
-        return;
-      }
-
       // Get token from Keycloak
       const token = await getKeycloakToken(TEST_USER, TEST_PASS);
       if (!token) {
@@ -623,11 +591,6 @@ describe('Keycloak Integration', () => {
 
   describe('Keycloak User Auto-Creation', () => {
     it('auto-creates X3 account for Keycloak user via OAUTHBEARER', async () => {
-      if (!keycloakAvailable) {
-        console.log('Skipping - Keycloak not available');
-        return;
-      }
-
       const adminToken = await getAdminToken();
       if (!adminToken) {
         console.log('Skipping - could not get admin token');
@@ -702,11 +665,6 @@ describe('Keycloak Integration', () => {
 
   describe('OpServ Level Sync', () => {
     it('includes x3_opserv_level in token claims', async () => {
-      if (!keycloakAvailable) {
-        console.log('Skipping - Keycloak not available');
-        return;
-      }
-
       const adminToken = await getAdminToken();
       if (!adminToken) {
         console.log('Skipping - could not get admin token');
@@ -748,11 +706,6 @@ describe('Keycloak Integration', () => {
 
   describe('Oper Group Membership', () => {
     it('adds user to x3-opers group in Keycloak', async () => {
-      if (!keycloakAvailable) {
-        console.log('Skipping - Keycloak not available');
-        return;
-      }
-
       const adminToken = await getAdminToken();
       if (!adminToken) {
         console.log('Skipping - could not get admin token');
@@ -775,11 +728,6 @@ describe('Keycloak Integration', () => {
     const TEST_FINGERPRINT_2 = '11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00';
 
     it('x509_fingerprints attribute exists in user profile', async () => {
-      if (!keycloakAvailable) {
-        console.log('Skipping - Keycloak not available');
-        return;
-      }
-
       const adminToken = await getAdminToken();
       if (!adminToken) {
         console.log('Skipping - could not get admin token');
@@ -813,11 +761,6 @@ describe('Keycloak Integration', () => {
     });
 
     it('can set and retrieve fingerprints for a user', async () => {
-      if (!keycloakAvailable) {
-        console.log('Skipping - Keycloak not available');
-        return;
-      }
-
       const adminToken = await getAdminToken();
       if (!adminToken) {
         console.log('Skipping - could not get admin token');
@@ -835,11 +778,6 @@ describe('Keycloak Integration', () => {
     });
 
     it('supports multiple fingerprints per user', async () => {
-      if (!keycloakAvailable) {
-        console.log('Skipping - Keycloak not available');
-        return;
-      }
-
       const adminToken = await getAdminToken();
       if (!adminToken) {
         console.log('Skipping - could not get admin token');
@@ -865,11 +803,6 @@ describe('Keycloak Integration', () => {
     });
 
     it('can search users by fingerprint (Scenario 1 lookup)', async () => {
-      if (!keycloakAvailable) {
-        console.log('Skipping - Keycloak not available');
-        return;
-      }
-
       const adminToken = await getAdminToken();
       if (!adminToken) {
         console.log('Skipping - could not get admin token');
@@ -893,11 +826,6 @@ describe('Keycloak Integration', () => {
     });
 
     it('fingerprint not found returns null', async () => {
-      if (!keycloakAvailable) {
-        console.log('Skipping - Keycloak not available');
-        return;
-      }
-
       const adminToken = await getAdminToken();
       if (!adminToken) {
         console.log('Skipping - could not get admin token');
@@ -912,11 +840,6 @@ describe('Keycloak Integration', () => {
     });
 
     it('includes x509_fingerprints in token claims', async () => {
-      if (!keycloakAvailable) {
-        console.log('Skipping - Keycloak not available');
-        return;
-      }
-
       const adminToken = await getAdminToken();
       if (!adminToken) {
         console.log('Skipping - could not get admin token');
@@ -1192,28 +1115,19 @@ async function getGroupMembers(adminToken: string, groupId: string): Promise<Arr
   }
 }
 
-describe('Keycloak Channel Access Groups', () => {
-  let keycloakAvailable = false;
+describe.skipIf(!isKeycloakAvailable())('Keycloak Channel Access Groups', () => {
   let adminToken: string | null = null;
 
   beforeAll(async () => {
-    try {
-      const response = await fetch(`${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}`, {
-        signal: AbortSignal.timeout(5000),
-      });
-      keycloakAvailable = response.ok;
-
-      if (keycloakAvailable) {
-        adminToken = await getAdminToken();
-      }
-    } catch {
-      keycloakAvailable = false;
+    adminToken = await getAdminToken();
+    if (!adminToken) {
+      console.log('Could not get Keycloak admin token - some tests will fail');
     }
   });
 
   it('irc-channels parent group exists', async () => {
-    if (!keycloakAvailable || !adminToken) {
-      console.log('Skipping - Keycloak not available');
+    if (!adminToken) {
+      console.log('Skipping - Keycloak admin token not available');
       return;
     }
 
@@ -1232,8 +1146,8 @@ describe('Keycloak Channel Access Groups', () => {
   });
 
   it('can create hierarchical channel access groups', async () => {
-    if (!keycloakAvailable || !adminToken) {
-      console.log('Skipping - Keycloak not available');
+    if (!adminToken) {
+      console.log('Skipping - Keycloak admin token not available');
       return;
     }
 
@@ -1253,8 +1167,8 @@ describe('Keycloak Channel Access Groups', () => {
   });
 
   it('can add user to channel access group', async () => {
-    if (!keycloakAvailable || !adminToken) {
-      console.log('Skipping - Keycloak not available');
+    if (!adminToken) {
+      console.log('Skipping - Keycloak admin token not available');
       return;
     }
 
@@ -1309,8 +1223,8 @@ describe('Keycloak Channel Access Groups', () => {
   });
 
   it('supports multiple access levels per channel', async () => {
-    if (!keycloakAvailable || !adminToken) {
-      console.log('Skipping - Keycloak not available');
+    if (!adminToken) {
+      console.log('Skipping - Keycloak admin token not available');
       return;
     }
 
@@ -1506,9 +1420,8 @@ async function authenticateSecondUser(
  * 2. keycloak_bidirectional_sync enabled in x3.conf
  * 3. Keycloak configured with irc-channels parent group
  */
-describe('Keycloak Bidirectional Sync', () => {
+describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
   const clients: RawSocketClient[] = [];
-  let keycloakAvailable = false;
   let adminToken: string | null = null;
 
   const trackClient = (client: RawSocketClient): RawSocketClient => {
@@ -1517,17 +1430,9 @@ describe('Keycloak Bidirectional Sync', () => {
   };
 
   beforeAll(async () => {
-    try {
-      const response = await fetch(`${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}`, {
-        signal: AbortSignal.timeout(5000),
-      });
-      keycloakAvailable = response.ok;
-
-      if (keycloakAvailable) {
-        adminToken = await getAdminToken();
-      }
-    } catch {
-      keycloakAvailable = false;
+    adminToken = await getAdminToken();
+    if (!adminToken) {
+      console.log('Could not get Keycloak admin token - some tests will fail');
     }
   });
 
@@ -1544,8 +1449,8 @@ describe('Keycloak Bidirectional Sync', () => {
 
   describe('ADDUSER creates Keycloak groups', () => {
     it('creates channel group with x3_access_level attribute when user added', async () => {
-      if (!keycloakAvailable || !adminToken) {
-        console.log('Skipping - Keycloak not available');
+      if (!adminToken) {
+        console.log('Skipping - Keycloak admin token not available');
         return;
       }
 
@@ -1622,8 +1527,8 @@ describe('Keycloak Bidirectional Sync', () => {
     });
 
     it('creates group with correct access level for different user levels', async () => {
-      if (!keycloakAvailable || !adminToken) {
-        console.log('Skipping - Keycloak not available');
+      if (!adminToken) {
+        console.log('Skipping - Keycloak admin token not available');
         return;
       }
 
@@ -1728,8 +1633,8 @@ describe('Keycloak Bidirectional Sync', () => {
 
   describe('CLVL updates Keycloak access level', () => {
     it('updates group attribute when access level changed', async () => {
-      if (!keycloakAvailable || !adminToken) {
-        console.log('Skipping - Keycloak not available');
+      if (!adminToken) {
+        console.log('Skipping - Keycloak admin token not available');
         return;
       }
 
@@ -1829,8 +1734,8 @@ describe('Keycloak Bidirectional Sync', () => {
 
   describe('DELUSER removes from Keycloak group', () => {
     it('removes user access when deleted from channel', async () => {
-      if (!keycloakAvailable || !adminToken) {
-        console.log('Skipping - Keycloak not available');
+      if (!adminToken) {
+        console.log('Skipping - Keycloak admin token not available');
         return;
       }
 
@@ -1926,8 +1831,8 @@ describe('Keycloak Bidirectional Sync', () => {
 
   describe('UNREGISTER deletes Keycloak channel group', () => {
     it('deletes channel group when channel unregistered', async () => {
-      if (!keycloakAvailable || !adminToken) {
-        console.log('Skipping - Keycloak not available');
+      if (!adminToken) {
+        console.log('Skipping - Keycloak admin token not available');
         return;
       }
 
