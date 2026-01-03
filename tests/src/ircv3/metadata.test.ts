@@ -579,29 +579,19 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       const caps = await client1.capLs();
       const metaCap = caps.has('draft/metadata-2') ? 'draft/metadata-2' : 'draft/metadata';
 
-      // Check if SASL is available
-      if (!caps.has('sasl')) {
-        console.log('Skipping persistence test - SASL not available');
-        client1.send('QUIT');
-        return;
-      }
+      // SASL should always be available with Keycloak
+      expect(caps.has('sasl')).toBe(true);
 
       await client1.capReq([metaCap, 'sasl']);
 
-      // Try to authenticate
+      // Authenticate - Keycloak and testuser should always be available
       client1.send('AUTHENTICATE PLAIN');
-      try {
-        await client1.waitForLine(/AUTHENTICATE \+/);
-        const user = process.env.IRC_TEST_ACCOUNT ?? 'testaccount';
-        const pass = process.env.IRC_TEST_PASSWORD ?? 'testpass';
-        const payload = Buffer.from(`${user}\0${user}\0${pass}`).toString('base64');
-        client1.send(`AUTHENTICATE ${payload}`);
-        await client1.waitForLine(/903/i, 5000);
-      } catch {
-        console.log('SASL auth failed - skipping persistence test');
-        client1.send('QUIT');
-        return;
-      }
+      await client1.waitForLine(/AUTHENTICATE \+/);
+      const user = process.env.IRC_TEST_ACCOUNT ?? 'testuser';
+      const pass = process.env.IRC_TEST_PASSWORD ?? 'testpass';
+      const payload = Buffer.from(`${user}\0${user}\0${pass}`).toString('base64');
+      client1.send(`AUTHENTICATE ${payload}`);
+      await client1.waitForLine(/903/i, 5000);
 
       client1.capEnd();
       client1.register('metapersist1');
@@ -620,34 +610,23 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client2.capLs();
       await client2.capReq([metaCap, 'sasl']);
 
+      // Authenticate on reconnect
       client2.send('AUTHENTICATE PLAIN');
-      try {
-        await client2.waitForLine(/AUTHENTICATE \+/);
-        const user = process.env.IRC_TEST_ACCOUNT ?? 'testaccount';
-        const pass = process.env.IRC_TEST_PASSWORD ?? 'testpass';
-        const payload = Buffer.from(`${user}\0${user}\0${pass}`).toString('base64');
-        client2.send(`AUTHENTICATE ${payload}`);
-        await client2.waitForLine(/903/i, 5000);
-      } catch {
-        console.log('SASL auth failed on reconnect');
-        client2.send('QUIT');
-        return;
-      }
+      await client2.waitForLine(/AUTHENTICATE \+/);
+      const user2 = process.env.IRC_TEST_ACCOUNT ?? 'testuser';
+      const pass2 = process.env.IRC_TEST_PASSWORD ?? 'testpass';
+      const payload2 = Buffer.from(`${user2}\0${user2}\0${pass2}`).toString('base64');
+      client2.send(`AUTHENTICATE ${payload2}`);
+      await client2.waitForLine(/903/i, 5000);
 
       client2.capEnd();
       client2.register('metapersist2');
       await client2.waitForLine(/001/);
 
-      // Try to get the metadata we set
+      // Get the metadata we set - should persist for authenticated users
       client2.send('METADATA GET * testpersist');
-
-      try {
-        const response = await client2.waitForLine(/761.*testpersist/i, 3000);
-        expect(response).toContain(testValue);
-        console.log('Metadata persisted:', response);
-      } catch {
-        console.log('Metadata did not persist or not found');
-      }
+      const response = await client2.waitForLine(/761.*testpersist/i, 3000);
+      expect(response).toContain(testValue);
 
       client2.send('QUIT');
     });

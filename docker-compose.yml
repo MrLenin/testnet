@@ -323,7 +323,10 @@ services:
     networks:
       - irc_net
     depends_on:
-      - x3
+      x3:
+        condition: service_started
+      keycloak-setup:
+        condition: service_completed_successfully
     environment:
       - IRC_HOST=nefarious
       - OPER_NAME=oper
@@ -394,6 +397,8 @@ services:
       - KC_HOSTNAME=localhost
       - KC_HOSTNAME_PORT=8080
       - KC_HOSTNAME_STRICT=false
+      # JVM tuning: use 75% of container memory + G1 GC for consistent performance
+      - JAVA_OPTS_APPEND=-XX:MaxRAMPercentage=75 -XX:InitialRAMPercentage=75 -XX:+UseG1GC
     command: start-dev
     volumes:
       - keycloak_data:/opt/keycloak/data

@@ -95,6 +95,17 @@ async function getKeycloakToken(username: string, password: string): Promise<str
 }
 
 /**
+ * Get Keycloak token - throws if unavailable (for tests where Keycloak is required)
+ */
+async function requireKeycloakToken(username: string, password: string): Promise<string> {
+  const token = await getKeycloakToken(username, password);
+  if (!token) {
+    throw new Error(`Failed to get Keycloak token for ${username} - Keycloak should always be available`);
+  }
+  return token;
+}
+
+/**
  * Helper to get admin token for Keycloak API
  */
 async function getAdminToken(): Promise<string | null> {
@@ -120,6 +131,17 @@ async function getAdminToken(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Get admin token - throws if unavailable (for tests where Keycloak admin is required)
+ */
+async function requireAdminToken(): Promise<string> {
+  const token = await getAdminToken();
+  if (!token) {
+    throw new Error('Failed to get Keycloak admin token - Keycloak should always be available');
+  }
+  return token;
 }
 
 /**
@@ -155,6 +177,22 @@ async function createKeycloakUser(
     return response.status === 201;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Create Keycloak user - throws on failure
+ */
+async function requireKeycloakUser(
+  adminToken: string,
+  username: string,
+  email: string,
+  password: string,
+  attributes?: Record<string, string[]>
+): Promise<void> {
+  const success = await createKeycloakUser(adminToken, username, email, password, attributes);
+  if (!success) {
+    throw new Error(`Failed to create Keycloak user ${username} - Keycloak should always be available`);
   }
 }
 
@@ -402,7 +440,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
     return client;
   };
 
-  afterEach(() => {
+  afterEach(async () => {
     for (const client of clients) {
       try {
         client.close();
@@ -411,6 +449,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
       }
     }
     clients.length = 0;
+    // Allow X3 to clean up SASL sessions between tests (increased for Keycloak round-trips)
+    await new Promise(r => setTimeout(r, 300));
   });
 
   describe('SASL PLAIN via Keycloak', () => {
@@ -502,35 +542,21 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
     });
 
     it('authenticates with OAuth2 bearer token', async () => {
-      // Get token from Keycloak
-      const token = await getKeycloakToken(TEST_USER, TEST_PASS);
-      if (!token) {
-        console.log('Skipping - could not get Keycloak token');
-        return;
-      }
+      // Get token from Keycloak - should always be available
+      const token = await requireKeycloakToken(TEST_USER, TEST_PASS);
 
       const client = trackClient(await createRawSocketClient());
 
       const caps = await client.capLs();
       const saslValue = caps.get('sasl');
 
-      if (!saslValue?.includes('OAUTHBEARER')) {
-        console.log('Skipping - OAUTHBEARER not supported');
-        client.send('QUIT');
-        return;
-      }
+      // OAUTHBEARER should be supported when Keycloak is enabled
+      expect(saslValue).toContain('OAUTHBEARER');
 
       await client.capReq(['sasl']);
 
       client.send('AUTHENTICATE OAUTHBEARER');
-
-      try {
-        await client.waitForLine(/AUTHENTICATE \+/, 3000);
-      } catch {
-        console.log('Server did not prompt for OAUTHBEARER data');
-        client.send('QUIT');
-        return;
-      }
+      await client.waitForLine(/AUTHENTICATE \+/, 3000);
 
       // OAUTHBEARER format: base64("n,,\x01auth=Bearer <token>\x01\x01")
       const oauthPayload = `n,,\x01auth=Bearer ${token}\x01\x01`;
@@ -556,22 +582,13 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
       const caps = await client.capLs();
       const saslValue = caps.get('sasl');
 
-      if (!saslValue?.includes('OAUTHBEARER')) {
-        console.log('Skipping - OAUTHBEARER not supported');
-        client.send('QUIT');
-        return;
-      }
+      // OAUTHBEARER should be supported when Keycloak is enabled
+      expect(saslValue).toContain('OAUTHBEARER');
 
       await client.capReq(['sasl']);
 
       client.send('AUTHENTICATE OAUTHBEARER');
-
-      try {
-        await client.waitForLine(/AUTHENTICATE \+/, 3000);
-      } catch {
-        client.send('QUIT');
-        return;
-      }
+      await client.waitForLine(/AUTHENTICATE \+/, 3000);
 
       // Invalid token
       const oauthPayload = `n,,\x01auth=Bearer invalidtoken123\x01\x01`;
@@ -587,30 +604,19 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
 
   describe('Keycloak User Auto-Creation', () => {
     it('auto-creates X3 account for Keycloak user via OAUTHBEARER', async () => {
-      const adminToken = await getAdminToken();
-      if (!adminToken) {
-        console.log('Skipping - could not get admin token');
-        return;
-      }
+      // Get admin token - Keycloak should always be available
+      const adminToken = await requireAdminToken();
 
       // Create unique Keycloak user
       const uniqueUser = `kcauto${uniqueId().slice(0,5)}`;
       const uniqueEmail = `${uniqueUser}@example.com`;
       const uniquePass = 'testpass123';
 
-      const created = await createKeycloakUser(adminToken, uniqueUser, uniqueEmail, uniquePass);
-      if (!created) {
-        console.log('Skipping - could not create Keycloak user');
-        return;
-      }
+      await requireKeycloakUser(adminToken, uniqueUser, uniqueEmail, uniquePass);
 
       try {
         // Get OAuth token for the new user
-        const userToken = await getKeycloakToken(uniqueUser, uniquePass);
-        if (!userToken) {
-          console.log('Skipping - could not get token for new user');
-          return;
-        }
+        const userToken = await requireKeycloakToken(uniqueUser, uniquePass);
 
         // Connect and authenticate via OAUTHBEARER - should auto-create X3 account
         const client = trackClient(await createRawSocketClient());
@@ -618,11 +624,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
         const caps = await client.capLs();
         const saslValue = caps.get('sasl');
 
-        if (!saslValue?.includes('OAUTHBEARER')) {
-          console.log('Skipping - OAUTHBEARER not supported');
-          client.send('QUIT');
-          return;
-        }
+        // OAUTHBEARER should be supported when Keycloak is enabled
+        expect(saslValue).toContain('OAUTHBEARER');
 
         await client.capReq(['sasl']);
 
@@ -661,25 +664,15 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
 
   describe('OpServ Level Sync', () => {
     it('includes x3_opserv_level in token claims', async () => {
-      const adminToken = await getAdminToken();
-      if (!adminToken) {
-        console.log('Skipping - could not get admin token');
-        return;
-      }
+      // Keycloak should always be available
+      const adminToken = await requireAdminToken();
 
       // Set opserv level on test user
       const set = await setKeycloakUserAttribute(adminToken, TEST_USER, 'x3_opserv_level', '500');
-      if (!set) {
-        console.log('Skipping - could not set user attribute');
-        return;
-      }
+      expect(set).toBe(true);
 
       // Get token and decode it to check claims
-      const token = await getKeycloakToken(TEST_USER, TEST_PASS);
-      if (!token) {
-        console.log('Skipping - could not get token');
-        return;
-      }
+      const token = await requireKeycloakToken(TEST_USER, TEST_PASS);
 
       // Decode JWT (just the payload)
       const parts = token.split('.');
@@ -702,15 +695,11 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
 
   describe('Oper Group Membership', () => {
     it('adds user to x3-opers group in Keycloak', async () => {
-      const adminToken = await getAdminToken();
-      if (!adminToken) {
-        console.log('Skipping - could not get admin token');
-        return;
-      }
+      // Keycloak should always be available
+      const adminToken = await requireAdminToken();
 
       // Add test user to x3-opers group
       const added = await addUserToGroup(adminToken, TEST_USER, 'x3-opers');
-      console.log('Added to x3-opers group:', added);
 
       // This tests that the group exists and can be used
       // Actual X3 -> Keycloak sync would happen when OpServ level is set
@@ -724,11 +713,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
     const TEST_FINGERPRINT_2 = '11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00';
 
     it('x509_fingerprints attribute exists in user profile', async () => {
-      const adminToken = await getAdminToken();
-      if (!adminToken) {
-        console.log('Skipping - could not get admin token');
-        return;
-      }
+      // Keycloak should always be available
+      const adminToken = await requireAdminToken();
 
       // Get user profile configuration
       const response = await fetch(
@@ -757,11 +743,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
     });
 
     it('can set and retrieve fingerprints for a user', async () => {
-      const adminToken = await getAdminToken();
-      if (!adminToken) {
-        console.log('Skipping - could not get admin token');
-        return;
-      }
+      // Keycloak should always be available
+      const adminToken = await requireAdminToken();
 
       // Set fingerprints
       const set = await setKeycloakFingerprints(adminToken, TEST_USER, [TEST_FINGERPRINT_1]);
@@ -774,11 +757,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
     });
 
     it('supports multiple fingerprints per user', async () => {
-      const adminToken = await getAdminToken();
-      if (!adminToken) {
-        console.log('Skipping - could not get admin token');
-        return;
-      }
+      // Keycloak should always be available
+      const adminToken = await requireAdminToken();
 
       // Set multiple fingerprints
       const set = await setKeycloakFingerprints(adminToken, TEST_USER, [
@@ -799,11 +779,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
     });
 
     it('can search users by fingerprint (Scenario 1 lookup)', async () => {
-      const adminToken = await getAdminToken();
-      if (!adminToken) {
-        console.log('Skipping - could not get admin token');
-        return;
-      }
+      // Keycloak should always be available
+      const adminToken = await requireAdminToken();
 
       // Ensure test user has the fingerprint
       await setKeycloakFingerprints(adminToken, TEST_USER, [TEST_FINGERPRINT_1]);
@@ -822,11 +799,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
     });
 
     it('fingerprint not found returns null', async () => {
-      const adminToken = await getAdminToken();
-      if (!adminToken) {
-        console.log('Skipping - could not get admin token');
-        return;
-      }
+      // Keycloak should always be available
+      const adminToken = await requireAdminToken();
 
       // Search for non-existent fingerprint
       const nonExistentFp = 'ZZ:ZZ:ZZ:ZZ:ZZ:ZZ:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99';
@@ -836,21 +810,14 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
     });
 
     it('includes x509_fingerprints in token claims', async () => {
-      const adminToken = await getAdminToken();
-      if (!adminToken) {
-        console.log('Skipping - could not get admin token');
-        return;
-      }
+      // Keycloak should always be available
+      const adminToken = await requireAdminToken();
 
       // Ensure test user has fingerprint
       await setKeycloakFingerprints(adminToken, TEST_USER, [TEST_FINGERPRINT_1]);
 
-      // Get user token
-      const token = await getKeycloakToken(TEST_USER, TEST_PASS);
-      if (!token) {
-        console.log('Skipping - could not get token');
-        return;
-      }
+      // Get user token - Keycloak should always be available
+      const token = await requireKeycloakToken(TEST_USER, TEST_PASS);
 
       // Decode JWT payload
       const parts = token.split('.');
@@ -912,7 +879,7 @@ describe('Keycloak Error Handling', () => {
     return client;
   };
 
-  afterEach(() => {
+  afterEach(async () => {
     for (const client of clients) {
       try {
         client.close();
@@ -921,6 +888,8 @@ describe('Keycloak Error Handling', () => {
       }
     }
     clients.length = 0;
+    // Allow X3 to clean up SASL sessions between tests (increased for Keycloak round-trips)
+    await new Promise(r => setTimeout(r, 300));
   });
 
   it('handles Keycloak unavailable gracefully', async () => {
@@ -1112,20 +1081,43 @@ async function getGroupMembers(adminToken: string, groupId: string): Promise<Arr
 }
 
 describe.skipIf(!isKeycloakAvailable())('Keycloak Channel Access Groups', () => {
-  let adminToken: string | null = null;
+  let adminToken: string;
 
   beforeAll(async () => {
-    adminToken = await getAdminToken();
-    if (!adminToken) {
-      console.log('Could not get Keycloak admin token - some tests will fail');
+    // Keycloak should always be available
+    adminToken = await requireAdminToken();
+
+    // Ensure irc-channels parent group exists (setup-keycloak.sh should create it,
+    // but ensure it exists for test stability)
+    const checkResponse = await fetch(
+      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups?search=irc-channels&exact=true`,
+      { headers: { 'Authorization': `Bearer ${adminToken}` } }
+    );
+    const groups = await checkResponse.json();
+
+    if (groups.length === 0) {
+      // Create the parent group
+      const createResponse = await fetch(
+        `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${adminToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            name: 'irc-channels',
+            attributes: { description: ['IRC Channel Access'] },
+          }),
+        }
+      );
+      if (createResponse.status !== 201) {
+        throw new Error('Failed to create irc-channels group for tests');
+      }
     }
   });
 
   it('irc-channels parent group exists', async () => {
-    if (!adminToken) {
-      console.log('Skipping - Keycloak admin token not available');
-      return;
-    }
 
     const response = await fetch(
       `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups?search=irc-channels&exact=true`,
@@ -1142,10 +1134,6 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Channel Access Groups', () => 
   });
 
   it('can create hierarchical channel access groups', async () => {
-    if (!adminToken) {
-      console.log('Skipping - Keycloak admin token not available');
-      return;
-    }
 
     // Create test channel group structure: /irc-channels/testchan/owner
     const created = await createChannelGroup(adminToken, '#testchan', 'owner');
@@ -1163,23 +1151,16 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Channel Access Groups', () => 
   });
 
   it('can add user to channel access group', async () => {
-    if (!adminToken) {
-      console.log('Skipping - Keycloak admin token not available');
-      return;
-    }
 
     // Ensure group structure exists
     await createChannelGroup(adminToken, '#testchan', 'coowner');
 
-    // Get the coowner group
+    // Get the coowner group - should exist after creation
     const group = await getGroupByPath(adminToken, '/irc-channels/testchan/coowner');
-    if (!group) {
-      console.log('Skipping - could not find channel group');
-      return;
-    }
+    expect(group).toBeDefined();
 
     // Add test user to coowner group
-    // First find user
+    // First find user - test user should always exist
     const userResponse = await fetch(
       `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/users?username=${TEST_USER}&exact=true`,
       {
@@ -1187,16 +1168,10 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Channel Access Groups', () => 
       }
     );
 
-    if (!userResponse.ok) {
-      console.log('Skipping - could not find test user');
-      return;
-    }
+    expect(userResponse.ok).toBe(true);
 
     const users = await userResponse.json();
-    if (users.length === 0) {
-      console.log('Skipping - test user not found');
-      return;
-    }
+    expect(users.length).toBeGreaterThan(0);
 
     const userId = users[0].id;
 
@@ -1219,10 +1194,6 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Channel Access Groups', () => 
   });
 
   it('supports multiple access levels per channel', async () => {
-    if (!adminToken) {
-      console.log('Skipping - Keycloak admin token not available');
-      return;
-    }
 
     // X3 uses these access levels for channels
     const accessLevels = ['owner', 'coowner', 'manager', 'op', 'halfop', 'voice', 'peon'];
@@ -1418,7 +1389,7 @@ async function authenticateSecondUser(
  */
 describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
   const clients: RawSocketClient[] = [];
-  let adminToken: string | null = null;
+  let adminToken: string;
 
   const trackClient = (client: RawSocketClient): RawSocketClient => {
     clients.push(client);
@@ -1426,13 +1397,11 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
   };
 
   beforeAll(async () => {
-    adminToken = await getAdminToken();
-    if (!adminToken) {
-      console.log('Could not get Keycloak admin token - some tests will fail');
-    }
+    // Keycloak should always be available
+    adminToken = await requireAdminToken();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     for (const client of clients) {
       try {
         client.close();
@@ -1441,14 +1410,12 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
       }
     }
     clients.length = 0;
+    // Allow X3 to clean up SASL sessions between tests (increased for Keycloak round-trips)
+    await new Promise(r => setTimeout(r, 300));
   });
 
   describe('ADDUSER creates Keycloak groups', () => {
     it('creates channel group with x3_access_level attribute when user added', async () => {
-      if (!adminToken) {
-        console.log('Skipping - Keycloak admin token not available');
-        return;
-      }
 
       const channelName = uniqueChannel('bidisync');
       const groupName = channelName.replace('#', '');
@@ -1467,12 +1434,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
       const payload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
       client.send(`AUTHENTICATE ${payload}`);
 
-      try {
-        await client.waitForLine(/903/, 5000);
-      } catch {
-        console.log('Skipping - could not authenticate');
-        return;
-      }
+      // SASL auth should always succeed with Keycloak
+      await client.waitForLine(/903/, 5000);
 
       client.capEnd();
       client.register(`bisync${uniqueId().slice(0,4)}`);
@@ -1523,21 +1486,13 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
     });
 
     it('creates group with correct access level for different user levels', async () => {
-      if (!adminToken) {
-        console.log('Skipping - Keycloak admin token not available');
-        return;
-      }
 
       // Create a second Keycloak user for this test
       const secondUser = `bisyncadd${uniqueId().slice(0,5)}`;
       const secondEmail = `${secondUser}@example.com`;
       const secondPass = 'testpass123';
 
-      const created = await createKeycloakUser(adminToken, secondUser, secondEmail, secondPass);
-      if (!created) {
-        console.log('Skipping - could not create second Keycloak user');
-        return;
-      }
+      await requireKeycloakUser(adminToken, secondUser, secondEmail, secondPass);
 
       const channelName = uniqueChannel('bisyncadd');
 
@@ -1553,12 +1508,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         const ownerPayload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
         ownerClient.send(`AUTHENTICATE ${ownerPayload}`);
 
-        try {
-          await ownerClient.waitForLine(/903/, 5000);
-        } catch {
-          console.log('Skipping - could not authenticate owner');
-          return;
-        }
+        // SASL auth should always succeed with Keycloak
+        await ownerClient.waitForLine(/903/, 5000);
 
         ownerClient.capEnd();
         ownerClient.register(`bisown${uniqueId().slice(0,4)}`);
@@ -1629,21 +1580,13 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
 
   describe('CLVL updates Keycloak access level', () => {
     it('updates group attribute when access level changed', async () => {
-      if (!adminToken) {
-        console.log('Skipping - Keycloak admin token not available');
-        return;
-      }
 
       // Create a second Keycloak user
       const secondUser = `bisyncclvl${uniqueId().slice(0,5)}`;
       const secondEmail = `${secondUser}@example.com`;
       const secondPass = 'testpass123';
 
-      const created = await createKeycloakUser(adminToken, secondUser, secondEmail, secondPass);
-      if (!created) {
-        console.log('Skipping - could not create second Keycloak user');
-        return;
-      }
+      await requireKeycloakUser(adminToken, secondUser, secondEmail, secondPass);
 
       const channelName = uniqueChannel('bisyncclvl');
 
@@ -1659,12 +1602,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         const payload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
         ownerClient.send(`AUTHENTICATE ${payload}`);
 
-        try {
-          await ownerClient.waitForLine(/903/, 5000);
-        } catch {
-          console.log('Skipping - could not authenticate');
-          return;
-        }
+        // SASL auth should always succeed with Keycloak
+        await ownerClient.waitForLine(/903/, 5000);
 
         ownerClient.capEnd();
         ownerClient.register(`clvl${uniqueId().slice(0,4)}`);
@@ -1730,21 +1669,13 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
 
   describe('DELUSER removes from Keycloak group', () => {
     it('removes user access when deleted from channel', async () => {
-      if (!adminToken) {
-        console.log('Skipping - Keycloak admin token not available');
-        return;
-      }
 
       // Create a second user
       const secondUser = `bisyncdel${uniqueId().slice(0,5)}`;
       const secondEmail = `${secondUser}@example.com`;
       const secondPass = 'testpass123';
 
-      const created = await createKeycloakUser(adminToken, secondUser, secondEmail, secondPass);
-      if (!created) {
-        console.log('Skipping - could not create second Keycloak user');
-        return;
-      }
+      await requireKeycloakUser(adminToken, secondUser, secondEmail, secondPass);
 
       const channelName = uniqueChannel('bisyncdel');
 
@@ -1759,12 +1690,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         const payload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
         ownerClient.send(`AUTHENTICATE ${payload}`);
 
-        try {
-          await ownerClient.waitForLine(/903/, 5000);
-        } catch {
-          console.log('Skipping - could not authenticate');
-          return;
-        }
+        // SASL auth should always succeed with Keycloak
+        await ownerClient.waitForLine(/903/, 5000);
 
         ownerClient.capEnd();
         ownerClient.register(`delown${uniqueId().slice(0,4)}`);
@@ -1827,10 +1754,6 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
 
   describe('UNREGISTER deletes Keycloak channel group', () => {
     it('deletes channel group when channel unregistered', async () => {
-      if (!adminToken) {
-        console.log('Skipping - Keycloak admin token not available');
-        return;
-      }
 
       const channelName = uniqueChannel('bisyncunreg');
 
@@ -1844,12 +1767,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
       const payload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
       client.send(`AUTHENTICATE ${payload}`);
 
-      try {
-        await client.waitForLine(/903/, 5000);
-      } catch {
-        console.log('Skipping - could not authenticate');
-        return;
-      }
+      // SASL auth should always succeed with Keycloak
+      await client.waitForLine(/903/, 5000);
 
       client.capEnd();
       client.register(`unreg${uniqueId().slice(0,4)}`);

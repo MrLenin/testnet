@@ -92,7 +92,7 @@ IRC_HOST=localhost npm test -- src/path/to/test.ts  # Run specific test
 
 **Important for Claude sessions:**
 - DO NOT run the full test suite (`npm test`) - it takes 5+ minutes and will timeout
-- Run specific test files instead: `npm test -- src/services/opserv.test.ts`
+- DO NOT run tests yourself - prompt the user with the command to run instead. Tests take time and the user cannot interact with Claude while waiting.
 - For quick IRC testing, use `scripts/irc-test.sh`
 
 ### X3 Services Testing
