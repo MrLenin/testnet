@@ -542,13 +542,25 @@ export class RawSocketClient {
   private socket: Socket | null = null;
   private buffer = '';
   private lines: string[] = [];
-  private lineListeners: Array<(line: string) => void> = [];
+  private lineListeners: Array<(line: string, lineIndex: number) => void> = [];
   private availableCaps = new Map<string, string | null>();
   private enabledCaps = new Set<string>();
+  private debug = process.env.DEBUG === '1' || process.env.IRC_DEBUG === '1';
+  private clientId = Math.random().toString(36).substring(2, 8);
+  private socketClosed = false;
+  private dataChunks = 0;
+
+  private log(msg: string, ...args: unknown[]): void {
+    if (this.debug) {
+      const ts = new Date().toISOString().substring(11, 23);
+      console.log(`[${ts}][${this.clientId}] ${msg}`, ...args);
+    }
+  }
 
   async connect(host: string, port: number): Promise<void> {
     return new Promise((resolve, reject) => {
       this.socket = new Socket();
+      this.log(`Connecting to ${host}:${port}`);
 
       const timeout = setTimeout(() => {
         reject(new Error('Connection timeout'));
@@ -556,18 +568,34 @@ export class RawSocketClient {
 
       this.socket.on('connect', () => {
         clearTimeout(timeout);
+        this.log(`Connected`);
         resolve();
       });
 
       this.socket.on('error', (err: Error) => {
         clearTimeout(timeout);
+        this.log(`Socket error: ${err.message}`);
         reject(err);
       });
 
+      this.socket.on('close', () => {
+        this.socketClosed = true;
+        this.log(`Socket closed`);
+      });
+
+      this.socket.on('end', () => {
+        this.log(`Socket ended`);
+      });
+
       this.socket.on('data', (data: Buffer) => {
-        this.buffer += data.toString();
+        this.dataChunks++;
+        const dataStr = data.toString();
+        this.log(`DATA[${this.dataChunks}] received ${data.length} bytes: ${dataStr.substring(0, 200).replace(/\r\n/g, '\\r\\n')}`);
+
+        this.buffer += dataStr;
         const parts = this.buffer.split('\r\n');
         this.buffer = parts.pop() || '';
+
         for (const line of parts) {
           if (line) {
             // Auto-respond to PING
@@ -576,10 +604,22 @@ export class RawSocketClient {
               this.send(`PONG ${pingArg}`);
             }
             this.lines.push(line);
+            const lineIndex = this.lines.length - 1;
+            this.log(`LINE[${lineIndex}]: ${line}`);
+
+            // Notify listeners
+            const listenerCount = this.lineListeners.length;
+            if (listenerCount > 0) {
+              this.log(`Notifying ${listenerCount} listeners`);
+            }
             for (const listener of this.lineListeners) {
-              listener(line);
+              listener(line, lineIndex);
             }
           }
+        }
+
+        if (this.buffer.length > 0) {
+          this.log(`Partial buffer remaining: ${this.buffer.substring(0, 100)}`);
         }
       });
 
@@ -588,39 +628,83 @@ export class RawSocketClient {
   }
 
   send(line: string): void {
+    this.log(`SEND: ${line}`);
+    if (this.socketClosed) {
+      this.log(`WARNING: Attempting to send on closed socket`);
+    }
     this.socket?.write(line + '\r\n');
   }
 
   private consumedIndices = new Set<number>();
 
   async waitForLine(pattern: RegExp, timeout = 5000): Promise<string> {
-    // Check existing lines first (skip already consumed ones)
-    for (let i = 0; i < this.lines.length; i++) {
-      if (!this.consumedIndices.has(i) && pattern.test(this.lines[i])) {
-        this.consumedIndices.add(i);
-        return this.lines[i];
+    const waitId = Math.random().toString(36).substring(2, 6);
+    this.log(`WAIT[${waitId}] start: pattern=${pattern}, timeout=${timeout}ms, lines=${this.lines.length}, consumed=${this.consumedIndices.size}, listeners=${this.lineListeners.length}`);
+
+    // Helper to find matching unconsumed line in buffer
+    const findInBuffer = (): { line: string; index: number } | null => {
+      for (let i = 0; i < this.lines.length; i++) {
+        if (!this.consumedIndices.has(i) && pattern.test(this.lines[i])) {
+          return { line: this.lines[i], index: i };
+        }
       }
+      return null;
+    };
+
+    // Check existing lines first
+    const existing = findInBuffer();
+    if (existing) {
+      this.consumedIndices.add(existing.index);
+      this.log(`WAIT[${waitId}] found in buffer at index ${existing.index}: ${existing.line}`);
+      return existing.line;
     }
 
+    this.log(`WAIT[${waitId}] not in buffer, registering listener`);
+
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      let resolved = false;
+
+      const cleanup = () => {
         const idx = this.lineListeners.indexOf(handler);
         if (idx >= 0) this.lineListeners.splice(idx, 1);
+      };
+
+      const timer = setTimeout(() => {
+        if (resolved) return;
+        cleanup();
+        this.log(`WAIT[${waitId}] TIMEOUT after ${timeout}ms, socketClosed=${this.socketClosed}, lines=${this.lines.length}`);
+        // Log all unconsumed lines for debugging
+        const unconsumed = this.lines.filter((_, i) => !this.consumedIndices.has(i));
+        this.log(`WAIT[${waitId}] Unconsumed lines: ${unconsumed.length}`);
+        unconsumed.forEach((line, i) => this.log(`  [${i}] ${line}`));
         reject(new Error(`Timeout waiting for ${pattern}\nBuffer: ${this.lines.slice(-10).join('\\n')}`));
       }, timeout);
 
-      const handler = (line: string) => {
+      const handler = (line: string, lineIndex: number) => {
+        if (resolved) return;
         if (pattern.test(line)) {
+          resolved = true;
           clearTimeout(timer);
-          const idx = this.lineListeners.indexOf(handler);
-          if (idx >= 0) this.lineListeners.splice(idx, 1);
-          // Mark as consumed (it's the last line added)
-          this.consumedIndices.add(this.lines.length - 1);
+          cleanup();
+          this.consumedIndices.add(lineIndex);
+          this.log(`WAIT[${waitId}] matched from listener at index ${lineIndex}: ${line}`);
           resolve(line);
         }
       };
 
       this.lineListeners.push(handler);
+      this.log(`WAIT[${waitId}] listener registered, now ${this.lineListeners.length} listeners`);
+
+      // Re-check buffer after registering listener to catch race condition
+      const lateMatch = findInBuffer();
+      if (lateMatch && !resolved) {
+        resolved = true;
+        clearTimeout(timer);
+        cleanup();
+        this.consumedIndices.add(lateMatch.index);
+        this.log(`WAIT[${waitId}] late match in buffer at index ${lateMatch.index}: ${lateMatch.line}`);
+        resolve(lateMatch.line);
+      }
     });
   }
 
@@ -652,6 +736,7 @@ export class RawSocketClient {
    * This marks all existing lines as consumed so waitForLine only matches new lines.
    */
   clearRawBuffer(): void {
+    this.log(`clearRawBuffer: marking ${this.lines.length} lines as consumed`);
     // Mark all current lines as consumed
     for (let i = 0; i < this.lines.length; i++) {
       this.consumedIndices.add(i);
@@ -663,6 +748,24 @@ export class RawSocketClient {
    */
   clearBuffer(): void {
     this.clearRawBuffer();
+  }
+
+  /**
+   * Dump current state for debugging.
+   */
+  dumpState(): void {
+    console.log(`[${this.clientId}] State dump:`);
+    console.log(`  socketClosed: ${this.socketClosed}`);
+    console.log(`  dataChunks: ${this.dataChunks}`);
+    console.log(`  lines: ${this.lines.length}`);
+    console.log(`  consumed: ${this.consumedIndices.size}`);
+    console.log(`  listeners: ${this.lineListeners.length}`);
+    console.log(`  pendingBuffer: ${this.buffer.length} chars`);
+    console.log(`  All lines:`);
+    this.lines.forEach((line, i) => {
+      const consumed = this.consumedIndices.has(i) ? '[C]' : '[ ]';
+      console.log(`    ${consumed} [${i}] ${line.substring(0, 100)}`);
+    });
   }
 
   /**

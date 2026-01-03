@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createRawSocketClient, RawSocketClient, uniqueId } from '../helpers/index.js';
 
 /**
@@ -24,7 +24,13 @@ describe('IRCv3 SASL Authentication', () => {
     return client;
   };
 
-  afterEach(() => {
+  beforeEach(async () => {
+    // Delay before each test to prevent Keycloak overload from rapid auth attempts
+    // Multiple tests authenticate with same account - need spacing
+    await new Promise(r => setTimeout(r, 500));
+  });
+
+  afterEach(async () => {
     for (const client of clients) {
       try {
         client.close();
@@ -33,14 +39,19 @@ describe('IRCv3 SASL Authentication', () => {
       }
     }
     clients.length = 0;
+    // Allow X3/Keycloak to recover between tests
+    await new Promise(r => setTimeout(r, 500));
   });
 
   // Helper for SASL PLAIN authentication
+  // Note: Keycloak auth can take ~6s for invalid credentials, ~100ms for valid
   const saslPlain = async (client: RawSocketClient, user: string, pass: string): Promise<boolean> => {
+    // Clear buffer to avoid interference from previous tests
+    client.clearBuffer();
     client.send('AUTHENTICATE PLAIN');
 
     try {
-      await client.waitForLine(/^AUTHENTICATE \+$/);
+      await client.waitForLine(/^AUTHENTICATE \+$/, 10000);
     } catch {
       return false;
     }
@@ -49,8 +60,12 @@ describe('IRCv3 SASL Authentication', () => {
     const payload = Buffer.from(`${user}\0${user}\0${pass}`).toString('base64');
     client.send(`AUTHENTICATE ${payload}`);
 
+    // Small delay to allow server to process and respond
+    await new Promise(r => setTimeout(r, 100));
+
     try {
-      await client.waitForLine(/903/); // RPL_SASLSUCCESS
+      // Use longer timeout (20s) since Keycloak can be slow under load
+      await client.waitForLine(/903/, 20000); // RPL_SASLSUCCESS
       return true;
     } catch {
       return false;
@@ -83,11 +98,20 @@ describe('IRCv3 SASL Authentication', () => {
       await client.capLs();
       await client.capReq(['sasl']);
 
+      // Small delay to allow event loop to process pending I/O
+      await new Promise(r => setTimeout(r, 100));
+
       client.send('AUTHENTICATE PLAIN');
 
       // Server should respond with AUTHENTICATE +
-      const response = await client.waitForLine(/^AUTHENTICATE \+$/);
+      // Use longer timeout (10s) due to occasional IRCd→X3→IRCd roundtrip delays
+      const response = await client.waitForLine(/^AUTHENTICATE \+$/, 10000);
       expect(response).toBe('AUTHENTICATE +');
+
+      // Properly abort SASL session before quitting to prevent
+      // race conditions with subsequent tests
+      client.send('AUTHENTICATE *');
+      await client.waitForLine(/906/, 5000);  // Wait for abort confirmation
       client.send('QUIT');
     });
 
@@ -98,14 +122,16 @@ describe('IRCv3 SASL Authentication', () => {
       await client.capReq(['sasl']);
 
       client.send('AUTHENTICATE PLAIN');
-      await client.waitForLine(/^AUTHENTICATE \+$/);
+      await client.waitForLine(/^AUTHENTICATE \+$/, 10000);
 
       // Send invalid credentials
       const invalidPayload = Buffer.from('invalid\0invalid\0wrongpass').toString('base64');
       client.send(`AUTHENTICATE ${invalidPayload}`);
 
       // Should receive 904 (ERR_SASLFAIL)
-      const result = await client.waitForLine(/90[0-9]/);
+      // Note: Keycloak takes longer (~6s) to reject invalid credentials vs accept valid ones (~100ms)
+      // Use 20s timeout to handle load conditions
+      const result = await client.waitForLine(/90[0-9]/, 20000);
       // 904 = SASLFAIL, 902 = NICK_LOCKED
       expect(result).toMatch(/90[24]/);
       client.send('QUIT');
@@ -119,21 +145,10 @@ describe('IRCv3 SASL Authentication', () => {
 
       const success = await saslPlain(client, TEST_ACCOUNT, TEST_PASSWORD);
 
-      // If auth fails, this test cannot verify the success path
-      // We still assert on the auth result to catch broken auth systems
-      if (!success) {
-        console.warn(
-          `SASL auth failed for '${TEST_ACCOUNT}' - skipping success verification. ` +
-          `Run scripts/setup-keycloak.sh to create test accounts.`
-        );
-        // Assert that we at least got a definitive failure (not a protocol error)
-        // The saslPlain helper already verified we got proper SASL responses
-        client.send('QUIT');
-        return;
-      }
-
-      // Auth succeeded - verify full registration flow
+      // Keycloak should always be available with testuser account
+      // If this fails, it's a real problem that should be fixed
       expect(success).toBe(true);
+
       client.capEnd();
       client.register('authtest3');
 
@@ -143,20 +158,33 @@ describe('IRCv3 SASL Authentication', () => {
     });
 
     it('receives 900 on successful authentication', async () => {
+      // Extra delay for test isolation - previous test also authenticates same account
+      // X3 needs time to clean up SASL sessions
+      await new Promise(r => setTimeout(r, 1000));
+
       const client = trackClient(await createRawSocketClient());
+
+      // Clear buffer to avoid interference from previous tests
+      client.clearBuffer();
 
       await client.capLs();
       await client.capReq(['sasl']);
 
       client.send('AUTHENTICATE PLAIN');
-      await client.waitForLine(/^AUTHENTICATE \+$/);
+      const authPlus = await client.waitForLine(/^AUTHENTICATE \+$/, 10000);
+      console.log('Got AUTHENTICATE +:', authPlus);
 
       const payload = Buffer.from(`${TEST_ACCOUNT}\0${TEST_ACCOUNT}\0${TEST_PASSWORD}`).toString('base64');
+      console.log('Sending credentials payload');
       client.send(`AUTHENTICATE ${payload}`);
+
+      // Small delay to allow server to process and respond
+      await new Promise(r => setTimeout(r, 50));
 
       // Server MUST send 900 (RPL_LOGGEDIN) or 903 (RPL_SASLSUCCESS)
       // Test will fail if account doesn't exist - that's expected
-      const result = await client.waitForLine(/(900|903)/, 5000);
+      // Note: Keycloak can take 3-6s under load
+      const result = await client.waitForLine(/(900|903)/, 20000);
       expect(result).toMatch(/(900|903)/);
       client.send('QUIT');
     });
@@ -183,6 +211,9 @@ describe('IRCv3 SASL Authentication', () => {
 
   describe('Account Tags After SASL', () => {
     it('JOIN messages include account after SASL auth', async () => {
+      // Extra delay to avoid Keycloak rate limiting from rapid auth attempts
+      await new Promise(r => setTimeout(r, 1000));
+
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
@@ -210,18 +241,17 @@ describe('IRCv3 SASL Authentication', () => {
   });
 
   describe('Full SASL Flow', () => {
-    it('can register account and authenticate with it', async () => {
+    // Skip: This test requires draft/account-registration CAP which is not
+    // currently supported by X3. When X3 adds support, remove the .skip()
+    it.skip('can register account and authenticate with it', async () => {
       // Step 1: Register a new account using draft/account-registration
       const regClient = trackClient(await createRawSocketClient());
 
       await regClient.capLs();
       const regCaps = await regClient.capReq(['draft/account-registration']);
 
-      if (!regCaps.ack.includes('draft/account-registration')) {
-        console.log('Skipping - server does not support account registration');
-        regClient.send('QUIT');
-        return;
-      }
+      // Require the capability - if not present, test fails
+      expect(regCaps.ack).toContain('draft/account-registration');
 
       regClient.capEnd();
       regClient.register('saslreg1');
@@ -234,24 +264,11 @@ describe('IRCv3 SASL Authentication', () => {
       // Format per spec: REGISTER <account> <email> <password>
       regClient.send(`REGISTER ${uniqueAccount} ${uniqueAccount}@example.com ${uniquePassword}`);
 
-      let accountRegistered = false;
-      try {
-        const response = await regClient.waitForLine(/REGISTER SUCCESS|920/, 5000);
-        if (response.includes('SUCCESS') || response.includes('920')) {
-          accountRegistered = true;
-          console.log('Account registered:', uniqueAccount);
-        }
-      } catch {
-        console.log('Account registration failed or not supported');
-      }
+      const response = await regClient.waitForLine(/REGISTER SUCCESS|920/, 5000);
+      expect(response).toMatch(/SUCCESS|920/);
 
       regClient.send('QUIT');
       await new Promise(r => setTimeout(r, 500));
-
-      if (!accountRegistered) {
-        console.log('Skipping SASL test - could not register account');
-        return;
-      }
 
       // Step 2: Connect fresh and authenticate with the new account
       const authClient = trackClient(await createRawSocketClient());
@@ -270,7 +287,6 @@ describe('IRCv3 SASL Authentication', () => {
       authClient.send(`WHOIS saslauth1`);
       const whoisResponse = await authClient.waitForLine(/330|WHOIS|311/i, 3000);
       expect(whoisResponse).toBeDefined();
-      console.log('Authenticated as:', uniqueAccount);
 
       authClient.send('QUIT');
     });
@@ -285,7 +301,7 @@ describe('SASL Error Handling', () => {
     return client;
   };
 
-  afterEach(() => {
+  afterEach(async () => {
     for (const client of clients) {
       try {
         client.close();
@@ -294,6 +310,13 @@ describe('SASL Error Handling', () => {
       }
     }
     clients.length = 0;
+    // Allow X3 to clean up SASL sessions between tests
+    await new Promise(r => setTimeout(r, 300));
+  });
+
+  beforeEach(async () => {
+    // Small delay before each test to prevent connection flooding
+    await new Promise(r => setTimeout(r, 100));
   });
 
   it('rejects unknown SASL mechanism', async () => {
@@ -319,35 +342,36 @@ describe('SASL Error Handling', () => {
     await client.capReq(['sasl']);
 
     client.send('AUTHENTICATE PLAIN');
-    await client.waitForLine(/AUTHENTICATE \+/);
+    await client.waitForLine(/AUTHENTICATE \+/, 10000);
 
     // Abort authentication
     client.send('AUTHENTICATE *');
 
-    // DIVERGENT BEHAVIOR (documented for later review):
-    // IRCv3 spec says AUTHENTICATE * should trigger 906 (ERR_SASLABORTED)
-    // However, X3 services doesn't explicitly handle the abort signal -
-    // it treats "*" as invalid SASL data and returns 904 (ERR_SASLFAIL)
-    // TODO: Fix X3 to properly handle AUTHENTICATE * and return 906
-    const response = await client.waitForLine(/904/i, 5000);
-    expect(response).toMatch(/904/);
+    // IRCv3 spec: AUTHENTICATE * should trigger 906 (ERR_SASLABORTED)
+    // X3 now properly handles abort and responds with D A
+    const response = await client.waitForLine(/906/i, 5000);
+    expect(response).toMatch(/906/);
     client.send('QUIT');
   });
 
   it('handles malformed base64 in AUTHENTICATE', async () => {
     const client = trackClient(await createRawSocketClient());
 
+    // Clear buffer to avoid interference from previous tests
+    client.clearBuffer();
+
     await client.capLs();
     await client.capReq(['sasl']);
 
     client.send('AUTHENTICATE PLAIN');
-    await client.waitForLine(/AUTHENTICATE \+/);
+    await client.waitForLine(/AUTHENTICATE \+/, 10000);
 
     // Send invalid base64
     client.send('AUTHENTICATE !!!invalid-base64!!!');
 
     // Should receive error
-    const response = await client.waitForLine(/90[0-9]|FAIL/i, 3000);
+    // Note: Error path can be slow under load
+    const response = await client.waitForLine(/90[0-9]|FAIL/i, 20000);
     expect(response).toBeDefined();
     console.log('Malformed base64 response:', response);
     client.send('QUIT');
@@ -356,17 +380,21 @@ describe('SASL Error Handling', () => {
   it('handles empty AUTHENTICATE payload', async () => {
     const client = trackClient(await createRawSocketClient());
 
+    // Clear buffer to avoid interference from previous tests
+    client.clearBuffer();
+
     await client.capLs();
     await client.capReq(['sasl']);
 
     client.send('AUTHENTICATE PLAIN');
-    await client.waitForLine(/AUTHENTICATE \+/);
+    await client.waitForLine(/AUTHENTICATE \+/, 10000);
 
     // Send empty payload (just +)
     client.send('AUTHENTICATE +');
 
     // Should receive error (empty SASL response)
-    const response = await client.waitForLine(/90[0-9]|FAIL/i, 3000);
+    // Note: Keycloak auth can take ~6s for error responses
+    const response = await client.waitForLine(/90[0-9]|FAIL/i, 20000);
     expect(response).toBeDefined();
     client.send('QUIT');
   });
@@ -400,19 +428,21 @@ describe('SASL Error Handling', () => {
     client.send('QUIT');
   });
 
-  it('enforces SASL timeout', async () => {
+  // Skip: This test takes 30+ seconds waiting for SASL timeout
+  // Enable manually if testing SASL timeout behavior
+  it.skip('enforces SASL timeout', async () => {
     const client = trackClient(await createRawSocketClient());
 
     await client.capLs();
     await client.capReq(['sasl']);
 
     client.send('AUTHENTICATE PLAIN');
-    await client.waitForLine(/AUTHENTICATE \+/);
+    await client.waitForLine(/AUTHENTICATE \+/, 10000);
 
-    // Don't send credentials - wait for timeout
-    // Most servers have a SASL timeout (e.g., 30 seconds)
-    // This is a long test, skip in CI
-    console.log('SASL timeout test - skipping due to long duration');
+    // Don't send credentials - wait for timeout (typically 30 seconds)
+    // Server should eventually send 906 (ERR_SASLABORTED) or disconnect
+    const response = await client.waitForLine(/906|ERROR/i, 45000);
+    expect(response).toBeDefined();
     client.send('QUIT');
   });
 });
@@ -425,7 +455,7 @@ describe('SASL Multi-line Payload', () => {
     return client;
   };
 
-  afterEach(() => {
+  afterEach(async () => {
     for (const client of clients) {
       try {
         client.close();
@@ -434,16 +464,26 @@ describe('SASL Multi-line Payload', () => {
       }
     }
     clients.length = 0;
+    // Allow X3 to clean up SASL sessions between tests
+    await new Promise(r => setTimeout(r, 300));
+  });
+
+  beforeEach(async () => {
+    // Small delay before each test to prevent connection flooding
+    await new Promise(r => setTimeout(r, 100));
   });
 
   it('handles 400-byte payload chunks', async () => {
     const client = trackClient(await createRawSocketClient());
 
+    // Clear buffer to avoid interference
+    client.clearBuffer();
+
     await client.capLs();
     await client.capReq(['sasl']);
 
     client.send('AUTHENTICATE PLAIN');
-    await client.waitForLine(/AUTHENTICATE \+/);
+    await client.waitForLine(/AUTHENTICATE \+/, 10000);
 
     // Create a long payload that would need chunking (>400 bytes base64)
     // Actually, PLAIN auth payloads are typically small, so this tests
@@ -455,7 +495,8 @@ describe('SASL Multi-line Payload', () => {
     client.send(`AUTHENTICATE ${payload}`);
 
     // Should get response (success or failure)
-    const response = await client.waitForLine(/90[0-9]/i, 3000);
+    // Allow more time for Keycloak round-trip
+    const response = await client.waitForLine(/90[0-9]/i, 10000);
     expect(response).toBeDefined();
     client.send('QUIT');
   });
@@ -469,7 +510,7 @@ describe('SASL with account-notify', () => {
     return client;
   };
 
-  afterEach(() => {
+  afterEach(async () => {
     for (const client of clients) {
       try {
         client.close();
@@ -478,16 +519,29 @@ describe('SASL with account-notify', () => {
       }
     }
     clients.length = 0;
+    // Allow X3 to clean up SASL sessions between tests
+    await new Promise(r => setTimeout(r, 300));
+  });
+
+  beforeEach(async () => {
+    // Small delay before each test to prevent connection flooding
+    await new Promise(r => setTimeout(r, 100));
   });
 
   it('ACCOUNT message sent after SASL auth', async () => {
+    // Extra delay to avoid Keycloak rate limiting from rapid auth attempts
+    await new Promise(r => setTimeout(r, 1000));
+
     const client = trackClient(await createRawSocketClient());
+
+    // Clear buffer to avoid interference from previous tests
+    client.clearBuffer();
 
     await client.capLs();
     await client.capReq(['sasl', 'account-notify']);
 
     client.send('AUTHENTICATE PLAIN');
-    await client.waitForLine(/AUTHENTICATE \+/);
+    await client.waitForLine(/AUTHENTICATE \+/, 10000);
 
     // Use test credentials
     const user = process.env.IRC_TEST_ACCOUNT ?? 'testuser';
@@ -496,13 +550,15 @@ describe('SASL with account-notify', () => {
 
     client.send(`AUTHENTICATE ${payload}`);
 
-    try {
-      // Should receive 903 (success) and possibly ACCOUNT message
-      await client.waitForLine(/903/i, 5000);
-      console.log('SASL successful with account-notify');
-    } catch {
-      console.log('SASL auth failed - test account may not exist');
-    }
+    // Small delay to allow server to process and respond
+    await new Promise(r => setTimeout(r, 100));
+
+    // Should receive 903 (success) and possibly ACCOUNT message
+    // Keycloak and testuser should always be available
+    // Use 20s timeout to handle load conditions
+    const response = await client.waitForLine(/903/i, 20000);
+    expect(response).toMatch(/903/);
+
     client.send('QUIT');
   });
 });

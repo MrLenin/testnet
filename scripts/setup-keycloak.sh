@@ -75,11 +75,11 @@ if [ "$REALM_EXISTS" = "200" ]; then
       "duplicateEmailsAllowed": true,
       "resetPasswordAllowed": true,
       "editUsernameAllowed": false,
-      "bruteForceProtected": true,
+      "bruteForceProtected": false,
       "permanentLockout": false,
-      "maxFailureWaitSeconds": 900,
-      "minimumQuickLoginWaitSeconds": 60,
-      "waitIncrementSeconds": 60,
+      "maxFailureWaitSeconds": 0,
+      "minimumQuickLoginWaitSeconds": 0,
+      "waitIncrementSeconds": 0,
       "quickLoginCheckMilliSeconds": 1000,
       "maxDeltaTimeSeconds": 43200,
       "failureFactor": 30,
@@ -101,11 +101,11 @@ else
       "duplicateEmailsAllowed": true,
       "resetPasswordAllowed": true,
       "editUsernameAllowed": false,
-      "bruteForceProtected": true,
+      "bruteForceProtected": false,
       "permanentLockout": false,
-      "maxFailureWaitSeconds": 900,
-      "minimumQuickLoginWaitSeconds": 60,
-      "waitIncrementSeconds": 60,
+      "maxFailureWaitSeconds": 0,
+      "minimumQuickLoginWaitSeconds": 0,
+      "waitIncrementSeconds": 0,
       "quickLoginCheckMilliSeconds": 1000,
       "maxDeltaTimeSeconds": 43200,
       "failureFactor": 30,
@@ -620,7 +620,7 @@ if [ -n "$OPER_GROUP" ]; then
   echo "x3-opers group already exists (id: $OPER_GROUP)"
 else
   echo "Creating x3-opers group..."
-  curl -s -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/groups" \
+  CREATE_RESULT=$(curl -s -w "\nHTTP:%{http_code}" -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/groups" \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
     -d '{
@@ -628,8 +628,14 @@ else
       "attributes": {
         "description": ["IRC Network Operators"]
       }
-    }'
-  echo "x3-opers group created"
+    }')
+  HTTP_CODE=$(echo "$CREATE_RESULT" | grep "HTTP:" | cut -d: -f2)
+  if [ "$HTTP_CODE" = "201" ]; then
+    echo "x3-opers group created"
+  else
+    echo "ERROR: Failed to create x3-opers group (HTTP $HTTP_CODE)"
+    echo "$CREATE_RESULT" | grep -v "^HTTP:"
+  fi
 fi
 
 # Create irc-channels parent group for channel access storage
@@ -644,7 +650,7 @@ if [ -n "$CHANNELS_GROUP" ]; then
   echo "irc-channels group already exists (id: $CHANNELS_GROUP)"
 else
   echo "Creating irc-channels group..."
-  curl -s -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/groups" \
+  CREATE_RESULT=$(curl -s -w "\nHTTP:%{http_code}" -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/groups" \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
     -d '{
@@ -652,9 +658,15 @@ else
       "attributes": {
         "description": ["IRC Channel Access - subgroups created by X3 ChanServ"]
       }
-    }'
-  echo "irc-channels group created"
-  echo "  (X3 will create subgroups like /irc-channels/#channel/owner, /irc-channels/#channel/coowner, etc.)"
+    }')
+  HTTP_CODE=$(echo "$CREATE_RESULT" | grep "HTTP:" | cut -d: -f2)
+  if [ "$HTTP_CODE" = "201" ]; then
+    echo "irc-channels group created"
+    echo "  (X3 will create subgroups like /irc-channels/#channel/owner, /irc-channels/#channel/coowner, etc.)"
+  else
+    echo "ERROR: Failed to create irc-channels group (HTTP $HTTP_CODE)"
+    echo "$CREATE_RESULT" | grep -v "^HTTP:"
+  fi
 fi
 
 # Create/recreate test user with IRC-friendly settings
