@@ -88,6 +88,9 @@ export class X3Client extends RawSocketClient {
     this.clearRawBuffer();
     this.send(`PRIVMSG ${service} :${command}`);
 
+    // Small delay to allow server to start responding before we collect
+    await new Promise(r => setTimeout(r, 100));
+
     const lines: string[] = [];
     const startTime = Date.now();
 
@@ -96,7 +99,7 @@ export class X3Client extends RawSocketClient {
       try {
         const line = await this.waitForLine(
           new RegExp(`NOTICE.*:`, 'i'),
-          Math.min(2000, timeout - (Date.now() - startTime))
+          Math.min(3000, timeout - (Date.now() - startTime))
         );
 
         // Only collect lines from X3 services (AuthServ, ChanServ, O3, etc.)

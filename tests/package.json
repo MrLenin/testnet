@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
+    "posttest": "npm run cleanup",
     "test:verbose": "VITEST_VERBOSE=1 vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
