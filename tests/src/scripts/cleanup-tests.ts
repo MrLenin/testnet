@@ -2,7 +2,7 @@
 /**
  * Cleanup script for test data
  *
- * Removes test accounts (test*) and test channels (#test-*) from X3.
+ * Removes test accounts (test*) and test channels (#test-*) from X3 and Keycloak.
  * Requires IRC oper AND X3 AuthServ admin account (olevel 1000).
  *
  * Setup (first time after fresh x3.db):
@@ -11,16 +11,20 @@
  *   3. First oper to register gets olevel 1000 automatically
  *
  * Usage:
+ *   npm run cleanup
+ *   # Or with custom credentials:
  *   X3_ACCOUNT=admin X3_PASSWORD=secret npm run cleanup
  *
  * Environment variables:
- *   IRC_HOST     - IRC server host (default: localhost)
- *   IRC_PORT     - IRC server port (default: 6667)
- *   OPER_NAME    - IRC oper name (default: oper)
- *   OPER_PASS    - IRC oper password (default: shmoo)
- *   X3_ACCOUNT   - X3 AuthServ account with olevel 1000
- *   X3_PASSWORD  - X3 AuthServ password
- *   DEBUG=1      - Enable verbose output
+ *   IRC_HOST       - IRC server host (default: localhost)
+ *   IRC_PORT       - IRC server port (default: 6667)
+ *   OPER_NAME      - IRC oper name (default: oper)
+ *   OPER_PASS      - IRC oper password (default: shmoo)
+ *   X3_ACCOUNT     - X3 AuthServ account with olevel 1000
+ *   X3_PASSWORD    - X3 AuthServ password
+ *   KEYCLOAK_URL   - Keycloak URL (default: http://localhost:8080)
+ *   KEYCLOAK_REALM - Keycloak realm (default: testnet)
+ *   DEBUG=1        - Enable verbose output
  */
 
 import * as net from 'net';
@@ -31,25 +35,107 @@ const IRC_PORT = parseInt(process.env.IRC_PORT || '6667', 10);
 const OPER_NAME = process.env.OPER_NAME || 'oper';
 const OPER_PASS = process.env.OPER_PASS || 'shmoo';
 // X3 AuthServ credentials (first oper to register gets olevel 1000)
-const X3_ACCOUNT = process.env.X3_ACCOUNT || '';
-const X3_PASSWORD = process.env.X3_PASSWORD || '';
+// Default to testadmin which is created by x3-ensure-admin.sh
+const X3_ACCOUNT = process.env.X3_ACCOUNT || 'testadmin';
+const X3_PASSWORD = process.env.X3_PASSWORD || 'testadmin123';
+// Keycloak settings
+const KEYCLOAK_URL = process.env.KEYCLOAK_URL || 'http://localhost:8080';
+const KEYCLOAK_REALM = process.env.KEYCLOAK_REALM || 'testnet';
+const DEBUG = process.env.DEBUG === '1';
 
 interface CleanupStats {
   accountsFound: string[];
   channelsFound: string[];
+  keycloakUsersFound: string[];
   accountsDeleted: number;
   channelsDeleted: number;
+  keycloakUsersDeleted: number;
   errors: string[];
+}
+
+/**
+ * Clean up test users from Keycloak
+ * Removes users matching test* pattern (but not testuser which is the main test account)
+ */
+async function cleanupKeycloak(stats: CleanupStats): Promise<void> {
+  console.log('\n=== Keycloak Cleanup ===');
+
+  try {
+    // Get admin token
+    const tokenRes = await fetch(`${KEYCLOAK_URL}/realms/master/protocol/openid-connect/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'username=admin&password=admin&grant_type=password&client_id=admin-cli',
+    });
+
+    if (!tokenRes.ok) {
+      console.log('Could not get Keycloak token (may not be running)');
+      return;
+    }
+
+    const tokenData = await tokenRes.json();
+    const token = tokenData.access_token;
+
+    // Get all users
+    const usersRes = await fetch(`${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/users?max=1000`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+
+    if (!usersRes.ok) {
+      console.log('Could not list Keycloak users');
+      return;
+    }
+
+    const users = await usersRes.json() as Array<{ id: string; username: string }>;
+
+    // Filter to test users (test* but not testuser or testadmin)
+    const testUsers = users.filter((u: { username: string }) =>
+      u.username.startsWith('test') &&
+      u.username !== 'testuser' &&
+      u.username !== 'testadmin'
+    );
+
+    console.log(`Found ${testUsers.length} test users in Keycloak`);
+    stats.keycloakUsersFound = testUsers.map((u: { username: string }) => u.username);
+
+    if (testUsers.length === 0) {
+      return;
+    }
+
+    console.log('Deleting Keycloak test users...');
+    for (const user of testUsers) {
+      const delRes = await fetch(`${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/users/${user.id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (delRes.ok) {
+        stats.keycloakUsersDeleted++;
+        if (DEBUG) console.log(`  Deleted ${user.username}`);
+        else process.stdout.write('.');
+      } else {
+        stats.errors.push(`Failed to delete Keycloak user ${user.username}`);
+      }
+    }
+    if (!DEBUG) console.log(` Done (${stats.keycloakUsersDeleted})`);
+
+  } catch (error) {
+    console.log(`Keycloak cleanup error: ${error}`);
+  }
 }
 
 async function cleanup(): Promise<void> {
   const stats: CleanupStats = {
     accountsFound: [],
     channelsFound: [],
+    keycloakUsersFound: [],
     accountsDeleted: 0,
     channelsDeleted: 0,
+    keycloakUsersDeleted: 0,
     errors: [],
   };
+
+  // First clean up Keycloak (prevents auto-create issues)
+  await cleanupKeycloak(stats);
 
   console.log(`Connecting to ${IRC_HOST}:${IRC_PORT}...`);
 
@@ -57,7 +143,6 @@ async function cleanup(): Promise<void> {
   const rl = readline.createInterface({ input: socket });
 
   const lines: string[] = [];
-  const DEBUG = process.env.DEBUG === '1';
   rl.on('line', (line) => {
     lines.push(line);
     if (DEBUG) console.log('<<', line);
@@ -93,25 +178,6 @@ async function cleanup(): Promise<void> {
     });
   };
 
-  const collectLines = async (endPattern: RegExp, timeout = 10000): Promise<string[]> => {
-    const collected: string[] = [];
-    const start = Date.now();
-    const startIdx = lines.length;
-
-    while (Date.now() - start < timeout) {
-      await new Promise(r => setTimeout(r, 200));
-      for (let i = startIdx; i < lines.length; i++) {
-        if (!collected.includes(lines[i])) {
-          collected.push(lines[i]);
-          if (endPattern.test(lines[i])) {
-            return collected;
-          }
-        }
-      }
-    }
-    return collected;
-  };
-
   try {
     // Register
     send(`NICK cleanup_bot`);
@@ -141,7 +207,6 @@ async function cleanup(): Promise<void> {
     }
 
     // Authenticate with AuthServ if credentials provided
-    let authenticated = false;
     if (X3_ACCOUNT && X3_PASSWORD) {
       console.log(`Authenticating with AuthServ as ${X3_ACCOUNT}...`);
       send(`PRIVMSG AuthServ :AUTH ${X3_ACCOUNT} ${X3_PASSWORD}`);
@@ -153,7 +218,6 @@ async function cleanup(): Promise<void> {
       );
       if (authSuccess) {
         console.log('AuthServ authentication successful.');
-        authenticated = true;
       } else {
         console.log('AuthServ authentication may have failed - check credentials.');
       }
@@ -222,8 +286,9 @@ async function cleanup(): Promise<void> {
 
     // Summary
     console.log('\n=== Cleanup Summary ===');
-    console.log(`Accounts deleted: ${stats.accountsDeleted}`);
-    console.log(`Channels unregistered: ${stats.channelsDeleted}`);
+    console.log(`X3 Accounts deleted: ${stats.accountsDeleted}`);
+    console.log(`X3 Channels unregistered: ${stats.channelsDeleted}`);
+    console.log(`Keycloak users deleted: ${stats.keycloakUsersDeleted}`);
 
     send('QUIT :Cleanup complete');
     await new Promise(r => setTimeout(r, 500));

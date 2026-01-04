@@ -299,6 +299,14 @@ services:
       additional_contexts:
         - data=./data
     user: "1234:1234"  # x3 user
+    # ASAN needs more memory (2-3x normal)
+    mem_limit: 2g
+    memswap_limit: 2g
+    # Enable core dumps for crash debugging
+    ulimits:
+      core:
+        soft: -1
+        hard: -1
     networks:
       irc_net:
         ipv4_address: 172.29.0.3
@@ -315,11 +323,12 @@ services:
     volumes:
       - x3_data:/x3/data
       - ./data/x3.conf:/x3/x3.conf
+      - ./x3cores:/x3/cores  # Core dump directory
 
   # Auto-create X3 admin account after X3 starts (first oper gets olevel 1000)
   x3-admin-init:
     container_name: x3-admin-init
-    image: alpine
+    image: docker:cli
     networks:
       - irc_net
     depends_on:
@@ -334,13 +343,16 @@ services:
       - X3_ADMIN=testadmin
       - X3_ADMIN_PASS=testadmin123
       - X3_ADMIN_EMAIL=admin@test.local
+      - KEYCLOAK_URL=http://keycloak:8080
+      - KEYCLOAK_REALM=testnet
     volumes:
       - ./scripts/x3-ensure-admin.sh:/ensure-admin.sh:ro
       - ./data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        apk add --no-cache netcat-openbsd bash
+        apk add --no-cache netcat-openbsd bash curl
         bash /ensure-admin.sh
 
   integration-tests:
