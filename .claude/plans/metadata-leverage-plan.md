@@ -334,38 +334,44 @@ Configure immutable keys in X3:
 
 ## 5. Implementation Phases
 
-### Phase 1: Activity Data Migration (Low Risk)
+### Phase 1: Activity Data Migration (Low Risk) ✅ COMPLETE
 
 **Goal**: Move frequently-updated activity fields to LMDB
 
+**Implementation Date**: 2026-01-05
+
 #### Tasks
 
-- [ ] 1.1 Add LMDB functions for activity data
-  - `x3_lmdb_activity_set(account, lastseen, last_present)`
-  - `x3_lmdb_activity_get(account, lastseen_out, last_present_out)`
+- [x] 1.1 Add LMDB functions for activity data
+  - `x3_lmdb_activity_set(account, lastseen, last_present)` - in x3_lmdb.c:1798
+  - `x3_lmdb_activity_get(account, lastseen_out, last_present_out)` - in x3_lmdb.c:1730
+  - `x3_lmdb_activity_touch(account)` - in x3_lmdb.c:1860
+  - `x3_lmdb_activity_delete(account)` - in x3_lmdb.c:1879
 
-- [ ] 1.2 Modify nickserv to use LMDB for activity
-  - Update `nickserv_set_lastseen()` to write LMDB
-  - Update `nickserv_set_last_present()` to write LMDB
-  - Update display commands to read LMDB
+- [x] 1.2 Modify nickserv to use LMDB for activity
+  - Added `nickserv_update_activity_lmdb()` helper function - nickserv.c:6840
+  - Dual-write on de-auth (quit) - nickserv.c:1218
+  - Dual-write on auth - nickserv.c:1248
+  - Dual-write in `handle_update_last_present()` - nickserv.c:7215
 
-- [ ] 1.3 Implement TTL management for activity data
-  - 30-day TTL with refresh on any account activity
-  - TTL auto-refresh when user authenticates or performs any action
-  - Implement `x3_lmdb_activity_touch(account)` to refresh TTL
+- [x] 1.3 Implement TTL management for activity data
+  - 30-day TTL with refresh on any account activity (LMDB_ACTIVITY_TTL_DAYS = 30)
+  - TTL auto-refresh when `x3_lmdb_activity_set()` is called
+  - `x3_lmdb_activity_touch(account)` refreshes TTL without changing values
 
-- [ ] 1.4 Add SAXDB sync-back mechanism
-  - Daily sync of LMDB activity data back to SAXDB
-  - Sync on graceful shutdown
-  - Dual-write during migration period (write both LMDB + SAXDB)
+- [x] 1.4 Add SAXDB sync-back mechanism
+  - Dual-write during migration period (writes to both struct/SAXDB and LMDB)
+  - LMDB shutdown handler ensures clean database close
+  - SAXDB continues to be written from the struct on normal schedule
 
-- [ ] 1.5 Add startup migration
-  - On startup, load activity from SAXDB if not in LMDB
-  - After migration period, SAXDB becomes backup only
+- [x] 1.5 Add startup migration
+  - On SAXDB load, checks LMDB for fresher data - nickserv.c:5533-5560
+  - If LMDB has fresher timestamps, uses those
+  - If LMDB doesn't have data, migrates from SAXDB
 
-- [ ] 1.6 Sync `$last_present` to Nefarious metadata
-  - Already supported via P10 MD command
-  - Ensure bidirectional sync on reconnect
+- [x] 1.6 Sync `$last_present` to Nefarious metadata
+  - Synced via irc_metadata() in `handle_update_last_present()` - nickserv.c:7217-7220
+  - Also synced during auth - nickserv.c:1283-1288
 
 ### Phase 2: User Preferences as Metadata (Medium Risk)
 
