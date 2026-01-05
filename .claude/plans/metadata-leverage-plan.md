@@ -410,32 +410,42 @@ Configure immutable keys in X3:
   - Called from `nickserv_set_user_metadata()` - nickserv.c:6765-6776
   - Supports: screen_width, table_width, style, announcements, maxlogins
 
-### Phase 3: Fingerprint Consolidation (Low Risk)
+### Phase 3: Fingerprint Consolidation (Low Risk) ✅ IN PROGRESS
 
 **Goal**: Make LMDB authoritative for fingerprint lookups
 
+**Implementation Date**: 2026-01-05
+
 #### Tasks
 
-- [ ] 3.1 Enhance LMDB fingerprint storage
-  - Store registration timestamp
-  - Store last-used timestamp
-  - Store associated account name
+- [x] 3.1 Enhance LMDB fingerprint storage
+  - Added `struct lmdb_fingerprint_entry` with fingerprint, account, registered, last_used, expires fields - x3_lmdb.h:364-371
+  - Added `LMDB_FINGERPRINT_TTL_DAYS 90` constant - x3_lmdb.h:360-361
+  - Implemented `x3_lmdb_fingerprint_get()` - x3_lmdb.c:1916-1999
+  - Implemented `x3_lmdb_fingerprint_set()` - x3_lmdb.c:2002-2065
+  - Implemented `x3_lmdb_fingerprint_touch()` - x3_lmdb.c:2068-2087
+  - Implemented `x3_lmdb_fingerprint_delete()` - x3_lmdb.c:2089-2124
+  - Implemented `x3_lmdb_fingerprint_list_account()` - x3_lmdb.c:2127-2235
+  - Store format: `T:{expiry}:{account}:{registered}:{last_used}`
 
-- [ ] 3.2 Implement TTL management for fingerprints
-  - 90-day TTL with refresh on SASL EXTERNAL auth
-  - TTL refresh when fingerprint successfully used for auth
-  - Store format: `fp:{fingerprint}` → `{account}:{registered}:{last_used}:{expiry}`
+- [x] 3.2 Implement TTL management for fingerprints
+  - 90-day TTL set in `x3_lmdb_fingerprint_set()` - x3_lmdb.c:2038-2039
+  - TTL refresh via `x3_lmdb_fingerprint_touch()` on successful SASL EXTERNAL auth - nickserv.c:6418-6419
+  - Auto-deletion of expired entries on read - x3_lmdb.c:1961-1965
+  - Backward-compatible parsing of legacy format (timestamp:username)
 
 - [ ] 3.3 Add fingerprint metadata sync
   - Sync fingerprints to Keycloak as user attribute (`x3_sslfps`)
   - Enable certificate-based login via Keycloak
   - Sync-back to SAXDB on change and daily
 
-- [ ] 3.4 Deprecate SAXDB fingerprint storage
-  - Read from LMDB first
-  - Fallback to SAXDB during migration
-  - Dual-write during migration period
-  - Eventually remove SAXDB fingerprint writes
+- [x] 3.4 Deprecate SAXDB fingerprint storage (Dual-write phase)
+  - LMDB-first reads in `loc_auth_external()` - nickserv.c:6388-6427
+  - Fallback to local X3 storage (hi->sslfps) if not in LMDB - nickserv.c:6430-6438
+  - Dual-write on fingerprint add via `nickserv_addsslfp()` - nickserv.c:3564-3567
+  - Dual-delete via `nickserv_delsslfp()` - nickserv.c:3603-3606
+  - Migration from SAXDB to LMDB on startup - nickserv.c:5631-5651
+  - Conflict detection during migration - nickserv.c:5644-5648
 
 ### Phase 4: Channel Metadata Enhancement (Medium Risk)
 
