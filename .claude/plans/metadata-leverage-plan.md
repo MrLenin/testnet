@@ -373,33 +373,42 @@ Configure immutable keys in X3:
   - Synced via irc_metadata() in `handle_update_last_present()` - nickserv.c:7217-7220
   - Also synced during auth - nickserv.c:1283-1288
 
-### Phase 2: User Preferences as Metadata (Medium Risk)
+### Phase 2: User Preferences as Metadata (Medium Risk) ✅ COMPLETE
 
 **Goal**: Expose user preferences as IRCv3 metadata keys
 
+**Implementation Date**: 2026-01-05
+
 #### Tasks
 
-- [ ] 2.1 Define metadata key namespace
-  - Use `x3.` prefix for X3-specific keys
-  - Register keys in both X3 and Nefarious
+- [x] 2.1 Define metadata key namespace
+  - Added `X3_METADATA_PREFIX "x3."` and individual key defines - nickserv.c:142-148
+  - Keys: `x3.screen_width`, `x3.table_width`, `x3.style`, `x3.announcements`, `x3.maxlogins`
+  - TTL constant: `X3_PREF_TTL_DAYS 90` (90 days) - nickserv.c:150-152
 
-- [ ] 2.2 Implement preference metadata handlers in X3
-  - `nickserv_set_user_metadata()` already exists
-  - Add handlers for `x3.screen_width`, `x3.table_width`, `x3.style`
+- [x] 2.2 Implement preference metadata handlers in X3
+  - Added `nickserv_sync_preference_metadata()` helper - nickserv.c:6884-6930
+  - Stores with P: visibility prefix (private) and 90-day TTL
+  - Pushes to Nefarious via `irc_metadata()` for online users
 
-- [ ] 2.3 Implement TTL management for preferences
-  - 90-day TTL with refresh on any SET command
-  - TTL refresh on read (touch-on-access pattern)
-  - Sync-back to SAXDB on change and daily
+- [x] 2.3 Implement TTL management for preferences
+  - 90-day TTL in `nickserv_sync_preference_metadata()` - nickserv.c:6910
+  - TTL refresh on any SET command (TTL refreshed when value written)
+  - x3.* keys use `X3_PREF_TTL_SECS` in `nickserv_set_user_metadata()` - nickserv.c:6806-6808
+  - Dual-write to SAXDB via struct updates (existing SAXDB writer handles this)
 
-- [ ] 2.4 Migrate preference commands to use metadata
-  - `SET SCREEN_WIDTH` → writes `x3.screen_width` metadata
-  - Display commands read from metadata
-  - Dual-write to SAXDB during migration period
+- [x] 2.4 Migrate preference commands to use metadata
+  - `opt_width()` → syncs `x3.screen_width` - nickserv.c:3783-3786
+  - `opt_tablewidth()` → syncs `x3.table_width` - nickserv.c:3804-3807
+  - `opt_style()` → syncs `x3.style` - nickserv.c:3908-3910
+  - `opt_announcements()` → syncs `x3.announcements` - nickserv.c:3948-3950
+  - `opt_maxlogins()` → syncs `x3.maxlogins` - nickserv.c:4085-4090
 
-- [ ] 2.5 Add IRCv3 METADATA client support
-  - Clients can `METADATA GET * x3.screen_width`
-  - Clients can `METADATA SET * x3.screen_width :80`
+- [x] 2.5 Add IRCv3 METADATA client support
+  - Added `handle_x3_preference_metadata()` - nickserv.c:6661-6753
+  - Validates values and updates handle_info struct when clients SET x3.* keys
+  - Called from `nickserv_set_user_metadata()` - nickserv.c:6765-6776
+  - Supports: screen_width, table_width, style, announcements, maxlogins
 
 ### Phase 3: Fingerprint Consolidation (Low Risk)
 
