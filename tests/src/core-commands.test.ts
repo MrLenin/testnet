@@ -660,7 +660,10 @@ describe('Core IRC Commands', () => {
     it('should leave channel', async () => {
       const client = trackClient(await createRawSocketClient());
 
+      // Request echo-message so we receive our own PART even when alone in channel
       await client.capLs();
+      const capResult = await client.capReq(['echo-message']);
+      expect(capResult.ack).toContain('echo-message');
       client.capEnd();
       client.register('partuser1');
       await client.waitForLine(/001/);
@@ -669,6 +672,8 @@ describe('Core IRC Commands', () => {
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
+      // Small delay to ensure channel join is fully processed
+      await new Promise(r => setTimeout(r, 100));
       client.clearRawBuffer();
 
       client.send(`PART ${channel} :Goodbye`);

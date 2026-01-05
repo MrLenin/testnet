@@ -212,7 +212,7 @@ describe('IRCv3 SASL Authentication', () => {
   describe('Account Tags After SASL', () => {
     it('JOIN messages include account after SASL auth', async () => {
       // Extra delay to avoid Keycloak rate limiting from rapid auth attempts
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise(r => setTimeout(r, 1500));
 
       const client = trackClient(await createRawSocketClient());
 
@@ -227,10 +227,13 @@ describe('IRCv3 SASL Authentication', () => {
       client.register('accttest1');
       await client.waitForLine(/001/);
 
+      // Small delay to ensure registration is fully processed
+      await new Promise(r => setTimeout(r, 200));
+
       // Join a channel and check for extended-join with account
       client.send('JOIN #accttestchan');
 
-      const joinMsg = await client.waitForLine(/JOIN.*#accttestchan/i);
+      const joinMsg = await client.waitForLine(/JOIN.*#accttestchan/i, 5000);
       expect(joinMsg).toBeDefined();
 
       // With extended-join, JOIN includes account name

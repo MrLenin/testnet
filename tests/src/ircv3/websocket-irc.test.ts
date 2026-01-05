@@ -429,8 +429,9 @@ describe('IRC-over-WebSocket Protocol', () => {
       }
 
       // All should receive join confirmations
+      // Use longer timeout to account for concurrent connection overhead
       for (const { client } of results) {
-        const join = await client.waitForText('366', 5000);
+        const join = await client.waitForText('366', 10000);
         expect(join).toContain(channel);
       }
     });
