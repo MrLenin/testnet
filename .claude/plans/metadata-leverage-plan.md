@@ -450,31 +450,45 @@ Configure immutable keys in X3:
   - Migration from SAXDB to LMDB on startup - nickserv.c:5631-5651
   - Conflict detection during migration - nickserv.c:5644-5648
 
-### Phase 4: Channel Metadata Enhancement (Medium Risk)
+### Phase 4: Channel Metadata Enhancement (Medium Risk) ✅ COMPLETE
 
 **Goal**: Expose channel settings as IRCv3 metadata
 
+**Implementation Date**: 2026-01-05
+
 #### Tasks
 
-- [ ] 4.1 Define channel metadata keys
-  - `x3.greeting`, `x3.user_greeting`, `x3.topic_mask`
-  - `x3.modes` for enforced modes
-  - `x3.registered`, `x3.founder` (immutable, no TTL)
+- [x] 4.1 Define channel metadata keys
+  - Added key constants in chanserv.c:158-169
+  - `X3_CHAN_META_GREETING "x3.greeting"`
+  - `X3_CHAN_META_USER_GREETING "x3.user_greeting"`
+  - `X3_CHAN_META_TOPIC_MASK "x3.topic_mask"`
+  - `X3_CHAN_META_MODES "x3.modes"`
+  - `X3_CHAN_META_REGISTERED "x3.registered"` (immutable)
+  - `X3_CHAN_META_FOUNDER "x3.founder"` (immutable)
+  - TTL constant: `X3_CHAN_META_TTL_DAYS 90` (90 days)
+  - Updated DEFAULT_CHANNEL_IMMUTABLE_KEYS to include x3.registered and x3.founder - chanserv.c:78
 
-- [ ] 4.2 Implement TTL management for channel metadata
-  - 90-day TTL for mutable settings (greeting, topic_mask)
-  - No TTL for immutable keys (registered, founder)
-  - TTL refresh on any ChanServ command for the channel
-  - Sync-back to SAXDB on change and daily
+- [x] 4.2 Implement TTL management for channel metadata
+  - 90-day TTL for mutable settings (greeting, user_greeting, topic_mask, modes)
+  - No TTL for immutable keys (registered, founder) via is_channel_immutable_key() - chanserv.c:10202-10240
+  - TTL refresh happens automatically when metadata is set via chanserv_set_channel_metadata()
+  - Dual-write to SAXDB via existing struct updates (SAXDB writes from struct on schedule)
 
-- [ ] 4.3 Implement channel metadata sync
-  - On channel registration, set metadata (no TTL for registered/founder)
-  - On setting changes, update metadata with TTL refresh
-  - Dual-write to SAXDB during migration period
+- [x] 4.3 Implement channel metadata sync
+  - Added `chanserv_sync_x3_metadata()` helper function - chanserv.c:10391-10452
+  - Syncs all x3.* keys with appropriate TTL handling
+  - Called on channel registration - chanserv.c:2742
+  - Called on database load - chanserv.c:9869
+  - Called on greeting change - chanserv.c:6801-6806, 6812-6817
+  - Called on topic_mask change - chanserv.c:6755-6757
+  - Called on modes change - chanserv.c:6874-6877
+  - Function declaration added to chanserv.h:239
 
-- [ ] 4.4 Enable channel metadata queries
-  - MDQ for channel metadata
-  - METADATA LIST for channels
+- [x] 4.4 Enable channel metadata queries
+  - MDQ for channel metadata works via existing chanserv_get_channel_metadata() - chanserv.c:10306-10341
+  - METADATA LIST for channels works via existing chanserv_sync_metadata_to_ircd() - chanserv.c:10344-10389
+  - All x3.* keys are now stored in LMDB and pushed to Nefarious via irc_metadata()
 
 ### Phase 5: SAXDB Reduction (Higher Risk)
 
