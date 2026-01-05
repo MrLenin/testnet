@@ -410,7 +410,7 @@ Configure immutable keys in X3:
   - Called from `nickserv_set_user_metadata()` - nickserv.c:6765-6776
   - Supports: screen_width, table_width, style, announcements, maxlogins
 
-### Phase 3: Fingerprint Consolidation (Low Risk) ✅ IN PROGRESS
+### Phase 3: Fingerprint Consolidation (Low Risk) ✅ COMPLETE
 
 **Goal**: Make LMDB authoritative for fingerprint lookups
 
@@ -434,10 +434,13 @@ Configure immutable keys in X3:
   - Auto-deletion of expired entries on read - x3_lmdb.c:1961-1965
   - Backward-compatible parsing of legacy format (timestamp:username)
 
-- [ ] 3.3 Add fingerprint metadata sync
-  - Sync fingerprints to Keycloak as user attribute (`x3_sslfps`)
-  - Enable certificate-based login via Keycloak
-  - Sync-back to SAXDB on change and daily
+- [x] 3.3 Add fingerprint metadata sync to Keycloak
+  - Added `keycloak_set_user_attribute_array()` for multi-value attributes - keycloak.c:3496-3571
+  - Added `kc_sync_fingerprints()` to sync all fingerprints to Keycloak - nickserv.c:6070-6126
+  - Syncs to `x509_fingerprints` attribute (same as Keycloak search uses)
+  - Called from `nickserv_addsslfp()` - nickserv.c:3570-3573
+  - Called from `nickserv_delsslfp()` - nickserv.c:3614-3617
+  - Enables certificate-based login via Keycloak (bidirectional sync)
 
 - [x] 3.4 Deprecate SAXDB fingerprint storage (Dual-write phase)
   - LMDB-first reads in `loc_auth_external()` - nickserv.c:6388-6427
