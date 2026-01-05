@@ -103,6 +103,8 @@ describe('Services Integration', () => {
 
       // Add user with OP level first
       await ownerClient.addUser(channel, coowner, ACCESS_LEVELS.OP);
+      // Allow X3 time to process the addUser before CLVL
+      await new Promise(r => setTimeout(r, 300));
 
       // Promote to COOWNER level
       const clvlResult = await ownerClient.clvl(channel, coowner, ACCESS_LEVELS.COOWNER);
@@ -295,12 +297,15 @@ describe('Services Integration', () => {
     it('should handle rapid sequential commands', async () => {
       const client = trackClient(await createX3Client());
 
-      // Send multiple commands rapidly
-      const responses = await Promise.all([
-        client.serviceCmd('AuthServ', 'HELP'),
-        client.serviceCmd('ChanServ', 'HELP'),
-        client.serviceCmd('O3', 'HELP'),
-      ]);
+      // Send multiple commands in rapid succession
+      // Note: serviceCmd uses a shared buffer, so we must await each response
+      // before sending the next command. This still tests rapid sequential
+      // command handling - the server must process them quickly one after another.
+      const responses: string[][] = [];
+
+      responses.push(await client.serviceCmd('AuthServ', 'HELP'));
+      responses.push(await client.serviceCmd('ChanServ', 'HELP'));
+      responses.push(await client.serviceCmd('O3', 'HELP'));
 
       // All should get responses
       for (const response of responses) {

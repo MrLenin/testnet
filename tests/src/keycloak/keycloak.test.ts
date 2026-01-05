@@ -404,9 +404,9 @@ async function addUserToGroup(
     if (users.length === 0) return false;
     const userId = users[0].id;
 
-    // Find group
+    // Find group - don't use exact=true as it's unreliable
     const groupResponse = await fetch(
-      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups?search=${groupName}&exact=true`,
+      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups?search=${groupName}`,
       {
         headers: { 'Authorization': `Bearer ${adminToken}` },
       }
@@ -414,8 +414,10 @@ async function addUserToGroup(
 
     if (!groupResponse.ok) return false;
     const groups = await groupResponse.json();
-    if (groups.length === 0) return false;
-    const groupId = groups[0].id;
+    // Manual exact match since search is fuzzy
+    const exactGroup = groups.find((g: { name: string }) => g.name === groupName);
+    if (!exactGroup) return false;
+    const groupId = exactGroup.id;
 
     // Add to group
     const addResponse = await fetch(
@@ -948,8 +950,9 @@ async function createChannelGroup(
     // First get or create the irc-channels parent group
     let parentGroupId: string | null = null;
 
+    // Search without exact=true which may not work reliably
     const parentResponse = await fetch(
-      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups?search=irc-channels&exact=true`,
+      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups?search=irc-channels`,
       {
         headers: { 'Authorization': `Bearer ${adminToken}` },
       }
@@ -957,14 +960,53 @@ async function createChannelGroup(
 
     if (parentResponse.ok) {
       const groups = await parentResponse.json();
-      if (groups.length > 0) {
-        parentGroupId = groups[0].id;
+      // Find exact match since search is fuzzy
+      const exactMatch = groups.find((g: { name: string }) => g.name === 'irc-channels');
+      if (exactMatch) {
+        parentGroupId = exactMatch.id;
       }
     }
 
+    // Create irc-channels group if it doesn't exist
     if (!parentGroupId) {
-      console.log('irc-channels parent group not found');
-      return false;
+      console.log('Creating irc-channels parent group...');
+      const createParentResponse = await fetch(
+        `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${adminToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            name: 'irc-channels',
+            attributes: { description: ['IRC Channel Access'] },
+          }),
+        }
+      );
+
+      if (createParentResponse.status === 201 || createParentResponse.status === 409) {
+        // 201 = created, 409 = already exists (race condition)
+        // Re-fetch to get the ID
+        const refetchResponse = await fetch(
+          `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups?search=irc-channels`,
+          {
+            headers: { 'Authorization': `Bearer ${adminToken}` },
+          }
+        );
+        if (refetchResponse.ok) {
+          const groups = await refetchResponse.json();
+          const exactMatch = groups.find((g: { name: string }) => g.name === 'irc-channels');
+          if (exactMatch) {
+            parentGroupId = exactMatch.id;
+          }
+        }
+      }
+
+      if (!parentGroupId) {
+        console.log('Failed to create/find irc-channels parent group');
+        return false;
+      }
     }
 
     // Create channel subgroup under irc-channels
@@ -1090,12 +1132,13 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Channel Access Groups', () => 
     // Ensure irc-channels parent group exists (setup-keycloak.sh should create it,
     // but ensure it exists for test stability)
     const checkResponse = await fetch(
-      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups?search=irc-channels&exact=true`,
+      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups?search=irc-channels`,
       { headers: { 'Authorization': `Bearer ${adminToken}` } }
     );
     const groups = await checkResponse.json();
+    const existingGroup = groups.find((g: { name: string }) => g.name === 'irc-channels');
 
-    if (groups.length === 0) {
+    if (!existingGroup) {
       // Create the parent group
       const createResponse = await fetch(
         `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups`,
@@ -1111,8 +1154,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Channel Access Groups', () => 
           }),
         }
       );
-      if (createResponse.status !== 201) {
-        throw new Error('Failed to create irc-channels group for tests');
+      if (createResponse.status !== 201 && createResponse.status !== 409) {
+        throw new Error(`Failed to create irc-channels group for tests (HTTP ${createResponse.status})`);
       }
     }
   });
@@ -1120,7 +1163,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Channel Access Groups', () => 
   it('irc-channels parent group exists', async () => {
 
     const response = await fetch(
-      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups?search=irc-channels&exact=true`,
+      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups?search=irc-channels`,
       {
         headers: { 'Authorization': `Bearer ${adminToken}` },
       }
@@ -1128,9 +1171,10 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Channel Access Groups', () => 
 
     expect(response.ok).toBe(true);
     const groups = await response.json();
-    expect(groups.length).toBeGreaterThan(0);
-    expect(groups[0].name).toBe('irc-channels');
-    console.log('irc-channels group id:', groups[0].id);
+    const ircChannelsGroup = groups.find((g: { name: string }) => g.name === 'irc-channels');
+    expect(ircChannelsGroup).toBeDefined();
+    expect(ircChannelsGroup.name).toBe('irc-channels');
+    console.log('irc-channels group id:', ircChannelsGroup.id);
   });
 
   it('can create hierarchical channel access groups', async () => {
@@ -1223,9 +1267,9 @@ async function getChannelGroupWithAttribute(
   channelName: string
 ): Promise<{ id: string; name: string; attributes?: Record<string, string[]> } | null> {
   try {
-    // Get irc-channels parent first
+    // Get irc-channels parent first - don't use exact=true as it's unreliable
     const parentResponse = await fetch(
-      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups?search=irc-channels&exact=true`,
+      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups?search=irc-channels`,
       {
         headers: { 'Authorization': `Bearer ${adminToken}` },
       }
@@ -1233,9 +1277,11 @@ async function getChannelGroupWithAttribute(
 
     if (!parentResponse.ok) return null;
     const parents = await parentResponse.json();
-    if (parents.length === 0) return null;
+    // Manual exact match since search is fuzzy
+    const exactParent = parents.find((g: { name: string }) => g.name === 'irc-channels');
+    if (!exactParent) return null;
 
-    const parentId = parents[0].id;
+    const parentId = exactParent.id;
     const groupName = channelName.replace('#', '');
 
     // Get children of irc-channels
@@ -1272,9 +1318,9 @@ async function getChannelGroupWithAttribute(
  */
 async function deleteChannelGroup(adminToken: string, channelName: string): Promise<boolean> {
   try {
-    // Get irc-channels parent first
+    // Get irc-channels parent first - don't use exact=true as it's unreliable
     const parentResponse = await fetch(
-      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups?search=irc-channels&exact=true`,
+      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups?search=irc-channels`,
       {
         headers: { 'Authorization': `Bearer ${adminToken}` },
       }
@@ -1282,9 +1328,11 @@ async function deleteChannelGroup(adminToken: string, channelName: string): Prom
 
     if (!parentResponse.ok) return false;
     const parents = await parentResponse.json();
-    if (parents.length === 0) return false;
+    // Manual exact match since search is fuzzy
+    const exactParent = parents.find((g: { name: string }) => g.name === 'irc-channels');
+    if (!exactParent) return false;
 
-    const parentId = parents[0].id;
+    const parentId = exactParent.id;
     const groupName = channelName.replace('#', '');
 
     // Get children of irc-channels

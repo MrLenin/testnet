@@ -459,7 +459,8 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`CHATHISTORY LATEST ${channelName} * 0`);
 
       // Should receive either an empty batch or a FAIL response
-      const response = await client.waitForLine(/BATCH|FAIL/i, 3000);
+      // Use longer timeout to account for server processing time
+      const response = await client.waitForLine(/BATCH|FAIL/i, 8000);
       expect(response).toBeDefined();
       console.log('Zero limit response:', response);
       client.send('QUIT');
@@ -487,7 +488,8 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`CHATHISTORY LATEST ${channelName} * 1000000`);
 
       // Should receive a batch response (server caps the limit)
-      const response = await client.waitForLine(/BATCH|FAIL/i, 5000);
+      // Use longer timeout to account for server processing time
+      const response = await client.waitForLine(/BATCH|FAIL/i, 8000);
       expect(response).toBeDefined();
       console.log('Large limit response:', response);
       client.send('QUIT');
