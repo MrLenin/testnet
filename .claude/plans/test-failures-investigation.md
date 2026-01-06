@@ -211,10 +211,12 @@ x3: segfault at 0 ip ...664 in x3[...+e6000]    -> modcmd_register
 3. **Pending**: Build X3 with ASAN or use Valgrind
 
 **Observations from crash:**
-- "COOKIE is an unknown command" indicates command table corruption
-- This aligns with modcmd_register crashes - commands not properly registered
 - Memory corruption suspected - random crash locations, corrupted data structures
 - Prior memory corruption bugs were fixed (caefbc6) suggesting pattern of issues
+
+**Note**: The "COOKIE is an unknown command" error observed during testing was a **separate issue**
+from the crashes - these two problems happened to be investigated simultaneously but are unrelated.
+Afternet has used cookie auth for years without issues, so command table corruption was not the cause.
 
 **Recent suspicious commits:**
 - `d8d6596` SASL async hardening - 674 lines changed in session management

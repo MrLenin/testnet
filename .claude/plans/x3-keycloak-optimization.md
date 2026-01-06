@@ -398,31 +398,37 @@ static void sasl_auth_callback(struct SASLSession *session, ...) {
    - Expired entries auto-deleted on read
    - Generic `x3_lmdb_get/set/delete` functions implemented
 
-**Future enhancements:**
-- [ ] Keycloak webhook for real-time cache invalidation
-  - Fingerprint revocation, password changes, account suspension
-  - Would eliminate TTL delay for revoked credentials
-  - Requires Keycloak admin event listener configuration
-
-- [ ] X3-issued session tokens for SASL PLAIN optimization
+**Completed enhancements:**
+- [x] X3-issued session tokens for SASL PLAIN optimization ✅
   - After successful PLAIN auth, issue session token to client
   - Token can be used as password in subsequent PLAIN auths
-  - X3 detects token format (e.g., `x3tok:...`) and validates locally
-  - LMDB storage: `session:<token_id>` → `username|expiry`
+  - X3 detects token format (`x3tok:...`) and validates locally
+  - LMDB storage: `session:<token_id>` → `expiry:version:username`
   - No Keycloak call needed for reconnects
+  - Session versioning for bulk revocation (`sessver:` prefix)
+  - Automatic revocation on password changes
 
-- [ ] SCRAM-SHA-256 for session tokens (enhanced security)
+- [x] Keycloak webhook for real-time cache invalidation ✅
+  - HTTP listener on configurable port (`keycloak_webhook_port`)
+  - Shared secret authentication (`keycloak_webhook_secret`)
+  - Handles Keycloak Admin Events:
+    - USER DELETE: Invalidates all caches for user
+    - USER UPDATE: Logs update (auth cache auto-refreshes)
+    - CREDENTIAL DELETE: Removes fingerprint from cache
+    - CREDENTIAL UPDATE/CREATE: Logs password change
+    - USER_SESSION DELETE: Revokes X3 session tokens
+  - Files: `keycloak_webhook.c`, `keycloak_webhook.h`
+  - Statistics tracking for monitoring
+
+**Implemented enhancements:**
+- [x] SCRAM-SHA-256 for session tokens (enhanced security) - IMPLEMENTED 2026-01-05
   - Instead of token-as-plaintext-password, use SCRAM exchange
   - After PLAIN auth, generate SCRAM verifier for session token
-  - LMDB storage: `scram:<token_id>` → `salt|storedkey|serverkey|username|expiry`
-  - Token never sent in plaintext, replay-resistant
-  - Requires client SCRAM support (better than OAUTHBEARER, worse than PLAIN)
-
-- [ ] Session token revocation
-  - LMDB-backed: just delete the entry for instant revocation
-  - Session versioning: `session_ver:<username>` → version number
-  - Bump version to invalidate all tokens for a user
-  - Triggers: password change, LOGOUT ALL, admin suspend, webhook
+  - LMDB storage: `scram:<token_id>` → `expiry:iteration:salt:storedkey:serverkey:username`
+  - Token never sent in plaintext, replay-resistant via nonces
+  - Works with WeeChat and other SCRAM-SHA-256 capable clients
+  - Client uses username `x3scram:tokenid` for SCRAM auth
+  - Files: `x3_lmdb.h`, `x3_lmdb.c`, `nickserv.c`
 
 ### Phase 5: Local JWT Validation (High Impact)
 
