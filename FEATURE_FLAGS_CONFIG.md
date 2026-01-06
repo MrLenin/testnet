@@ -93,6 +93,48 @@ The multiline batch system includes comprehensive flood protection to prevent ab
 |---------|---------|-------------|
 | `FEAT_DRAFT_WEBSOCKET` | TRUE | Enable WebSocket protocol support |
 | `FEAT_WEBSOCKET_RECVQ` | 8192 | Receive queue size for WebSocket clients (higher than regular clients since WS frames can bundle multiple IRC lines) |
+| `FEAT_WEBSOCKET_ORIGIN` | "" | Allowed WebSocket origins (space/comma separated, empty = allow all) |
+
+**Origin Validation**: When `WEBSOCKET_ORIGIN` is non-empty, WebSocket connections must include an Origin header that matches one of the allowed patterns. Connections with missing or non-matching origins receive HTTP 403 Forbidden.
+
+**Pattern Syntax**:
+- Exact match: `https://example.com` - Origin must match exactly
+- Wildcard prefix: `*.example.com` - Origin must end with `.example.com`
+- Multiple patterns: `https://example.com *.trusted.org` (space or comma separated)
+
+**Example Configuration**:
+```
+features {
+    # Allow only specific origins for WebSocket connections
+    "WEBSOCKET_ORIGIN" = "https://webchat.example.com *.example.org";
+};
+```
+
+**Security Notes**:
+- Empty string (default) allows all origins - suitable for testing but not production
+- Wildcard patterns match suffix only (`*.example.com` matches `sub.example.com` but not `example.com`)
+- Origin validation helps prevent CSRF attacks against WebSocket endpoints
+
+### Certificate Expiry Tracking
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `FEAT_CERT_EXPIRY_TRACKING` | TRUE | Enable client certificate expiration tracking |
+
+When enabled, Nefarious extracts the expiration date from client TLS certificates and propagates it via P10 MARK (SSLCLIEXP) to X3. This allows services to:
+- Warn users on authentication when their certificate is about to expire
+- Display expiry dates in `LISTSSLFP` output
+- Store expiry timestamps in LMDB alongside fingerprints
+
+**X3 Behavior**:
+- Certificates expiring within 30 days trigger a warning on authentication
+- Expired certificates display "EXPIRED" warning on authentication
+- `LISTSSLFP` command shows registration date and expiry date for each fingerprint
+
+**P10 Protocol**: Certificate expiry is sent as Unix timestamp via:
+```
+AB MK <numeric> SSLCLIEXP :<timestamp>
+```
 
 ### Chat History Configuration
 
@@ -999,6 +1041,8 @@ In networks with multiple servers between client and X3, each intermediate serve
 | 1.9 | December 2024 | Added Keycloak group attribute-based access levels (keycloak_use_group_attributes) |
 | 2.0 | December 2024 | Added Keycloak bidirectional sync (keycloak_bidirectional_sync) - X3 auto-creates groups |
 | 2.1 | January 2025 | Added SASL Authentication Architecture documentation (session tokens, SCRAM, registration flows) |
+| 2.2 | January 2025 | Added Certificate Expiry Tracking (FEAT_CERT_EXPIRY_TRACKING, P10 SSLCLIEXP) |
+| 2.3 | January 2025 | Added WebSocket Origin Validation (FEAT_WEBSOCKET_ORIGIN) |
 
 ---
 
