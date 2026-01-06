@@ -62,7 +62,37 @@ Feature flags are configured in the `features {}` block of the IRCd config file.
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `FEAT_MULTILINE_MAX_BYTES` | 4096 | Maximum total bytes in multiline message |
-| `FEAT_MULTILINE_MAX_LINES` | 100 | Maximum lines in multiline message |
+| `FEAT_MULTILINE_MAX_LINES` | 24 | Maximum lines in multiline message |
+
+### Multiline Flood Protection
+
+The multiline batch system includes comprehensive flood protection to prevent abuse while rewarding legitimate multiline usage.
+
+**Lag Discounting**: Instead of applying fake lag immediately for each PRIVMSG in a batch, lag is accumulated during the batch and applied with a configurable discount when the batch ends. This recognizes that batched messages are transmitted simultaneously per the IRCv3 multiline spec.
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `FEAT_MULTILINE_LAG_DISCOUNT` | 50 | Percentage of lag applied for DMs (0-100) |
+| `FEAT_MULTILINE_CHANNEL_LAG_DISCOUNT` | 75 | Percentage of lag applied for channels (higher since more users affected) |
+| `FEAT_MULTILINE_MAX_LAG` | 30 | Maximum accumulated lag in seconds (prevents extremely long batches from building massive lag debt) |
+| `FEAT_MULTILINE_RECIPIENT_DISCOUNT` | TRUE | If all recipients support draft/multiline (no fallback needed), halve the discount percentage |
+| `FEAT_BATCH_RATE_LIMIT` | 10 | Maximum batches per minute per client (0 = disabled) |
+| `FEAT_CLIENT_BATCH_TIMEOUT` | 30 | Seconds before incomplete batch is auto-cleared |
+
+**Discount Values**:
+- `100` = Full lag (no benefit to multiline, like regular messages)
+- `50` = 50% lag (default for DMs - rewards multiline while preventing abuse)
+- `75` = 75% lag (default for channels - higher since more users affected)
+- `0` = No lag (dangerous - allows unlimited flooding)
+
+**Recipient-Aware Discounting**: When `MULTILINE_RECIPIENT_DISCOUNT` is enabled and ALL recipients support draft/multiline (no fallback to individual PRIVMSGs was needed), the lag discount is halved. This rewards clients for sending multiline to recipients who can properly receive it as a batch.
+
+### WebSocket Configuration
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `FEAT_DRAFT_WEBSOCKET` | TRUE | Enable WebSocket protocol support |
+| `FEAT_WEBSOCKET_RECVQ` | 8192 | Receive queue size for WebSocket clients (higher than regular clients since WS frames can bundle multiple IRC lines) |
 
 ### Chat History Configuration
 
@@ -282,6 +312,104 @@ X3 configuration is in `x3.conf` or environment variables for Docker.
 |---------|-------------|
 | `sasl_enable` | Enable SASL authentication |
 | `sasl_timeout` | SASL authentication timeout (seconds) |
+
+### SASL Authentication Architecture
+
+X3 implements a unique dual-credential SASL system that supports both account passwords and session tokens. This provides enhanced security and flexibility for IRC authentication.
+
+#### Supported SASL Mechanisms
+
+| Mechanism | Description |
+|-----------|-------------|
+| `PLAIN` | Username/password authentication (account password OR session token) |
+| `EXTERNAL` | Certificate fingerprint authentication |
+| `SCRAM-SHA-1` | Salted Challenge Response (session tokens and account passwords) |
+| `SCRAM-SHA-256` | SCRAM with SHA-256 (recommended) |
+| `SCRAM-SHA-512` | SCRAM with SHA-512 (strongest) |
+
+#### Session Token Authentication (Unique to X3)
+
+When a user authenticates via AuthServ (`AUTH` command), X3 generates a **session token** - a random credential that can be used for subsequent SASL authentication instead of the account password.
+
+**Benefits:**
+- Clients can store the session token instead of the plaintext password
+- Session tokens can be revoked without changing the account password
+- Reduced exposure of the primary password
+- Enables SCRAM authentication even when account was registered with weak hash
+
+**Flow:**
+1. User authenticates: `PRIVMSG AuthServ :AUTH <account> <password>`
+2. X3 validates password, generates session token, stores in LMDB
+3. X3 responds with: `NOTICE <nick> :Your session cookie is: <token>`
+4. Client stores token for future SASL authentication
+5. On reconnect, client uses SASL PLAIN with `<account>\0<account>\0<token>`
+
+**Session Token Storage (LMDB):**
+```
+Key: session:<account>
+Value: <token_hash>:<created_timestamp>:<last_used_timestamp>
+```
+
+#### SCRAM Credential Storage
+
+When LMDB and SSL are enabled, X3 generates SCRAM credentials for both session tokens and account passwords. This allows secure challenge-response authentication without transmitting passwords.
+
+**Session Token SCRAM (created on AUTH):**
+```
+Key: scram:<hash_type>:<account>
+Value: <salt>:<iterations>:<stored_key>:<server_key>
+```
+
+**Account Password SCRAM (created on registration/password change):**
+```
+Key: scram_acct:<hash_type>:<account>
+Value: <salt>:<iterations>:<stored_key>:<server_key>
+```
+
+**SCRAM Parameters:**
+- Salt: 32 random bytes (base64 encoded)
+- Iterations: 4096 (PBKDF2)
+- Hash types: SHA-1, SHA-256, SHA-512
+
+#### Registration Flow with SCRAM
+
+X3 supports two registration paths, both designed to enable SCRAM credentials:
+
+**X3 Native Flow (AuthServ REGISTER/COOKIE):**
+
+When email verification is enabled:
+1. `PRIVMSG AuthServ :REGISTER <account> <password> <email>`
+   - Password is hashed and stored in cookie data
+2. User receives activation email with cookie code
+3. `PRIVMSG AuthServ :COOKIE <account> <cookie> <password>`
+   - Password required at activation for confirmation AND SCRAM creation
+   - Confirms user didn't mistype password during registration
+   - Provides plaintext for SCRAM credential generation
+4. Account is activated with both legacy hash and SCRAM credentials
+
+When email verification is disabled:
+1. `PRIVMSG AuthServ :REGISTER <account> <password> <email>`
+2. Account is created immediately with SCRAM credentials
+
+**IRCv3 Native Flow (REGISTER/VERIFY commands):**
+
+Per the IRCv3 `draft/account-registration` specification:
+1. `REGISTER * <email> <password>` - Password provided at registration
+2. `VERIFY <account> <code>` - No password in VERIFY command
+
+For SCRAM support with email verification:
+- Password is stored temporarily in `pending_scram_dict` (memory)
+- On VERIFY, pending password is retrieved and SCRAM credentials created
+- Pending passwords auto-expire after 24 hours
+- Secure cleanup wipes password from memory
+
+**Configuration:**
+```
+"nickserv" {
+    "email_enabled" = "1";      // Require email for registration
+    "email_verify" = "1";       // Require email verification
+};
+```
 
 ### Account Registration
 
@@ -870,6 +998,7 @@ In networks with multiple servers between client and X3, each intermediate serve
 | 1.8 | December 2024 | Added FEAT_CHATHISTORY_FEDERATION, FEAT_CHATHISTORY_TIMEOUT for S2S federation |
 | 1.9 | December 2024 | Added Keycloak group attribute-based access levels (keycloak_use_group_attributes) |
 | 2.0 | December 2024 | Added Keycloak bidirectional sync (keycloak_bidirectional_sync) - X3 auto-creates groups |
+| 2.1 | January 2025 | Added SASL Authentication Architecture documentation (session tokens, SCRAM, registration flows) |
 
 ---
 
