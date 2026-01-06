@@ -227,7 +227,7 @@ modcmd:<service>:<command>      -> JSON {module, flags, min_level, ...}
   - Added fallback in `opserv_saxdb_read()` when SAXDB disabled
   - Added JSON helper functions `os_json_extract_string/int()`
 
-### Phase 5: Supporting Modules (2-3 hours) - PARTIAL
+### Phase 5: Supporting Modules (2-3 hours) ✅ COMPLETE
 
 - [x] 5.1 Global messages ✅
   - Added `x3_lmdb_global_set/get/delete/clear()` to x3_lmdb.c
@@ -237,15 +237,23 @@ modcmd:<service>:<command>      -> JSON {module, flags, min_level, ...}
   - Added `lmdb_global_read_callback()` and `global_lmdb_read_all()`
   - Added LMDB fallback in `global_saxdb_read()`
 
-- [~] 5.2 ModCmd bindings - DEFERRED
-  - Complex nested structure (bots, services, commands, helpfiles)
-  - Mostly static configuration that rarely changes
-  - Lower priority - can be added later if needed
+- [x] 5.2 ModCmd bindings ✅ (2026-01-06)
+  - Added `x3_lmdb_modbot_set/get/delete()` for bot definitions
+  - Added `x3_lmdb_modcmd_set/get/delete/clear_service()` for command bindings
+  - Added `x3_lmdb_modhelp_set/get()` for helpfile bindings
+  - Added jansson-based write functions in modcmd.c
+  - Added LMDB read callbacks (`lmdb_bot_read_callback`, etc.)
+  - Added `modcmd_lmdb_write_all()` and `modcmd_lmdb_read_all()`
+  - Added LMDB fallback in `modcmd_saxdb_read()`
 
-- [~] 5.3 MemoServ - DEFERRED
-  - Optional module, may not be enabled on all networks
-  - Complex structure (accounts, memos, history)
-  - Lower priority - can be added later if needed
+- [x] 5.3 MemoServ ✅ (2026-01-06)
+  - Added `x3_lmdb_memo_acct_set/get()` for account settings
+  - Added `x3_lmdb_memo_set/get/delete()` for memos
+  - Added `x3_lmdb_memo_hist_set/get/delete()` for history
+  - Added jansson-based write functions in mod-memoserv.c
+  - Added LMDB read callbacks (`lmdb_memo_acct_read_callback`, etc.)
+  - Added `memoserv_lmdb_write_all()` and `memoserv_lmdb_read_all()`
+  - Added LMDB fallback in `memoserv_saxdb_read()`
 
 ### Phase 6: Testing and Finalization (3-4 hours)
 
@@ -304,7 +312,7 @@ modcmd:<service>:<command>      -> JSON {module, flags, min_level, ...}
 - [x] Phase 2: NickServ ✅ (write + read complete)
 - [x] Phase 3: ChanServ ✅ (write + read complete)
 - [x] Phase 4: OpServ ✅ (infrastructure + write + read complete)
-- [x] Phase 5: Supporting Modules ✅ (Global complete, ModCmd/MemoServ deferred)
+- [x] Phase 5: Supporting Modules ✅ (Global, ModCmd, MemoServ complete)
 - [ ] Phase 6: Testing
 
 ## Jansson Integration Notes (2026-01-05)
@@ -312,15 +320,27 @@ modcmd:<service>:<command>      -> JSON {module, flags, min_level, ...}
 Jansson is now mandatory when LMDB is enabled (via --with-keycloak).
 JSON handling has been refactored to use jansson for proper encoding/escaping.
 
-### Refactored Modules
+### Refactored Modules - ALL MODULES COMPLETE ✅
 - **global.c** ✅ - Full jansson integration for read/write
 - **opserv.c** ✅ - Full jansson integration for read/write
-
-### Modules Using Legacy JSON Extractors
-- **chanserv.c** - Still uses manual JSON extractors (cs_json_extract_*)
-  - Has jansson.h include available
-  - Refactoring deferred due to complexity (12+ LMDB sections)
-  - Current code works correctly, just not using jansson API
+- **nickserv.c** ✅ - Full jansson integration for read/write (2026-01-05)
+  - Replaced manual `json_extract_string/int()` with jansson API
+  - Updated guards to `#if defined(WITH_LMDB) && defined(HAVE_JANSSON_H)`
+- **chanserv.c** ✅ - Full jansson integration for read/write (2026-01-05)
+  - Replaced manual `cs_json_extract_string/int/int_array()` with jansson API
+  - Updated write functions to use `json_object_set_new()` and `json_dumps()`
+  - Updated read functions to use `json_loads()` and `json_object_get()`
+  - Removed legacy manual JSON extractors
+- **modcmd.c** ✅ - Full jansson integration for read/write (2026-01-06)
+  - Added LMDB functions for bots, commands, and helpfiles
+  - Write functions: `modcmd_lmdb_write_bot/command/helpfiles()`
+  - Read callbacks: `lmdb_bot/cmd/help_read_callback()`
+  - SAXDB-optional fallback in `modcmd_saxdb_read()`
+- **mod-memoserv.c** ✅ - Full jansson integration for read/write (2026-01-06)
+  - Added LMDB functions for accounts, memos, and history
+  - Write functions: `memoserv_lmdb_write_account/memo/history()`
+  - Read callbacks: `lmdb_memo_acct/memo/history_read_callback()`
+  - SAXDB-optional fallback in `memoserv_saxdb_read()`
 
 ### Build Configuration
 ```bash
