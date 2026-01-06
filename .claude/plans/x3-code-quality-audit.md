@@ -234,8 +234,21 @@ Remaining failures are timing-related flakiness in tests, not X3 bugs.
 
 ---
 
+### Phase 7: Static Analysis Integration ✅ COMPLETE
+
+- [x] Updated compiler warnings in `configure.in`:
+  - Replaced deprecated `-W` with modern `-Wextra`
+  - Added: `-Wall -Wextra -Wformat=2 -Wstrict-prototypes -Wmissing-prototypes -Wold-style-definition -Wuninitialized -Wpointer-arith -Wno-unused-parameter`
+  - `-Werror` enabled in maintainer mode (unchanged)
+- [x] Created `.cppcheck` configuration file for cppcheck analyzer
+- [x] Created `tools/static-analysis.sh` script supporting:
+  - cppcheck (general purpose C analyzer)
+  - scan-build (Clang static analyzer)
+  - Usage: `./tools/static-analysis.sh [cppcheck|scan-build|all]`
+
+---
+
 ## Notes
 
 - All fixes should be tested with Valgrind to verify no new memory issues
-- Consider adding `-Wall -Wextra -Werror` to catch future issues
-- Static analysis (cppcheck, scan-build) would catch many of these automatically
+- Static analysis tools now integrated - run `tools/static-analysis.sh` before releases
