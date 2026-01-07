@@ -7,8 +7,8 @@
 | 1 - Batch processing | ✅ Complete | `chanserv.c` refactored with `kc_sync_state`, `chanserv_sync_keycloak_batch()`, priority queue |
 | 6 - Resilient failure handling | ✅ Complete | LMDB per-channel metadata (`lmdb_chansync_meta`), exponential backoff (30s→1h), `x3_lmdb_chansync_*()` functions |
 | 3 - Priority queue | ✅ Complete | `kc_channel_priority()`, `kc_sync_priority_cmp()`, configurable |
-| 4a - Hash-based incremental | 🔄 Ready | `membership_hash` field in `lmdb_chansync_meta`, storage functions ready, comparison logic TBD |
-| 4b - Webhooks (GROUP_MEMBERSHIP) | 🔄 Ready | `chanserv_queue_keycloak_sync()`, `kc_group_path_to_channel()` helper ready for webhook calls |
+| 4a - Hash-based incremental | ✅ Complete | FNV-1a hash via `kc_membership_hash_*()`, comparison in attribute mode, `unchanged_syncs` stat |
+| 4b - Webhooks (GROUP_MEMBERSHIP) | ✅ Complete | GROUP_MEMBERSHIP + GROUP UPDATE handlers in `keycloak_webhook.c`, `group_syncs` stat |
 | 4c - Expanded webhook coverage | ⏳ Pending | |
 | 2 - Async pull sync | ⏳ Pending | |
 | 5 - Distributed sync window | ⏳ Pending | Config added (`keycloak_sync_distributed`), logic TBD |
