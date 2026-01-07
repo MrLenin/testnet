@@ -748,12 +748,66 @@ enum adduser_state {
 - [x] `kc_token_refresh_callback()` at nickserv.c:6216-6241 - stores new token, notifies waiters
 - [x] `kc_notify_token_waiters()` at nickserv.c:6191-6211 - iterates waiter list, invokes callbacks
 
-#### 5.5 Migration Strategy
-- [x] Keep sync `kc_ensure_token()` for remaining sync paths
-- [ ] Update Phase 2-4 async operations to use `kc_ensure_token_async()` as first step (pending Phase 2-4)
-- [ ] Eventually deprecate sync version (future)
+#### 5.5 Migration Strategy ✅ COMPLETED (Jan 2026)
+- [x] Keep sync `keycloak_ensure_token()` for remaining sync paths
+- [x] Update COOKIE async (Phase 3/4) to use `keycloak_ensure_token_async()` first step
+- [x] Update ADDUSER async (chanserv.c) to use `keycloak_ensure_token_async()` first step
+- [x] Removed ALL sync `keycloak_get_client_token()` calls from application code (Jan 2026)
 
-#### 5.6 Testing
+**Sync Cleanup (Jan 2026) - "All-in Async":**
+- [x] `chanserv_sync_keycloak_channel_async()` - Converted to use `keycloak_ensure_token_async()`
+- [x] `chanserv_delete_keycloak_channel()` - Converted to fire-and-forget async with token callback
+- [x] `chanserv_sync_keycloak_channel_level()` - Uses `keycloak_get_cached_token()` only (no blocking)
+- [x] `chanserv_sync_keycloak_channel_attribute_mode()` - Uses cached token only (no blocking)
+- [x] `chanserv_push_keycloak_access()` - Removed sync fallback, async-only
+- [x] Zero `keycloak_get_client_token()` calls remain in nickserv.c or chanserv.c
+- [x] Token manager in keycloak.c is the only caller of sync token refresh
+
+#### 5.6 Token Manager Refactoring ✅ (Jan 2026)
+
+**Goal:** Move token management from nickserv.c to keycloak.c/h for proper separation of concerns.
+
+**Changes:**
+- [x] Added Token Manager API in keycloak.h:
+  - `keycloak_token_manager_init()` - Initialize with realm/client config
+  - `keycloak_token_manager_shutdown()` - Cleanup on exit
+  - `keycloak_ensure_token()` - Sync token refresh (for sync callers)
+  - `keycloak_ensure_token_async()` - Async token refresh with waiter queue
+  - `keycloak_get_cached_token()` - Get current token
+  - `keycloak_get_authed_client()` - Get client with token attached
+  - `keycloak_get_realm()` - Get realm config
+  - `keycloak_set_available()` / `keycloak_is_available()` - Availability tracking
+- [x] Implemented `kc_token_mgr` static struct in keycloak.c
+- [x] Implemented waiter queue (`kc_token_waiter`) in keycloak.c
+- [x] Removed old static variables from nickserv.c:
+  - `kc_realm_config`, `kc_client_config`, `kc_admin_token`, `kc_token_expires`
+  - `keycloak_available`, `kc_token_waiters`, `kc_token_refresh_pending`
+- [x] Removed old token management functions from nickserv.c
+- [x] Updated nickserv.c to call `keycloak_token_manager_init()` at startup
+- [x] Updated 43+ call sites to use `keycloak_get_realm()` / `keycloak_get_authed_client()`
+- [x] Created `ns_keycloak_set_available()` wrapper to preserve SASL mechanism updates
+
+#### 5.7 Async API Additions (Jan 2026)
+- [x] Added `keycloak_get_group_by_name_async()` in keycloak.c/h
+- [x] Added `keycloak_delete_group_async()` in keycloak.c/h
+- [x] Converted `kc_async_sync_token_callback` to use async group lookup (KC_ASYNC_STATE_GET_GROUP_ID state)
+- [x] Converted `kc_delete_token_callback` to fully async (kc_delete_group_id_cb → kc_delete_group_done_cb)
+- [x] Added `KC_ASYNC_GET_GROUP_NAME` and `KC_ASYNC_DELETE_GROUP` to kc_async_type enum
+- [x] Added waiter queue backpressure limit (KC_TOKEN_WAITER_LIMIT = 100)
+
+#### 5.8 Sync Code Cleanup (Jan 2026)
+- [x] Removed non-attribute mode fallback in `chanserv_sync_keycloak_channel_async()`
+- [x] Converted `chanserv_sync_keycloak_channel_async_standalone()` to queue requests instead of sync fallback
+- [x] Converted `kc_sync_process_pending()` to start async for first item (completion callback chains rest)
+- [x] Added pending queue processing in `kc_async_sync_channel_done()` for standalone syncs
+- [x] Removed dead sync functions:
+  - `chanserv_sync_keycloak_channel()`
+  - `chanserv_sync_keycloak_channel_attribute_mode()`
+  - `chanserv_sync_keycloak_group_with_attribute()`
+  - `chanserv_sync_keycloak_channel_level()`
+- [x] Zero sync `keycloak_get_group_by_path/name()` calls remain in chanserv.c
+
+#### 5.9 Testing
 - [ ] Token refresh during single operation
 - [ ] Multiple operations waiting on same refresh
 - [ ] Token refresh failure notification
@@ -774,6 +828,87 @@ Phase 4 (ChanServ) ←── Full state machine
 **Recommended Order:** 5 → 2 → 3 → 4 (token cache enables all others)
 **Alternative:** 2 → 3 → 4 → 5 (use sync token initially, optimize later)
 
+### Phase 5.10: NickServ All-In Async (Jan 2026) 🔄 IN PROGRESS
+
+**Problem:** 18+ `keycloak_ensure_token()` sync calls remain in nickserv.c, blocking the event loop.
+
+**Scope:** Convert ALL remaining sync Keycloak operations to async.
+
+#### 5.10.1 Sync Functions Requiring Conversion
+
+| Function | Lines | Callers | Priority |
+|----------|-------|---------|----------|
+| `kc_do_modify()` | 6803-6854 | Email/password changes, COOKIE sync path | HIGH |
+| `kc_do_add()` | 6770-6801 | Account registration, SASL registration | HIGH |
+| `kc_get_user_info()` | 6749-6767 | AUTH email lookup, auth_async_callback | HIGH |
+| `kc_delete_account()` | 6860-6883 | Account unregistration | MEDIUM |
+| `kc_do_oslevel()` | 6887-6929 | OpServ level changes | MEDIUM |
+| `kc_add2group()` | 7126-7154 | Oper group membership | MEDIUM |
+| `kc_delfromgroup()` | 7159-7187 | Oper group removal | MEDIUM |
+| `kc_sync_email_verified()` | 6936-6967 | Cookie verification | LOW (fire-and-forget) |
+| `kc_sync_fingerprints()` | 6977-7028 | Fingerprint sync | LOW (fire-and-forget) |
+| `kc_check_email_verified()` | 7043-7063 | Auto-activate check | MEDIUM |
+| `kc_try_auto_activate()` | 7076-7121 | SASL auth success | MEDIUM |
+| `loc_auth_oauth()` | 7205-7310 | OAuth bearer auth | HIGH |
+
+#### 5.10.2 Caller Analysis
+
+**HIGH Priority Callers (user-facing, blocking):**
+- `cmd_register()` line 1429 → `kc_do_add()`
+- `cmd_auth()` lines 2538, 2936 → `kc_get_user_info()`
+- `cmd_cookie()` lines 3454, 3523 → `kc_do_modify()` (sync path)
+- `cmd_pass()` line 3708 → `kc_do_modify()`
+- `cmd_set()` lines 1783, 1901, 4493 → `kc_do_modify()`
+- SASL registration line 11672 → `kc_do_add()`
+
+**MEDIUM Priority Callers:**
+- `nickserv_unregister()` line 799 → `kc_delete_account()`
+- `cmd_oset()` line 4655 → `kc_do_oslevel()`
+- SASL success lines 10167, 10333, 10461, 10601, 10729 → `kc_try_auto_activate()`
+
+**LOW Priority (fire-and-forget):**
+- `cmd_cookie()` line 3576 → `kc_sync_email_verified()`
+- Fingerprint ops lines 3842, 3871, 3915 → `kc_sync_fingerprints()`
+
+#### 5.10.3 Implementation Strategy
+
+**Approach A: Token-First Async (Recommended)**
+1. Convert each function to take a token callback pattern
+2. Use `keycloak_ensure_token_async()` as first step
+3. Chain to actual operation callback
+4. Return async handle, caller waits for completion
+
+**Approach B: Fire-and-Forget Where Possible**
+1. For non-critical syncs (email_verified, fingerprints), use fire-and-forget
+2. For user-facing operations, use full async with user notification
+
+#### 5.10.4 Implementation Checklist
+
+**Completed (Jan 2026):**
+- [x] `kc_do_modify()` - Converted to fully async fire-and-forget
+- [x] `kc_do_add()` - Converted to fully async fire-and-forget
+- [x] `kc_sync_email_verified()` - Converted to full async
+- [x] `kc_sync_fingerprints()` - Converted to full async
+- [x] All callers updated to fire-and-forget pattern
+- [x] Added `keycloak_create_user_with_hash_async()` API
+- [x] Added `keycloak_set_user_attribute_array_async()` API
+- [x] Fixed `keycloak_create_user_async()` to accept NULL password
+
+**Remaining (14 sync keycloak_ensure_token() calls):**
+- [ ] `kc_get_user_info()` - line 6724
+- [ ] `kc_delete_account()` - line 7085
+- [ ] `kc_do_oslevel()` - line 7113
+- [ ] `kc_check_email_verified()` - line 7459
+- [ ] `kc_add2group()` - line 7536
+- [ ] `kc_delfromgroup()` - line 7569
+- [ ] `loc_auth_oauth()` - line 7626 (HIGH PRIORITY - auth path)
+- [ ] `loc_auth_external()` - line 7857
+- [ ] `nickserv_set_user_metadata()` - line 8242
+- [ ] `nickserv_get_user_metadata()` - line 8352
+- [ ] `nickserv_list_metadata()` - lines 8549, 8688
+- [ ] `nickserv_get_webpush_subscriptions()` - line 8768
+- [ ] SASL EXTERNAL fingerprint lookup - line 10961
+
 ### Phase 6: DNS Async (2-3 days)
 - [ ] Create `ioset_connect_async()` using SAR
 - [ ] Implement DNS resolution callback
@@ -784,7 +919,7 @@ Phase 4 (ChanServ) ←── Full state machine
 ### Phase 7: Dead Code Removal (1 day) ✅
 - [x] Remove `keycloak_update_user_credentials()` - removed from keycloak.c/h
 - [x] Remove `getipbyname()` - removed from tools.c and common.h
-- [ ] Remove any remaining sync fallbacks
+- [x] Remove any remaining sync fallbacks - All sync token calls removed from application code (Jan 2026)
 - [ ] Audit for other dead code
 
 ### Phase 8: Cleanup & Testing (2 days)
