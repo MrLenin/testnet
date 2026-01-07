@@ -604,47 +604,52 @@ Note: Reuses existing `kc_check_auth_async()` infrastructure (KC_ASYNC_AUTH type
 - [ ] Invalid password returns proper error
 - [ ] Event loop latency stays under 10ms during AUTH
 
-### Phase 3: COOKIE Command (2-3 days)
+### Phase 3: COOKIE Command (2-3 days) ✅ COMPLETED
 
 **Problem:** `cmd_cookie()` calls `kc_do_modify()` with two blocking calls: `keycloak_get_user()` and `keycloak_update_user_representation()`.
 
 **Implementation Steps:**
 
-#### 3.1 Add Async Types (keycloak.c/h)
-- [ ] Add `KC_ASYNC_GET_USER` and `KC_ASYNC_UPDATE_USER` to enum
-- [ ] Add callback types:
+#### 3.1 Add Async Types (keycloak.c/h) ✅
+- [x] Add `KC_ASYNC_GET_USER` and `KC_ASYNC_UPDATE_USER` to enum
+- [x] Add callback types:
   ```c
   typedef int (*kc_get_user_callback)(void *session, int result, struct kc_user *user);
   typedef int (*kc_update_user_callback)(void *session, int result);
   ```
 
-#### 3.2 Create Async Functions (keycloak.c)
-- [ ] Create `keycloak_get_user_async()` - single user lookup
-- [ ] Create `keycloak_update_user_representation_async()`
-- [ ] Add dispatch cases in `kc_curl_check_completed()`
+#### 3.2 Create Async Functions (keycloak.c) ✅
+- [x] Create `keycloak_get_user_async()` - single user lookup with ID cache check
+- [x] Create `keycloak_update_user_representation_async()`
+- [x] Add dispatch cases in `kc_curl_check_completed()`
 
-#### 3.3 Two-Phase State Machine (nickserv.c)
-- [ ] Create `struct cookie_async_ctx`:
+#### 3.3 Two-Phase State Machine (nickserv.c) ✅
+- [x] Create `struct cookie_async_ctx`:
   ```c
   struct cookie_async_ctx {
-      struct userNode *user;
-      uint64_t user_numeric;
-      struct handle_info *hi;
-      char *user_id;  /* From lookup phase */
-      char password[128];
-      enum { COOKIE_STATE_LOOKUP, COOKIE_STATE_UPDATE, COOKIE_STATE_DONE } state;
+      char handle[NICKSERV_HANDLE_LEN + 1];   /* Account handle */
+      char nick[NICKLEN + 1];                  /* User's nick (for replies) */
+      char numeric[COMBO_NUMERIC_LEN + 1];    /* User numeric for validation */
+      struct userNode *user;                   /* User pointer (validated before use) */
+      struct handle_info *hi;                  /* Handle info (validated before use) */
+      char *user_id;                           /* Keycloak user ID (from lookup phase) */
+      char *password_hash;                     /* Password hash to set */
+      char *plaintext_password;                /* Plaintext password for SCRAM creation */
+      enum cookie_async_state state;           /* Current state */
+      time_t started;                          /* When request started */
   };
   ```
-- [ ] Create `cookie_async_lookup_callback()` - stores user_id, starts update
-- [ ] Create `cookie_async_update_callback()` - completes activation
+- [x] Create `cookie_async_lookup_callback()` - stores user_id, starts update
+- [x] Create `cookie_async_update_callback()` - completes activation
 
-#### 3.4 Modify cmd_cookie() (nickserv.c:3295)
-- [ ] Add async path for ACTIVATION case
-- [ ] Handle PASSWORD_CHANGE case similarly
+#### 3.4 Modify cmd_cookie() (nickserv.c:3391) ✅
+- [x] Add async path for ACTIVATION case
+- [x] Only use async for registered users with numerics (pre-registration users use sync)
+- [ ] Handle PASSWORD_CHANGE case similarly (future)
 
 #### 3.5 Testing
 - [ ] ACTIVATION cookie flow completes
-- [ ] PASSWORD_CHANGE cookie flow
+- [ ] PASSWORD_CHANGE cookie flow (not yet async)
 - [ ] User disconnect during lookup/update phases
 - [ ] Keycloak user not found error
 
