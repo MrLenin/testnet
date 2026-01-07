@@ -24,6 +24,46 @@ The following 4c handlers are **tracking/logging only** and need additional work
 
 ---
 
+## Implementation Review (vs Plan)
+
+### Divergences from Plan
+
+| Area | Plan | Implemented | Risk |
+|------|------|-------------|------|
+| **Backoff timing** | 5min→30min→2hr | 30s→60s→2min→4min...→1hr (exponential) | Low - current is more conservative |
+| **Priority queue for webhook** | Proper queue with HIGH/IMMEDIATE priorities | TODO: Does immediate sync or waits for batch | Medium - webhook-triggered syncs not properly queued |
+| **CHANNEL_IMPORTANT flag** | +200 score in priority | Not implemented | Low - minor feature |
+| **`kc_channel_sync_meta` in chanData** | Store in struct chanData | Stored in LMDB via `lmdb_chansync_meta` | None - LMDB approach is better |
+
+### Potential Issues
+
+1. **`chanserv_queue_keycloak_sync()` doesn't queue properly**
+   - For non-IMMEDIATE priorities (e.g., GROUP UPDATE → HIGH priority), it just does immediate sync or relies on current batch
+   - Line 11595-11600 has `/* TODO: For lower priorities, add to a priority queue */`
+   - **Impact**: GROUP UPDATE webhook handlers may not properly defer to batch system
+
+2. **Hash-only in attribute mode**
+   - Hash-based incremental sync only works in attribute mode (`chanserv_sync_keycloak_group_with_attribute`)
+   - Legacy mode (`chanserv_sync_keycloak_group`) stores entry count as "hash" - not true incremental
+   - **Impact**: Legacy mode users don't get incremental sync benefits
+
+3. **Phase 4c partial completion**
+   - OpServ level: Tracking only (acceptable - fetched live)
+   - Metadata: Tracking only (needs prefix-delete for immediate invalidation)
+
+### Working Correctly ✅
+
+- **Batch processing**: `kc_sync_state`, `chanserv_sync_keycloak_batch()`, `timeq` integration
+- **Priority queue**: `kc_channel_priority()` scoring, `qsort` ordering
+- **Exponential backoff**: LMDB-based `lmdb_chansync_meta` with failure tracking
+- **FNV-1a hash**: `kc_membership_hash_init/add()` for incremental sync
+- **SCRAM invalidation**: Calls real `x3_lmdb_scram_*` functions
+- **Fingerprint pre-warm**: Calls real `x3_lmdb_fingerprint_set()`
+- **GROUP_MEMBERSHIP handler**: Queues immediate sync for channel
+- **OpServ KCSYNC**: STATUS/STATS/CHANNEL/ALL/ABORT/RESET all implemented
+
+---
+
 ## Problem Statement
 
 The current Keycloak access sync implementation processes all channels synchronously in a single blocking operation. For large deployments (6000+ entries across 50+ channels), this creates:
