@@ -54,7 +54,12 @@ interface CleanupStats {
 }
 
 /**
- * Clean up test users from Keycloak
+ * Clean up test users from Keycloak directly (DEPRECATED)
+ *
+ * NOTE: This function is no longer called automatically. X3's OUNREGISTER command
+ * now handles Keycloak user deletion via kc_delete_account(). Keeping this function
+ * available for manual cleanup if needed (e.g., if X3 is down but Keycloak isn't).
+ *
  * Removes users matching test* pattern (but not testuser which is the main test account)
  */
 async function cleanupKeycloak(stats: CleanupStats): Promise<void> {
@@ -134,8 +139,9 @@ async function cleanup(): Promise<void> {
     errors: [],
   };
 
-  // First clean up Keycloak (prevents auto-create issues)
-  await cleanupKeycloak(stats);
+  // Note: Keycloak cleanup is now handled by X3's OUNREGISTER command
+  // (via kc_delete_account), so we don't need to do it separately here.
+  // Doing both would cause double-delete issues.
 
   console.log(`Connecting to ${IRC_HOST}:${IRC_PORT}...`);
 
@@ -207,12 +213,24 @@ async function cleanup(): Promise<void> {
     }
 
     // Authenticate with AuthServ if credentials provided
+    // Note: Keycloak validation can take 5-10 seconds - we check result after search
     if (X3_ACCOUNT && X3_PASSWORD) {
       console.log(`Authenticating with AuthServ as ${X3_ACCOUNT}...`);
       send(`PRIVMSG AuthServ :AUTH ${X3_ACCOUNT} ${X3_PASSWORD}`);
-      await new Promise(r => setTimeout(r, 1000));
+    } else {
+      console.log('No X3_ACCOUNT/X3_PASSWORD set - O3 commands will fail.');
+      console.log('Set these env vars or wipe x3.db and register first oper.');
+    }
 
-      // Check for successful auth (look for "I recognize you" or similar)
+    // Search for test accounts using AuthServ
+    // AuthServ SEARCH supports: handlemask, accountmask, account (all synonyms)
+    // Note: Need longer wait time for Keycloak sync + large result sets
+    console.log('\nSearching for test accounts...');
+    send('PRIVMSG AuthServ :SEARCH PRINT handlemask test*');
+    await new Promise(r => setTimeout(r, 10000));
+
+    // Check auth result now (Keycloak response should have arrived by now)
+    if (X3_ACCOUNT) {
       const authSuccess = lines.some(l =>
         l.includes('AuthServ') && (l.includes('recognize') || l.includes('authenticated'))
       );
@@ -221,31 +239,29 @@ async function cleanup(): Promise<void> {
       } else {
         console.log('AuthServ authentication may have failed - check credentials.');
       }
-    } else {
-      console.log('No X3_ACCOUNT/X3_PASSWORD set - O3 commands will fail.');
-      console.log('Set these env vars or wipe x3.db and register first oper.');
     }
 
-    // Search for test accounts using O3
-    console.log('\nSearching for test accounts...');
-    send('PRIVMSG O3 :SEARCH PRINT account test*');
-    await new Promise(r => setTimeout(r, 2000));
-
     // Parse search results for accounts
+    if (DEBUG) console.log(`DEBUG: lines array has ${lines.length} entries`);
     for (const line of lines) {
-      // Look for account names in O3 responses
-      const match = line.match(/NOTICE.*:(test[a-f0-9]{5,6})\b/i);
-      if (match && !stats.accountsFound.includes(match[1])) {
-        stats.accountsFound.push(match[1]);
+      // Look for test account names (test + 6 hex chars) in Match: lines
+      // Format is ":AuthServ NOTICE bot :Match: test01f17b"
+      if (line.includes('Match:')) {
+        const match = line.match(/(test[0-9a-f]{6})/i);
+        if (match && !stats.accountsFound.includes(match[1])) {
+          stats.accountsFound.push(match[1]);
+          if (DEBUG) console.log(`DEBUG: Found account ${match[1]}`);
+        }
       }
     }
 
     console.log(`Found ${stats.accountsFound.length} test accounts`);
 
-    // Search for test channels using ChanServ CLIST command
+    // Search for test channels using O3 CSEARCH
+    // CSEARCH supports: name, topic, users, timestamp, limit criteria
     console.log('\nSearching for test channels...');
-    send('PRIVMSG ChanServ :CLIST #test-*');
-    await new Promise(r => setTimeout(r, 3000));
+    send('PRIVMSG O3 :CSEARCH PRINT name #test-*');
+    await new Promise(r => setTimeout(r, 5000));
 
     // Parse channel list - look for #test- patterns in any response
     for (const line of lines) {
@@ -260,12 +276,22 @@ async function cleanup(): Promise<void> {
 
     console.log(`Found ${stats.channelsFound.length} test channels`);
 
-    // Delete accounts
+    // Enable GOD mode for cleanup operations (required for OUNREGISTER and UNREGISTER)
+    // GOD mode grants UL_HELPER (600) access which allows deleting other users' accounts/channels
+    if (stats.accountsFound.length > 0 || stats.channelsFound.length > 0) {
+      console.log('\nEnabling GOD mode for cleanup...');
+      send('PRIVMSG O3 :GOD ON');
+      await new Promise(r => setTimeout(r, 500));
+    }
+
+    // Delete accounts using AuthServ OUNREGISTER
+    // OUNREGISTER is on AuthServ (not O3), use *account for account name
+    // Note: Use 1s delay to avoid flood protection kick
     if (stats.accountsFound.length > 0) {
-      console.log('\nDeleting test accounts...');
+      console.log('Deleting test accounts...');
       for (const account of stats.accountsFound) {
-        send(`PRIVMSG O3 :OUNREGISTER *${account} FORCE`);
-        await new Promise(r => setTimeout(r, 300));
+        send(`PRIVMSG AuthServ :OUNREGISTER *${account} FORCE`);
+        await new Promise(r => setTimeout(r, 1000));
         stats.accountsDeleted++;
         process.stdout.write('.');
       }
@@ -274,21 +300,27 @@ async function cleanup(): Promise<void> {
 
     // Unregister channels using ChanServ
     if (stats.channelsFound.length > 0) {
-      console.log('\nUnregistering test channels...');
+      console.log('Unregistering test channels...');
       for (const channel of stats.channelsFound) {
-        send(`PRIVMSG ChanServ :UNREGISTER ${channel} CONFIRM`);
-        await new Promise(r => setTimeout(r, 300));
+        // With GOD mode, no confirmation string needed - IsHelping bypasses that check
+        send(`PRIVMSG ChanServ :UNREGISTER ${channel}`);
+        await new Promise(r => setTimeout(r, 500));
         stats.channelsDeleted++;
         process.stdout.write('.');
       }
       console.log(` Done (${stats.channelsDeleted})`);
     }
 
+    // Disable GOD mode when done
+    if (stats.accountsFound.length > 0 || stats.channelsFound.length > 0) {
+      send('PRIVMSG O3 :GOD OFF');
+      await new Promise(r => setTimeout(r, 300));
+    }
+
     // Summary
     console.log('\n=== Cleanup Summary ===');
-    console.log(`X3 Accounts deleted: ${stats.accountsDeleted}`);
+    console.log(`X3 Accounts deleted: ${stats.accountsDeleted} (Keycloak users deleted via OUNREGISTER)`);
     console.log(`X3 Channels unregistered: ${stats.channelsDeleted}`);
-    console.log(`Keycloak users deleted: ${stats.keycloakUsersDeleted}`);
 
     send('QUIT :Cleanup complete');
     await new Promise(r => setTimeout(r, 500));
