@@ -893,21 +893,23 @@ Phase 4 (ChanServ) ←── Full state machine
 - [x] Added `keycloak_create_user_with_hash_async()` API
 - [x] Added `keycloak_set_user_attribute_array_async()` API
 - [x] Fixed `keycloak_create_user_async()` to accept NULL password
+- [x] `kc_delete_account()` - Converted to fully async fire-and-forget (Jan 7)
+- [x] `kc_do_oslevel()` - Converted to fully async fire-and-forget (Jan 7)
+- [x] `kc_add2group()` - Converted to fully async fire-and-forget (Jan 7)
+- [x] `kc_delfromgroup()` - Converted to fully async fire-and-forget (Jan 7)
+- [x] `nickserv_set_user_metadata()` - Keycloak section converted to fully async (Jan 7)
+- [x] Added `keycloak_delete_user_async()` API (Jan 7)
 
-**Remaining (14 sync keycloak_ensure_token() calls):**
-- [ ] `kc_get_user_info()` - line 6724
-- [ ] `kc_delete_account()` - line 7085
-- [ ] `kc_do_oslevel()` - line 7113
-- [ ] `kc_check_email_verified()` - line 7459
-- [ ] `kc_add2group()` - line 7536
-- [ ] `kc_delfromgroup()` - line 7569
-- [ ] `loc_auth_oauth()` - line 7626 (HIGH PRIORITY - auth path)
-- [ ] `loc_auth_external()` - line 7857
-- [ ] `nickserv_set_user_metadata()` - line 8242
-- [ ] `nickserv_get_user_metadata()` - line 8352
-- [ ] `nickserv_list_metadata()` - lines 8549, 8688
-- [ ] `nickserv_get_webpush_subscriptions()` - line 8768
-- [ ] SASL EXTERNAL fingerprint lookup - line 10961
+**Remaining (9 sync keycloak_ensure_token() calls - READ operations requiring state machines):**
+- [ ] `kc_get_user_info()` - line ~6711 (HIGH - auth email lookup)
+- [ ] `kc_try_auto_activate()` - line ~7663 (MEDIUM - SASL success auto-activate)
+- [ ] `loc_auth_oauth()` - line ~8117 (HIGH PRIORITY - OAUTHBEARER auth)
+- [ ] `loc_auth_external()` - line ~8348 (HIGH - SASL EXTERNAL auth)
+- [ ] `nickserv_get_user_metadata()` - line ~8827 (READ - needs response)
+- [ ] `nickserv_sync_metadata_to_ircd()` - line ~9024 (bulk sync)
+- [ ] `nickserv_sync_account_metadata_to_ircd()` - line ~9163 (bulk sync)
+- [ ] `nickserv_list_user_metadata()` - line ~9243 (READ - needs response)
+- [ ] SASL EXTERNAL fingerprint lookup - line ~11436 (auth path)
 
 ### Phase 6: DNS Async (2-3 days)
 - [ ] Create `ioset_connect_async()` using SAR
