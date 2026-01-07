@@ -31,16 +31,17 @@ The following 4c handlers are **tracking/logging only** and need additional work
 | Area | Plan | Implemented | Risk |
 |------|------|-------------|------|
 | **Backoff timing** | 5min→30min→2hr | 30s→60s→2min→4min...→1hr (exponential) | Low - current is more conservative |
-| **Priority queue for webhook** | Proper queue with HIGH/IMMEDIATE priorities | TODO: Does immediate sync or waits for batch | Medium - webhook-triggered syncs not properly queued |
+| **Priority queue for webhook** | Proper queue with HIGH/IMMEDIATE priorities | ✅ Implemented with pending queue | None - fixed |
 | **CHANNEL_IMPORTANT flag** | +200 score in priority | Not implemented | Low - minor feature |
 | **`kc_channel_sync_meta` in chanData** | Store in struct chanData | Stored in LMDB via `lmdb_chansync_meta` | None - LMDB approach is better |
 
 ### Potential Issues
 
-1. **`chanserv_queue_keycloak_sync()` doesn't queue properly**
-   - For non-IMMEDIATE priorities (e.g., GROUP UPDATE → HIGH priority), it just does immediate sync or relies on current batch
-   - Line 11595-11600 has `/* TODO: For lower priorities, add to a priority queue */`
-   - **Impact**: GROUP UPDATE webhook handlers may not properly defer to batch system
+1. **`chanserv_queue_keycloak_sync()` pending queue** ✅ FIXED
+   - Added `struct kc_pending_sync` linked list to track channels queued during batch
+   - HIGH+ priority requests during batch are added to pending queue
+   - `kc_sync_process_pending()` processes pending queue after batch completes (or aborts)
+   - Duplicate detection: if channel already pending, updates priority if higher
 
 2. **Hash-only in attribute mode**
    - Hash-based incremental sync only works in attribute mode (`chanserv_sync_keycloak_group_with_attribute`)
