@@ -10,7 +10,7 @@
 | 4a - Hash-based incremental | ✅ Complete | FNV-1a hash via `kc_membership_hash_*()`, comparison in attribute mode, `unchanged_syncs` stat |
 | 4b - Webhooks (GROUP_MEMBERSHIP) | ✅ Complete | GROUP_MEMBERSHIP + GROUP UPDATE handlers in `keycloak_webhook.c`, `group_syncs` stat |
 | OpServ KCSYNC commands | ✅ Complete | `cmd_kcsync()` in opserv.c with STATUS/STATS/CHANNEL/ALL/ABORT/RESET subcommands, accessor funcs in chanserv.c |
-| 4c - Expanded webhook coverage | ⏳ Pending | |
+| 4c - Expanded webhook coverage | ✅ Complete | USER UPDATE x3_opserv_level/metadata detection, CREDENTIAL password→SCRAM invalidation, x509 CREATE→fingerprint pre-warm, new stats fields |
 | 2 - Async pull sync | ⏳ Pending | |
 | 5 - Distributed sync window | ⏳ Pending | Config added (`keycloak_sync_distributed`), logic TBD |
 
