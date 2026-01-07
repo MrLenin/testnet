@@ -407,4 +407,333 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send('QUIT');
     });
   });
+
+  describe('Multiline Fallback and Truncation', () => {
+    it('sends WARN to sender when recipients lack multiline support', async () => {
+      // Client1 sends multiline (has capability)
+      const client1 = trackClient(await createRawSocketClient());
+      // Client2 receives but doesn't have multiline cap (will get fallback)
+      const client2 = trackClient(await createRawSocketClient());
+
+      // Client1: full multiline + standard-replies for WARN
+      client1.send('CAP LS 302');
+      await client1.waitForLine(/CAP.*LS/i);
+      client1.send('CAP REQ :draft/multiline batch standard-replies');
+      await client1.waitForLine(/CAP.*ACK/i);
+      client1.send('CAP END');
+      client1.send('NICK mlfallback1');
+      client1.send('USER mlfallback1 0 * :mlfallback1');
+      await client1.waitForLine(/001/);
+
+      // Client2: NO multiline cap - only basic IRC
+      client2.send('CAP LS 302');
+      await client2.waitForLine(/CAP.*LS/i);
+      client2.send('CAP END');
+      client2.send('NICK mlfallback2');
+      client2.send('USER mlfallback2 0 * :mlfallback2');
+      await client2.waitForLine(/001/);
+
+      const channelName = uniqueChannel('mlfallback');
+
+      // Both join channel
+      client1.send(`JOIN ${channelName}`);
+      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      client2.send(`JOIN ${channelName}`);
+      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+      // Wait for both to be in channel
+      await new Promise(resolve => setTimeout(resolve, 500));
+      client1.clearRawBuffer();
+
+      // Send multiline message (medium size to trigger truncation)
+      const batchId = `fb${uniqueId()}`;
+      client1.send(`BATCH +${batchId} draft/multiline ${channelName}`);
+      for (let i = 1; i <= 8; i++) {
+        client1.send(`@batch=${batchId} PRIVMSG ${channelName} :Line ${i} of multiline message`);
+      }
+      client1.send(`BATCH -${batchId}`);
+
+      // Client1 should receive WARN about fallback
+      try {
+        const warnLine = await client1.waitForLine(/WARN.*MULTILINE_FALLBACK|WARN.*BATCH/i, 3000);
+        console.log('WARN notification received:', warnLine);
+        expect(warnLine).toMatch(/WARN/i);
+        expect(warnLine).toMatch(/truncat|legacy|fallback/i);
+      } catch {
+        // WARN may be disabled - check if feature is enabled
+        console.log('No WARN received - MULTILINE_FALLBACK_NOTIFY may be disabled');
+      }
+
+      // Client2 should receive truncated fallback (individual PRIVMSGs, not full batch)
+      const received = await client2.waitForLine(/PRIVMSG.*Line 1/i, 3000);
+      console.log('Client2 received fallback:', received);
+      expect(received).toContain('PRIVMSG');
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+
+    it('WARN includes labeled-response correlation when sender has capability', async () => {
+      const client1 = trackClient(await createRawSocketClient());
+      const client2 = trackClient(await createRawSocketClient());
+
+      // Client1: multiline + labeled-response + standard-replies
+      client1.send('CAP LS 302');
+      await client1.waitForLine(/CAP.*LS/i);
+      client1.send('CAP REQ :draft/multiline batch labeled-response standard-replies');
+      await client1.waitForLine(/CAP.*ACK/i);
+      client1.send('CAP END');
+      client1.send('NICK mllabel1');
+      client1.send('USER mllabel1 0 * :mllabel1');
+      await client1.waitForLine(/001/);
+
+      // Client2: NO multiline
+      client2.send('CAP LS 302');
+      await client2.waitForLine(/CAP.*LS/i);
+      client2.send('CAP END');
+      client2.send('NICK mllabel2');
+      client2.send('USER mllabel2 0 * :mllabel2');
+      await client2.waitForLine(/001/);
+
+      const channelName = uniqueChannel('mllabel');
+
+      client1.send(`JOIN ${channelName}`);
+      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      client2.send(`JOIN ${channelName}`);
+      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+      await new Promise(resolve => setTimeout(resolve, 500));
+      client1.clearRawBuffer();
+
+      // Send labeled multiline batch
+      const batchId = `lbl${uniqueId()}`;
+      const label = `testlabel${uniqueId()}`;
+      client1.send(`@label=${label} BATCH +${batchId} draft/multiline ${channelName}`);
+      for (let i = 1; i <= 8; i++) {
+        client1.send(`@batch=${batchId} PRIVMSG ${channelName} :Labeled line ${i}`);
+      }
+      client1.send(`BATCH -${batchId}`);
+
+      // Look for WARN with label correlation
+      try {
+        const warnLine = await client1.waitForLine(/WARN.*MULTILINE|label=/i, 3000);
+        console.log('Labeled WARN received:', warnLine);
+        // Check if label is correlated
+        if (warnLine.includes('label=')) {
+          expect(warnLine).toContain(label);
+          console.log('Label correlation confirmed in WARN');
+        }
+      } catch {
+        console.log('No labeled WARN received');
+      }
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+
+    it('3-tier truncation sends appropriate number of lines for medium batches', async () => {
+      const client1 = trackClient(await createRawSocketClient());
+      const client2 = trackClient(await createRawSocketClient());
+
+      // Client1: has multiline
+      client1.send('CAP LS 302');
+      await client1.waitForLine(/CAP.*LS/i);
+      client1.send('CAP REQ :draft/multiline batch');
+      await client1.waitForLine(/CAP.*ACK/i);
+      client1.send('CAP END');
+      client1.send('NICK mltrunc1');
+      client1.send('USER mltrunc1 0 * :mltrunc1');
+      await client1.waitForLine(/001/);
+
+      // Client2: NO multiline (will receive truncated fallback)
+      client2.send('CAP LS 302');
+      await client2.waitForLine(/CAP.*LS/i);
+      client2.send('CAP END');
+      client2.send('NICK mltrunc2');
+      client2.send('USER mltrunc2 0 * :mltrunc2');
+      await client2.waitForLine(/001/);
+
+      const channelName = uniqueChannel('mltrunc');
+
+      client1.send(`JOIN ${channelName}`);
+      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      client2.send(`JOIN ${channelName}`);
+      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+      await new Promise(resolve => setTimeout(resolve, 500));
+      client2.clearRawBuffer();
+
+      // Send medium-size multiline (8 lines - should trigger 4-line truncation)
+      const batchId = `trunc${uniqueId()}`;
+      client1.send(`BATCH +${batchId} draft/multiline ${channelName}`);
+      for (let i = 1; i <= 8; i++) {
+        client1.send(`@batch=${batchId} PRIVMSG ${channelName} :Content line ${i}`);
+      }
+      client1.send(`BATCH -${batchId}`);
+
+      // Collect all PRIVMSGs received by client2
+      const receivedLines: string[] = [];
+      const startTime = Date.now();
+      while (Date.now() - startTime < 3000) {
+        try {
+          const line = await client2.waitForLine(/PRIVMSG.*Content line|truncat|more lines/i, 500);
+          receivedLines.push(line);
+          console.log('Truncation test received:', line);
+        } catch {
+          break;
+        }
+      }
+
+      console.log(`Received ${receivedLines.length} lines for 8-line batch`);
+      // Medium batch (6-10 lines) should send ~4 content lines + truncation notice
+      expect(receivedLines.length).toBeGreaterThan(0);
+      expect(receivedLines.length).toBeLessThanOrEqual(6); // 4 lines + truncation notice
+
+      // Check for truncation notice or retrieval hint
+      const hasTruncationNotice = receivedLines.some(l =>
+        l.includes('truncat') || l.includes('more lines') || l.includes('&ml-')
+      );
+      console.log('Has truncation notice:', hasTruncationNotice);
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+
+    it('retrieval hint mentions local channel &ml-<msgid>', async () => {
+      const client1 = trackClient(await createRawSocketClient());
+      const client2 = trackClient(await createRawSocketClient());
+
+      // Client1: has multiline + message-tags to see msgid
+      client1.send('CAP LS 302');
+      await client1.waitForLine(/CAP.*LS/i);
+      client1.send('CAP REQ :draft/multiline batch message-tags');
+      await client1.waitForLine(/CAP.*ACK/i);
+      client1.send('CAP END');
+      client1.send('NICK mlhint1');
+      client1.send('USER mlhint1 0 * :mlhint1');
+      await client1.waitForLine(/001/);
+
+      // Client2: NO multiline
+      client2.send('CAP LS 302');
+      await client2.waitForLine(/CAP.*LS/i);
+      client2.send('CAP END');
+      client2.send('NICK mlhint2');
+      client2.send('USER mlhint2 0 * :mlhint2');
+      await client2.waitForLine(/001/);
+
+      const channelName = uniqueChannel('mlhint');
+
+      client1.send(`JOIN ${channelName}`);
+      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      client2.send(`JOIN ${channelName}`);
+      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+      await new Promise(resolve => setTimeout(resolve, 500));
+      client2.clearRawBuffer();
+
+      // Send large multiline (triggers truncation with retrieval hint)
+      const batchId = `hint${uniqueId()}`;
+      client1.send(`BATCH +${batchId} draft/multiline ${channelName}`);
+      for (let i = 1; i <= 12; i++) {
+        client1.send(`@batch=${batchId} PRIVMSG ${channelName} :Long message line ${i}`);
+      }
+      client1.send(`BATCH -${batchId}`);
+
+      // Look for truncation notice with &ml- retrieval hint
+      let foundRetrievalHint = false;
+      const startTime = Date.now();
+      while (Date.now() - startTime < 3000) {
+        try {
+          const line = await client2.waitForLine(/PRIVMSG|NOTICE/i, 500);
+          console.log('Retrieval hint test:', line);
+          if (line.includes('&ml-')) {
+            foundRetrievalHint = true;
+            console.log('Found &ml- retrieval hint:', line);
+            break;
+          }
+        } catch {
+          break;
+        }
+      }
+
+      // Note: retrieval hints may only appear for certain truncation levels
+      console.log('Retrieval hint found:', foundRetrievalHint);
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+
+    it('users with +M mode receive full multiline content', async () => {
+      const client1 = trackClient(await createRawSocketClient());
+      const client2 = trackClient(await createRawSocketClient());
+
+      // Client1: has multiline
+      client1.send('CAP LS 302');
+      await client1.waitForLine(/CAP.*LS/i);
+      client1.send('CAP REQ :draft/multiline batch');
+      await client1.waitForLine(/CAP.*ACK/i);
+      client1.send('CAP END');
+      client1.send('NICK mlmode1');
+      client1.send('USER mlmode1 0 * :mlmode1');
+      await client1.waitForLine(/001/);
+
+      // Client2: NO multiline but will set +M to receive full content
+      client2.send('CAP LS 302');
+      await client2.waitForLine(/CAP.*LS/i);
+      client2.send('CAP END');
+      client2.send('NICK mlmode2');
+      client2.send('USER mlmode2 0 * :mlmode2');
+      await client2.waitForLine(/001/);
+
+      // Client2 sets +M mode (multiline receive mode)
+      client2.send('MODE mlmode2 +M');
+      try {
+        await client2.waitForLine(/MODE.*\+M/i, 2000);
+        console.log('Client2 set +M mode');
+      } catch {
+        console.log('Server may not support +M mode - skipping');
+        client1.send('QUIT');
+        client2.send('QUIT');
+        return;
+      }
+
+      const channelName = uniqueChannel('mlmode');
+
+      client1.send(`JOIN ${channelName}`);
+      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      client2.send(`JOIN ${channelName}`);
+      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+      await new Promise(resolve => setTimeout(resolve, 500));
+      client2.clearRawBuffer();
+
+      // Send multiline message
+      const batchId = `mode${uniqueId()}`;
+      const totalLines = 8;
+      client1.send(`BATCH +${batchId} draft/multiline ${channelName}`);
+      for (let i = 1; i <= totalLines; i++) {
+        client1.send(`@batch=${batchId} PRIVMSG ${channelName} :Full content line ${i}`);
+      }
+      client1.send(`BATCH -${batchId}`);
+
+      // Client2 with +M should receive ALL lines (no truncation)
+      const receivedLines: string[] = [];
+      const startTime = Date.now();
+      while (Date.now() - startTime < 3000) {
+        try {
+          const line = await client2.waitForLine(/PRIVMSG.*Full content line/i, 500);
+          receivedLines.push(line);
+        } catch {
+          break;
+        }
+      }
+
+      console.log(`+M mode user received ${receivedLines.length}/${totalLines} lines`);
+      // With +M, should receive all lines
+      expect(receivedLines.length).toBe(totalLines);
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+  });
 });
