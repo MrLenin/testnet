@@ -5,10 +5,10 @@
 | Phase | Status | Notes |
 |-------|--------|-------|
 | 1 - Batch processing | ✅ Complete | `chanserv.c` refactored with `kc_sync_state`, `chanserv_sync_keycloak_batch()`, priority queue |
-| 6 - Resilient failure handling | 🔄 Partial | Failure tracking added in Phase 1, backoff TBD |
+| 6 - Resilient failure handling | ✅ Complete | LMDB per-channel metadata (`lmdb_chansync_meta`), exponential backoff (30s→1h), `x3_lmdb_chansync_*()` functions |
 | 3 - Priority queue | ✅ Complete | `kc_channel_priority()`, `kc_sync_priority_cmp()`, configurable |
-| 4a - Hash-based incremental | ⏳ Pending | |
-| 4b - Webhooks (GROUP_MEMBERSHIP) | ⏳ Pending | `chanserv_queue_keycloak_sync()` ready for webhook calls |
+| 4a - Hash-based incremental | 🔄 Ready | `membership_hash` field in `lmdb_chansync_meta`, storage functions ready, comparison logic TBD |
+| 4b - Webhooks (GROUP_MEMBERSHIP) | 🔄 Ready | `chanserv_queue_keycloak_sync()`, `kc_group_path_to_channel()` helper ready for webhook calls |
 | 4c - Expanded webhook coverage | ⏳ Pending | |
 | 2 - Async pull sync | ⏳ Pending | |
 | 5 - Distributed sync window | ⏳ Pending | Config added (`keycloak_sync_distributed`), logic TBD |
@@ -740,8 +740,8 @@ modcmd_register(opserv_module, "KCSYNC RESET", cmd_kcsync, 3, MODCMD_REQUIRE_AUT
 - `x3/src/keycloak.h` - New async callback type for group members
 
 ### Storage
-- `x3/src/x3_lmdb.c` - Add hash storage functions for incremental sync (`x3_lmdb_channel_sync_meta_get/set`)
-- `x3/src/x3_lmdb.h` - New `lmdb_channel_sync_meta` struct
+- `x3/src/x3_lmdb.c` - ✅ Added `x3_lmdb_chansync_*()` functions for per-channel sync metadata (backoff, hash storage)
+- `x3/src/x3_lmdb.h` - ✅ Added `struct lmdb_chansync_meta` with membership_hash, last_sync, consecutive_failures, next_allowed_sync, last_entry_count
 
 ### Configuration
 - `data/x3.conf` - New sync configuration options
