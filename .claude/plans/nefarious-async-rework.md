@@ -42,6 +42,8 @@ Nefarious already has a well-architected event-driven I/O system using epoll/kqu
 | 5 - Async logging (optional) | ✅ Complete | Dedicated writer thread, ring buffer |
 | Config - THREAD_POOL_SIZE | ✅ Complete | Feature added to ircd_features |
 | Config - ASYNC_LOGGING | ✅ Complete | Boolean feature flag (disabled by default) |
+| 6a - WEBIRC async | ✅ Complete | `m_webirc.c` async with FLAG_WEBIRC_PENDING |
+| 6b - SpoofHost async | ✅ Complete | `m_sethost.c` async with FLAG_SETHOST_PENDING |
 
 ### Implementation Details
 
@@ -60,6 +62,13 @@ Nefarious already has a well-architected event-driven I/O system using epoll/kqu
 **Phase 4 changes:**
 - `include/client.h` - Added FLAG_OPER_PENDING and accessors
 - `ircd/m_oper.c` - Async OPER with callback, falls back to sync if pool unavailable
+
+**Phase 6a/6b files:**
+- `include/client.h` - Added FLAG_WEBIRC_PENDING and FLAG_SETHOST_PENDING with accessors
+- `ircd/s_conf.c` - Added `find_webirc_conf_by_host()` and `find_shost_conf_by_host()` helpers
+- `include/s_conf.h` - Added function declarations
+- `ircd/m_webirc.c` - Full async rewrite with `webirc_verify_ctx` struct and `apply_webirc_changes()` helper
+- `ircd/m_sethost.c` - Async support for both `m_sethost()` and `mo_sethost()` handlers
 
 ---
 
@@ -426,14 +435,20 @@ int m_sethost(...) {
 
 ### Implementation Plan for WEBIRC/SpoofHost Async
 
-#### Phase 6a: WEBIRC Async (Optional)
+| Phase | Status | Notes |
+|-------|--------|-------|
+| 6a - WEBIRC Async | ✅ Complete | Ready for bcrypt WEBIRC passwords |
+| 6b - SpoofHost Async | ✅ Complete | Ready for bcrypt SpoofHost passwords |
+
+---
+
+#### Phase 6a: WEBIRC Async
 
 **Prerequisites:**
 - Thread pool infrastructure (Phase 1) ✅
 - Async crypt API (Phase 2) ✅
 
-**New files:**
-- None (modify existing)
+**Status:** ✅ Complete - Async WEBIRC verification implemented
 
 **Modified files:**
 - `include/client.h` - Add `FLAG_WEBIRC_PENDING`
@@ -442,14 +457,155 @@ int m_sethost(...) {
 
 **Estimated effort:** 4-6 hours
 
-#### Phase 6b: SpoofHost Async (Optional)
+##### Detailed Implementation Steps
+
+**Step 1: Add client flag (`include/client.h`)**
+```c
+/* In enum Flag, after FLAG_OPER_PENDING */
+FLAG_WEBIRC_PENDING,           /**< Async WEBIRC password verification in progress */
+
+/* Add accessor macros */
+#define IsWebIRCPending(x)     HasFlag(x, FLAG_WEBIRC_PENDING)
+#define SetWebIRCPending(x)    SetFlag(x, FLAG_WEBIRC_PENDING)
+#define ClearWebIRCPending(x)  ClrFlag(x, FLAG_WEBIRC_PENDING)
+```
+
+**Step 2: Add helper to find WEBIRC block by host (`ircd/s_conf.c`)**
+```c
+/** Find a WebIRC block by host/IP match only (no password verification).
+ * @param[in] cptr Client to match against
+ * @return Matching WebIRCConf or NULL
+ */
+struct WebIRCConf *find_webirc_conf_by_host(struct Client *cptr)
+{
+  struct WebIRCConf *wconf;
+
+  for (wconf = GlobalWebIRCConf; wconf; wconf = wconf->next) {
+    /* Check IP match */
+    if (!ipmask_check(&cli_ip(cptr), &wconf->address, wconf->bits))
+      continue;
+
+    /* Check ident if required */
+    if (!EmptyString(wconf->ident)) {
+      const char *ident = IsIdented(cptr) ? cli_username(cptr) : "";
+      if (match(wconf->ident, ident))
+        continue;
+    }
+
+    return wconf;  /* Found match (password check deferred) */
+  }
+  return NULL;
+}
+```
+
+**Step 3: Add context struct and callback (`ircd/m_webirc.c`)**
+```c
+#include "ircd_crypt.h"
+
+/** Context for async WEBIRC password verification */
+struct webirc_verify_ctx {
+  int fd;                        /**< Client fd for lookup */
+  char username[USERLEN + 1];    /**< WEBIRC username */
+  char hostname[HOSTLEN + 1];    /**< WEBIRC hostname */
+  char ipaddr[SOCKIPLEN + 1];    /**< WEBIRC IP address */
+  char options[256];             /**< WEBIRC options */
+  struct WebIRCConf *wconf;      /**< Matched config block */
+};
+
+/** Callback when async WEBIRC password verification completes. */
+static void webirc_password_verified(int result, void *arg)
+{
+  struct webirc_verify_ctx *ctx = arg;
+  struct Client *cptr;
+
+  /* Look up client by fd */
+  if (ctx->fd < 0 || ctx->fd > HighestFd ||
+      !(cptr = LocalClientArray[ctx->fd])) {
+    /* Client disconnected during async verification */
+    MyFree(ctx);
+    return;
+  }
+
+  /* Clear pending flag */
+  ClearWebIRCPending(cptr);
+
+  if (result == CRYPT_VERIFY_MATCH) {
+    /* Password matched - apply WEBIRC IP/host changes */
+    webirc_apply_changes(cptr, ctx->wconf, ctx->username,
+                         ctx->hostname, ctx->ipaddr, ctx->options);
+  } else {
+    /* Password mismatch */
+    send_reply(cptr, ERR_INVALIDPASS);
+  }
+
+  MyFree(ctx);
+}
+```
+
+**Step 4: Modify m_webirc() for async (`ircd/m_webirc.c`)**
+```c
+int m_webirc(struct Client *cptr, struct Client *sptr, int parc, char *parv[])
+{
+  /* ... existing validation code ... */
+
+  /* Check if IAuth handles WEBIRC first */
+  if (cli_auth(cptr) && IAuthHas(iauth, IAUTH_WEBIRC)) {
+    int ares = auth_set_webirc(cli_auth(cptr), password, username,
+                               hostname, ipaddr, options);
+    if (!ares)
+      return 0;  /* IAuth handles it - no local password check */
+  }
+
+  /* Find matching WEBIRC block by host (without password check) */
+  wconf = find_webirc_conf_by_host(cptr);
+  if (!wconf) {
+    send_reply(cptr, ERR_INVALIDPASS);
+    return 0;
+  }
+
+  /* If password required and async available, use async */
+  if (!EmptyString(wconf->passwd) && ircd_crypt_async_available()) {
+    struct webirc_verify_ctx *ctx = MyMalloc(sizeof(*ctx));
+    ctx->fd = cli_fd(cptr);
+    ctx->wconf = wconf;
+    ircd_strncpy(ctx->username, username, USERLEN);
+    ircd_strncpy(ctx->hostname, hostname, HOSTLEN);
+    ircd_strncpy(ctx->ipaddr, ipaddr, SOCKIPLEN);
+    ircd_strncpy(ctx->options, options ? options : "", sizeof(ctx->options) - 1);
+
+    if (ircd_crypt_verify_async(password, wconf->passwd,
+                                 webirc_password_verified, ctx) == 0) {
+      SetWebIRCPending(cptr);
+      return 0;  /* Async verification started */
+    }
+    MyFree(ctx);  /* Fall through to sync */
+  }
+
+  /* Synchronous verification (fallback or no password) */
+  wconf = find_webirc_conf(cptr, password, &res);
+  /* ... existing sync handling ... */
+}
+```
+
+**Step 5: Handle disconnect during pending (`ircd/s_bsd.c`)**
+```c
+/* In close_connection() or equivalent */
+if (IsWebIRCPending(cptr)) {
+  /* Client disconnected during WEBIRC verification
+   * Callback will handle cleanup via fd lookup failure */
+  ClearWebIRCPending(cptr);
+}
+```
+
+---
+
+#### Phase 6b: SpoofHost Async
 
 **Prerequisites:**
 - Thread pool infrastructure (Phase 1) ✅
 - Async crypt API (Phase 2) ✅
 
-**New files:**
-- None (modify existing)
+**Status:** ✅ Complete - Async SETHOST verification implemented
 
 **Modified files:**
 - `include/client.h` - Add `FLAG_SETHOST_PENDING`
@@ -458,6 +614,131 @@ int m_sethost(...) {
 
 **Estimated effort:** 3-4 hours
 
+##### Detailed Implementation Steps
+
+**Step 1: Add client flag (`include/client.h`)**
+```c
+/* In enum Flag, after FLAG_WEBIRC_PENDING */
+FLAG_SETHOST_PENDING,          /**< Async SETHOST password verification in progress */
+
+/* Add accessor macros */
+#define IsSetHostPending(x)    HasFlag(x, FLAG_SETHOST_PENDING)
+#define SetSetHostPending(x)   SetFlag(x, FLAG_SETHOST_PENDING)
+#define ClearSetHostPending(x) ClrFlag(x, FLAG_SETHOST_PENDING)
+```
+
+**Step 2: Add helper to find SHost block by host (`ircd/s_conf.c`)**
+```c
+/** Find a SpoofHost block by hostmask match only (no password verification).
+ * @param[in] sptr Client requesting spoofhost
+ * @param[in] hostmask Requested user@host mask
+ * @return Matching SHostConf or NULL
+ */
+struct SHostConf *find_shost_conf_by_host(struct Client *sptr, const char *hostmask)
+{
+  struct SHostConf *sconf;
+  char *host;
+
+  /* Parse user@host */
+  host = strchr(hostmask, '@');
+  if (host)
+    host++;
+  else
+    host = (char *)hostmask;
+
+  for (sconf = GlobalSHostConf; sconf; sconf = sconf->next) {
+    /* Check if hostmask matches this spoofhost pattern */
+    if (!match(sconf->spoofhost, host))
+      return sconf;  /* Found match (password check deferred) */
+  }
+  return NULL;
+}
+```
+
+**Step 3: Add context struct and callback (`ircd/m_sethost.c`)**
+```c
+#include "ircd_crypt.h"
+
+/** Context for async SETHOST password verification */
+struct sethost_verify_ctx {
+  int fd;                           /**< Client fd for lookup */
+  char hostmask[USERLEN + HOSTLEN + 2]; /**< Requested hostmask */
+  struct SHostConf *sconf;          /**< Matched config block */
+};
+
+/** Callback when async SETHOST password verification completes. */
+static void sethost_password_verified(int result, void *arg)
+{
+  struct sethost_verify_ctx *ctx = arg;
+  struct Client *sptr;
+
+  /* Look up client by fd */
+  if (ctx->fd < 0 || ctx->fd > HighestFd ||
+      !(sptr = LocalClientArray[ctx->fd])) {
+    /* Client disconnected during async verification */
+    MyFree(ctx);
+    return;
+  }
+
+  /* Clear pending flag */
+  ClearSetHostPending(sptr);
+
+  if (result == CRYPT_VERIFY_MATCH) {
+    /* Password matched - apply spoofhost */
+    do_sethost(sptr, ctx->hostmask, ctx->sconf);
+    sendcmdto_one(&me, CMD_NOTICE, sptr,
+                  "%C :Spoofhost set to %s", sptr, ctx->hostmask);
+  } else {
+    /* Password mismatch */
+    send_reply(sptr, ERR_PASSWDMISMATCH);
+  }
+
+  MyFree(ctx);
+}
+```
+
+**Step 4: Modify m_sethost() for async (`ircd/m_sethost.c`)**
+```c
+int m_sethost(struct Client *cptr, struct Client *sptr, int parc, char *parv[])
+{
+  struct SHostConf *sconf;
+  const char *hostmask = parv[1];
+  const char *password = parc > 2 ? parv[2] : NULL;
+
+  /* ... existing validation code ... */
+
+  /* Find matching SHost block by hostmask */
+  sconf = find_shost_conf_by_host(sptr, hostmask);
+  if (!sconf) {
+    return send_reply(sptr, ERR_HOSTUNAVAIL, hostmask);
+  }
+
+  /* If password required and async available, use async */
+  if (!EmptyString(sconf->passwd) && ircd_crypt_async_available()) {
+    if (EmptyString(password)) {
+      return send_reply(sptr, ERR_NEEDMOREPARAMS, "SETHOST");
+    }
+
+    struct sethost_verify_ctx *ctx = MyMalloc(sizeof(*ctx));
+    ctx->fd = cli_fd(sptr);
+    ctx->sconf = sconf;
+    ircd_strncpy(ctx->hostmask, hostmask, sizeof(ctx->hostmask) - 1);
+
+    if (ircd_crypt_verify_async(password, sconf->passwd,
+                                 sethost_password_verified, ctx) == 0) {
+      SetSetHostPending(sptr);
+      sendcmdto_one(&me, CMD_NOTICE, sptr,
+                    "%C :Verifying spoofhost password...", sptr);
+      return 0;  /* Async verification started */
+    }
+    MyFree(ctx);  /* Fall through to sync */
+  }
+
+  /* Synchronous verification (fallback or no password) */
+  /* ... existing sync handling ... */
+}
+```
+
 ---
 
 ### Decision Matrix: When to Implement WEBIRC/SpoofHost Async
@@ -465,11 +746,13 @@ int m_sethost(...) {
 | Condition | Recommendation |
 |-----------|----------------|
 | WEBIRC passwords are plaintext/DES | ❌ No async needed |
-| WEBIRC passwords use bcrypt | ✅ Implement async |
+| WEBIRC passwords use bcrypt | ✅ Implement Phase 6a |
 | IAuth handles WEBIRC | ❌ No async needed (already delegated) |
-| High WebSocket traffic | ✅ Implement async |
+| High WebSocket traffic | ✅ Implement Phase 6a |
 | SpoofHost rarely used | ❌ No async needed |
-| SpoofHost with bcrypt passwords | ⚠️ Consider async |
+| SpoofHost with bcrypt passwords | ✅ Implement Phase 6b |
+
+**Note:** With bcrypt support recently added, these phases should be implemented proactively before deploying bcrypt passwords for WEBIRC or SpoofHost in production.
 
 ---
 
@@ -482,10 +765,12 @@ The IAUTH investigation reveals that:
 3. **WEBIRC and SpoofHost** are the only remaining paths that call `ircd_crypt()` and could block
 4. **DIE/RESTART** are rare admin operations not worth making async
 
-**Current recommendation:** The existing async implementation (OPER authentication) covers the most critical path. WEBIRC/SpoofHost async conversion should be implemented only if:
-- The network uses bcrypt/PBKDF2 for these passwords
-- Performance issues are observed during WebSocket gateway connections
-- IAuth is not being used to handle WEBIRC
+**Current status:** ✅ **All async implementation phases are complete.** The implementation now covers:
+- OPER authentication (Phase 4)
+- WEBIRC password verification (Phase 6a)
+- SpoofHost/SETHOST password verification (Phase 6b)
+
+All operations that use `ircd_crypt()` for bcrypt/PBKDF2 password verification now have async support via the thread pool infrastructure. The event loop remains unblocked during expensive password hashing operations.
 
 ---
 
