@@ -729,6 +729,44 @@ else
   echo "Error creating test user: $CREATE_RESULT"
 fi
 
+# Enable webhook event listener for X3 integration
+echo ""
+echo "Configuring webhook event listener..."
+
+# Get current realm events config
+CURRENT_LISTENERS=$(curl -s \
+  -H "Authorization: Bearer $TOKEN" \
+  "$KEYCLOAK_URL/admin/realms/$REALM_NAME/events/config" | grep -o '"eventsListeners":\[[^]]*\]' || echo "")
+
+# Check if webhook-events is already enabled
+if echo "$CURRENT_LISTENERS" | grep -q "webhook-events"; then
+  echo "  webhook-events listener already enabled"
+else
+  echo "  Enabling webhook-events listener..."
+
+  # Update realm events config to:
+  # 1. Enable admin events (for GROUP_MEMBERSHIP, USER, CREDENTIAL changes)
+  # 2. Add webhook-events to event listeners
+  # 3. Include representations in admin events (needed for webhook payload)
+  curl -s -X PUT "$KEYCLOAK_URL/admin/realms/$REALM_NAME/events/config" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "eventsEnabled": true,
+      "eventsListeners": ["jboss-logging", "webhook-events"],
+      "enabledEventTypes": [
+        "LOGIN", "LOGOUT", "REGISTER",
+        "UPDATE_CREDENTIAL", "REMOVE_CREDENTIAL",
+        "UPDATE_PASSWORD", "RESET_PASSWORD"
+      ],
+      "adminEventsEnabled": true,
+      "adminEventsDetailsEnabled": true
+    }'
+
+  echo "  webhook-events listener enabled"
+  echo "  Admin events enabled with representations"
+fi
+
 echo ""
 echo "=== Setup Complete ==="
 echo ""
