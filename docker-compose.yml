@@ -61,11 +61,11 @@ services:
       nefarious-init:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "pgrep", "-x", "ircd"]
+      test: ["CMD-SHELL", "pgrep -f '/home/nefarious/bin/ircd'"]
       interval: 5s
       timeout: 3s
-      retries: 5
-      start_period: 10s
+      retries: 10
+      start_period: 30s
 
   nefarious2-init:
     container_name: nefarious2-init
@@ -129,11 +129,11 @@ services:
       nefarious2-init:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "pgrep", "-x", "ircd"]
+      test: ["CMD-SHELL", "pgrep -f '/home/nefarious/bin/ircd'"]
       interval: 5s
       timeout: 3s
-      retries: 5
-      start_period: 10s
+      retries: 10
+      start_period: 30s
     profiles:
       - linked
 
@@ -198,11 +198,11 @@ services:
       nefarious3-init:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "pgrep", "-x", "ircd"]
+      test: ["CMD-SHELL", "pgrep -f '/home/nefarious/bin/ircd'"]
       interval: 5s
       timeout: 3s
-      retries: 5
-      start_period: 10s
+      retries: 10
+      start_period: 30s
     profiles:
       - multi
 
@@ -267,11 +267,11 @@ services:
       nefarious4-init:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "pgrep", "-x", "ircd"]
+      test: ["CMD-SHELL", "pgrep -f '/home/nefarious/bin/ircd'"]
       interval: 5s
       timeout: 3s
-      retries: 5
-      start_period: 10s
+      retries: 10
+      start_period: 30s
     profiles:
       - multi
 
