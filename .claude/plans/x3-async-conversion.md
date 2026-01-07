@@ -645,11 +645,16 @@ Note: Reuses existing `kc_check_auth_async()` infrastructure (KC_ASYNC_AUTH type
 #### 3.4 Modify cmd_cookie() (nickserv.c:3391) ✅
 - [x] Add async path for ACTIVATION case
 - [x] Only use async for registered users with numerics (pre-registration users use sync)
-- [ ] Handle PASSWORD_CHANGE case similarly (future)
+- [x] Handle PASSWORD_CHANGE case similarly
+  - Added Keycloak sync (kc_do_modify) - was missing!
+  - Added async path with same state machine as ACTIVATION
+  - Added cookie_type field to cookie_async_ctx
+  - Updated callback to handle both ACTIVATION and PASSWORD_CHANGE
+  - Optional: If password re-entered at COOKIE time, creates SCRAM credentials
 
 #### 3.5 Testing
 - [ ] ACTIVATION cookie flow completes
-- [ ] PASSWORD_CHANGE cookie flow (not yet async)
+- [ ] PASSWORD_CHANGE cookie flow (now async)
 - [ ] User disconnect during lookup/update phases
 - [ ] Keycloak user not found error
 
