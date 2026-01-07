@@ -556,50 +556,46 @@ static void token_refresh_callback(void *data, int result, struct access_token *
 - [ ] Test webhook -> async sync -> completion flow
 - [ ] Verify no blocking in webhook handler path
 
-### Phase 2: AUTH Command (3-4 days)
+### Phase 2: AUTH Command (3-4 days) ✅ COMPLETED
 
 **Problem:** `cmd_auth()` calls `kc_check_auth()` which synchronously calls `keycloak_get_user_token()` (keycloak.c:3310), blocking 50-200ms per AUTH.
 
-**Implementation Steps:**
+**Implementation (Completed Jan 2026):**
 
-#### 2.1 Add Async Infrastructure (keycloak.c/h)
-- [ ] Add `KC_ASYNC_USER_TOKEN` to `enum kc_async_type`
-- [ ] Add callback type:
-  ```c
-  typedef int (*kc_user_token_callback)(void *session, int result,
-                                         struct access_token *token);
-  ```
-- [ ] Create `keycloak_get_user_token_async()` - model after `kc_check_auth_async()`
-- [ ] Add dispatch case in `kc_curl_check_completed()` for `KC_ASYNC_USER_TOKEN`
+Note: Reuses existing `kc_check_auth_async()` infrastructure (KC_ASYNC_AUTH type) instead of adding new KC_ASYNC_USER_TOKEN type.
 
-#### 2.2 Create Async Context (nickserv.c)
-- [ ] Create `struct auth_async_ctx` near line 9166:
+#### 2.1 Async Infrastructure ✅
+- [x] Already exists: `kc_check_auth_async()` with `KC_ASYNC_AUTH` type
+- [x] Already exists: `kc_async_callback` callback type
+- [x] Already exists: Dispatch case in `kc_curl_check_completed()`
+
+#### 2.2 Create Async Context (nickserv.c) ✅
+- [x] Created `struct auth_async_ctx` at nickserv.c:6338-6346:
   ```c
   struct auth_async_ctx {
+      char handle[NICKSERV_HANDLE_LEN + 1];
+      char nick[NICKLEN + 1];
+      char numeric[COMBO_NUMERIC_LEN + 1];  /* For disconnect validation */
       struct userNode *user;
       struct svccmd *cmd;
-      char handle[NICKSERV_HANDLE_LEN+1];
-      char password[128];  /* Cleared after use */
-      uint64_t user_numeric;  /* For disconnect validation */
       int pw_arg;
       time_t started;
   };
   ```
+- [x] Added forward declaration at nickserv.c:287
 
-#### 2.3 Implement Callback (nickserv.c)
-- [ ] Create `auth_async_callback()`:
-  - Validate user still connected via numeric
-  - Process KC_SUCCESS/KC_FORBIDDEN/KC_ERROR
-  - Handle autocreate path
-  - Clear password from context
-  - Free context
+#### 2.3 Implement Callback (nickserv.c) ✅
+- [x] Created `auth_async_callback()` at nickserv.c:6375-6539
+- [x] `auth_async_validate_user()` validates user via numeric lookup
+- [x] Handles KC_SUCCESS (with autocreate), KC_FORBIDDEN, KC_ERROR
+- [x] Performs all cmd_auth checks: hostmask, suspended, activation, max logins
+- [x] Sends appropriate messages via `send_message_type()`
 
-#### 2.4 Modify cmd_auth() (nickserv.c:2785)
-- [ ] Add async path in Keycloak section:
-  - Allocate context, copy handle/password
-  - Call `keycloak_get_user_token_async()`
-  - Mask password arg, return 1 (pending)
-  - Fall back to sync on async failure
+#### 2.4 Modify cmd_auth() (nickserv.c:2896) ✅
+- [x] Added async path in Keycloak section
+- [x] Only uses async for users with numerics (pre-registration users fall to sync)
+- [x] Falls back to sync on async start failure
+- [x] Masks password arg on async start
 
 #### 2.5 Testing
 - [ ] Single AUTH completes successfully
