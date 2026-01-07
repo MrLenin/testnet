@@ -899,17 +899,17 @@ Phase 4 (ChanServ) ←── Full state machine
 - [x] `kc_delfromgroup()` - Converted to fully async fire-and-forget (Jan 7)
 - [x] `nickserv_set_user_metadata()` - Keycloak section converted to fully async (Jan 7)
 - [x] Added `keycloak_delete_user_async()` API (Jan 7)
+- [x] SASL EXTERNAL fingerprint lookup - fully async token → fingerprint chain (Jan 7)
 
-**Remaining (9 sync keycloak_ensure_token() calls - READ operations requiring state machines):**
+**Remaining (8 sync keycloak_ensure_token() calls - READ operations requiring state machines):**
 - [ ] `kc_get_user_info()` - line ~6711 (HIGH - auth email lookup)
-- [ ] `kc_try_auto_activate()` - line ~7663 (MEDIUM - SASL success auto-activate)
+- [ ] `kc_check_email_verified()` - line ~7663 (MEDIUM - auto-activate check)
 - [ ] `loc_auth_oauth()` - line ~8117 (HIGH PRIORITY - OAUTHBEARER auth)
-- [ ] `loc_auth_external()` - line ~8348 (HIGH - SASL EXTERNAL auth)
+- [ ] `loc_auth_external()` - line ~8348 (HIGH - SASL EXTERNAL sync fallback)
 - [ ] `nickserv_get_user_metadata()` - line ~8827 (READ - needs response)
-- [ ] `nickserv_sync_metadata_to_ircd()` - line ~9024 (bulk sync)
+- [ ] `nickserv_sync_metadata_to_ircd()` - line ~9024 (bulk sync on connect)
 - [ ] `nickserv_sync_account_metadata_to_ircd()` - line ~9163 (bulk sync)
-- [ ] `nickserv_list_user_metadata()` - line ~9243 (READ - needs response)
-- [ ] SASL EXTERNAL fingerprint lookup - line ~11436 (auth path)
+- [ ] `nickserv_get_webpush_subscriptions()` - line ~9243 (READ - needs response)
 
 ### Phase 6: DNS Async (2-3 days)
 - [ ] Create `ioset_connect_async()` using SAR
