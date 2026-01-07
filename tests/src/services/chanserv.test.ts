@@ -230,35 +230,46 @@ describe('ChanServ (X3)', () => {
       const channel = uniqueChannel();
 
       // Setup owner and channel
-      await client.registerAndActivate(account, password, email);
-      await client.auth(account, password);
+      const regResult = await client.registerAndActivate(account, password, email);
+      expect(regResult.success, `Registration failed: ${regResult.error}`).toBe(true);
+      const authResult = await client.auth(account, password);
+      expect(authResult.success, `Auth failed: ${authResult.error}`).toBe(true);
       client.send(`JOIN ${channel}`);
       await client.waitForLine(/JOIN/i, 5000);
       await new Promise(r => setTimeout(r, 500));
-      await client.registerChannel(channel);
+      const chanResult = await client.registerChannel(channel);
+      expect(chanResult.success, `Channel reg failed: ${chanResult.error}`).toBe(true);
 
-      // Create second user with OP level
-      const user2Client = trackClient(await createX3Client());
+      // Create second user with OP level - use account name as nick for easy assertion
       const { account: user2, password: pass2, email: email2 } = await createTestAccount();
-      await user2Client.registerAndActivate(user2, pass2, email2);
-      await user2Client.auth(user2, pass2);
-      await client.addUser(channel, user2, ACCESS_LEVELS.OP);
+      const user2Client = trackClient(await createX3Client(user2));
+      const reg2Result = await user2Client.registerAndActivate(user2, pass2, email2);
+      expect(reg2Result.success, `User2 registration failed: ${reg2Result.error}`).toBe(true);
+      const auth2Result = await user2Client.auth(user2, pass2);
+      expect(auth2Result.success, `User2 auth failed: ${auth2Result.error}`).toBe(true);
+      const addResult = await client.addUser(channel, user2, ACCESS_LEVELS.OP);
+      expect(addResult.success, `ADDUSER failed: ${addResult.error}`).toBe(true);
 
       // User2 joins - should get opped
       user2Client.send(`JOIN ${channel}`);
 
-      // Wait for JOIN and mode changes
+      // Wait for JOIN first
       await user2Client.waitForLine(/JOIN/i, 5000);
-      await new Promise(r => setTimeout(r, 1000)); // Let ChanServ process
 
-      // Check if user got ops
+      // Wait for MODE from ChanServ granting ops (or timeout after 3s)
+      try {
+        await user2Client.waitForLine(/MODE.*\+o/i, 3000);
+      } catch {
+        // MODE might have arrived before we started waiting, check NAMES
+      }
+
+      // Check if user got ops via NAMES
       user2Client.clearRawBuffer();
       user2Client.send(`NAMES ${channel}`);
       const namesResponse = await user2Client.waitForLine(/353/, 5000);
-      console.log('NAMES after join:', namesResponse);
 
-      // Should have @ prefix for ops
-      // This depends on X3 configuration for auto-op
+      // Should have @ prefix for ops (nick = account name = user2)
+      expect(namesResponse).toMatch(new RegExp(`@${user2}\\b`));
     });
 
     it('should auto-voice users with level >= 100', async () => {
@@ -267,33 +278,46 @@ describe('ChanServ (X3)', () => {
       const channel = uniqueChannel();
 
       // Setup owner and channel
-      await client.registerAndActivate(account, password, email);
-      await client.auth(account, password);
+      const regResult = await client.registerAndActivate(account, password, email);
+      expect(regResult.success, `Registration failed: ${regResult.error}`).toBe(true);
+      const authResult = await client.auth(account, password);
+      expect(authResult.success, `Auth failed: ${authResult.error}`).toBe(true);
       client.send(`JOIN ${channel}`);
       await client.waitForLine(/JOIN/i, 5000);
       await new Promise(r => setTimeout(r, 500));
-      await client.registerChannel(channel);
+      const chanResult = await client.registerChannel(channel);
+      expect(chanResult.success, `Channel reg failed: ${chanResult.error}`).toBe(true);
 
-      // Create second user with VOICE level
-      const user2Client = trackClient(await createX3Client());
+      // Create second user with VOICE level - use account name as nick for easy assertion
       const { account: user2, password: pass2, email: email2 } = await createTestAccount();
-      await user2Client.registerAndActivate(user2, pass2, email2);
-      await user2Client.auth(user2, pass2);
-      await client.addUser(channel, user2, ACCESS_LEVELS.VOICE);
+      const user2Client = trackClient(await createX3Client(user2));
+      const reg2Result = await user2Client.registerAndActivate(user2, pass2, email2);
+      expect(reg2Result.success, `User2 registration failed: ${reg2Result.error}`).toBe(true);
+      const auth2Result = await user2Client.auth(user2, pass2);
+      expect(auth2Result.success, `User2 auth failed: ${auth2Result.error}`).toBe(true);
+      const addResult = await client.addUser(channel, user2, ACCESS_LEVELS.VOICE);
+      expect(addResult.success, `ADDUSER failed: ${addResult.error}`).toBe(true);
 
       // User2 joins - should get voiced
       user2Client.send(`JOIN ${channel}`);
-      await user2Client.waitForLine(/JOIN/i, 5000);
-      await new Promise(r => setTimeout(r, 1000)); // Let ChanServ process
 
-      // Check if user got voice
+      // Wait for JOIN first
+      await user2Client.waitForLine(/JOIN/i, 5000);
+
+      // Wait for MODE from ChanServ granting voice (or timeout after 3s)
+      try {
+        await user2Client.waitForLine(/MODE.*\+v/i, 3000);
+      } catch {
+        // MODE might have arrived before we started waiting, check NAMES
+      }
+
+      // Check if user got voice via NAMES
       user2Client.clearRawBuffer();
       user2Client.send(`NAMES ${channel}`);
       const namesResponse = await user2Client.waitForLine(/353/, 5000);
-      console.log('NAMES after join (voice):', namesResponse);
 
-      // Should have + prefix for voice
-      // This depends on X3 configuration for auto-voice
+      // Should have + prefix for voice (nick = account name = user2)
+      expect(namesResponse).toMatch(new RegExp(`\\+${user2}\\b`));
     });
   });
 

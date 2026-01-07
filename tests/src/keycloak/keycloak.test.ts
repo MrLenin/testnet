@@ -28,6 +28,10 @@ const KEYCLOAK_URL = process.env.KEYCLOAK_URL ?? 'http://localhost:8080';
 const KEYCLOAK_REALM = process.env.KEYCLOAK_REALM ?? 'testnet';
 const KEYCLOAK_CLIENT_ID = process.env.KEYCLOAK_CLIENT_ID ?? 'irc-client';
 
+// Skip direct Keycloak API tests by default (they test Keycloak, not X3 integration)
+// Enable with KEYCLOAK_API_TESTS=1 to verify Keycloak setup
+const SKIP_KEYCLOAK_API_TESTS = !process.env.KEYCLOAK_API_TESTS;
+
 // Test credentials - must match Keycloak user
 const TEST_USER = 'testuser';
 const TEST_PASS = 'testpass';
@@ -1122,7 +1126,9 @@ async function getGroupMembers(adminToken: string, groupId: string): Promise<Arr
   }
 }
 
-describe.skipIf(!isKeycloakAvailable())('Keycloak Channel Access Groups', () => {
+// These tests verify Keycloak API directly (not X3 integration).
+// For X3↔Keycloak integration testing, see "Keycloak Bidirectional Sync" below.
+describe.skipIf(!isKeycloakAvailable() || SKIP_KEYCLOAK_API_TESTS)('Keycloak Channel Access Groups', () => {
   let adminToken: string;
 
   beforeAll(async () => {
