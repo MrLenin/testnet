@@ -900,16 +900,23 @@ Phase 4 (ChanServ) ←── Full state machine
 - [x] `nickserv_set_user_metadata()` - Keycloak section converted to fully async (Jan 7)
 - [x] Added `keycloak_delete_user_async()` API (Jan 7)
 - [x] SASL EXTERNAL fingerprint lookup - fully async token → fingerprint chain (Jan 7)
+- [x] `kc_try_auto_activate()` - Converted to fully async fire-and-forget (Jan 7)
+- [x] Removed `kc_check_email_verified()` - merged into async auto-activate callbacks (Jan 7)
 
-**Remaining (8 sync keycloak_ensure_token() calls - READ operations requiring state machines):**
-- [ ] `kc_get_user_info()` - line ~6711 (HIGH - auth email lookup)
-- [ ] `kc_check_email_verified()` - line ~7663 (MEDIUM - auto-activate check)
-- [ ] `loc_auth_oauth()` - line ~8117 (HIGH PRIORITY - OAUTHBEARER auth)
-- [ ] `loc_auth_external()` - line ~8348 (HIGH - SASL EXTERNAL sync fallback)
-- [ ] `nickserv_get_user_metadata()` - line ~8827 (READ - needs response)
-- [ ] `nickserv_sync_metadata_to_ircd()` - line ~9024 (bulk sync on connect)
-- [ ] `nickserv_sync_account_metadata_to_ircd()` - line ~9163 (bulk sync)
-- [ ] `nickserv_get_webpush_subscriptions()` - line ~9243 (READ - needs response)
+**Remaining (7 sync keycloak_ensure_token() calls):**
+
+*Auth fallback paths (sync acceptable - only run when async fails):*
+- [ ] `loc_auth_oauth()` - line ~8200 (OAUTHBEARER sync fallback)
+- [ ] `loc_auth_external()` - line ~8431 (SASL EXTERNAL sync fallback)
+
+*Functions that return data synchronously (harder to convert):*
+- [ ] `kc_get_user_info()` - line ~6710 (returns email for auto-create flows)
+- [ ] `nickserv_get_user_metadata()` - line ~8910 (returns metadata value)
+- [ ] `nickserv_get_webpush_subscriptions()` - line ~9326 (returns subscriptions)
+
+*Fire-and-forget but need new async API:*
+- [ ] `nickserv_sync_metadata_to_ircd()` - line ~9107 (needs `keycloak_list_user_attributes_async()`)
+- [ ] `nickserv_sync_account_metadata_to_ircd()` - line ~9246 (needs `keycloak_list_user_attributes_async()`)
 
 ### Phase 6: DNS Async (2-3 days)
 - [ ] Create `ioset_connect_async()` using SAR
