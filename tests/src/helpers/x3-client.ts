@@ -79,40 +79,68 @@ export class X3Client extends RawSocketClient {
   /**
    * Send a command to a service and collect NOTICE responses.
    *
+   * Uses adaptive timing:
+   * - Wait up to `timeout` for the FIRST response (handles busy servers)
+   * - After first response, use short timeout (500ms) for subsequent lines
+   * - This prevents stale responses from previous commands bleeding in
+   *
    * @param service - Service name (AuthServ, ChanServ, X3, O3, OpServ)
    * @param command - Command to send
-   * @param timeout - Response timeout in ms
+   * @param timeout - Max time to wait for first response (default 10s)
    * @returns Array of response lines
    */
   async serviceCmd(service: string, command: string, timeout = 10000): Promise<string[]> {
     this.clearRawBuffer();
     this.send(`PRIVMSG ${service} :${command}`);
 
-    // Small delay to allow server to start responding before we collect
-    await new Promise(r => setTimeout(r, 100));
-
     const lines: string[] = [];
     const startTime = Date.now();
 
-    // Collect NOTICE responses from the service
+    // Helper to check if line is from our target service
+    const isServiceLine = (line: string): boolean => {
+      return line.includes('x3.services') ||
+             line.toLowerCase().includes(service.toLowerCase() + '!');
+    };
+
+    // Wait for FIRST response with full timeout (server may be busy)
     while (Date.now() - startTime < timeout) {
       try {
         const line = await this.waitForLine(
           new RegExp(`NOTICE.*:`, 'i'),
-          Math.min(3000, timeout - (Date.now() - startTime))
+          Math.min(2000, timeout - (Date.now() - startTime))
         );
 
-        // Only collect lines from X3 services (AuthServ, ChanServ, O3, etc.)
-        // X3 services have format: :ServiceName!ServiceName@x3.services NOTICE nick :message
-        // Exclude server notices like: :testnet.fractalrealities.net NOTICE nick :...
-        if (line.includes('x3.services') ||
-            line.toLowerCase().includes(service.toLowerCase() + '!')) {
+        if (isServiceLine(line)) {
+          lines.push(line);
+          break; // Got first response, switch to fast collection
+        }
+        // Non-service NOTICE (server notice, etc.) - keep waiting
+      } catch {
+        // Timeout - no response yet, keep waiting until overall timeout
+      }
+    }
+
+    // If no first response, return empty
+    if (lines.length === 0) {
+      return lines;
+    }
+
+    // Collect remaining responses with SHORT timeout (500ms)
+    // X3 sends multi-line responses in rapid succession
+    const fastTimeout = 500;
+    while (Date.now() - startTime < timeout) {
+      try {
+        const line = await this.waitForLine(
+          new RegExp(`NOTICE.*:`, 'i'),
+          fastTimeout
+        );
+
+        if (isServiceLine(line)) {
           lines.push(line);
         }
       } catch {
-        // Timeout on individual line - if we have responses, we're done
-        if (lines.length > 0) break;
-        // Otherwise keep waiting until overall timeout
+        // 500ms with no response = service is done responding
+        break;
       }
     }
 
@@ -155,9 +183,10 @@ export class X3Client extends RawSocketClient {
 
   /**
    * Activate an account using a cookie.
+   * For ACTIVATION cookies, password is required (verifies original registration password).
    */
-  async activateAccount(account: string, cookie: string): Promise<ServiceResponse> {
-    const lines = await this.serviceCmd('AuthServ', `COOKIE ${account} ${cookie}`);
+  async activateAccount(account: string, cookie: string, password: string): Promise<ServiceResponse> {
+    const lines = await this.serviceCmd('AuthServ', `COOKIE ${account} ${cookie} ${password}`);
     const success = lines.some(l =>
       l.includes('activated') ||
       l.includes('Account activated') ||
@@ -196,8 +225,8 @@ export class X3Client extends RawSocketClient {
 
       const cookie = match[1].trim();
 
-      // Activate with the cookie
-      const activateResult = await this.activateAccount(account, cookie);
+      // Activate with the cookie (requires password for ACTIVATION cookies)
+      const activateResult = await this.activateAccount(account, cookie, password);
       return {
         lines: [...regResult.lines, ...activateResult.lines],
         success: activateResult.success,

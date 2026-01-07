@@ -184,6 +184,24 @@ async function cleanup(): Promise<void> {
     });
   };
 
+  // Wait for service responses to stop (no new lines for `quiet` ms)
+  const waitForQuiet = async (quiet = 1000, maxWait = 15000): Promise<void> => {
+    const start = Date.now();
+    let lastCount = lines.length;
+    let lastChange = Date.now();
+
+    while (Date.now() - start < maxWait) {
+      await new Promise(r => setTimeout(r, 200));
+      if (lines.length > lastCount) {
+        lastCount = lines.length;
+        lastChange = Date.now();
+      } else if (Date.now() - lastChange >= quiet) {
+        // No new lines for `quiet` ms - responses done
+        return;
+      }
+    }
+  };
+
   try {
     // Register
     send(`NICK cleanup_bot`);
@@ -224,10 +242,10 @@ async function cleanup(): Promise<void> {
 
     // Search for test accounts using AuthServ
     // AuthServ SEARCH supports: handlemask, accountmask, account (all synonyms)
-    // Note: Need longer wait time for Keycloak sync + large result sets
+    // Use limit 500 to get more results (default may be capped)
     console.log('\nSearching for test accounts...');
-    send('PRIVMSG AuthServ :SEARCH PRINT handlemask test*');
-    await new Promise(r => setTimeout(r, 10000));
+    send('PRIVMSG AuthServ :SEARCH PRINT handlemask test* limit 500');
+    await waitForQuiet(1500, 15000); // Wait for results to stop arriving
 
     // Check auth result now (Keycloak response should have arrived by now)
     if (X3_ACCOUNT) {
@@ -242,17 +260,30 @@ async function cleanup(): Promise<void> {
     }
 
     // Parse search results for accounts
-    if (DEBUG) console.log(`DEBUG: lines array has ${lines.length} entries`);
-    for (const line of lines) {
-      // Look for test account names (test + 6 hex chars) in Match: lines
-      // Format is ":AuthServ NOTICE bot :Match: test01f17b"
-      if (line.includes('Match:')) {
-        const match = line.match(/(test[0-9a-f]{6})/i);
-        if (match && !stats.accountsFound.includes(match[1])) {
-          stats.accountsFound.push(match[1]);
-          if (DEBUG) console.log(`DEBUG: Found account ${match[1]}`);
+    const parseAccounts = () => {
+      for (const line of lines) {
+        // Look for test account names (test + 6 hex chars) in Match: lines
+        // Format is ":AuthServ NOTICE bot :Match: test01f17b"
+        if (line.includes('Match:')) {
+          const match = line.match(/(test[0-9a-f]{6})/i);
+          if (match && !stats.accountsFound.includes(match[1])) {
+            stats.accountsFound.push(match[1]);
+            if (DEBUG) console.log(`DEBUG: Found account ${match[1]}`);
+          }
         }
       }
+    };
+
+    parseAccounts();
+    if (DEBUG) console.log(`DEBUG: lines array has ${lines.length} entries`);
+
+    // Check if more results were truncated and re-search if needed
+    const hasMoreAccounts = lines.some(l => l.includes('more match') || l.includes('truncated'));
+    if (hasMoreAccounts) {
+      console.log('Results may be truncated, searching again with higher limit...');
+      send('PRIVMSG AuthServ :SEARCH PRINT handlemask test* limit 1000');
+      await waitForQuiet(2000, 20000);
+      parseAccounts();
     }
 
     console.log(`Found ${stats.accountsFound.length} test accounts`);
@@ -260,18 +291,31 @@ async function cleanup(): Promise<void> {
     // Search for test channels using O3 CSEARCH
     // CSEARCH supports: name, topic, users, timestamp, limit criteria
     console.log('\nSearching for test channels...');
-    send('PRIVMSG O3 :CSEARCH PRINT name #test-*');
-    await new Promise(r => setTimeout(r, 5000));
+    send('PRIVMSG O3 :CSEARCH PRINT name #test-* limit 500');
+    await waitForQuiet(1000, 10000); // Wait for results to stop arriving
 
     // Parse channel list - look for #test- patterns in any response
-    for (const line of lines) {
-      // Match channel names like #test-a0da46b0 (8 hex chars)
-      const matches = line.matchAll(/(#test-[a-f0-9]{6,8})/gi);
-      for (const match of matches) {
-        if (!stats.channelsFound.includes(match[1])) {
-          stats.channelsFound.push(match[1]);
+    const parseChannels = () => {
+      for (const line of lines) {
+        // Match channel names like #test-a0da46b0 (8 hex chars)
+        const matches = line.matchAll(/(#test-[a-f0-9]{6,8})/gi);
+        for (const match of matches) {
+          if (!stats.channelsFound.includes(match[1])) {
+            stats.channelsFound.push(match[1]);
+          }
         }
       }
+    };
+
+    parseChannels();
+
+    // Check if more results were truncated
+    const hasMoreChannels = lines.some(l => l.includes('more match') || l.includes('truncated'));
+    if (hasMoreChannels) {
+      console.log('Results may be truncated, searching again with higher limit...');
+      send('PRIVMSG O3 :CSEARCH PRINT name #test-* limit 1000');
+      await waitForQuiet(1500, 15000);
+      parseChannels();
     }
 
     console.log(`Found ${stats.channelsFound.length} test channels`);
@@ -286,14 +330,22 @@ async function cleanup(): Promise<void> {
 
     // Delete accounts using AuthServ OUNREGISTER
     // OUNREGISTER is on AuthServ (not O3), use *account for account name
-    // Note: Use 1s delay to avoid flood protection kick
     if (stats.accountsFound.length > 0) {
       console.log('Deleting test accounts...');
       for (const account of stats.accountsFound) {
+        const beforeCount = lines.length;
         send(`PRIVMSG AuthServ :OUNREGISTER *${account} FORCE`);
-        await new Promise(r => setTimeout(r, 1000));
-        stats.accountsDeleted++;
-        process.stdout.write('.');
+        // Wait for response (unregistered confirmation or error)
+        await waitForQuiet(500, 5000);
+        // Check if we got a response
+        const gotResponse = lines.length > beforeCount;
+        if (gotResponse) {
+          stats.accountsDeleted++;
+          process.stdout.write('.');
+        } else {
+          stats.errors.push(`No response for OUNREGISTER ${account}`);
+          process.stdout.write('x');
+        }
       }
       console.log(` Done (${stats.accountsDeleted})`);
     }
@@ -302,11 +354,19 @@ async function cleanup(): Promise<void> {
     if (stats.channelsFound.length > 0) {
       console.log('Unregistering test channels...');
       for (const channel of stats.channelsFound) {
+        const beforeCount = lines.length;
         // With GOD mode, no confirmation string needed - IsHelping bypasses that check
         send(`PRIVMSG ChanServ :UNREGISTER ${channel}`);
-        await new Promise(r => setTimeout(r, 500));
-        stats.channelsDeleted++;
-        process.stdout.write('.');
+        // Wait for response
+        await waitForQuiet(500, 5000);
+        const gotResponse = lines.length > beforeCount;
+        if (gotResponse) {
+          stats.channelsDeleted++;
+          process.stdout.write('.');
+        } else {
+          stats.errors.push(`No response for UNREGISTER ${channel}`);
+          process.stdout.write('x');
+        }
       }
       console.log(` Done (${stats.channelsDeleted})`);
     }
