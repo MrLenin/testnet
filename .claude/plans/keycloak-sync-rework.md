@@ -11,7 +11,7 @@
 | 4b - Webhooks (GROUP_MEMBERSHIP) | ✅ Complete | GROUP_MEMBERSHIP + GROUP UPDATE handlers in `keycloak_webhook.c`, `group_syncs` stat |
 | OpServ KCSYNC commands | ✅ Complete | `cmd_kcsync()` in opserv.c with STATUS/STATS/CHANNEL/ALL/ABORT/RESET subcommands, accessor funcs in chanserv.c |
 | 4c - Expanded webhook coverage | ⚠️ Partial | SCRAM invalidation ✅, fingerprint pre-warm ✅, opserv/metadata detection (tracking only, see TODO) |
-| 2 - Async pull sync | ⏳ Pending | |
+| 2 - Async pull sync | ✅ Complete | State machine in `chanserv.c`, async primitives in `keycloak.c` (`keycloak_get_group_info_async`, `keycloak_get_group_members_async`) |
 | 5 - Distributed sync window | ⏳ Pending | Config added (`keycloak_sync_distributed`), logic TBD |
 
 ### Phase 4c TODO Items
@@ -62,6 +62,7 @@ The following 4c handlers are **tracking/logging only** and need additional work
 - **Fingerprint pre-warm**: Calls real `x3_lmdb_fingerprint_set()`
 - **GROUP_MEMBERSHIP handler**: Queues immediate sync for channel
 - **OpServ KCSYNC**: STATUS/STATS/CHANNEL/ALL/ABORT/RESET all implemented
+- **Async pull sync**: State machine (`kc_async_sync_ctx`), `keycloak_get_group_info_async()`, `keycloak_get_group_members_async()`, callback-driven channel chain via `kc_async_sync_next_channel()`
 
 ---
 
