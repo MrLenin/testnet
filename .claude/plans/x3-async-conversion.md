@@ -653,43 +653,51 @@ Note: Reuses existing `kc_check_auth_async()` infrastructure (KC_ASYNC_AUTH type
 - [ ] User disconnect during lookup/update phases
 - [ ] Keycloak user not found error
 
-### Phase 4: ChanServ ADDUSER (4-5 days)
+### Phase 4: ChanServ ADDUSER (4-5 days) ✅ COMPLETED
 
 **Problem:** `chanserv_push_keycloak_access()` has complex multi-step blocking flow: token → user lookup → group lookup → create parent → create group → set level → add user.
 
 **Implementation Steps:**
 
-#### 4.1 State Machine Design
+#### 4.1 State Machine Design ✅
 ```c
 enum adduser_state {
-    ADDUSER_ENSURE_TOKEN,   /* Phase 5 dependency */
-    ADDUSER_LOOKUP_USER,    /* Get Keycloak user UUID */
-    ADDUSER_LOOKUP_GROUP,   /* Find channel group */
-    ADDUSER_CREATE_PARENT,  /* Create /irc-channels if needed */
-    ADDUSER_CREATE_GROUP,   /* Create channel group if needed */
-    ADDUSER_SET_LEVEL,      /* Set access level attribute */
-    ADDUSER_ADD_USER,       /* Final step (already async!) */
+    ADDUSER_LOOKUP_USER,     /* Get Keycloak user UUID */
+    ADDUSER_LOOKUP_GROUP,    /* Find channel group */
+    ADDUSER_ENSURE_PARENT,   /* Ensure /irc-channels parent exists */
+    ADDUSER_CREATE_GROUP,    /* Create channel group if needed */
+    ADDUSER_SET_LEVEL,       /* Set access level attribute */
+    ADDUSER_ADD_USER,        /* Final step for adds */
+    ADDUSER_REMOVE_USER,     /* Final step for removals (access=0) */
     ADDUSER_DONE
 };
 ```
 
-#### 4.2 Add Async Types (keycloak.c/h)
-- [ ] Add `KC_ASYNC_GET_GROUP_BY_PATH`, `KC_ASYNC_CREATE_GROUP`, `KC_ASYNC_CREATE_SUBGROUP`, `KC_ASYNC_SET_GROUP_ATTR`
-- [ ] Add callback types for group operations
+#### 4.2 Add Async Types (keycloak.c/h) ✅
+- [x] Add `KC_ASYNC_GET_GROUP_PATH`, `KC_ASYNC_CREATE_SUBGROUP`, `KC_ASYNC_SET_GROUP_ATTR`
+- [x] Add callback types: `kc_get_group_path_callback`, `kc_create_subgroup_callback`
 
-#### 4.3 Create Async Functions (keycloak.c)
-- [ ] `keycloak_get_group_by_path_async()`
-- [ ] `keycloak_create_group_async()`
-- [ ] `keycloak_create_subgroup_async()`
-- [ ] `keycloak_set_group_attribute_async()`
+#### 4.3 Create Async Functions (keycloak.c) ✅
+- [x] `keycloak_get_group_by_path_async()` - Group path lookup
+- [x] `keycloak_create_subgroup_async()` - Create channel subgroup
+- [x] `keycloak_set_group_attribute_async()` - Set access level attribute
 
-#### 4.4 State Machine (chanserv.c)
-- [ ] Create `struct adduser_async_ctx` with channel, username, access_level, state, intermediate IDs
-- [ ] Create `adduser_state_machine()` driver function
-- [ ] Implement callbacks for each state transition
-- [ ] Handle partial failure (idempotent design)
+#### 4.4 State Machine (chanserv.c) ✅
+- [x] Create `struct adduser_async_ctx` with channel, username, access, state, intermediate IDs
+- [x] Implement callback-driven state machine:
+  - `adduser_lookup_user_cb()` → `adduser_lookup_group_cb()`
+  - → `adduser_ensure_parent_cb()` (if group doesn't exist)
+  - → `adduser_create_group_cb()`
+  - → `adduser_set_level_cb()`
+  - → `adduser_final_cb()` (handles both add and remove)
+- [x] Handle `KC_USER_EXISTS` (group already exists) gracefully
+- [x] LMDB cache update in final callback
 
-#### 4.5 Testing
+#### 4.5 Modify chanserv_push_keycloak_access() ✅
+- [x] Try async path first via `chanserv_push_keycloak_access_async()`
+- [x] Fall back to sync path if async fails to start (e.g., no token)
+
+#### 4.6 Testing
 - [ ] ADDUSER with existing channel group
 - [ ] ADDUSER with new channel (creates hierarchy)
 - [ ] DELUSER (removal path)
