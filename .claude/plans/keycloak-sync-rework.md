@@ -10,17 +10,15 @@
 | 4a - Hash-based incremental | ✅ Complete | FNV-1a hash via `kc_membership_hash_*()`, comparison in attribute mode, `unchanged_syncs` stat |
 | 4b - Webhooks (GROUP_MEMBERSHIP) | ✅ Complete | GROUP_MEMBERSHIP + GROUP UPDATE handlers in `keycloak_webhook.c`, `group_syncs` stat |
 | OpServ KCSYNC commands | ✅ Complete | `cmd_kcsync()` in opserv.c with STATUS/STATS/CHANNEL/ALL/ABORT/RESET subcommands, accessor funcs in chanserv.c |
-| 4c - Expanded webhook coverage | ⚠️ Partial | SCRAM invalidation ✅, fingerprint pre-warm ✅, opserv/metadata detection (tracking only, see TODO) |
+| 4c - Expanded webhook coverage | ✅ Complete | SCRAM invalidation ✅, fingerprint pre-warm ✅, metadata invalidation via `x3_lmdb_metadata_delete_by_user()` ✅, opserv (tracking only - fetched live) |
 | 2 - Async pull sync | ✅ Complete | State machine in `chanserv.c`, async primitives in `keycloak.c` (`keycloak_get_group_info_async`, `keycloak_get_group_members_async`) |
-| 5 - Distributed sync window | ⏳ Pending | Config added (`keycloak_sync_distributed`), logic TBD |
+| 5 - Distributed sync window | ✅ Complete | `kc_async_sync_channel_done()` uses timeq delay between channels when enabled, spreads syncs across `keycloak_sync_frequency` window |
 
-### Phase 4c TODO Items
+### Phase 4c Notes
 
-The following 4c handlers are **tracking/logging only** and need additional work:
+1. **OpServ level invalidation** - Tracking only (`stats.opserv_invalidations`). Acceptable since opserv level is fetched live from Keycloak on each check (no local cache).
 
-1. **OpServ level invalidation** - Currently just increments `stats.opserv_invalidations`. This is acceptable since opserv level is fetched live from Keycloak on each check (no local cache exists). Could add local cache later for performance.
-
-2. **Metadata invalidation** - Currently just increments `stats.metadata_invalidations` and relies on TTL expiration. Needs `x3_lmdb_metadata_delete_by_prefix()` function to immediately purge `meta:<username>.*` keys instead of waiting for TTL.
+2. **Metadata invalidation** - ✅ Now uses `x3_lmdb_metadata_delete_by_user()` for immediate cache purge when Keycloak webhook detects x3_metadata attribute changes.
 
 ---
 
@@ -63,6 +61,8 @@ The following 4c handlers are **tracking/logging only** and need additional work
 - **GROUP_MEMBERSHIP handler**: Queues immediate sync for channel
 - **OpServ KCSYNC**: STATUS/STATS/CHANNEL/ALL/ABORT/RESET all implemented
 - **Async pull sync**: State machine (`kc_async_sync_ctx`), `keycloak_get_group_info_async()`, `keycloak_get_group_members_async()`, callback-driven channel chain via `kc_async_sync_next_channel()`
+- **Distributed sync**: `kc_async_sync_next_channel_delayed()` via timeq, interval calculated as `sync_frequency / queue_size`, aborted via `timeq_del` on abort
+- **Metadata invalidation**: `x3_lmdb_metadata_delete_by_user()` for immediate webhook-triggered purge
 
 ---
 
