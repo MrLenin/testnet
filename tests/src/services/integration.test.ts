@@ -18,6 +18,7 @@ import {
   uniqueChannel,
   uniqueId,
   isKeycloakAvailable,
+  waitForUserAccess,
 } from '../helpers/index.js';
 
 describe('Services Integration', () => {
@@ -46,9 +47,9 @@ describe('Services Integration', () => {
       const channel = uniqueChannel();
 
       // First connection: register account and channel
+      // Note: registerAndActivate already authenticates the user via COOKIE
       const client1 = trackClient(await createX3Client());
       await client1.registerAndActivate(account, password, email);
-      await client1.auth(account, password);
       client1.send(`JOIN ${channel}`);
       await client1.waitForLine(/JOIN/i, 5000);
       await new Promise(r => setTimeout(r, 500));
@@ -89,9 +90,9 @@ describe('Services Integration', () => {
       const channel = uniqueChannel();
 
       // Setup owner
+      // Note: registerAndActivate already authenticates the user via COOKIE
       const ownerClient = trackClient(await createX3Client());
       await ownerClient.registerAndActivate(owner, ownerPass, ownerEmail);
-      await ownerClient.auth(owner, ownerPass);
       ownerClient.send(`JOIN ${channel}`);
       await ownerClient.waitForLine(/JOIN/i, 5000);
       await new Promise(r => setTimeout(r, 500));
@@ -102,29 +103,35 @@ describe('Services Integration', () => {
       await coownerClient.registerAndActivate(coowner, coownerPass, coownerEmail);
 
       // Add user with OP level first
-      await ownerClient.addUser(channel, coowner, ACCESS_LEVELS.OP);
-      // Allow X3 time to process the addUser before CLVL
-      await new Promise(r => setTimeout(r, 300));
+      const addResult = await ownerClient.addUser(channel, coowner, ACCESS_LEVELS.OP);
+      console.log('ADDUSER response:', addResult.lines);
+      expect(addResult.success).toBe(true);
+
+      // Wait for user to appear in access list before CLVL (replaces hardcoded delay)
+      await waitForUserAccess(ownerClient, channel, coowner, ACCESS_LEVELS.OP);
 
       // Promote to COOWNER level
       const clvlResult = await ownerClient.clvl(channel, coowner, ACCESS_LEVELS.COOWNER);
       console.log('CLVL to coowner response:', clvlResult.lines);
       expect(clvlResult.success).toBe(true);
 
+      // Wait for level change to be visible
+      await waitForUserAccess(ownerClient, channel, coowner, ACCESS_LEVELS.COOWNER);
+
       // Verify user has COOWNER level
       const accessList = await ownerClient.getAccess(channel);
       const coownerEntry = accessList.find(e => e.account.toLowerCase() === coowner.toLowerCase());
       expect(coownerEntry?.level).toBe(ACCESS_LEVELS.COOWNER);
-    });
+    }, 60000); // Extended timeout for 2 account registrations (~10s each)
 
     it('should enforce channel settings on all users', async () => {
       const { account: owner, password: ownerPass, email: ownerEmail } = await createTestAccount();
       const channel = uniqueChannel();
 
       // Setup owner and channel
+      // Note: registerAndActivate already authenticates the user via COOKIE
       const ownerClient = trackClient(await createX3Client());
       await ownerClient.registerAndActivate(owner, ownerPass, ownerEmail);
-      await ownerClient.auth(owner, ownerPass);
       ownerClient.send(`JOIN ${channel}`);
       await ownerClient.waitForLine(/JOIN/i, 5000);
       await new Promise(r => setTimeout(r, 500));
@@ -156,13 +163,14 @@ describe('Services Integration', () => {
     it('should track multiple concurrent logins', async () => {
       const { account, password, email } = await createTestAccount();
 
-      // Register account
+      // Register account (registerAndActivate also authenticates via COOKIE)
       const client1 = trackClient(await createX3Client());
       await client1.registerAndActivate(account, password, email);
 
-      // Login from multiple clients
-      const authResult1 = await client1.auth(account, password);
-      expect(authResult1.success).toBe(true);
+      // client1 is already authenticated from registerAndActivate
+      // Verify by checking auth status instead of redundant auth() call
+      const authStatus1 = await client1.checkAuth();
+      expect(authStatus1.authenticated).toBe(true);
 
       const client2 = trackClient(await createX3Client());
       const authResult2 = await client2.auth(account, password);
@@ -180,9 +188,9 @@ describe('Services Integration', () => {
       const channel = uniqueChannel();
 
       // Setup account and channel
+      // Note: registerAndActivate already authenticates the user via COOKIE
       const client1 = trackClient(await createX3Client());
       await client1.registerAndActivate(account, password, email);
-      await client1.auth(account, password);
       client1.send(`JOIN ${channel}`);
       await client1.waitForLine(/JOIN/i, 5000);
       await new Promise(r => setTimeout(r, 500));
@@ -278,6 +286,10 @@ describe('Services Integration', () => {
     it('should receive NOTICE responses from all services', async () => {
       const client = trackClient(await createX3Client());
 
+      // Wait for connection to fully settle - server sends many welcome messages
+      // after 001, and X3 services may not process commands during this window
+      await new Promise(r => setTimeout(r, 500));
+
       // AuthServ
       const authLines = await client.serviceCmd('AuthServ', 'HELP');
       expect(authLines.length).toBeGreaterThan(0);
@@ -296,6 +308,9 @@ describe('Services Integration', () => {
 
     it('should handle rapid sequential commands', async () => {
       const client = trackClient(await createX3Client());
+
+      // Wait for connection to fully settle
+      await new Promise(r => setTimeout(r, 500));
 
       // Send multiple commands in rapid succession
       // Note: serviceCmd uses a shared buffer, so we must await each response
@@ -317,6 +332,9 @@ describe('Services Integration', () => {
   describe('Error Propagation', () => {
     it('should return consistent error format across services', async () => {
       const client = trackClient(await createX3Client());
+
+      // Wait for connection to fully settle
+      await new Promise(r => setTimeout(r, 500));
 
       // Invalid commands to each service
       const authError = await client.serviceCmd('AuthServ', 'INVALIDCMD');

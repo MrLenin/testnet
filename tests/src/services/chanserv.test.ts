@@ -29,6 +29,8 @@ import {
   ACCESS_LEVELS,
   uniqueChannel,
   uniqueId,
+  waitForUserAccess,
+  waitForChannelMode,
 } from '../helpers/index.js';
 
 describe('ChanServ (X3)', () => {
@@ -178,6 +180,9 @@ describe('ChanServ (X3)', () => {
       await user2Client.registerAndActivate(user2, pass2, email2);
       await ownerClient.addUser(channel, user2, ACCESS_LEVELS.OP);
 
+      // Wait for user to appear in access list before changing level
+      await waitForUserAccess(ownerClient, channel, user2, ACCESS_LEVELS.OP);
+
       // Change level to MANAGER
       const clvlResult = await ownerClient.clvl(channel, user2, ACCESS_LEVELS.MANAGER);
       console.log('CLVL response:', clvlResult.lines);
@@ -193,6 +198,9 @@ describe('ChanServ (X3)', () => {
       await user2Client.registerAndActivate(user2, pass2, email2);
       await ownerClient.addUser(channel, user2, ACCESS_LEVELS.OP);
 
+      // Wait for user to appear in access list before deleting
+      await waitForUserAccess(ownerClient, channel, user2);
+
       // Remove user
       const delResult = await ownerClient.delUser(channel, user2);
       console.log('DELUSER response:', delResult.lines);
@@ -201,13 +209,18 @@ describe('ChanServ (X3)', () => {
       expect(delResult.success).toBe(true);
     });
 
+    // This test creates 3 accounts total (owner in beforeEach + user2 + user3), each taking
+    // ~10s for registerAndActivate. Use 60s timeout to handle this.
     it('should reject ADDUSER from user without sufficient access', async () => {
       // Create user2 with low access
+      // Note: registerAndActivate already authenticates the user via COOKIE
       const user2Client = trackClient(await createX3Client());
       const { account: user2, password: pass2, email: email2 } = await createTestAccount();
       await user2Client.registerAndActivate(user2, pass2, email2);
-      await user2Client.auth(user2, pass2);
       await ownerClient.addUser(channel, user2, ACCESS_LEVELS.VOICE); // Low level
+
+      // Wait for user2's access to be visible before they try to use it
+      await waitForUserAccess(ownerClient, channel, user2, ACCESS_LEVELS.VOICE);
 
       // Create user3
       const { account: user3, password: pass3, email: email3 } = await createTestAccount();
@@ -220,20 +233,21 @@ describe('ChanServ (X3)', () => {
 
       // Should fail
       expect(addResult.success).toBe(false);
-    });
+    }, 60000);
   });
 
   describe('Access Level Enforcement', () => {
+    // Tests in this section create 2 accounts each (owner + user2), each taking ~10s for
+    // registerAndActivate, plus additional waits. Use 45s timeout.
     it('should auto-op users with level >= 200', async () => {
       const client = trackClient(await createX3Client());
       const { account, password, email } = await createTestAccount();
       const channel = uniqueChannel();
 
       // Setup owner and channel
+      // Note: registerAndActivate already authenticates the user via COOKIE
       const regResult = await client.registerAndActivate(account, password, email);
       expect(regResult.success, `Registration failed: ${regResult.error}`).toBe(true);
-      const authResult = await client.auth(account, password);
-      expect(authResult.success, `Auth failed: ${authResult.error}`).toBe(true);
       client.send(`JOIN ${channel}`);
       await client.waitForLine(/JOIN/i, 5000);
       await new Promise(r => setTimeout(r, 500));
@@ -241,14 +255,28 @@ describe('ChanServ (X3)', () => {
       expect(chanResult.success, `Channel reg failed: ${chanResult.error}`).toBe(true);
 
       // Create second user with OP level - use account name as nick for easy assertion
+      // Note: registerAndActivate already authenticates the user via COOKIE
       const { account: user2, password: pass2, email: email2 } = await createTestAccount();
       const user2Client = trackClient(await createX3Client(user2));
       const reg2Result = await user2Client.registerAndActivate(user2, pass2, email2);
       expect(reg2Result.success, `User2 registration failed: ${reg2Result.error}`).toBe(true);
-      const auth2Result = await user2Client.auth(user2, pass2);
-      expect(auth2Result.success, `User2 auth failed: ${auth2Result.error}`).toBe(true);
+
+      // Verify user2 is actually authenticated before proceeding
+      const authStatus = await user2Client.checkAuth();
+      console.log(`[auto-op] User2 auth status: authenticated=${authStatus.authenticated}, account=${authStatus.account}`);
+      expect(authStatus.authenticated, 'User2 should be authenticated after registerAndActivate').toBe(true);
+
       const addResult = await client.addUser(channel, user2, ACCESS_LEVELS.OP);
       expect(addResult.success, `ADDUSER failed: ${addResult.error}`).toBe(true);
+      console.log(`[auto-op] ADDUSER response: ${addResult.lines.join(' | ')}`);
+
+      // Wait for user access to be visible before joining
+      await waitForUserAccess(client, channel, user2, ACCESS_LEVELS.OP);
+
+      // Verify access list shows user2 with OP level
+      const accessList = await client.getAccess(channel);
+      const user2Access = accessList.find(e => e.account.toLowerCase() === user2.toLowerCase());
+      console.log(`[auto-op] User2 access in ${channel}: level=${user2Access?.level}`);
 
       // User2 joins - should get opped
       user2Client.send(`JOIN ${channel}`);
@@ -256,21 +284,11 @@ describe('ChanServ (X3)', () => {
       // Wait for JOIN first
       await user2Client.waitForLine(/JOIN/i, 5000);
 
-      // Wait for MODE from ChanServ granting ops (or timeout after 3s)
-      try {
-        await user2Client.waitForLine(/MODE.*\+o/i, 3000);
-      } catch {
-        // MODE might have arrived before we started waiting, check NAMES
-      }
-
-      // Check if user got ops via NAMES
-      user2Client.clearRawBuffer();
-      user2Client.send(`NAMES ${channel}`);
-      const namesResponse = await user2Client.waitForLine(/353/, 5000);
-
-      // Should have @ prefix for ops (nick = account name = user2)
-      expect(namesResponse).toMatch(new RegExp(`@${user2}\\b`));
-    });
+      // Wait for ChanServ to grant ops (polls NAMES with retries)
+      // Extended timeout to 10s to handle slow ChanServ processing
+      const hasOps = await waitForChannelMode(user2Client, channel, user2, '@', 10000);
+      expect(hasOps, `User ${user2} should have ops (@) in ${channel}`).toBe(true);
+    }, 45000);
 
     it('should auto-voice users with level >= 100', async () => {
       const client = trackClient(await createX3Client());
@@ -278,10 +296,9 @@ describe('ChanServ (X3)', () => {
       const channel = uniqueChannel();
 
       // Setup owner and channel
+      // Note: registerAndActivate already authenticates the user via COOKIE
       const regResult = await client.registerAndActivate(account, password, email);
       expect(regResult.success, `Registration failed: ${regResult.error}`).toBe(true);
-      const authResult = await client.auth(account, password);
-      expect(authResult.success, `Auth failed: ${authResult.error}`).toBe(true);
       client.send(`JOIN ${channel}`);
       await client.waitForLine(/JOIN/i, 5000);
       await new Promise(r => setTimeout(r, 500));
@@ -289,14 +306,28 @@ describe('ChanServ (X3)', () => {
       expect(chanResult.success, `Channel reg failed: ${chanResult.error}`).toBe(true);
 
       // Create second user with VOICE level - use account name as nick for easy assertion
+      // Note: registerAndActivate already authenticates the user via COOKIE
       const { account: user2, password: pass2, email: email2 } = await createTestAccount();
       const user2Client = trackClient(await createX3Client(user2));
       const reg2Result = await user2Client.registerAndActivate(user2, pass2, email2);
       expect(reg2Result.success, `User2 registration failed: ${reg2Result.error}`).toBe(true);
-      const auth2Result = await user2Client.auth(user2, pass2);
-      expect(auth2Result.success, `User2 auth failed: ${auth2Result.error}`).toBe(true);
+
+      // Verify user2 is actually authenticated before proceeding
+      const authStatus = await user2Client.checkAuth();
+      console.log(`[auto-voice] User2 auth status: authenticated=${authStatus.authenticated}, account=${authStatus.account}`);
+      expect(authStatus.authenticated, 'User2 should be authenticated after registerAndActivate').toBe(true);
+
       const addResult = await client.addUser(channel, user2, ACCESS_LEVELS.VOICE);
       expect(addResult.success, `ADDUSER failed: ${addResult.error}`).toBe(true);
+      console.log(`[auto-voice] ADDUSER response: ${addResult.lines.join(' | ')}`);
+
+      // Wait for user access to be visible before joining
+      await waitForUserAccess(client, channel, user2, ACCESS_LEVELS.VOICE);
+
+      // Verify access list shows user2 with VOICE level
+      const accessList = await client.getAccess(channel);
+      const user2Access = accessList.find(e => e.account.toLowerCase() === user2.toLowerCase());
+      console.log(`[auto-voice] User2 access in ${channel}: level=${user2Access?.level}`);
 
       // User2 joins - should get voiced
       user2Client.send(`JOIN ${channel}`);
@@ -304,21 +335,11 @@ describe('ChanServ (X3)', () => {
       // Wait for JOIN first
       await user2Client.waitForLine(/JOIN/i, 5000);
 
-      // Wait for MODE from ChanServ granting voice (or timeout after 3s)
-      try {
-        await user2Client.waitForLine(/MODE.*\+v/i, 3000);
-      } catch {
-        // MODE might have arrived before we started waiting, check NAMES
-      }
-
-      // Check if user got voice via NAMES
-      user2Client.clearRawBuffer();
-      user2Client.send(`NAMES ${channel}`);
-      const namesResponse = await user2Client.waitForLine(/353/, 5000);
-
-      // Should have + prefix for voice (nick = account name = user2)
-      expect(namesResponse).toMatch(new RegExp(`\\+${user2}\\b`));
-    });
+      // Wait for ChanServ to grant voice (polls NAMES with retries)
+      // Extended timeout to 10s to handle slow ChanServ processing
+      const hasVoice = await waitForChannelMode(user2Client, channel, user2, '+', 10000);
+      expect(hasVoice, `User ${user2} should have voice (+) in ${channel}`).toBe(true);
+    }, 45000);
   });
 
   describe('Channel Settings', () => {
