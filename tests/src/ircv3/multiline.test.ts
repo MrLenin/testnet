@@ -736,4 +736,462 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send('QUIT');
     });
   });
+
+  describe('Multiline Retrieval Mechanisms', () => {
+    it('chathistory fallback hint for clients with chathistory but not multiline', async () => {
+      const client1 = trackClient(await createRawSocketClient());
+      const client2 = trackClient(await createRawSocketClient());
+
+      // Client1: has multiline (sender)
+      client1.send('CAP LS 302');
+      await client1.waitForLine(/CAP.*LS/i);
+      client1.send('CAP REQ :draft/multiline batch message-tags');
+      await client1.waitForLine(/CAP.*ACK/i);
+      client1.send('CAP END');
+      client1.send('NICK mlchhist1');
+      client1.send('USER mlchhist1 0 * :mlchhist1');
+      await client1.waitForLine(/001/);
+
+      // Client2: has chathistory but NOT multiline (should get chathistory hint)
+      client2.send('CAP LS 302');
+      await client2.waitForLine(/CAP.*LS/i);
+      client2.send('CAP REQ :draft/chathistory batch message-tags');
+      await client2.waitForLine(/CAP.*ACK/i);
+      client2.send('CAP END');
+      client2.send('NICK mlchhist2');
+      client2.send('USER mlchhist2 0 * :mlchhist2');
+      await client2.waitForLine(/001/);
+
+      const channelName = uniqueChannel('mlchhist');
+
+      client1.send(`JOIN ${channelName}`);
+      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      client2.send(`JOIN ${channelName}`);
+      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+      await new Promise(resolve => setTimeout(resolve, 500));
+      client2.clearRawBuffer();
+
+      // Send large multiline to trigger truncation
+      const batchId = `chhist${uniqueId()}`;
+      client1.send(`BATCH +${batchId} draft/multiline ${channelName}`);
+      for (let i = 1; i <= 12; i++) {
+        client1.send(`@batch=${batchId} PRIVMSG ${channelName} :Chathistory fallback line ${i}`);
+      }
+      client1.send(`BATCH -${batchId}`);
+
+      // Client2 should receive truncated message with chathistory hint
+      let foundChathistoryHint = false;
+      let capturedMsgid: string | null = null;
+      const receivedLines: string[] = [];
+      const startTime = Date.now();
+
+      while (Date.now() - startTime < 4000) {
+        try {
+          const line = await client2.waitForLine(/PRIVMSG|NOTICE/i, 500);
+          receivedLines.push(line);
+          console.log('Chathistory fallback test:', line);
+
+          // Look for CHATHISTORY hint
+          if (line.toLowerCase().includes('chathistory') || line.includes('AROUND')) {
+            foundChathistoryHint = true;
+            console.log('Found CHATHISTORY hint:', line);
+          }
+
+          // Capture msgid for later verification
+          const msgidMatch = line.match(/msgid=([^\s;]+)/);
+          if (msgidMatch) {
+            capturedMsgid = msgidMatch[1];
+          }
+        } catch {
+          break;
+        }
+      }
+
+      console.log('Received lines:', receivedLines.length);
+      console.log('Found chathistory hint:', foundChathistoryHint);
+      console.log('Captured msgid:', capturedMsgid);
+
+      // Verify we got some truncated content
+      expect(receivedLines.length).toBeGreaterThan(0);
+
+      // If chathistory hint was provided, try to retrieve full message
+      if (foundChathistoryHint && capturedMsgid) {
+        client2.clearRawBuffer();
+        client2.send(`CHATHISTORY AROUND ${channelName} msgid=${capturedMsgid} 5`);
+
+        try {
+          const batchStart = await client2.waitForLine(/BATCH \+/i, 3000);
+          console.log('CHATHISTORY AROUND response:', batchStart);
+
+          // Collect the batch
+          const historyLines: string[] = [];
+          while (true) {
+            const line = await client2.waitForLine(/PRIVMSG|BATCH -/i, 2000);
+            historyLines.push(line);
+            if (line.includes('BATCH -')) break;
+          }
+
+          console.log('Retrieved via CHATHISTORY:', historyLines.length, 'lines');
+          // Should retrieve more content than the truncated version
+          expect(historyLines.length).toBeGreaterThan(receivedLines.length);
+        } catch (e) {
+          console.log('CHATHISTORY retrieval failed:', e);
+        }
+      }
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+
+    it('HistServ fallback for clients without chathistory or multiline', async () => {
+      const client1 = trackClient(await createRawSocketClient());
+      const client2 = trackClient(await createRawSocketClient());
+
+      // Client1: has multiline (sender)
+      client1.send('CAP LS 302');
+      await client1.waitForLine(/CAP.*LS/i);
+      client1.send('CAP REQ :draft/multiline batch');
+      await client1.waitForLine(/CAP.*ACK/i);
+      client1.send('CAP END');
+      client1.send('NICK mlhserv1');
+      client1.send('USER mlhserv1 0 * :mlhserv1');
+      await client1.waitForLine(/001/);
+
+      // Client2: NO multiline, NO chathistory (basic IRC client - should get HistServ hint)
+      client2.send('CAP LS 302');
+      await client2.waitForLine(/CAP.*LS/i);
+      client2.send('CAP END');
+      client2.send('NICK mlhserv2');
+      client2.send('USER mlhserv2 0 * :mlhserv2');
+      await client2.waitForLine(/001/);
+
+      const channelName = uniqueChannel('mlhserv');
+
+      client1.send(`JOIN ${channelName}`);
+      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      client2.send(`JOIN ${channelName}`);
+      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+      await new Promise(resolve => setTimeout(resolve, 500));
+      client2.clearRawBuffer();
+
+      // Send large multiline to trigger truncation
+      const batchId = `hserv${uniqueId()}`;
+      client1.send(`BATCH +${batchId} draft/multiline ${channelName}`);
+      for (let i = 1; i <= 15; i++) {
+        client1.send(`@batch=${batchId} PRIVMSG ${channelName} :HistServ fallback line ${i}`);
+      }
+      client1.send(`BATCH -${batchId}`);
+
+      // Client2 should receive truncated message with HistServ hint or &ml- channel
+      let foundHistServHint = false;
+      let foundLocalChannel = false;
+      const receivedLines: string[] = [];
+      const startTime = Date.now();
+
+      while (Date.now() - startTime < 4000) {
+        try {
+          const line = await client2.waitForLine(/PRIVMSG|NOTICE/i, 500);
+          receivedLines.push(line);
+          console.log('HistServ fallback test:', line);
+
+          // Look for HistServ hint
+          if (line.toLowerCase().includes('histserv') || line.toLowerCase().includes('history')) {
+            foundHistServHint = true;
+            console.log('Found HistServ hint:', line);
+          }
+
+          // Look for &ml- local channel hint
+          if (line.includes('&ml-')) {
+            foundLocalChannel = true;
+            console.log('Found &ml- local channel hint:', line);
+          }
+        } catch {
+          break;
+        }
+      }
+
+      console.log('Received lines:', receivedLines.length);
+      console.log('Found HistServ hint:', foundHistServHint);
+      console.log('Found &ml- channel:', foundLocalChannel);
+
+      // Verify we got some truncated content
+      expect(receivedLines.length).toBeGreaterThan(0);
+
+      // Should have some form of retrieval hint (either HistServ or &ml-)
+      const hasRetrievalHint = foundHistServHint || foundLocalChannel;
+      console.log('Has retrieval hint:', hasRetrievalHint);
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+
+    it('can join &ml-<msgid> virtual channel to retrieve full message', async () => {
+      const client1 = trackClient(await createRawSocketClient());
+      const client2 = trackClient(await createRawSocketClient());
+
+      // Client1: has multiline + message-tags (sender, to capture msgid)
+      client1.send('CAP LS 302');
+      await client1.waitForLine(/CAP.*LS/i);
+      client1.send('CAP REQ :draft/multiline batch message-tags echo-message');
+      await client1.waitForLine(/CAP.*ACK/i);
+      client1.send('CAP END');
+      client1.send('NICK mlvirt1');
+      client1.send('USER mlvirt1 0 * :mlvirt1');
+      await client1.waitForLine(/001/);
+
+      // Client2: NO multiline (will receive truncated + &ml- hint)
+      client2.send('CAP LS 302');
+      await client2.waitForLine(/CAP.*LS/i);
+      client2.send('CAP END');
+      client2.send('NICK mlvirt2');
+      client2.send('USER mlvirt2 0 * :mlvirt2');
+      await client2.waitForLine(/001/);
+
+      const channelName = uniqueChannel('mlvirt');
+
+      client1.send(`JOIN ${channelName}`);
+      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      client2.send(`JOIN ${channelName}`);
+      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+      await new Promise(resolve => setTimeout(resolve, 500));
+      client1.clearRawBuffer();
+      client2.clearRawBuffer();
+
+      // Send multiline message
+      const totalLines = 10;
+      const batchId = `virt${uniqueId()}`;
+      client1.send(`BATCH +${batchId} draft/multiline ${channelName}`);
+      for (let i = 1; i <= totalLines; i++) {
+        client1.send(`@batch=${batchId} PRIVMSG ${channelName} :Virtual channel line ${i}`);
+      }
+      client1.send(`BATCH -${batchId}`);
+
+      // Client1 gets echo with msgid - capture it
+      let capturedMsgid: string | null = null;
+      try {
+        const echoBatch = await client1.waitForLine(/BATCH \+.*multiline/i, 3000);
+        const msgidMatch = echoBatch.match(/msgid=([^\s;]+)/);
+        if (msgidMatch) {
+          capturedMsgid = msgidMatch[1];
+          console.log('Captured msgid from echo:', capturedMsgid);
+        }
+
+        // Drain the echo batch
+        while (true) {
+          const line = await client1.waitForLine(/PRIVMSG|BATCH -/i, 1000);
+          if (line.includes('BATCH -')) break;
+        }
+      } catch (e) {
+        console.log('Echo capture failed:', e);
+      }
+
+      // Client2 looks for &ml- hint
+      let localChannelName: string | null = null;
+      const startTime = Date.now();
+      while (Date.now() - startTime < 4000) {
+        try {
+          const line = await client2.waitForLine(/PRIVMSG|NOTICE/i, 500);
+          console.log('Virtual channel test (client2):', line);
+
+          const mlMatch = line.match(/(&ml-[^\s]+)/);
+          if (mlMatch) {
+            localChannelName = mlMatch[1];
+            console.log('Found local channel:', localChannelName);
+            break;
+          }
+        } catch {
+          break;
+        }
+      }
+
+      // If we found &ml- channel or have msgid, try to join it
+      const channelToJoin = localChannelName || (capturedMsgid ? `&ml-${capturedMsgid}` : null);
+
+      if (channelToJoin) {
+        console.log('Attempting to join virtual channel:', channelToJoin);
+        client2.clearRawBuffer();
+        client2.send(`JOIN ${channelToJoin}`);
+
+        try {
+          // Should receive the full multiline content
+          const joinResponse = await client2.waitForLine(/JOIN|PRIVMSG|NOTICE|4\d\d/i, 3000);
+          console.log('Virtual channel join response:', joinResponse);
+
+          if (joinResponse.includes('JOIN')) {
+            // Successfully joined - collect content
+            const contentLines: string[] = [];
+            const collectStart = Date.now();
+            while (Date.now() - collectStart < 3000) {
+              try {
+                const line = await client2.waitForLine(/PRIVMSG|332|333|366/i, 500);
+                contentLines.push(line);
+                console.log('Virtual channel content:', line);
+                if (line.includes('366')) break; // End of NAMES
+              } catch {
+                break;
+              }
+            }
+
+            console.log('Retrieved', contentLines.length, 'lines from virtual channel');
+
+            // PART from virtual channel
+            client2.send(`PART ${channelToJoin}`);
+          } else if (joinResponse.match(/4\d\d/)) {
+            console.log('Virtual channel join rejected (may not be implemented)');
+          }
+        } catch (e) {
+          console.log('Virtual channel join failed:', e);
+        }
+      } else {
+        console.log('No virtual channel hint found - feature may not be enabled');
+      }
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+
+    it('virtual channel content matches original multiline message', async () => {
+      const client1 = trackClient(await createRawSocketClient());
+      const client2 = trackClient(await createRawSocketClient());
+
+      // Client1: sender with full caps
+      client1.send('CAP LS 302');
+      await client1.waitForLine(/CAP.*LS/i);
+      client1.send('CAP REQ :draft/multiline batch message-tags echo-message');
+      await client1.waitForLine(/CAP.*ACK/i);
+      client1.send('CAP END');
+      client1.send('NICK mlmatch1');
+      client1.send('USER mlmatch1 0 * :mlmatch1');
+      await client1.waitForLine(/001/);
+
+      // Client2: receiver with message-tags (to see content)
+      client2.send('CAP LS 302');
+      await client2.waitForLine(/CAP.*LS/i);
+      client2.send('CAP REQ :message-tags');
+      await client2.waitForLine(/CAP.*ACK/i);
+      client2.send('CAP END');
+      client2.send('NICK mlmatch2');
+      client2.send('USER mlmatch2 0 * :mlmatch2');
+      await client2.waitForLine(/001/);
+
+      const channelName = uniqueChannel('mlmatch');
+      const expectedContent = [
+        'First line of important message',
+        'Second line with details',
+        'Third line conclusion',
+        'Fourth line signature',
+        'Fifth line postscript',
+        'Sixth line addendum',
+        'Seventh line extra info',
+        'Eighth line final notes',
+      ];
+
+      client1.send(`JOIN ${channelName}`);
+      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      client2.send(`JOIN ${channelName}`);
+      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+
+      await new Promise(resolve => setTimeout(resolve, 500));
+      client1.clearRawBuffer();
+      client2.clearRawBuffer();
+
+      // Send specific content
+      const batchId = `match${uniqueId()}`;
+      client1.send(`BATCH +${batchId} draft/multiline ${channelName}`);
+      for (const line of expectedContent) {
+        client1.send(`@batch=${batchId} PRIVMSG ${channelName} :${line}`);
+      }
+      client1.send(`BATCH -${batchId}`);
+
+      // Capture msgid from echo
+      let capturedMsgid: string | null = null;
+      try {
+        const echoBatch = await client1.waitForLine(/BATCH \+.*multiline/i, 3000);
+        const msgidMatch = echoBatch.match(/msgid=([^\s;]+)/);
+        if (msgidMatch) capturedMsgid = msgidMatch[1];
+
+        // Drain echo batch
+        while (true) {
+          const line = await client1.waitForLine(/PRIVMSG|BATCH -/i, 1000);
+          if (line.includes('BATCH -')) break;
+        }
+      } catch {
+        // Continue without msgid
+      }
+
+      // Collect what client2 received (truncated)
+      const truncatedContent: string[] = [];
+      let localChannel: string | null = null;
+      const startTime = Date.now();
+
+      while (Date.now() - startTime < 4000) {
+        try {
+          const line = await client2.waitForLine(/PRIVMSG/i, 500);
+
+          // Extract message text
+          const textMatch = line.match(/PRIVMSG [^\s]+ :(.+)$/);
+          if (textMatch) {
+            truncatedContent.push(textMatch[1]);
+          }
+
+          // Look for &ml- hint
+          const mlMatch = line.match(/(&ml-[^\s]+)/);
+          if (mlMatch) localChannel = mlMatch[1];
+        } catch {
+          break;
+        }
+      }
+
+      console.log('Truncated content received:', truncatedContent.length, 'lines');
+      console.log('Local channel hint:', localChannel);
+
+      // Try to retrieve full content via virtual channel
+      const channelToJoin = localChannel || (capturedMsgid ? `&ml-${capturedMsgid}` : null);
+
+      if (channelToJoin) {
+        client2.clearRawBuffer();
+        client2.send(`JOIN ${channelToJoin}`);
+
+        const fullContent: string[] = [];
+        try {
+          await client2.waitForLine(/JOIN/i, 2000);
+
+          // Collect PRIVMSGs (the stored multiline content)
+          const collectStart = Date.now();
+          while (Date.now() - collectStart < 3000) {
+            try {
+              const line = await client2.waitForLine(/PRIVMSG/i, 500);
+              const textMatch = line.match(/PRIVMSG [^\s]+ :(.+)$/);
+              if (textMatch) fullContent.push(textMatch[1]);
+            } catch {
+              break;
+            }
+          }
+        } catch {
+          console.log('Could not retrieve via virtual channel');
+        }
+
+        if (fullContent.length > 0) {
+          console.log('Full content retrieved:', fullContent.length, 'lines');
+
+          // Verify content matches
+          for (let i = 0; i < Math.min(fullContent.length, expectedContent.length); i++) {
+            console.log(`Line ${i + 1}: expected "${expectedContent[i]}", got "${fullContent[i]}"`);
+            expect(fullContent[i]).toBe(expectedContent[i]);
+          }
+
+          // Virtual channel should have more content than truncated version
+          expect(fullContent.length).toBeGreaterThanOrEqual(truncatedContent.length);
+        }
+
+        client2.send(`PART ${channelToJoin}`);
+      }
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+  });
 });

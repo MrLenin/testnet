@@ -22,7 +22,7 @@
  */
 
 import { RawSocketClient, createRawSocketClient, PRIMARY_SERVER } from './ircv3-client.js';
-import { uniqueId } from './cap-bundles.js';
+import { uniqueId, retryAsync, waitForCondition } from './cap-bundles.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -125,9 +125,9 @@ export class X3Client extends RawSocketClient {
       return lines;
     }
 
-    // Collect remaining responses with SHORT timeout (500ms)
-    // X3 sends multi-line responses in rapid succession
-    const fastTimeout = 500;
+    // Collect remaining responses with short timeout
+    // Increased from 500ms to handle slow X3/Keycloak responses
+    const fastTimeout = 1000;
     while (Date.now() - startTime < timeout) {
       try {
         const line = await this.waitForLine(
@@ -139,7 +139,7 @@ export class X3Client extends RawSocketClient {
           lines.push(line);
         }
       } catch {
-        // 500ms with no response = service is done responding
+        // Timeout with no response = service is done responding
         break;
       }
     }
@@ -204,6 +204,7 @@ export class X3Client extends RawSocketClient {
   /**
    * Register and activate an account by scraping the cookie from X3 logs.
    * This is the preferred method for tests when email verification is enabled.
+   * Uses polling to handle race condition where logs may not be flushed immediately.
    */
   async registerAndActivate(account: string, password: string, email: string): Promise<ServiceResponse> {
     // First register
@@ -212,29 +213,33 @@ export class X3Client extends RawSocketClient {
       return regResult;
     }
 
-    // Wait a moment for logs to be written
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    // Scrape cookie from X3 docker logs
-    try {
-      const { stdout } = await execAsync(`docker logs x3 2>&1 | grep "Created cookie type=0 for ${account}:" | tail -1`);
-      const match = stdout.match(/Created cookie type=0 for \S+: (\S+)/);
-      if (!match) {
-        return { lines: regResult.lines, success: false, error: 'Could not find activation cookie in logs' };
+    // Poll for cookie in logs instead of fixed delay (handles race condition)
+    let cookie: string | null = null;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 300));
+      try {
+        const { stdout } = await execAsync(`docker logs x3 2>&1 | grep "Created cookie type=0 for ${account}:" | tail -1`);
+        const match = stdout.match(/Created cookie type=0 for \S+: (\S+)/);
+        if (match) {
+          cookie = match[1].trim();
+          break;
+        }
+      } catch {
+        // Continue polling - grep returns non-zero if no match
       }
-
-      const cookie = match[1].trim();
-
-      // Activate with the cookie (requires password for ACTIVATION cookies)
-      const activateResult = await this.activateAccount(account, cookie, password);
-      return {
-        lines: [...regResult.lines, ...activateResult.lines],
-        success: activateResult.success,
-        error: activateResult.error,
-      };
-    } catch (e) {
-      return { lines: regResult.lines, success: false, error: `Failed to scrape cookie: ${e}` };
     }
+
+    if (!cookie) {
+      return { lines: regResult.lines, success: false, error: 'Could not find activation cookie in logs after 10 attempts' };
+    }
+
+    // Activate with the cookie (requires password for ACTIVATION cookies)
+    const activateResult = await this.activateAccount(account, cookie, password);
+    return {
+      lines: [...regResult.lines, ...activateResult.lines],
+      success: activateResult.success,
+      error: activateResult.error,
+    };
   }
 
   /**
@@ -262,6 +267,29 @@ export class X3Client extends RawSocketClient {
   }
 
   /**
+   * Authenticate with retry logic for race conditions with Keycloak sync.
+   * Use when auth may race with account creation or backend sync.
+   */
+  async authWithRetry(account: string, password: string, maxRetries = 3): Promise<ServiceResponse> {
+    let lastResult: ServiceResponse = { lines: [], success: false, error: 'No attempts made' };
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      if (attempt > 0) {
+        await new Promise(r => setTimeout(r, 500 * attempt)); // Exponential backoff
+      }
+      lastResult = await this.auth(account, password);
+      if (lastResult.success) return lastResult;
+
+      // Don't retry on permanent failures
+      if (lastResult.error?.includes('Incorrect password') ||
+          lastResult.error?.includes('not registered')) {
+        return lastResult;
+      }
+    }
+    return lastResult;
+  }
+
+  /**
    * Check if we're currently authenticated.
    */
   async checkAuth(): Promise<{ authenticated: boolean; account?: string }> {
@@ -277,9 +305,15 @@ export class X3Client extends RawSocketClient {
       return { authenticated: false };
     }
 
-    // Look for explicit account indication like "Account: username" or "logged in as username"
+    // Look for explicit account indication
     for (const line of lines) {
-      // Match "Account: username" or similar (avoiding "Account Information" header)
+      // Match X3's "Account Information for <account>" header
+      const infoMatch = line.match(/Account Information for\s+(\S+)/i);
+      if (infoMatch) {
+        return { authenticated: true, account: infoMatch[1] };
+      }
+
+      // Match "Account: username" or similar
       const accountMatch = line.match(/Account:\s*(\S+)/i);
       if (accountMatch && accountMatch[1].toLowerCase() !== 'information') {
         return { authenticated: true, account: accountMatch[1] };
@@ -340,14 +374,14 @@ export class X3Client extends RawSocketClient {
     let success = false;
     let error: string | undefined;
     const startTime = Date.now();
-    const timeout = 10000;
+    const timeout = 15000; // Increased timeout for slow Keycloak sync
 
     // Watch for ChanServ joining (success) or NOTICE with error
     while (Date.now() - startTime < timeout) {
       try {
         const line = await this.waitForLine(
           /ChanServ.*JOIN|NOTICE.*:/i,
-          Math.min(2000, timeout - (Date.now() - startTime))
+          Math.min(3000, timeout - (Date.now() - startTime))
         );
 
         // Success: ChanServ joins the channel
@@ -369,13 +403,16 @@ export class X3Client extends RawSocketClient {
             break;
           }
 
-          // Check for error messages
-          if (line.includes('already registered') ||
-              line.includes('registered to someone') ||
-              line.includes('must be') ||
-              line.includes('authenticate') ||
-              line.includes('denied') ||
-              line.includes('not op')) {
+          // Check for specific error messages
+          const lowerLine = line.toLowerCase();
+          if (lowerLine.includes('already registered') ||
+              lowerLine.includes('registered to someone') ||
+              lowerLine.includes('must be opped') ||
+              lowerLine.includes('must be authenticated') ||
+              lowerLine.includes('not authenticated') ||
+              lowerLine.includes('you must first authenticate') ||
+              lowerLine.includes('access denied') ||
+              lowerLine.includes('not op in')) {
             error = line;
             break;
           }
@@ -384,6 +421,13 @@ export class X3Client extends RawSocketClient {
         // Timeout on individual line
         if (lines.length > 0 || success) break;
       }
+    }
+
+    // If we got responses but no success, use last line as error hint
+    if (!success && !error && lines.length > 0) {
+      error = lines[lines.length - 1];
+    } else if (!success && !error) {
+      error = 'No response from ChanServ (timeout)';
     }
 
     return { lines, success, error };
@@ -413,19 +457,30 @@ export class X3Client extends RawSocketClient {
    */
   async addUser(channel: string, account: string, level: number): Promise<ServiceResponse> {
     // Use *account syntax to specify account name instead of nick
-    const lines = await this.serviceCmd('ChanServ', `ADDUSER ${channel} *${account} ${level}`);
-    const success = lines.some(l =>
-      l.toLowerCase().includes('added') ||
-      l.toLowerCase().includes('now has access') ||
-      l.toLowerCase().includes('user list')
-    );
-    const error = lines.find(l =>
-      l.includes('already') ||
-      l.includes('denied') ||
-      l.includes('not registered') ||
-      l.includes('no such')
-    );
-    return { lines, success, error };
+    const lines = await this.serviceCmd('ChanServ', `ADDUSER ${channel} *${account} ${level}`, 15000);
+
+    // Check for error patterns first
+    const errorLine = lines.find(l => {
+      const lower = l.toLowerCase();
+      return lower.includes('already on') ||
+             lower.includes('access denied') ||
+             lower.includes('insufficient access') ||
+             lower.includes('not registered') ||
+             lower.includes('no such') ||
+             lower.includes('outranks you') ||
+             lower.includes('you may not');
+    });
+
+    // Success patterns
+    const success = !errorLine && lines.some(l => {
+      const lower = l.toLowerCase();
+      return lower.includes('added') ||
+             lower.includes('now has access') ||
+             lower.includes('to the user list') ||
+             lower.includes('has been added');
+    });
+
+    return { lines, success, error: errorLine };
   }
 
   /**
@@ -434,12 +489,31 @@ export class X3Client extends RawSocketClient {
    */
   async clvl(channel: string, account: string, level: number): Promise<ServiceResponse> {
     const lines = await this.serviceCmd('ChanServ', `CLVL ${channel} *${account} ${level}`);
-    const success = lines.some(l =>
-      l.includes('access') ||
-      l.includes('level') ||
-      l.includes('changed')
-    );
-    return { lines, success };
+
+    // Check for explicit error patterns first
+    const hasError = lines.some(l => {
+      const lower = l.toLowerCase();
+      return lower.includes('denied') ||
+             lower.includes('insufficient') ||
+             lower.includes('no such') ||
+             lower.includes('not found') ||
+             lower.includes('cannot') ||
+             lower.includes('invalid') ||
+             lower.includes('error');
+    });
+
+    // Success: look for positive confirmation patterns
+    // X3 typically says "access level for X changed to Y" or similar
+    const success = !hasError && lines.some(l => {
+      const lower = l.toLowerCase();
+      return (lower.includes('access') && lower.includes('changed')) ||
+             (lower.includes('level') && lower.includes('changed')) ||
+             lower.includes('now has') ||
+             lower.includes('set to');
+    });
+
+    const error = hasError ? lines.find(l => l.toLowerCase().includes('denied') || l.toLowerCase().includes('error')) : undefined;
+    return { lines, success, error };
   }
 
   /**
@@ -717,4 +791,131 @@ export async function createOperClient(nick?: string): Promise<X3Client> {
   }
 
   return client;
+}
+
+/**
+ * Wait for a user to appear in a channel's access list.
+ * Use after ADDUSER to verify the operation completed before proceeding.
+ */
+export async function waitForUserAccess(
+  client: X3Client,
+  channel: string,
+  account: string,
+  expectedLevel?: number,
+  timeoutMs = 5000
+): Promise<boolean> {
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeoutMs) {
+    const accessList = await client.getAccess(channel);
+    const entry = accessList.find(
+      e => e.account.toLowerCase() === account.toLowerCase()
+    );
+
+    if (entry) {
+      if (expectedLevel === undefined || entry.level === expectedLevel) {
+        return true;
+      }
+    }
+
+    await new Promise(r => setTimeout(r, 500));
+  }
+
+  return false;
+}
+
+/**
+ * Wait for a user to have a specific channel mode (op, voice, etc) after joining.
+ *
+ * This handles the timing issue where ChanServ may not grant modes immediately
+ * after a user joins. It checks NAMES with retries to allow ChanServ time to process.
+ *
+ * @param client - The client to use for NAMES queries (should be in the channel)
+ * @param channel - Channel name
+ * @param nick - Nick to check for mode
+ * @param modePrefix - Expected prefix: '@' for op, '+' for voice, '%' for halfop
+ * @param timeoutMs - How long to wait (default 5s)
+ * @returns true if user has expected mode, false on timeout
+ */
+export async function waitForChannelMode(
+  client: X3Client,
+  channel: string,
+  nick: string,
+  modePrefix: '@' | '+' | '%',
+  timeoutMs = 5000
+): Promise<boolean> {
+  const startTime = Date.now();
+  const checkInterval = 300; // Check every 300ms
+  const debug = process.env.DEBUG === '1';
+  let lastNamesResponse = '';
+
+  if (debug) {
+    console.log(`[waitForChannelMode] Looking for ${modePrefix}${nick} in ${channel}, timeout=${timeoutMs}ms`);
+  }
+
+  while (Date.now() - startTime < timeoutMs) {
+    // Send NAMES and check response
+    // Don't clear buffer - we might want to see MODE messages too
+    client.send(`NAMES ${channel}`);
+
+    try {
+      const namesResponse = await client.waitForLine(/353.*:/, 3000);
+      lastNamesResponse = namesResponse;
+
+      // Check if user has the expected prefix
+      // Handle multiple prefixes (e.g., @+nick for op+voice)
+      // Pattern: prefix(es) followed by nick and word boundary or space
+      // Note: + needs to be escaped in regex since it's a quantifier
+      const escapedPrefix = modePrefix === '+' ? '\\+' : modePrefix;
+      const prefixPattern = new RegExp(`[@+%]*${escapedPrefix}[@+%]*${nick}(?:\\s|$)`, 'i');
+
+      if (debug) {
+        console.log(`[waitForChannelMode] NAMES response: ${namesResponse}`);
+        console.log(`[waitForChannelMode] Pattern: ${prefixPattern}, matches: ${prefixPattern.test(namesResponse)}`);
+      }
+
+      if (prefixPattern.test(namesResponse)) {
+        return true;
+      }
+    } catch {
+      // NAMES timeout, will retry
+      if (debug) {
+        console.log(`[waitForChannelMode] NAMES timeout, retrying...`);
+      }
+    }
+
+    // Wait before next check
+    await new Promise(r => setTimeout(r, checkInterval));
+  }
+
+  // Timeout - log final state for debugging
+  console.log(`[waitForChannelMode] TIMEOUT: Looking for ${modePrefix}${nick} in ${channel}`);
+  console.log(`[waitForChannelMode] Last NAMES response: ${lastNamesResponse}`);
+
+  return false;
+}
+
+/**
+ * Wait for an account to be queryable (useful after registration + activation).
+ * Polls auth until it succeeds or returns "Incorrect password" (account exists).
+ */
+export async function waitForAccountExists(
+  client: X3Client,
+  account: string,
+  password: string,
+  timeoutMs = 5000
+): Promise<boolean> {
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeoutMs) {
+    const result = await client.auth(account, password);
+    if (result.success) return true;
+
+    // If wrong password, account exists (just wrong creds)
+    if (result.error?.includes('Incorrect password')) return true;
+
+    await new Promise(r => setTimeout(r, 500));
+  }
+
+  return false;
 }

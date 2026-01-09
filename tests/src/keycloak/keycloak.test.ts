@@ -356,6 +356,38 @@ async function getKeycloakFingerprints(
 }
 
 /**
+ * Helper to get user's channel access level from Keycloak user attributes.
+ * Access levels are stored as user attributes with key "x3.channel.#channelname".
+ */
+async function getUserChannelAccess(
+  adminToken: string,
+  username: string,
+  channelName: string
+): Promise<number | null> {
+  try {
+    const searchResponse = await fetch(
+      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/users?username=${username}&exact=true`,
+      {
+        headers: { 'Authorization': `Bearer ${adminToken}` },
+      }
+    );
+
+    if (!searchResponse.ok) return null;
+
+    const users = await searchResponse.json();
+    if (users.length === 0) return null;
+
+    const user = users[0];
+    // Access levels are stored as x3.channel.#channelname = ["level"]
+    const attrKey = `x3.channel.${channelName}`;
+    const levelStr = user.attributes?.[attrKey]?.[0];
+    return levelStr ? parseInt(levelStr, 10) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Helper to search users by fingerprint
  */
 async function findUserByFingerprint(
@@ -490,7 +522,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
       client.send(`AUTHENTICATE ${payload}`);
 
       // Wait for SASL result - should succeed with proper Keycloak user
-      const result = await client.waitForLine(/90[03]/, 5000);
+      // Increased timeout for slow Keycloak responses
+      const result = await client.waitForLine(/90[03]/, 15000);
       expect(result).toMatch(/90[03]/);
       console.log('SASL PLAIN auth result:', result);
 
@@ -571,7 +604,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
       // Use chunked sending for large OAuth tokens
       await sendSaslPayload(client, payload);
 
-      const result = await client.waitForLine(/90[03]/, 5000);
+      // Increased timeout for slow Keycloak token validation
+      const result = await client.waitForLine(/90[03]/, 15000);
       expect(result).toMatch(/90[03]/);
       console.log('OAUTHBEARER auth result:', result);
 
@@ -1539,7 +1573,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
       client.send('QUIT');
     });
 
-    it('creates group with correct access level for different user levels', async () => {
+    it('sets user attribute with correct access level for added user', async () => {
 
       // Create a second Keycloak user for this test
       const secondUser = `bisyncadd${uniqueId().slice(0,5)}`;
@@ -1606,20 +1640,20 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         // Wait for Keycloak sync
         await new Promise(r => setTimeout(r, 2000));
 
-        // Check the group's access level attribute
-        // Note: The current implementation stores the owner's access level on the group
-        // User-level access would need per-user subgroups or attributes
-        const group = await getChannelGroupWithAttribute(adminToken, channelName);
+        // Check user's access level attribute (x3.channel.#channelname)
+        // Access levels are now stored as per-user attributes, not group attributes
+        const accessLevel = await getUserChannelAccess(adminToken, secondUser, channelName);
 
-        if (group) {
-          console.log(`Channel group: ${channelName.replace('#', '')}`);
-          console.log('Group attributes:', JSON.stringify(group.attributes, null, 2));
-
-          // This verifies the group exists - the access level tracking approach
-          // may vary based on implementation (group attribute vs subgroups)
-          expect(group.id).toBeDefined();
+        if (accessLevel !== null) {
+          console.log(`User ${secondUser} access level for ${channelName}: ${accessLevel}`);
+          expect(accessLevel).toBe(200);
         } else {
-          console.log('Group not found - bidirectional sync may not be enabled');
+          console.log('User access level attribute not found - bidirectional sync may not be enabled');
+          // Still verify the channel group exists for membership tracking
+          const group = await getChannelGroupWithAttribute(adminToken, channelName);
+          if (group) {
+            console.log(`Channel group exists: ${group.id}`);
+          }
         }
 
         // Cleanup - use proper unregister with confirmation code
@@ -1633,7 +1667,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
   });
 
   describe('CLVL updates Keycloak access level', () => {
-    it('updates group attribute when access level changed', async () => {
+    it('updates user attribute when access level changed', async () => {
 
       // Create a second Keycloak user
       const secondUser = `bisyncclvl${uniqueId().slice(0,5)}`;
@@ -1682,10 +1716,9 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         ownerClient.send(`PRIVMSG ChanServ :ADDUSER ${channelName} *${secondUser} 100`);
         await new Promise(r => setTimeout(r, 2000));
 
-        // Get initial state
-        let group = await getChannelGroupWithAttribute(adminToken, channelName);
-        const initialAccessLevel = group?.attributes?.x3_access_level?.[0];
-        console.log(`Initial access level attribute: ${initialAccessLevel || 'not set'}`);
+        // Get initial user access level from user attribute (x3.channel.#channelname)
+        let initialAccessLevel = await getUserChannelAccess(adminToken, secondUser, channelName);
+        console.log(`Initial user access level: ${initialAccessLevel ?? 'not set'}`);
 
         // Change access level to 300 - use *username prefix for account lookup
         ownerClient.send(`PRIVMSG ChanServ :CLVL ${channelName} *${secondUser} 300`);
@@ -1700,14 +1733,11 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         // Wait for sync
         await new Promise(r => setTimeout(r, 2000));
 
-        // Check updated access level
-        group = await getChannelGroupWithAttribute(adminToken, channelName);
-        if (group?.attributes?.x3_access_level) {
-          const newAccessLevel = group.attributes.x3_access_level[0];
-          console.log(`Updated access level attribute: ${newAccessLevel}`);
-          // Note: The implementation may store the last modified user's level
-          // or use a different strategy
-          expect(parseInt(newAccessLevel)).toBeGreaterThan(0);
+        // Check updated access level from user attribute
+        const newAccessLevel = await getUserChannelAccess(adminToken, secondUser, channelName);
+        if (newAccessLevel !== null) {
+          console.log(`Updated user access level: ${newAccessLevel}`);
+          expect(newAccessLevel).toBe(300);
         } else {
           console.log('Access level attribute not found after CLVL');
         }
@@ -1770,10 +1800,13 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         ownerClient.send(`PRIVMSG ChanServ :ADDUSER ${channelName} *${secondUser} 200`);
         await new Promise(r => setTimeout(r, 2000));
 
-        // Verify group exists before delete
-        let group = await getChannelGroupWithAttribute(adminToken, channelName);
-        if (group) {
-          console.log(`Group exists before DELUSER: ${channelName.replace('#', '')}`);
+        // Verify user attribute exists before delete
+        let accessLevel = await getUserChannelAccess(adminToken, secondUser, channelName);
+        if (accessLevel !== null) {
+          console.log(`User ${secondUser} has access level ${accessLevel} before DELUSER`);
+          expect(accessLevel).toBe(200);
+        } else {
+          console.log('User access attribute not set before DELUSER');
         }
 
         // Delete user from channel - use *username prefix for account lookup
@@ -1789,13 +1822,19 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         // Wait for sync
         await new Promise(r => setTimeout(r, 2000));
 
-        // The group should still exist (for other users), but user membership may be updated
-        // Depending on implementation, this could:
-        // 1. Remove user from group membership
-        // 2. Remove user's subgroup
-        // 3. Update group attributes
-        group = await getChannelGroupWithAttribute(adminToken, channelName);
-        console.log('Group after DELUSER:', group ? 'exists' : 'deleted');
+        // The user's access attribute should be removed after DELUSER
+        accessLevel = await getUserChannelAccess(adminToken, secondUser, channelName);
+        if (accessLevel === null) {
+          console.log(`User ${secondUser} access attribute removed - DELUSER synced correctly`);
+        } else {
+          console.log(`User ${secondUser} still has access level ${accessLevel} after DELUSER`);
+        }
+        // Attribute should be null after deletion
+        expect(accessLevel).toBeNull();
+
+        // The channel group should still exist (for other users)
+        const group = await getChannelGroupWithAttribute(adminToken, channelName);
+        console.log('Channel group after DELUSER:', group ? 'exists' : 'deleted');
 
         // Cleanup - use proper unregister with confirmation code
         await unregisterChannel(ownerClient, channelName);

@@ -86,3 +86,126 @@ export function uniqueChannel(prefix = 'test'): string {
 export function uniqueNick(prefix = 'user'): string {
   return `${prefix}${uniqueId().slice(0, 5)}`;
 }
+
+/**
+ * Retry an async operation with exponential backoff.
+ * Useful for operations that may fail due to timing issues.
+ *
+ * @param fn - Async function to retry
+ * @param options - Retry options
+ * @returns Result of successful operation
+ * @throws Last error if all retries fail
+ */
+export async function retryAsync<T>(
+  fn: () => Promise<T>,
+  options: {
+    maxRetries?: number;
+    initialDelayMs?: number;
+    maxDelayMs?: number;
+    shouldRetry?: (error: unknown) => boolean;
+  } = {}
+): Promise<T> {
+  const {
+    maxRetries = 3,
+    initialDelayMs = 100,
+    maxDelayMs = 2000,
+    shouldRetry = () => true,
+  } = options;
+
+  let lastError: unknown;
+  let delay = initialDelayMs;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+
+      if (attempt === maxRetries || !shouldRetry(error)) {
+        throw error;
+      }
+
+      await new Promise(r => setTimeout(r, delay));
+      delay = Math.min(delay * 2, maxDelayMs);
+    }
+  }
+
+  throw lastError;
+}
+
+/**
+ * Wait for a condition to be true with polling.
+ * More resilient than fixed delays for async operations.
+ *
+ * @param condition - Function that returns true when condition is met
+ * @param options - Polling options
+ * @returns Result of condition function when true
+ * @throws Error if timeout is reached
+ */
+export async function waitForCondition<T>(
+  condition: () => Promise<T | null | undefined | false>,
+  options: {
+    timeoutMs?: number;
+    pollIntervalMs?: number;
+    description?: string;
+  } = {}
+): Promise<T> {
+  const {
+    timeoutMs = 10000,
+    pollIntervalMs = 100,
+    description = 'condition',
+  } = options;
+
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeoutMs) {
+    const result = await condition();
+    if (result) {
+      return result;
+    }
+    await new Promise(r => setTimeout(r, pollIntervalMs));
+  }
+
+  throw new Error(`Timeout waiting for ${description} after ${timeoutMs}ms`);
+}
+
+/**
+ * Collect messages from a chathistory BATCH response with proper timeout handling.
+ * Fixes nested timeout cascade issue where BATCH arriving late leaves insufficient
+ * time for message collection.
+ */
+export async function collectChathistoryBatch(
+  client: { waitForLine: (pattern: RegExp, timeout?: number) => Promise<string> },
+  options: {
+    batchTimeout?: number;
+    messageTimeout?: number;
+  } = {}
+): Promise<{ batchId: string; messages: string[] }> {
+  const { batchTimeout = 8000, messageTimeout = 3000 } = options;
+
+  // Wait for batch start with full timeout
+  const batchStart = await client.waitForLine(/BATCH \+(\S+) chathistory/i, batchTimeout);
+  const batchMatch = batchStart.match(/BATCH \+(\S+)/);
+  if (!batchMatch) {
+    throw new Error('Failed to parse batch ID from: ' + batchStart);
+  }
+  const batchId = batchMatch[1];
+
+  // Collect messages until batch end with separate timeout budget
+  const messages: string[] = [];
+  const collectionStart = Date.now();
+  const maxCollectionTime = 30000; // Hard limit prevents infinite loops
+
+  while (Date.now() - collectionStart < maxCollectionTime) {
+    try {
+      const line = await client.waitForLine(/PRIVMSG|NOTICE|BATCH -/i, messageTimeout);
+      if (line.includes('BATCH -')) break;
+      if (/PRIVMSG|NOTICE/.test(line)) messages.push(line);
+    } catch {
+      // Timeout = no more messages in batch
+      break;
+    }
+  }
+
+  return { batchId, messages };
+}

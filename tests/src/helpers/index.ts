@@ -29,6 +29,9 @@ export {
   uniqueId,
   uniqueChannel,
   uniqueNick,
+  retryAsync,
+  waitForCondition,
+  collectChathistoryBatch,
   type CapBundle,
 } from './cap-bundles.js';
 
@@ -140,6 +143,10 @@ export {
   createAuthenticatedX3Client,
   createTestAccount,
   createOperClient,
+  // State verification helpers
+  waitForUserAccess,
+  waitForAccountExists,
+  waitForChannelMode,
   // Access level constants
   ACCESS_LEVELS,
   // Admin/Oper credentials
