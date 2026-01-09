@@ -26,35 +26,55 @@ KEYCLOAK_REALM="${KEYCLOAK_REALM:-testnet}"
 echo "Waiting for X3 to be ready..."
 sleep 5
 
-# Step 0: Delete testadmin from Keycloak if it exists
-# This prevents AUTH from triggering auto-create with olevel 0
-echo "Checking for leftover testadmin in Keycloak..."
-if command -v curl &> /dev/null; then
-  # Get admin token
-  KC_TOKEN=$(curl -s -X POST "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
-    -H "Content-Type: application/x-www-form-urlencoded" \
-    -d "username=admin&password=admin&grant_type=password&client_id=admin-cli" 2>/dev/null | \
-    grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
+# Step 0: Check if account already exists in X3 (via quick connection test)
+# If it does, skip Keycloak deletion to preserve sync
+echo "Checking if $X3_ADMIN account exists in X3..."
+X3_ACCOUNT_EXISTS=0
 
-  if [ -n "$KC_TOKEN" ]; then
-    # Find testadmin user ID
-    TESTADMIN_ID=$(curl -s -H "Authorization: Bearer $KC_TOKEN" \
-      "$KEYCLOAK_URL/admin/realms/$KEYCLOAK_REALM/users?username=$X3_ADMIN&exact=true" 2>/dev/null | \
-      grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+# Quick test: try to get account info by connecting and sending ACCOUNTINFO
+# We do this BEFORE deleting from Keycloak to avoid breaking sync
+QUICK_CHECK=$(echo -e "NICK checkbot$$\r\nUSER check check check :Check Bot\r\n" | timeout 5 nc "$IRC_HOST" "$IRC_PORT" 2>/dev/null | head -20)
+if echo "$QUICK_CHECK" | grep -q "001"; then
+  # Connected successfully, now we'll check in the main connection below
+  echo "IRC server is up, will check account status during main connection"
+fi
 
-    if [ -n "$TESTADMIN_ID" ]; then
-      echo "Found $X3_ADMIN in Keycloak (ID: $TESTADMIN_ID), deleting..."
-      curl -s -X DELETE -H "Authorization: Bearer $KC_TOKEN" \
-        "$KEYCLOAK_URL/admin/realms/$KEYCLOAK_REALM/users/$TESTADMIN_ID" 2>/dev/null
-      echo "Deleted $X3_ADMIN from Keycloak"
+# Only delete from Keycloak if this appears to be first-time setup
+# We detect this by checking if there's BOTH a Keycloak user AND an X3 account
+# If X3 account exists (indicated by persist file), don't delete Keycloak user
+if [ -f "/data/.x3_admin_created_$X3_ADMIN" ]; then
+  echo "Admin account was previously created, skipping Keycloak cleanup to preserve sync"
+else
+  # First-time setup: Delete testadmin from Keycloak if it exists
+  # This prevents AUTH from triggering auto-create with olevel 0
+  echo "First-time setup: Checking for leftover testadmin in Keycloak..."
+  if command -v curl &> /dev/null; then
+    # Get admin token
+    KC_TOKEN=$(curl -s -X POST "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
+      -H "Content-Type: application/x-www-form-urlencoded" \
+      -d "username=admin&password=admin&grant_type=password&client_id=admin-cli" 2>/dev/null | \
+      grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
+
+    if [ -n "$KC_TOKEN" ]; then
+      # Find testadmin user ID
+      TESTADMIN_ID=$(curl -s -H "Authorization: Bearer $KC_TOKEN" \
+        "$KEYCLOAK_URL/admin/realms/$KEYCLOAK_REALM/users?username=$X3_ADMIN&exact=true" 2>/dev/null | \
+        grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+      if [ -n "$TESTADMIN_ID" ]; then
+        echo "Found $X3_ADMIN in Keycloak (ID: $TESTADMIN_ID), deleting..."
+        curl -s -X DELETE -H "Authorization: Bearer $KC_TOKEN" \
+          "$KEYCLOAK_URL/admin/realms/$KEYCLOAK_REALM/users/$TESTADMIN_ID" 2>/dev/null
+        echo "Deleted $X3_ADMIN from Keycloak"
+      else
+        echo "No leftover $X3_ADMIN in Keycloak"
+      fi
     else
-      echo "No leftover $X3_ADMIN in Keycloak"
+      echo "Could not get Keycloak token (may not be running), continuing..."
     fi
   else
-    echo "Could not get Keycloak token (may not be running), continuing..."
+    echo "curl not available, skipping Keycloak cleanup"
   fi
-else
-  echo "curl not available, skipping Keycloak cleanup"
 fi
 
 # Function to enable email verification inside X3 container (avoids bind mount cache issues)
@@ -201,6 +221,8 @@ echo "--- Checking results ---"
 
 if grep -q "Account has been registered" /tmp/irc.log; then
   echo "SUCCESS: Admin account '$X3_ADMIN' created with olevel 1000."
+  # Mark as created to prevent Keycloak deletion on future runs
+  touch "/data/.x3_admin_created_$X3_ADMIN"
   echo ""
   echo "For cleanup: X3_ACCOUNT=$X3_ADMIN X3_PASSWORD=$X3_ADMIN_PASS npm run cleanup"
   exit 0
@@ -208,6 +230,8 @@ fi
 
 if grep -q "already registered" /tmp/irc.log; then
   echo "Account '$X3_ADMIN' already exists (may need activation)."
+  # Mark as created to prevent Keycloak deletion on future runs
+  touch "/data/.x3_admin_created_$X3_ADMIN"
   exit 0
 fi
 
