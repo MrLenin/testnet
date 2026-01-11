@@ -4,7 +4,7 @@
  * Tests X3 AuthServ functionality:
  * - Account registration
  * - Authentication
- * - User settings (USET)
+ * - User settings (SET)
  * - Hostmask management
  *
  * AuthServ Communication:
@@ -191,25 +191,24 @@ describe('AuthServ', () => {
     });
   });
 
-  describe('USET (User Settings)', () => {
+  describe('SET (User Settings)', () => {
     it('should allow setting user preferences after authentication', async () => {
       const client = trackClient(await createX3Client());
       const { account, password, email } = await createTestAccount();
 
-      // Register and activate
+      // Register and activate (also authenticates via COOKIE)
       const regResult = await client.registerAndActivate(account, password, email);
+      expect(regResult.success).toBe(true);
 
-      if (regResult.success) {
-        const authResult = await client.auth(account, password);
+      // Try to set a preference (STYLE is a valid SET option)
+      const setResult = await client.setUserOption('STYLE', 'def');
+      console.log('SET STYLE response:', setResult.lines);
 
-        if (authResult.success) {
-          // Try to set a preference
-          const usetResult = await client.uset('STYLE', 'def');
-
-          expect(usetResult.lines.length).toBeGreaterThan(0);
-          console.log('USET response:', usetResult.lines);
-        }
-      }
+      expect(setResult.lines.length).toBeGreaterThan(0);
+      // Should succeed or report current value
+      expect(setResult.lines.some(l =>
+        l.includes('STYLE') || l.includes('style') || l.includes('set')
+      )).toBe(true);
     });
   });
 
@@ -266,22 +265,23 @@ describe('AuthServ', () => {
       console.log('VERSION response:', lines);
     });
 
-    it('should respond to LISTMASKS command (when authenticated)', async () => {
+    it('should show hostmasks via ACCOUNTINFO command (when authenticated)', async () => {
       const client = trackClient(await createX3Client());
       const { account, password, email } = await createTestAccount();
 
+      // Register and activate (also authenticates via COOKIE)
       const regResult = await client.registerAndActivate(account, password, email);
+      expect(regResult.success).toBe(true);
 
-      if (regResult.success) {
-        const authResult = await client.auth(account, password);
+      // ACCOUNTINFO shows account details including hostmasks
+      const lines = await client.serviceCmd('AuthServ', 'ACCOUNTINFO');
+      console.log('ACCOUNTINFO response:', lines);
 
-        if (authResult.success) {
-          const lines = await client.serviceCmd('AuthServ', 'LISTMASKS');
-
-          expect(lines.length).toBeGreaterThan(0);
-          console.log('LISTMASKS response:', lines);
-        }
-      }
+      expect(lines.length).toBeGreaterThan(0);
+      // Should show account information
+      expect(lines.some(l =>
+        l.includes('Account') || l.includes('Hostmask') || l.includes('mask')
+      )).toBe(true);
     });
   });
 
