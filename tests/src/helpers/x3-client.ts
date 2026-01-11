@@ -206,9 +206,12 @@ export class X3Client extends RawSocketClient {
   /**
    * Activate an account using a cookie.
    * For ACTIVATION cookies, password is required (verifies original registration password).
+   * Uses 20s timeout because Keycloak async operations can take 10-15s.
    */
   async activateAccount(account: string, cookie: string, password: string): Promise<ServiceResponse> {
-    const lines = await this.serviceCmd('AuthServ', `COOKIE ${account} ${cookie} ${password}`);
+    // Keycloak async flow: token validation -> user lookup -> account update
+    // This can take 10-15s, so use 20s timeout instead of default 10s
+    const lines = await this.serviceCmd('AuthServ', `COOKIE ${account} ${cookie} ${password}`, 20000);
     const success = lines.some(l =>
       l.includes('activated') ||
       l.includes('Account activated') ||
