@@ -33,7 +33,7 @@ describe('Error Conditions', () => {
       await client.capLs();
       client.capEnd();
       client.register('erruser1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -52,7 +52,7 @@ describe('Error Conditions', () => {
       await client.capLs();
       client.capEnd();
       client.register('erruser2');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -71,7 +71,7 @@ describe('Error Conditions', () => {
       await client.capLs();
       client.capEnd();
       client.register('erruser3');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -90,7 +90,7 @@ describe('Error Conditions', () => {
       await client.capLs();
       client.capEnd();
       client.register('erruser4');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -109,7 +109,7 @@ describe('Error Conditions', () => {
       await client.capLs();
       client.capEnd();
       client.register('erruser5');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -130,7 +130,7 @@ describe('Error Conditions', () => {
       await client.capLs();
       client.capEnd();
       client.register('erruser6');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -150,7 +150,7 @@ describe('Error Conditions', () => {
       await client.capLs();
       client.capEnd();
       client.register('erruser7');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -169,7 +169,7 @@ describe('Error Conditions', () => {
       await client.capLs();
       client.capEnd();
       client.register('erruser8');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -191,11 +191,11 @@ describe('Error Conditions', () => {
       await client.capLs();
       client.capEnd();
       client.register('erruser9');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Join a different channel
       client.send('JOIN #otherchannel');
-      await client.waitForLine(/JOIN.*#otherchannel/i);
+      await client.waitForJoin('#otherchannel');
 
       client.clearRawBuffer();
 
@@ -217,17 +217,17 @@ describe('Error Conditions', () => {
       await client.capLs();
       client.capEnd();
       client.register('erruser10');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       await target.capLs();
       target.capEnd();
       target.register('kicktarget1');
-      await target.waitForLine(/001/);
+      await target.waitForNumeric('001');
 
       // Target joins a channel
       const channel = uniqueChannel('kicknoton');
       target.send(`JOIN ${channel}`);
-      await target.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await target.waitForJoin(channel);
 
       client.clearRawBuffer();
 
@@ -252,26 +252,26 @@ describe('Error Conditions', () => {
       await op.capLs();
       op.capEnd();
       op.register('chanop1');
-      await op.waitForLine(/001/);
+      await op.waitForNumeric('001');
 
       await user1.capLs();
       user1.capEnd();
       user1.register('nonop1');
-      await user1.waitForLine(/001/);
+      await user1.waitForNumeric('001');
 
       await user2.capLs();
       user2.capEnd();
       user2.register('target1');
-      await user2.waitForLine(/001/);
+      await user2.waitForNumeric('001');
 
       const channel = uniqueChannel('opneeded');
       op.send(`JOIN ${channel}`);
-      await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await op.waitForJoin(channel);
 
       user1.send(`JOIN ${channel}`);
       user2.send(`JOIN ${channel}`);
-      await user1.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await user2.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await user1.waitForJoin(channel);
+      await user2.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       user1.clearRawBuffer();
@@ -296,26 +296,26 @@ describe('Error Conditions', () => {
       await op.capLs();
       op.capEnd();
       op.register('chanop2');
-      await op.waitForLine(/001/);
+      await op.waitForNumeric('001');
 
       await user.capLs();
       user.capEnd();
       user.register('nonop2');
-      await user.waitForLine(/001/);
+      await user.waitForNumeric('001');
 
       await target.capLs();
       target.capEnd();
       target.register('target2');
-      await target.waitForLine(/001/);
+      await target.waitForNumeric('001');
 
       const channel = uniqueChannel('kickprivs');
       op.send(`JOIN ${channel}`);
-      await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await op.waitForJoin(channel);
 
       user.send(`JOIN ${channel}`);
       target.send(`JOIN ${channel}`);
-      await user.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await target.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await user.waitForJoin(channel);
+      await target.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       user.clearRawBuffer();
@@ -341,16 +341,16 @@ describe('Error Conditions', () => {
       await op.capLs();
       op.capEnd();
       op.register('kickop1');
-      await op.waitForLine(/001/);
+      await op.waitForNumeric('001');
 
       await outside.capLs();
       outside.capEnd();
       outside.register('outside1');
-      await outside.waitForLine(/001/);
+      await outside.waitForNumeric('001');
 
       const channel = uniqueChannel('kicknothere');
       op.send(`JOIN ${channel}`);
-      await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await op.waitForJoin(channel);
 
       // outside does NOT join the channel
 
@@ -376,7 +376,7 @@ describe('Error Conditions', () => {
       await client1.capLs();
       client1.capEnd();
       client1.register('takenname');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       await client2.capLs();
       client2.capEnd();
@@ -403,7 +403,7 @@ describe('Error Conditions', () => {
       await client.capLs();
       client.capEnd();
       client.register('msguser1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -422,7 +422,7 @@ describe('Error Conditions', () => {
       await client.capLs();
       client.capEnd();
       client.register('whoisuser1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -444,16 +444,16 @@ describe('Error Conditions', () => {
       await op.capLs();
       op.capEnd();
       op.register('inviteop1');
-      await op.waitForLine(/001/);
+      await op.waitForNumeric('001');
 
       await user.capLs();
       user.capEnd();
       user.register('inviteuser1');
-      await user.waitForLine(/001/);
+      await user.waitForNumeric('001');
 
       const channel = uniqueChannel('inviteonly');
       op.send(`JOIN ${channel}`);
-      await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await op.waitForJoin(channel);
 
       // Set +i (invite only)
       op.send(`MODE ${channel} +i`);
@@ -481,16 +481,16 @@ describe('Error Conditions', () => {
       await op.capLs();
       op.capEnd();
       op.register('limitop1');
-      await op.waitForLine(/001/);
+      await op.waitForNumeric('001');
 
       await user.capLs();
       user.capEnd();
       user.register('limituser1');
-      await user.waitForLine(/001/);
+      await user.waitForNumeric('001');
 
       const channel = uniqueChannel('limited');
       op.send(`JOIN ${channel}`);
-      await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await op.waitForJoin(channel);
 
       // Set limit to 1
       op.send(`MODE ${channel} +l 1`);
@@ -518,16 +518,16 @@ describe('Error Conditions', () => {
       await op.capLs();
       op.capEnd();
       op.register('banop1');
-      await op.waitForLine(/001/);
+      await op.waitForNumeric('001');
 
       await user.capLs();
       user.capEnd();
       user.register('banned1');
-      await user.waitForLine(/001/);
+      await user.waitForNumeric('001');
 
       const channel = uniqueChannel('banned');
       op.send(`JOIN ${channel}`);
-      await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await op.waitForJoin(channel);
 
       // Ban the user
       op.send(`MODE ${channel} +b banned1!*@*`);
@@ -555,16 +555,16 @@ describe('Error Conditions', () => {
       await op.capLs();
       op.capEnd();
       op.register('keyop1');
-      await op.waitForLine(/001/);
+      await op.waitForNumeric('001');
 
       await user.capLs();
       user.capEnd();
       user.register('keyuser1');
-      await user.waitForLine(/001/);
+      await user.waitForNumeric('001');
 
       const channel = uniqueChannel('keyed');
       op.send(`JOIN ${channel}`);
-      await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await op.waitForJoin(channel);
 
       // Set channel key
       op.send(`MODE ${channel} +k secretkey`);
@@ -592,16 +592,16 @@ describe('Error Conditions', () => {
       await inside.capLs();
       inside.capEnd();
       inside.register('inside1');
-      await inside.waitForLine(/001/);
+      await inside.waitForNumeric('001');
 
       await outside.capLs();
       outside.capEnd();
       outside.register('outside2');
-      await outside.waitForLine(/001/);
+      await outside.waitForNumeric('001');
 
       const channel = uniqueChannel('noexternal');
       inside.send(`JOIN ${channel}`);
-      await inside.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await inside.waitForJoin(channel);
 
       // Ensure +n is set (default usually)
       inside.send(`MODE ${channel} +n`);

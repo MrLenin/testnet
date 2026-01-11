@@ -41,7 +41,7 @@ async function createRegisteredClient(server: typeof PRIMARY_SERVER, nick: strin
   await client.capLs();
   client.capEnd();
   client.register(nick);
-  await client.waitForLine(/001/, 5000);
+  await client.waitForNumeric('001', 5000);
   return client;
 }
 
@@ -265,14 +265,14 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
       const primary = trackClient(await createRegisteredClient(PRIMARY_SERVER, nick1));
 
       primary.send(`JOIN ${channel}`);
-      await primary.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+      await primary.waitForJoin(channel, undefined, 5000);
 
       // Create client on secondary server
       const secondary = trackClient(await createRegisteredClient(SECONDARY_SERVER, nick2));
 
       // Join the same channel from secondary
       secondary.send(`JOIN ${channel}`);
-      const joinResponse = await secondary.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+      const joinResponse = await secondary.waitForJoin(channel, undefined, 5000);
       expect(joinResponse).toContain(channel);
 
       // Verify both users see each other in NAMES
@@ -292,7 +292,7 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
       const primary = trackClient(await createRegisteredClient(PRIMARY_SERVER, nick1));
 
       primary.send(`JOIN ${channel}`);
-      await primary.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+      await primary.waitForJoin(channel, undefined, 5000);
 
       // Set modes on primary
       primary.send(`MODE ${channel} +nt`);
@@ -308,7 +308,7 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
       const secondary = trackClient(await createRegisteredClient(SECONDARY_SERVER, nick2));
 
       secondary.send(`JOIN ${channel}`);
-      await secondary.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+      await secondary.waitForJoin(channel, undefined, 5000);
 
       secondary.send(`MODE ${channel}`);
       const modeResponse = await secondary.waitForLine(/324.*\+/, 5000);
@@ -326,13 +326,13 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
       const primary = trackClient(await createRegisteredClient(PRIMARY_SERVER, opNick));
 
       primary.send(`JOIN ${channel}`);
-      await primary.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+      await primary.waitForJoin(channel, undefined, 5000);
 
       // Create second user on primary to give voice
       const voice = trackClient(await createRegisteredClient(PRIMARY_SERVER, voiceNick));
 
       voice.send(`JOIN ${channel}`);
-      await voice.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+      await voice.waitForJoin(channel, undefined, 5000);
 
       // Give voice
       primary.send(`MODE ${channel} +v ${voiceNick}`);
@@ -342,7 +342,7 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
       const secondary = trackClient(await createRegisteredClient(SECONDARY_SERVER, observerNick));
 
       secondary.send(`JOIN ${channel}`);
-      await secondary.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+      await secondary.waitForJoin(channel, undefined, 5000);
 
       secondary.send(`NAMES ${channel}`);
       const namesResponse = await secondary.waitForLine(/353/, 5000);
@@ -363,7 +363,7 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
       const primary = trackClient(await createRegisteredClient(PRIMARY_SERVER, nick1));
 
       primary.send(`JOIN ${channel}`);
-      await primary.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+      await primary.waitForJoin(channel, undefined, 5000);
 
       primary.send(`MODE ${channel} +b ${banMask}`);
       await primary.waitForLine(/MODE.*\+b/i, 5000);
@@ -372,7 +372,7 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
       const secondary = trackClient(await createRegisteredClient(SECONDARY_SERVER, nick2));
 
       secondary.send(`JOIN ${channel}`);
-      await secondary.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+      await secondary.waitForJoin(channel, undefined, 5000);
 
       secondary.send(`MODE ${channel} +b`);
 
@@ -393,7 +393,7 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
       const primary = trackClient(await createRegisteredClient(PRIMARY_SERVER, nick1));
 
       primary.send(`JOIN ${channel}`);
-      await primary.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+      await primary.waitForJoin(channel, undefined, 5000);
 
       // Wait a bit before joining from secondary
       await new Promise(r => setTimeout(r, 500));
@@ -402,7 +402,7 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
       const secondary = trackClient(await createRegisteredClient(SECONDARY_SERVER, nick2));
 
       secondary.send(`JOIN ${channel}`);
-      await secondary.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+      await secondary.waitForJoin(channel, undefined, 5000);
 
       // Both servers should report consistent creation time
       // (We can't easily access TS directly, but modes should be consistent)
@@ -430,7 +430,7 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
       for (const nick of primaryNicks) {
         const client = trackClient(await createRegisteredClient(PRIMARY_SERVER, nick));
         client.send(`JOIN ${channel}`);
-        await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+        await client.waitForJoin(channel, undefined, 5000);
         primaryClients.push(client);
       }
 
@@ -439,7 +439,7 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
       for (const nick of secondaryNicks) {
         const client = trackClient(await createRegisteredClient(SECONDARY_SERVER, nick));
         client.send(`JOIN ${channel}`);
-        await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+        await client.waitForJoin(channel, undefined, 5000);
         secondaryClients.push(client);
       }
 
@@ -470,12 +470,12 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
       // Create user on primary
       const primary = trackClient(await createRegisteredClient(PRIMARY_SERVER, nick1));
       primary.send(`JOIN ${channel}`);
-      await primary.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+      await primary.waitForJoin(channel, undefined, 5000);
 
       // Create user on secondary
       const secondary = trackClient(await createRegisteredClient(SECONDARY_SERVER, nick2));
       secondary.send(`JOIN ${channel}`);
-      await secondary.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+      await secondary.waitForJoin(channel, undefined, 5000);
 
       // WHO from secondary should show primary user
       secondary.send(`WHO ${channel}`);
@@ -514,7 +514,7 @@ describe.skipIf(!secondaryAvailable)('P10 Log Inspection', () => {
     const client = trackClient(await createRegisteredClient(PRIMARY_SERVER, nick));
 
     client.send(`JOIN ${channel}`);
-    await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+    await client.waitForJoin(channel, undefined, 5000);
 
     // Try to get P10 logs (may or may not capture depending on server debug level)
     const logs = await getP10Logs('nefarious', undefined, '1m');
