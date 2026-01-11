@@ -57,7 +57,7 @@ describe('IRCv3 setname', () => {
       await client.capReq(['setname']);
       client.capEnd();
       client.register('snchange1', 'snuser', 'Original Realname');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -79,19 +79,19 @@ describe('IRCv3 setname', () => {
       await changer.capReq(['setname']);
       changer.capEnd();
       changer.register('snchanger1');
-      await changer.waitForLine(/001/);
+      await changer.waitForNumeric('001');
 
       await observer.capLs();
       await observer.capReq(['setname']);
       observer.capEnd();
       observer.register('snobserver1');
-      await observer.waitForLine(/001/);
+      await observer.waitForNumeric('001');
 
       const channel = uniqueChannel('snnotify');
       changer.send(`JOIN ${channel}`);
       observer.send(`JOIN ${channel}`);
-      await changer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await observer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await changer.waitForJoin(channel);
+      await observer.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       observer.clearRawBuffer();
@@ -115,7 +115,7 @@ describe('IRCv3 setname', () => {
       await client.capReq(['setname']);
       client.capEnd();
       client.register('snwhois1', 'snuser', 'Initial Name');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Change name
       client.send('SETNAME :WHOIS Test Name');
@@ -141,20 +141,20 @@ describe('IRCv3 setname', () => {
       await changer.capReq(['setname']);
       changer.capEnd();
       changer.register('snnocap1');
-      await changer.waitForLine(/001/);
+      await changer.waitForNumeric('001');
 
       // Observer does NOT enable setname
       await observer.capLs();
       await observer.capReq(['multi-prefix']);
       observer.capEnd();
       observer.register('snnocapobs1');
-      await observer.waitForLine(/001/);
+      await observer.waitForNumeric('001');
 
       const channel = uniqueChannel('snnocap');
       changer.send(`JOIN ${channel}`);
       observer.send(`JOIN ${channel}`);
-      await changer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await observer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await changer.waitForJoin(channel);
+      await observer.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       observer.clearRawBuffer();
@@ -185,7 +185,7 @@ describe('IRCv3 setname', () => {
       await client.capReq(['setname']);
       client.capEnd();
       client.register('snempty1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -210,7 +210,7 @@ describe('IRCv3 setname', () => {
       await client.capReq(['setname']);
       client.capEnd();
       client.register('snlong1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -279,7 +279,7 @@ describe('IRCv3 chghost', () => {
       await client.capReq(['chghost']);
       client.capEnd();
       client.register('chown1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // chghost capability is enabled - actual host changes require special setup
       expect(client.hasCapEnabled('chghost')).toBe(true);
@@ -296,7 +296,7 @@ describe('IRCv3 chghost', () => {
       await observer.capReq(['chghost']);
       observer.capEnd();
       observer.register('chobs1');
-      await observer.waitForLine(/001/);
+      await observer.waitForNumeric('001');
 
       // Can't easily trigger CHGHOST without oper/services
       // This verifies capability setup
@@ -315,7 +315,7 @@ describe('IRCv3 chghost', () => {
       await client.capReq(['multi-prefix']);
       client.capEnd();
       client.register('nochg1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       expect(client.hasCapEnabled('chghost')).toBe(false);
 
@@ -376,7 +376,7 @@ describe('IRCv3 account-tag', () => {
       await receiver.capReq(['account-tag']);
       receiver.capEnd();
       receiver.register('atrecv1');
-      await receiver.waitForLine(/001/);
+      await receiver.waitForNumeric('001');
 
       expect(receiver.hasCapEnabled('account-tag')).toBe(true);
 
@@ -390,19 +390,19 @@ describe('IRCv3 account-tag', () => {
       await sender.capLs();
       sender.capEnd();
       sender.register('atsend1');
-      await sender.waitForLine(/001/);
+      await sender.waitForNumeric('001');
 
       await receiver.capLs();
       await receiver.capReq(['account-tag']);
       receiver.capEnd();
       receiver.register('atrecv2');
-      await receiver.waitForLine(/001/);
+      await receiver.waitForNumeric('001');
 
       const channel = uniqueChannel('attag');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
-      await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await receiver.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await sender.waitForJoin(channel);
+      await receiver.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       receiver.clearRawBuffer();
@@ -464,7 +464,7 @@ describe('IRCv3 batch', () => {
       await client.capReq(['batch']);
       client.capEnd();
       client.register('batchpair1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       expect(client.hasCapEnabled('batch')).toBe(true);
 
@@ -481,7 +481,7 @@ describe('IRCv3 batch', () => {
       await client.capReq(['batch']);
       client.capEnd();
       client.register('batchnest1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Batches can be nested - inner batch references outer
       expect(client.hasCapEnabled('batch')).toBe(true);
@@ -499,7 +499,7 @@ describe('IRCv3 batch', () => {
       await client.capReq(['batch']);
       client.capEnd();
       client.register('batchnj1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       expect(client.hasCapEnabled('batch')).toBe(true);
 
@@ -514,7 +514,7 @@ describe('IRCv3 batch', () => {
       await client.capReq(['batch']);
       client.capEnd();
       client.register('batchns1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       expect(client.hasCapEnabled('batch')).toBe(true);
 

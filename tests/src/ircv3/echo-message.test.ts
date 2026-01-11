@@ -64,11 +64,11 @@ describe('IRCv3 Echo Message', () => {
       await client.capReq(['echo-message']);
       client.capEnd();
       client.register('echomsg1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channelName = uniqueChannel('echo');
       client.send(`JOIN ${channelName}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client.waitForJoin(channelName);
 
       const testMsg = `Echo test ${uniqueId()}`;
       client.send(`PRIVMSG ${channelName} :${testMsg}`);
@@ -89,12 +89,12 @@ describe('IRCv3 Echo Message', () => {
       await client1.capReq(['echo-message']);
       client1.capEnd();
       client1.register('echosend1');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       await client2.capLs();
       client2.capEnd();
       client2.register('echorecv1');
-      await client2.waitForLine(/001/);
+      await client2.waitForNumeric('001');
 
       const testMsg = `Private echo ${uniqueId()}`;
       client1.send(`PRIVMSG echorecv1 :${testMsg}`);
@@ -115,11 +115,11 @@ describe('IRCv3 Echo Message', () => {
       await client.capReq(CAP_BUNDLES.messaging);
       client.capEnd();
       client.register('echotime1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channelName = uniqueChannel('echotime');
       client.send(`JOIN ${channelName}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client.waitForJoin(channelName);
 
       client.send(`PRIVMSG ${channelName} :Time tagged message`);
 
@@ -146,11 +146,11 @@ describe('IRCv3 Echo Message', () => {
       await client.capReq(CAP_BUNDLES.messaging);
       client.capEnd();
       client.register('echoid1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channelName = uniqueChannel('echoid');
       client.send(`JOIN ${channelName}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client.waitForJoin(channelName);
 
       client.send(`PRIVMSG ${channelName} :Message ID test`);
 
@@ -179,11 +179,11 @@ describe('IRCv3 Echo Message', () => {
       await client.capReq(['echo-message']);
       client.capEnd();
       client.register('echonotice1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channelName = uniqueChannel('echonotice');
       client.send(`JOIN ${channelName}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client.waitForJoin(channelName);
 
       const testNotice = `Notice test ${uniqueId()}`;
       client.send(`NOTICE ${channelName} :${testNotice}`);
@@ -204,11 +204,11 @@ describe('IRCv3 Echo Message', () => {
       await client.capReq(['multi-prefix']);
       client.capEnd();
       client.register('noecho1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channelName = uniqueChannel('noecho');
       client.send(`JOIN ${channelName}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client.waitForJoin(channelName);
 
       const testMsg = `No echo test ${uniqueId()}`;
       client.send(`PRIVMSG ${channelName} :${testMsg}`);
@@ -233,11 +233,11 @@ describe('IRCv3 Echo Message', () => {
       await client.capReq([...CAP_BUNDLES.messaging, 'labeled-response', 'batch']);
       client.capEnd();
       client.register('echolabel1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channelName = uniqueChannel('echolabel');
       client.send(`JOIN ${channelName}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client.waitForJoin(channelName);
 
       const label = `lbl${uniqueId()}`;
       client.send(`@label=${label} PRIVMSG ${channelName} :Labeled message`);
@@ -287,22 +287,22 @@ describe('IRCv3 TAGMSG', () => {
     await client1.capReq(['message-tags']);
     client1.capEnd();
     client1.register('tagmsg1');
-    await client1.waitForLine(/001/);
+    await client1.waitForNumeric('001');
 
     await client2.capLs();
     await client2.capReq(['message-tags']);
     client2.capEnd();
     client2.register('tagmsg2');
-    await client2.waitForLine(/001/);
+    await client2.waitForNumeric('001');
 
     const channelName = uniqueChannel('tagmsg');
     // Join client1 first, then client2 so client2 sees client1's JOIN
     client1.send(`JOIN ${channelName}`);
-    await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+    await client1.waitForJoin(channelName);
 
     // Now join client2 - it will see client1 in NAMES
     client2.send(`JOIN ${channelName}`);
-    await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+    await client2.waitForJoin(channelName);
     // Verify client1 is in channel via NAMES (shows as @tagmsg1)
     await client2.waitForLine(/366.*End of.*NAMES/i, 2000);
 
@@ -333,11 +333,11 @@ describe('IRCv3 TAGMSG', () => {
     await client.capReq(['message-tags', 'echo-message']);
     client.capEnd();
     client.register('tagecho1');
-    await client.waitForLine(/001/);
+    await client.waitForNumeric('001');
 
     const channelName = uniqueChannel('tagecho');
     client.send(`JOIN ${channelName}`);
-    await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+    await client.waitForJoin(channelName);
 
     client.send(`@+react=👍 TAGMSG ${channelName}`);
 
@@ -381,7 +381,7 @@ describe('IRCv3 Labeled Response', () => {
     await client.capReq(CAP_BUNDLES.batching);
     client.capEnd();
     client.register('labeltest2');
-    await client.waitForLine(/001/);
+    await client.waitForNumeric('001');
 
     // Send WHO with label
     const label = `who${uniqueId()}`;
@@ -400,7 +400,7 @@ describe('IRCv3 Labeled Response', () => {
     await client.capReq(CAP_BUNDLES.batching);
     client.capEnd();
     client.register('acktest1');
-    await client.waitForLine(/001/);
+    await client.waitForNumeric('001');
 
     // Send command that produces no output
     const label = `ack${uniqueId()}`;

@@ -60,7 +60,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.capReq([metaCap]);
       client.capEnd();
       client.register('metaset1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Try to set avatar metadata
       client.send('METADATA SET * avatar :https://example.com/avatar.png');
@@ -81,7 +81,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.capReq([metaCap]);
       client.capEnd();
       client.register('metaget1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // First set some metadata
       client.send('METADATA SET * testkey :testvalue123');
@@ -106,7 +106,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.capReq([metaCap]);
       client.capEnd();
       client.register('metalist1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.send('METADATA LIST *');
 
@@ -144,7 +144,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.capReq([metaCap]);
       client.capEnd();
       client.register('metaclear1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Set then clear
       client.send('METADATA SET * cleartest :value');
@@ -168,12 +168,12 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.capReq([metaCap]);
       client.capEnd();
       client.register('chanmeta1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Join channel first (need to be op usually)
       const channelName = uniqueChannel('metaTest');
       client.send(`JOIN ${channelName}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client.waitForJoin(channelName);
 
       // Try to set channel metadata
       client.send(`METADATA SET ${channelName} url :https://example.com`);
@@ -193,11 +193,11 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.capReq([metaCap]);
       client.capEnd();
       client.register('chanmeta2');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channelName = uniqueChannel('metaGet');
       client.send(`JOIN ${channelName}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client.waitForJoin(channelName);
 
       // Set then get
       client.send(`METADATA SET ${channelName} testchankey :testvalue`);
@@ -221,7 +221,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.capReq([metaCap]);
       client.capEnd();
       client.register('metasub1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Subscribe to all metadata changes for a target
       client.send('METADATA * SUB avatar');
@@ -247,7 +247,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.capReq([metaCap]);
       client.capEnd();
       client.register('metaerr1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Try to get non-existent key
       client.send('METADATA GET * nonexistentkey12345');
@@ -273,7 +273,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.capReq([metaCap]);
       client.capEnd();
       client.register('metaerr2');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Try to get metadata for non-existent user
       client.send('METADATA GET nonexistentnick12345 avatar');
@@ -301,7 +301,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.capReq([metaCap]);
       client.capEnd();
       client.register('stdmeta1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.send('METADATA SET * avatar :https://example.com/myavatar.png');
       await new Promise(r => setTimeout(r, 500));
@@ -326,7 +326,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.capReq([metaCap]);
       client.capEnd();
       client.register('stdmeta2');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.send('METADATA SET * pronouns :they/them');
       await new Promise(r => setTimeout(r, 500));
@@ -351,7 +351,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.capReq([metaCap]);
       client.capEnd();
       client.register('stdmeta3');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.send('METADATA SET * bot :1');
       await new Promise(r => setTimeout(r, 500));
@@ -377,7 +377,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.capReq([metaCap]);
       client.capEnd();
       client.register('metalimit1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Create a very large value (exceeds typical limits)
       const largeValue = 'x'.repeat(100000);
@@ -402,7 +402,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.capReq([metaCap]);
       client.capEnd();
       client.register('metaspecial1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Keys with dots are typically used for namespacing
       client.send('METADATA SET * example.org/customkey :value');
@@ -427,7 +427,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.capReq([metaCap]);
       client.capEnd();
       client.register('metaempty1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Empty key
       client.send('METADATA SET *  :value');
@@ -453,13 +453,13 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await owner.capReq([metaCap]);
       owner.capEnd();
       owner.register('metapriv1');
-      await owner.waitForLine(/001/);
+      await owner.waitForNumeric('001');
 
       await other.capLs();
       await other.capReq([metaCap]);
       other.capEnd();
       other.register('metapriv2');
-      await other.waitForLine(/001/);
+      await other.waitForNumeric('001');
 
       // Owner sets private metadata (if supported)
       owner.send('METADATA SET * privatekey :secretvalue');
@@ -489,13 +489,13 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await setter.capReq([metaCap]);
       setter.capEnd();
       setter.register('metapub1');
-      await setter.waitForLine(/001/);
+      await setter.waitForNumeric('001');
 
       await getter.capLs();
       await getter.capReq([metaCap]);
       getter.capEnd();
       getter.register('metapub2');
-      await getter.waitForLine(/001/);
+      await getter.waitForNumeric('001');
 
       // Setter sets a public key (avatar is typically public)
       setter.send('METADATA SET * avatar :https://example.com/public.png');
@@ -525,7 +525,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.capReq([metaCap]);
       client.capEnd();
       client.register('metasub2');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Subscribe to multiple keys
       client.send('METADATA * SUB avatar');
@@ -555,7 +555,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.capReq([metaCap]);
       client.capEnd();
       client.register('metaunsub1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Try to unsubscribe from something we never subscribed to
       client.send('METADATA * UNSUB nonexistent');
@@ -586,16 +586,16 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
 
       // Authenticate - Keycloak and testuser should always be available
       client1.send('AUTHENTICATE PLAIN');
-      await client1.waitForLine(/AUTHENTICATE \+/);
+      await client1.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+');
       const user = process.env.IRC_TEST_ACCOUNT ?? 'testuser';
       const pass = process.env.IRC_TEST_PASSWORD ?? 'testpass';
       const payload = Buffer.from(`${user}\0${user}\0${pass}`).toString('base64');
       client1.send(`AUTHENTICATE ${payload}`);
-      await client1.waitForLine(/903/i, 5000);
+      await client1.waitForNumeric('903', 5000);
 
       client1.capEnd();
       client1.register('metapersist1');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       // Set metadata
       const testValue = `persist_${uniqueId()}`;
@@ -612,16 +612,16 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
 
       // Authenticate on reconnect
       client2.send('AUTHENTICATE PLAIN');
-      await client2.waitForLine(/AUTHENTICATE \+/);
+      await client2.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+');
       const user2 = process.env.IRC_TEST_ACCOUNT ?? 'testuser';
       const pass2 = process.env.IRC_TEST_PASSWORD ?? 'testpass';
       const payload2 = Buffer.from(`${user2}\0${user2}\0${pass2}`).toString('base64');
       client2.send(`AUTHENTICATE ${payload2}`);
-      await client2.waitForLine(/903/i, 5000);
+      await client2.waitForNumeric('903', 5000);
 
       client2.capEnd();
       client2.register('metapersist2');
-      await client2.waitForLine(/001/);
+      await client2.waitForNumeric('001');
 
       // Get the metadata we set - should persist for authenticated users
       client2.send('METADATA GET * testpersist');
@@ -641,7 +641,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.capReq([metaCap]);
       client.capEnd();
       client.register('metarate1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Send many rapid metadata requests
       for (let i = 0; i < 20; i++) {
