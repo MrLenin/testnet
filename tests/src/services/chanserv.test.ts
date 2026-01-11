@@ -59,22 +59,10 @@ describe('ChanServ (X3)', () => {
       const { account, password, email } = await createTestAccount();
       const channel = uniqueChannel();
 
-      // Register account first
+      // Register and activate account (COOKIE activation also authenticates)
       const regResult = await client.registerAndActivate(account, password, email);
       console.log('REGISTER account response:', regResult.lines);
       expect(regResult.success).toBe(true);
-
-      // Authenticate (user may already be authenticated from cookie activation)
-      const authResult = await client.auth(account, password);
-      console.log('AUTH response:', authResult.lines);
-      // Accept success or if already authenticated from activation
-      if (!authResult.success) {
-        // Check if already authenticated from cookie activation
-        const alreadyAuth = regResult.lines.some(l => l.includes('now authenticated'));
-        if (!alreadyAuth) {
-          expect(authResult.success).toBe(true);
-        }
-      }
 
       // Join channel - should get ops as first user
       client.send(`JOIN ${channel}`);
@@ -110,9 +98,8 @@ describe('ChanServ (X3)', () => {
       const { account, password, email } = await createTestAccount();
       const channel = uniqueChannel();
 
-      // Setup
+      // Setup (registerAndActivate also authenticates via COOKIE)
       await client.registerAndActivate(account, password, email);
-      await client.auth(account, password);
       client.send(`JOIN ${channel}`);
       await client.waitForLine(/JOIN/i, 5000);
       await new Promise(r => setTimeout(r, 500));
@@ -147,9 +134,8 @@ describe('ChanServ (X3)', () => {
       // Wait for connection to settle before sending service commands
       await new Promise(r => setTimeout(r, 1000));
 
-      // Setup owner and registered channel
+      // Setup owner and registered channel (registerAndActivate also authenticates)
       await ownerClient.registerAndActivate(account, password, email);
-      await ownerClient.auth(account, password);
       ownerClient.send(`JOIN ${channel}`);
       await ownerClient.waitForLine(/JOIN/i, 5000);
       await new Promise(r => setTimeout(r, 500));
@@ -392,9 +378,8 @@ describe('ChanServ (X3)', () => {
       const { account, password, email } = await createTestAccount();
       const channel = uniqueChannel();
 
-      // Setup
+      // Setup (registerAndActivate also authenticates)
       await client.registerAndActivate(account, password, email);
-      await client.auth(account, password);
       client.send(`JOIN ${channel}`);
       await client.waitForLine(/JOIN/i, 5000);
       await new Promise(r => setTimeout(r, 500));
@@ -417,9 +402,8 @@ describe('ChanServ (X3)', () => {
       // Wait for connection to settle before sending service commands
       await new Promise(r => setTimeout(r, 1000));
 
-      // Setup
+      // Setup (registerAndActivate also authenticates)
       await client.registerAndActivate(account, password, email);
-      await client.auth(account, password);
       client.send(`JOIN ${channel}`);
       await client.waitForLine(/JOIN/i, 5000);
       await new Promise(r => setTimeout(r, 500));
@@ -440,9 +424,8 @@ describe('ChanServ (X3)', () => {
       // Wait for connection to settle before sending service commands
       await new Promise(r => setTimeout(r, 1000));
 
-      // Setup and ban
+      // Setup and ban (registerAndActivate also authenticates)
       await client.registerAndActivate(account, password, email);
-      await client.auth(account, password);
       client.send(`JOIN ${channel}`);
       await client.waitForLine(/JOIN/i, 5000);
       await new Promise(r => setTimeout(r, 500));
@@ -472,9 +455,8 @@ describe('ChanServ (X3)', () => {
       const { account, password, email } = await createTestAccount();
       const channel = uniqueChannel();
 
-      // Setup registered channel
+      // Setup registered channel (registerAndActivate also authenticates)
       await client.registerAndActivate(account, password, email);
-      await client.auth(account, password);
       client.send(`JOIN ${channel}`);
       await client.waitForLine(/JOIN/i, 5000);
       await new Promise(r => setTimeout(r, 500));
