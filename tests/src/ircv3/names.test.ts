@@ -56,16 +56,16 @@ describe('IRCv3 extended-join', () => {
       await observer.capReq(['extended-join']);
       observer.capEnd();
       observer.register('extjobs1');
-      await observer.waitForLine(/001/);
+      await observer.waitForNumeric('001');
 
       await joiner.capLs();
       joiner.capEnd();
       joiner.register('extjjoin1', 'joinuser', 'Test Joiner Realname');
-      await joiner.waitForLine(/001/);
+      await joiner.waitForNumeric('001');
 
       const channel = uniqueChannel('extjtest');
       observer.send(`JOIN ${channel}`);
-      await observer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await observer.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       observer.clearRawBuffer();
@@ -91,7 +91,7 @@ describe('IRCv3 extended-join', () => {
       await client.capReq(['extended-join']);
       client.capEnd();
       client.register('extjself1', 'selfuser', 'My Realname');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -113,17 +113,17 @@ describe('IRCv3 extended-join', () => {
       await observer.capReq(['extended-join']);
       observer.capEnd();
       observer.register('extjobs2');
-      await observer.waitForLine(/001/);
+      await observer.waitForNumeric('001');
 
       // Joiner doesn't authenticate
       await joiner.capLs();
       joiner.capEnd();
       joiner.register('extjjoin2');
-      await joiner.waitForLine(/001/);
+      await joiner.waitForNumeric('001');
 
       const channel = uniqueChannel('extjunauth');
       observer.send(`JOIN ${channel}`);
-      await observer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await observer.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       observer.clearRawBuffer();
@@ -149,16 +149,16 @@ describe('IRCv3 extended-join', () => {
       await observer.capReq(['multi-prefix']);
       observer.capEnd();
       observer.register('stdobs1');
-      await observer.waitForLine(/001/);
+      await observer.waitForNumeric('001');
 
       await joiner.capLs();
       joiner.capEnd();
       joiner.register('stdjoin1');
-      await joiner.waitForLine(/001/);
+      await joiner.waitForNumeric('001');
 
       const channel = uniqueChannel('stdjoin');
       observer.send(`JOIN ${channel}`);
-      await observer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await observer.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       observer.clearRawBuffer();
@@ -222,11 +222,11 @@ describe('IRCv3 userhost-in-names', () => {
       await client.capReq(['userhost-in-names']);
       client.capEnd();
       client.register('uhintest1', 'testuser');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('uhintest');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
 
       client.clearRawBuffer();
 
@@ -248,7 +248,7 @@ describe('IRCv3 userhost-in-names', () => {
       await client.capReq(['userhost-in-names']);
       client.capEnd();
       client.register('uhinjoin1', 'joinuser');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -270,18 +270,18 @@ describe('IRCv3 userhost-in-names', () => {
       await client1.capReq(['userhost-in-names']);
       client1.capEnd();
       client1.register('uhinmulti1', 'user1');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       await client2.capLs();
       client2.capEnd();
       client2.register('uhinmulti2', 'user2');
-      await client2.waitForLine(/001/);
+      await client2.waitForNumeric('001');
 
       const channel = uniqueChannel('uhinmulti');
       client1.send(`JOIN ${channel}`);
       client2.send(`JOIN ${channel}`);
-      await client1.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await client2.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client1.waitForJoin(channel);
+      await client2.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       client1.clearRawBuffer();
@@ -306,11 +306,11 @@ describe('IRCv3 userhost-in-names', () => {
       await client.capReq(['multi-prefix']); // NOT userhost-in-names
       client.capEnd();
       client.register('nouhin1', 'testuser');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('nouhin');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
 
       client.clearRawBuffer();
 
@@ -373,11 +373,11 @@ describe('IRCv3 multi-prefix', () => {
       await client.capReq(['multi-prefix']);
       client.capEnd();
       client.register('mpnames1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('mpnames');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
 
       client.clearRawBuffer();
 
@@ -400,11 +400,11 @@ describe('IRCv3 multi-prefix', () => {
       await client.capReq(['multi-prefix']);
       client.capEnd();
       client.register('mpmulti1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('mpmulti');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
 
       // Give ourselves voice too (if we're op)
       client.send(`MODE ${channel} +v mpmulti1`);
@@ -431,11 +431,11 @@ describe('IRCv3 multi-prefix', () => {
       await client.capLs();
       client.capEnd();
       client.register('nomp1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('nomp');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
 
       // Give ourselves voice too
       client.send(`MODE ${channel} +v nomp1`);
@@ -464,11 +464,11 @@ describe('IRCv3 multi-prefix', () => {
       await client.capReq(['multi-prefix']);
       client.capEnd();
       client.register('mpwho1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('mpwho');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
 
       // Give voice
       client.send(`MODE ${channel} +v mpwho1`);
@@ -531,7 +531,7 @@ describe('draft/no-implicit-names', () => {
 
       client.capEnd();
       client.register('nimjoin1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -539,7 +539,7 @@ describe('draft/no-implicit-names', () => {
       client.send(`JOIN ${channel}`);
 
       // Wait for JOIN
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
 
       // Should NOT receive 353 (RPL_NAMREPLY) automatically
       try {
@@ -568,11 +568,11 @@ describe('draft/no-implicit-names', () => {
 
       client.capEnd();
       client.register('nimexpl1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('nimexpl');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       client.clearRawBuffer();

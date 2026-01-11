@@ -56,7 +56,7 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       await client.capReq(CAP_BUNDLES.batching);
       client.capEnd();
       client.register('label1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -81,7 +81,7 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       await client.capReq(CAP_BUNDLES.batching);
       client.capEnd();
       client.register('label2');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -122,11 +122,11 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       await client.capReq(CAP_BUNDLES.batching);
       client.capEnd();
       client.register('label3');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('labelbatch');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
 
       client.clearRawBuffer();
 
@@ -163,11 +163,11 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       await client.capReq([...CAP_BUNDLES.batching, ...CAP_BUNDLES.messaging]);
       client.capEnd();
       client.register('labelecho1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('labelecho');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
 
       client.clearRawBuffer();
 
@@ -196,7 +196,7 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       await client.capReq(CAP_BUNDLES.batching);
       client.capEnd();
       client.register('labelempty1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -217,7 +217,7 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       await client.capReq(CAP_BUNDLES.batching);
       client.capEnd();
       client.register('labellong1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -239,7 +239,7 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       await client.capReq(CAP_BUNDLES.batching);
       client.capEnd();
       client.register('labelspec1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -268,7 +268,7 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       await client.capReq(['multi-prefix']);
       client.capEnd();
       client.register('labelnone1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -293,11 +293,11 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       await client.capReq(CAP_BUNDLES.batching);
       client.capEnd();
       client.register('labelack1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('labelack');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
 
       client.clearRawBuffer();
 
@@ -327,7 +327,7 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       await client.capReq(CAP_BUNDLES.batching);
       client.capEnd();
       client.register('labelerr1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -397,19 +397,19 @@ describe('IRCv3 Message Tags (message-tags)', () => {
       await sender.capReq(['message-tags', 'echo-message']);
       sender.capEnd();
       sender.register('tagsend1');
-      await sender.waitForLine(/001/);
+      await sender.waitForNumeric('001');
 
       await receiver.capLs();
       await receiver.capReq(['message-tags']);
       receiver.capEnd();
       receiver.register('tagrecv1');
-      await receiver.waitForLine(/001/);
+      await receiver.waitForNumeric('001');
 
       const channel = uniqueChannel('tags');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
-      await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await receiver.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await sender.waitForJoin(channel);
+      await receiver.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       receiver.clearRawBuffer();
@@ -441,19 +441,19 @@ describe('IRCv3 Message Tags (message-tags)', () => {
       await sender.capReq(['message-tags']);
       sender.capEnd();
       sender.register('tagreact1');
-      await sender.waitForLine(/001/);
+      await sender.waitForNumeric('001');
 
       await receiver.capLs();
       await receiver.capReq(['message-tags']);
       receiver.capEnd();
       receiver.register('tagreact2');
-      await receiver.waitForLine(/001/);
+      await receiver.waitForNumeric('001');
 
       const channel = uniqueChannel('react');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
-      await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await receiver.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await sender.waitForJoin(channel);
+      await receiver.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       receiver.clearRawBuffer();
@@ -482,19 +482,19 @@ describe('IRCv3 Message Tags (message-tags)', () => {
       await sender.capReq(['message-tags']);
       sender.capEnd();
       sender.register('tagmsg1');
-      await sender.waitForLine(/001/);
+      await sender.waitForNumeric('001');
 
       await receiver.capLs();
       await receiver.capReq(['message-tags']);
       receiver.capEnd();
       receiver.register('tagmsg2');
-      await receiver.waitForLine(/001/);
+      await receiver.waitForNumeric('001');
 
       const channel = uniqueChannel('tagmsg');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
-      await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await receiver.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await sender.waitForJoin(channel);
+      await receiver.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       receiver.clearRawBuffer();
@@ -522,20 +522,20 @@ describe('IRCv3 Message Tags (message-tags)', () => {
       await sender.capReq(['message-tags']);
       sender.capEnd();
       sender.register('tagmsg3');
-      await sender.waitForLine(/001/);
+      await sender.waitForNumeric('001');
 
       // Receiver does NOT request message-tags
       await receiver.capLs();
       await receiver.capReq(['multi-prefix']);
       receiver.capEnd();
       receiver.register('tagmsg4');
-      await receiver.waitForLine(/001/);
+      await receiver.waitForNumeric('001');
 
       const channel = uniqueChannel('tagmsg2');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
-      await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await receiver.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await sender.waitForJoin(channel);
+      await receiver.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       receiver.clearRawBuffer();

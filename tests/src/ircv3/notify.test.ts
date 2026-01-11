@@ -56,20 +56,20 @@ describe('IRCv3 away-notify', () => {
       await observer.capReq(CAP_BUNDLES.accounts);
       observer.capEnd();
       observer.register('awayobs1');
-      await observer.waitForLine(/001/);
+      await observer.waitForNumeric('001');
 
       // Awayer registers normally
       await awayer.capLs();
       awayer.capEnd();
       awayer.register('awayuser1');
-      await awayer.waitForLine(/001/);
+      await awayer.waitForNumeric('001');
 
       // Both join same channel
       const channel = uniqueChannel('away');
       observer.send(`JOIN ${channel}`);
       awayer.send(`JOIN ${channel}`);
-      await observer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await awayer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await observer.waitForJoin(channel);
+      await awayer.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 500));
 
       observer.clearRawBuffer();
@@ -93,18 +93,18 @@ describe('IRCv3 away-notify', () => {
       await observer.capReq(CAP_BUNDLES.accounts);
       observer.capEnd();
       observer.register('awayobs2');
-      await observer.waitForLine(/001/);
+      await observer.waitForNumeric('001');
 
       await awayer.capLs();
       awayer.capEnd();
       awayer.register('awayuser2');
-      await awayer.waitForLine(/001/);
+      await awayer.waitForNumeric('001');
 
       const channel = uniqueChannel('awayret');
       observer.send(`JOIN ${channel}`);
       awayer.send(`JOIN ${channel}`);
-      await observer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await awayer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await observer.waitForJoin(channel);
+      await awayer.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 500));
 
       // Go away first
@@ -133,18 +133,18 @@ describe('IRCv3 away-notify', () => {
       await observer.capReq(CAP_BUNDLES.accounts);
       observer.capEnd();
       observer.register('awayobs3');
-      await observer.waitForLine(/001/);
+      await observer.waitForNumeric('001');
 
       await awayer.capLs();
       awayer.capEnd();
       awayer.register('awayuser3');
-      await awayer.waitForLine(/001/);
+      await awayer.waitForNumeric('001');
 
       // Join DIFFERENT channels
       observer.send('JOIN #awayobs3channel');
       awayer.send('JOIN #awayuser3channel');
-      await observer.waitForLine(/JOIN.*#awayobs3channel/i);
-      await awayer.waitForLine(/JOIN.*#awayuser3channel/i);
+      await observer.waitForJoin('#awayobs3channel');
+      await awayer.waitForJoin('#awayuser3channel');
       await new Promise(r => setTimeout(r, 500));
 
       observer.clearRawBuffer();
@@ -175,18 +175,18 @@ describe('IRCv3 away-notify', () => {
       await observer.capReq(['multi-prefix']);
       observer.capEnd();
       observer.register('awayobs4');
-      await observer.waitForLine(/001/);
+      await observer.waitForNumeric('001');
 
       await awayer.capLs();
       awayer.capEnd();
       awayer.register('awayuser4');
-      await awayer.waitForLine(/001/);
+      await awayer.waitForNumeric('001');
 
       const channel = uniqueChannel('noaway');
       observer.send(`JOIN ${channel}`);
       awayer.send(`JOIN ${channel}`);
-      await observer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await awayer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await observer.waitForJoin(channel);
+      await awayer.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 500));
 
       observer.clearRawBuffer();
@@ -219,12 +219,12 @@ describe('IRCv3 away-notify', () => {
       await observer.capReq(CAP_BUNDLES.accounts);
       observer.capEnd();
       observer.register('awayobs5');
-      await observer.waitForLine(/001/);
+      await observer.waitForNumeric('001');
 
       await awayer.capLs();
       awayer.capEnd();
       awayer.register('awayuser5');
-      await awayer.waitForLine(/001/);
+      await awayer.waitForNumeric('001');
 
       // Awayer goes away BEFORE joining channel
       awayer.send('AWAY :Already away');
@@ -233,14 +233,14 @@ describe('IRCv3 away-notify', () => {
       // Observer joins channel first
       const channel = uniqueChannel('awayjoin');
       observer.send(`JOIN ${channel}`);
-      await observer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await observer.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       observer.clearRawBuffer();
 
       // Awayer joins while already away
       awayer.send(`JOIN ${channel}`);
-      await awayer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await awayer.waitForJoin(channel);
 
       // Per IRCv3 spec, servers MUST send AWAY status for users who are away on JOIN
       // First we should see the JOIN
@@ -307,11 +307,11 @@ describe('IRCv3 account-notify', () => {
       await observer.capReq([...CAP_BUNDLES.accounts, 'sasl']);
       observer.capEnd();
       observer.register('acctobs1');
-      await observer.waitForLine(/001/);
+      await observer.waitForNumeric('001');
 
       const channel = uniqueChannel('acctnotify');
       observer.send(`JOIN ${channel}`);
-      await observer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await observer.waitForJoin(channel);
 
       // Note: To fully test this, we'd need another client to authenticate
       // via SASL after joining the channel. This tests the setup is correct.
@@ -329,7 +329,7 @@ describe('IRCv3 account-notify', () => {
       await client.capReq(CAP_BUNDLES.accounts);
       client.capEnd();
       client.register('accttest3');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // The spec says ACCOUNT * indicates no account
       // This is tested by protocol understanding
@@ -347,16 +347,16 @@ describe('IRCv3 account-notify', () => {
       await client1.capReq(CAP_BUNDLES.accounts);
       client1.capEnd();
       client1.register('extjoin1');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       await client2.capLs();
       client2.capEnd();
       client2.register('extjoin2');
-      await client2.waitForLine(/001/);
+      await client2.waitForNumeric('001');
 
       const channel = uniqueChannel('extjoin');
       client1.send(`JOIN ${channel}`);
-      await client1.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client1.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       client1.clearRawBuffer();
@@ -416,27 +416,27 @@ describe('IRCv3 invite-notify', () => {
       await op.capReq(['invite-notify']);
       op.capEnd();
       op.register('inviteop1');
-      await op.waitForLine(/001/);
+      await op.waitForNumeric('001');
 
       await member.capLs();
       await member.capReq(['invite-notify']);
       member.capEnd();
       member.register('invitemem1');
-      await member.waitForLine(/001/);
+      await member.waitForNumeric('001');
 
       await invitee.capLs();
       invitee.capEnd();
       invitee.register('invitee1');
-      await invitee.waitForLine(/001/);
+      await invitee.waitForNumeric('001');
 
       // Op creates channel and member joins BEFORE setting +i
       const channel = uniqueChannel('invite');
       op.send(`JOIN ${channel}`);
-      await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await op.waitForJoin(channel);
 
       // Member joins the channel first (before +i is set)
       member.send(`JOIN ${channel}`);
-      await member.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await member.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       // Now set channel invite-only
