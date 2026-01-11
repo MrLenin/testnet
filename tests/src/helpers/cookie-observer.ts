@@ -24,6 +24,7 @@ const IRC_PORT = parseInt(process.env.IRC_PORT || '6667', 10);
 export class CookieObserver extends RawSocketClient {
   private cookieCache = new Map<string, string>();
   private ready = false;
+  private processedIndex = 0; // Track which messages we've already processed
   public readonly nick: string;
 
   private constructor(nick: string) {
@@ -104,16 +105,17 @@ export class CookieObserver extends RawSocketClient {
   }
 
   private setupMessageHandler(): void {
-    // Watch all incoming lines for cookies and queries
-    // This runs in addition to the normal line processing
-    const originalLines = this.allParsedLines;
-
-    // Periodic check for new messages (the listener approach would be cleaner but this works)
+    // Periodic check for new messages only (avoid reprocessing)
     const checkInterval = setInterval(() => {
       if (!this.ready && this.cookieCache.size === 0) return;
 
-      // allParsedLines returns IRCMessage[] directly, not {raw, parsed} objects
-      for (const msg of this.allParsedLines) {
+      // allParsedLines returns IRCMessage[] directly
+      const allMessages = this.allParsedLines;
+
+      // Only process messages we haven't seen yet
+      while (this.processedIndex < allMessages.length) {
+        const msg = allMessages[this.processedIndex];
+        this.processedIndex++;
         this.processMessage(msg, msg.raw);
       }
     }, 100);
