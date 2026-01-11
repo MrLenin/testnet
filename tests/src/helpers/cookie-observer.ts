@@ -112,8 +112,9 @@ export class CookieObserver extends RawSocketClient {
     const checkInterval = setInterval(() => {
       if (!this.ready && this.cookieCache.size === 0) return;
 
-      for (const pl of this.allParsedLines) {
-        this.processMessage(pl.parsed, pl.raw);
+      // allParsedLines returns IRCMessage[] directly, not {raw, parsed} objects
+      for (const msg of this.allParsedLines) {
+        this.processMessage(msg, msg.raw);
       }
     }, 100);
 
@@ -121,7 +122,10 @@ export class CookieObserver extends RawSocketClient {
     (this as any)._checkInterval = checkInterval;
   }
 
-  private processMessage(msg: IRCMessage, raw: string): void {
+  private processMessage(msg: IRCMessage | undefined, raw: string): void {
+    // Guard against undefined parsed messages
+    if (!msg || !msg.command) return;
+
     // Watch for COOKIE broadcasts in #MrSnoopy
     // Format: :O3!service@host PRIVMSG #MrSnoopy :COOKIE accountname cookievalue
     if (msg.command === 'PRIVMSG') {
