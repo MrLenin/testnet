@@ -358,7 +358,12 @@ async function cleanup(): Promise<void> {
     await waitForSearchComplete(30000);
     await new Promise(r => setTimeout(r, 2000)); // Anti-flood delay
 
-    // Parse channel list - look for test and bisync channel patterns
+    console.log('Searching for orphaned bidisync channels...');
+    send('PRIVMSG O3 :CSEARCH PRINT name #bidisync* limit 500');
+    await waitForSearchComplete(30000);
+    await new Promise(r => setTimeout(r, 2000)); // Anti-flood delay
+
+    // Parse channel list - look for test, bisync, and bidisync channel patterns
     // Only look at lines since channel search started to avoid picking up
     // channel names from earlier OUNREGISTER responses
     const parseChannels = (startIndex: number = 0) => {
@@ -374,6 +379,13 @@ async function cleanup(): Promise<void> {
         // Match bisync channel names like #bisyncadd-a0da46b0, #bisyncclvl-..., etc.
         const bisyncMatches = line.matchAll(/(#bisync(?:add|clvl|del|unreg)?-[a-f0-9]{6,8})/gi);
         for (const match of bisyncMatches) {
+          if (!stats.channelsFound.includes(match[1])) {
+            stats.channelsFound.push(match[1]);
+          }
+        }
+        // Match bidisync channel names like #bidisync-a0da46b0
+        const bidisyncMatches = line.matchAll(/(#bidisync-[a-f0-9]{6,8})/gi);
+        for (const match of bidisyncMatches) {
           if (!stats.channelsFound.includes(match[1])) {
             stats.channelsFound.push(match[1]);
           }

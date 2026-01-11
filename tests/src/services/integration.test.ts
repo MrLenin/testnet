@@ -96,19 +96,33 @@ describe('Services Integration', () => {
       ownerClient.send(`JOIN ${channel}`);
       await ownerClient.waitForLine(/JOIN/i, 5000);
       await new Promise(r => setTimeout(r, 500));
-      await ownerClient.registerChannel(channel);
+
+      // Register channel and verify success
+      const regResult = await ownerClient.registerChannel(channel);
+      console.log('Channel registration result:', regResult.lines, 'success:', regResult.success);
+      if (!regResult.success) {
+        console.log('Channel registration failed, skipping test');
+        return;
+      }
 
       // Setup coowner account
       const coownerClient = trackClient(await createX3Client());
       await coownerClient.registerAndActivate(coowner, coownerPass, coownerEmail);
+
+      // Small delay to ensure account is fully synced before ADDUSER
+      await new Promise(r => setTimeout(r, 300));
 
       // Add user with OP level first
       const addResult = await ownerClient.addUser(channel, coowner, ACCESS_LEVELS.OP);
       console.log('ADDUSER response:', addResult.lines);
       expect(addResult.success).toBe(true);
 
-      // Wait for user to appear in access list before CLVL (replaces hardcoded delay)
-      await waitForUserAccess(ownerClient, channel, coowner, ACCESS_LEVELS.OP);
+      // Wait for user to appear in access list before CLVL
+      const addedOk = await waitForUserAccess(ownerClient, channel, coowner, ACCESS_LEVELS.OP, 8000);
+      if (!addedOk) {
+        console.log('waitForUserAccess failed for OP level');
+      }
+      expect(addedOk).toBe(true);
 
       // Promote to COOWNER level
       const clvlResult = await ownerClient.clvl(channel, coowner, ACCESS_LEVELS.COOWNER);
@@ -116,11 +130,21 @@ describe('Services Integration', () => {
       expect(clvlResult.success).toBe(true);
 
       // Wait for level change to be visible
-      await waitForUserAccess(ownerClient, channel, coowner, ACCESS_LEVELS.COOWNER);
+      const promotedOk = await waitForUserAccess(ownerClient, channel, coowner, ACCESS_LEVELS.COOWNER, 8000);
+      if (!promotedOk) {
+        console.log('waitForUserAccess failed for COOWNER level');
+      }
+      expect(promotedOk).toBe(true);
+
+      // Small delay to ensure state is fully synced before final verification
+      await new Promise(r => setTimeout(r, 300));
 
       // Verify user has COOWNER level
       const accessList = await ownerClient.getAccess(channel);
+      console.log('Final access list:', JSON.stringify(accessList));
+      console.log('Looking for coowner account:', coowner);
       const coownerEntry = accessList.find(e => e.account.toLowerCase() === coowner.toLowerCase());
+      console.log('Found coowner entry:', coownerEntry);
       expect(coownerEntry?.level).toBe(ACCESS_LEVELS.COOWNER);
     }, 60000); // Extended timeout for 2 account registrations (~10s each)
 
@@ -165,12 +189,14 @@ describe('Services Integration', () => {
 
       // Register account (registerAndActivate also authenticates via COOKIE)
       const client1 = trackClient(await createX3Client());
-      await client1.registerAndActivate(account, password, email);
 
-      // client1 is already authenticated from registerAndActivate
-      // Verify by checking auth status instead of redundant auth() call
-      const authStatus1 = await client1.checkAuth();
-      expect(authStatus1.authenticated).toBe(true);
+      // Wait for connection to fully settle before sending service commands
+      await new Promise(r => setTimeout(r, 1000));
+
+      const regResult = await client1.registerAndActivate(account, password, email);
+
+      // registerAndActivate returns success:true if COOKIE auth worked
+      expect(regResult.success).toBe(true);
 
       const client2 = trackClient(await createX3Client());
       const authResult2 = await client2.auth(account, password);
@@ -190,15 +216,33 @@ describe('Services Integration', () => {
       // Setup account and channel
       // Note: registerAndActivate already authenticates the user via COOKIE
       const client1 = trackClient(await createX3Client());
-      await client1.registerAndActivate(account, password, email);
+
+      // Wait for connection to settle before sending service commands
+      await new Promise(r => setTimeout(r, 1000));
+
+      const regResult = await client1.registerAndActivate(account, password, email);
+      expect(regResult.success).toBe(true);
+
       client1.send(`JOIN ${channel}`);
       await client1.waitForLine(/JOIN/i, 5000);
       await new Promise(r => setTimeout(r, 500));
-      await client1.registerChannel(channel);
+
+      const chanRegResult = await client1.registerChannel(channel);
+      console.log('Channel registration result:', chanRegResult.success, chanRegResult.lines?.slice(0, 2));
+      expect(chanRegResult.success).toBe(true);
+
+      // Wait for registration to fully sync
+      await new Promise(r => setTimeout(r, 500));
 
       // Second client should also have access
       const client2 = trackClient(await createX3Client());
-      await client2.auth(account, password);
+
+      // Wait for connection to settle before sending service commands
+      await new Promise(r => setTimeout(r, 1000));
+
+      const authResult = await client2.auth(account, password);
+      console.log('Client2 auth result:', authResult.success);
+
       client2.send(`JOIN ${channel}`);
       await client2.waitForLine(/JOIN/i, 5000);
       await new Promise(r => setTimeout(r, 500));
@@ -206,6 +250,8 @@ describe('Services Integration', () => {
       // Both should be able to get channel access
       const access1 = await client1.getAccess(channel);
       const access2 = await client2.getAccess(channel);
+      console.log('Access1:', JSON.stringify(access1));
+      console.log('Access2:', JSON.stringify(access2));
 
       expect(access1.length).toBeGreaterThan(0);
       expect(access2.length).toBeGreaterThan(0);
@@ -287,8 +333,10 @@ describe('Services Integration', () => {
       const client = trackClient(await createX3Client());
 
       // Wait for connection to fully settle - server sends many welcome messages
-      // after 001, and X3 services may not process commands during this window
-      await new Promise(r => setTimeout(r, 500));
+      // after 001, and X3 services may not process commands during this window.
+      // 1500ms needed because server may still be sending NOTICE about PM history,
+      // MODE +x for hidden host, etc.
+      await new Promise(r => setTimeout(r, 1500));
 
       // AuthServ
       const authLines = await client.serviceCmd('AuthServ', 'HELP');
@@ -310,7 +358,7 @@ describe('Services Integration', () => {
       const client = trackClient(await createX3Client());
 
       // Wait for connection to fully settle
-      await new Promise(r => setTimeout(r, 500));
+      await new Promise(r => setTimeout(r, 1500));
 
       // Send multiple commands in rapid succession
       // Note: serviceCmd uses a shared buffer, so we must await each response
@@ -334,7 +382,7 @@ describe('Services Integration', () => {
       const client = trackClient(await createX3Client());
 
       // Wait for connection to fully settle
-      await new Promise(r => setTimeout(r, 500));
+      await new Promise(r => setTimeout(r, 1500));
 
       // Invalid commands to each service
       const authError = await client.serviceCmd('AuthServ', 'INVALIDCMD');

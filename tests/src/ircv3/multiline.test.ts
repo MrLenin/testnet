@@ -590,8 +590,9 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       expect(receivedLines.length).toBeLessThanOrEqual(6); // 4 lines + truncation notice
 
       // Check for truncation notice or retrieval hint
+      // Could be HistServ FETCH hint (when available) or &ml- channel (fallback)
       const hasTruncationNotice = receivedLines.some(l =>
-        l.includes('truncat') || l.includes('more lines') || l.includes('&ml-')
+        l.includes('truncat') || l.includes('more lines') || l.includes('&ml-') || l.toLowerCase().includes('histserv')
       );
       console.log('Has truncation notice:', hasTruncationNotice);
 
@@ -599,7 +600,8 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send('QUIT');
     });
 
-    it('retrieval hint mentions local channel &ml-<msgid>', async () => {
+    // Retrieval hints: HistServ FETCH (when HistServ available) or &ml- channel (fallback)
+    it('truncated multiline includes retrieval hint', async () => {
       const client1 = trackClient(await createRawSocketClient());
       const client2 = trackClient(await createRawSocketClient());
 
@@ -628,7 +630,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send(`JOIN ${channelName}`);
       await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 1000));
       client2.clearRawBuffer();
 
       // Send large multiline (triggers truncation with retrieval hint)
@@ -639,25 +641,39 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       }
       client1.send(`BATCH -${batchId}`);
 
-      // Look for truncation notice with &ml- retrieval hint
-      let foundRetrievalHint = false;
+      // Look for truncation notice with retrieval hint
+      // Could be HistServ FETCH (when HistServ available) or &ml- channel (fallback)
+      let foundHistServHint = false;
+      let foundMlChannelHint = false;
+      let receivedLines = 0;
       const startTime = Date.now();
-      while (Date.now() - startTime < 3000) {
+      while (Date.now() - startTime < 4000) {
         try {
           const line = await client2.waitForLine(/PRIVMSG|NOTICE/i, 500);
+          receivedLines++;
           console.log('Retrieval hint test:', line);
+
+          if (line.toLowerCase().includes('histserv')) {
+            foundHistServHint = true;
+            console.log('Found HistServ retrieval hint:', line);
+          }
           if (line.includes('&ml-')) {
-            foundRetrievalHint = true;
+            foundMlChannelHint = true;
             console.log('Found &ml- retrieval hint:', line);
-            break;
           }
         } catch {
           break;
         }
       }
 
-      // Note: retrieval hints may only appear for certain truncation levels
-      console.log('Retrieval hint found:', foundRetrievalHint);
+      console.log('Received lines:', receivedLines);
+      console.log('Found HistServ hint:', foundHistServHint);
+      console.log('Found &ml- hint:', foundMlChannelHint);
+
+      // Should have received some content
+      expect(receivedLines).toBeGreaterThan(0);
+      // Should have some form of retrieval hint
+      expect(foundHistServHint || foundMlChannelHint).toBe(true);
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -873,7 +889,8 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send(`JOIN ${channelName}`);
       await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Wait for join to fully complete and drain any server notices
+      await new Promise(resolve => setTimeout(resolve, 1000));
       client2.clearRawBuffer();
 
       // Send large multiline to trigger truncation
@@ -886,23 +903,27 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
 
       // Client2 should receive truncated message with HistServ hint or &ml- channel
       let foundHistServHint = false;
+      let histServMsgid: string | null = null;
       let foundLocalChannel = false;
       const receivedLines: string[] = [];
       const startTime = Date.now();
 
-      while (Date.now() - startTime < 4000) {
+      while (Date.now() - startTime < 5000) {
         try {
-          const line = await client2.waitForLine(/PRIVMSG|NOTICE/i, 500);
+          const line = await client2.waitForLine(/PRIVMSG|NOTICE/i, 1000);
           receivedLines.push(line);
           console.log('HistServ fallback test:', line);
 
-          // Look for HistServ hint
-          if (line.toLowerCase().includes('histserv') || line.toLowerCase().includes('history')) {
+          // Look for HistServ FETCH hint with msgid
+          // Format: [N more lines - /msg HistServ FETCH #channel msgid]
+          const histServMatch = line.match(/HistServ FETCH \S+ (\S+)/i);
+          if (histServMatch) {
             foundHistServHint = true;
-            console.log('Found HistServ hint:', line);
+            histServMsgid = histServMatch[1];
+            console.log('Found HistServ hint with msgid:', histServMsgid);
           }
 
-          // Look for &ml- local channel hint
+          // Look for &ml- local channel hint (fallback when HistServ unavailable)
           if (line.includes('&ml-')) {
             foundLocalChannel = true;
             console.log('Found &ml- local channel hint:', line);
@@ -919,19 +940,43 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       // Verify we got some truncated content
       expect(receivedLines.length).toBeGreaterThan(0);
 
-      // Should have some form of retrieval hint (either HistServ or &ml-)
+      // Should have HistServ hint (or &ml- if HistServ unavailable)
       const hasRetrievalHint = foundHistServHint || foundLocalChannel;
-      console.log('Has retrieval hint:', hasRetrievalHint);
+      expect(hasRetrievalHint).toBe(true);
+
+      // If we got a HistServ hint, verify we can retrieve the full message
+      if (foundHistServHint && histServMsgid) {
+        client2.clearRawBuffer();
+        client2.send(`PRIVMSG HistServ :FETCH ${channelName} ${histServMsgid}`);
+
+        const histServLines: string[] = [];
+        const fetchStart = Date.now();
+        while (Date.now() - fetchStart < 3000) {
+          try {
+            const line = await client2.waitForLine(/NOTICE.*HistServ|PRIVMSG/i, 500);
+            histServLines.push(line);
+            console.log('HistServ FETCH response:', line);
+          } catch {
+            break;
+          }
+        }
+
+        console.log('Retrieved via HistServ:', histServLines.length, 'lines');
+        // Should retrieve more content than the truncated version
+        expect(histServLines.length).toBeGreaterThan(0);
+      }
 
       client1.send('QUIT');
       client2.send('QUIT');
     });
 
+    // Test &ml- virtual channel directly using captured msgid.
+    // The &ml- storage is always populated (Tier 4 fallback), even when HistServ hint is shown.
     it('can join &ml-<msgid> virtual channel to retrieve full message', async () => {
       const client1 = trackClient(await createRawSocketClient());
       const client2 = trackClient(await createRawSocketClient());
 
-      // Client1: has multiline + message-tags (sender, to capture msgid)
+      // Client1: has multiline + message-tags + echo-message (sender, to capture msgid)
       client1.send('CAP LS 302');
       await client1.waitForLine(/CAP.*LS/i);
       client1.send('CAP REQ :draft/multiline batch message-tags echo-message');
@@ -941,7 +986,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('USER mlvirt1 0 * :mlvirt1');
       await client1.waitForLine(/001/);
 
-      // Client2: NO multiline (will receive truncated + &ml- hint)
+      // Client2: NO multiline, NO chathistory (basic client)
       client2.send('CAP LS 302');
       await client2.waitForLine(/CAP.*LS/i);
       client2.send('CAP END');
@@ -956,7 +1001,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send(`JOIN ${channelName}`);
       await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 1000));
       client1.clearRawBuffer();
       client2.clearRawBuffer();
 
@@ -988,66 +1033,49 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
         console.log('Echo capture failed:', e);
       }
 
-      // Client2 looks for &ml- hint
-      let localChannelName: string | null = null;
+      // Drain client2's truncated message (we don't need to parse it)
       const startTime = Date.now();
-      while (Date.now() - startTime < 4000) {
+      while (Date.now() - startTime < 3000) {
         try {
           const line = await client2.waitForLine(/PRIVMSG|NOTICE/i, 500);
           console.log('Virtual channel test (client2):', line);
+        } catch {
+          break;
+        }
+      }
 
-          const mlMatch = line.match(/(&ml-[^\s]+)/);
-          if (mlMatch) {
-            localChannelName = mlMatch[1];
-            console.log('Found local channel:', localChannelName);
+      // We must have captured the msgid to test virtual channels
+      expect(capturedMsgid).not.toBeNull();
+      const channelToJoin = `&ml-${capturedMsgid}`;
+
+      console.log('Attempting to join virtual channel:', channelToJoin);
+      client2.clearRawBuffer();
+      client2.send(`JOIN ${channelToJoin}`);
+
+      // Virtual channel join should deliver content via PRIVMSGs
+      const contentLines: string[] = [];
+      const collectStart = Date.now();
+      while (Date.now() - collectStart < 3000) {
+        try {
+          const line = await client2.waitForLine(/PRIVMSG|NOTICE|JOIN|4\d\d/i, 500);
+          console.log('Virtual channel response:', line);
+
+          if (line.match(/4\d\d/)) {
+            // Error response - virtual channel not supported
+            console.log('Virtual channel join rejected:', line);
             break;
+          }
+          if (line.includes('PRIVMSG') && line.includes('Virtual channel line')) {
+            contentLines.push(line);
           }
         } catch {
           break;
         }
       }
 
-      // If we found &ml- channel or have msgid, try to join it
-      const channelToJoin = localChannelName || (capturedMsgid ? `&ml-${capturedMsgid}` : null);
-
-      if (channelToJoin) {
-        console.log('Attempting to join virtual channel:', channelToJoin);
-        client2.clearRawBuffer();
-        client2.send(`JOIN ${channelToJoin}`);
-
-        try {
-          // Should receive the full multiline content
-          const joinResponse = await client2.waitForLine(/JOIN|PRIVMSG|NOTICE|4\d\d/i, 3000);
-          console.log('Virtual channel join response:', joinResponse);
-
-          if (joinResponse.includes('JOIN')) {
-            // Successfully joined - collect content
-            const contentLines: string[] = [];
-            const collectStart = Date.now();
-            while (Date.now() - collectStart < 3000) {
-              try {
-                const line = await client2.waitForLine(/PRIVMSG|332|333|366/i, 500);
-                contentLines.push(line);
-                console.log('Virtual channel content:', line);
-                if (line.includes('366')) break; // End of NAMES
-              } catch {
-                break;
-              }
-            }
-
-            console.log('Retrieved', contentLines.length, 'lines from virtual channel');
-
-            // PART from virtual channel
-            client2.send(`PART ${channelToJoin}`);
-          } else if (joinResponse.match(/4\d\d/)) {
-            console.log('Virtual channel join rejected (may not be implemented)');
-          }
-        } catch (e) {
-          console.log('Virtual channel join failed:', e);
-        }
-      } else {
-        console.log('No virtual channel hint found - feature may not be enabled');
-      }
+      console.log('Retrieved', contentLines.length, 'lines from virtual channel');
+      // Should have retrieved all 10 lines
+      expect(contentLines.length).toBe(totalLines);
 
       client1.send('QUIT');
       client2.send('QUIT');
