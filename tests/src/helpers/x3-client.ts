@@ -26,6 +26,14 @@ import { uniqueId, retryAsync, waitForCondition } from './cap-bundles.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
+/**
+ * Get the nick of the global CookieObserver if it exists.
+ * Accesses via globalThis to avoid circular dependency.
+ */
+function getGlobalObserverNick(): string | null {
+  return (globalThis as any).__cookieObserver?.nick || null;
+}
+
 const execAsync = promisify(exec);
 
 /**
@@ -221,9 +229,9 @@ export class X3Client extends RawSocketClient {
    * @param account - Account name to register
    * @param password - Password for the account
    * @param email - Email address for the account
-   * @param observerNick - Nick of the CookieObserver bot (default: CookieBot)
+   * @param observerNick - Nick of the CookieObserver bot (auto-detected if not specified)
    */
-  async registerAndActivate(account: string, password: string, email: string, observerNick = 'CookieBot'): Promise<ServiceResponse> {
+  async registerAndActivate(account: string, password: string, email: string, observerNick?: string): Promise<ServiceResponse> {
     // First register
     const regResult = await this.registerAccount(account, password, email);
     if (!regResult.success) {
@@ -339,12 +347,15 @@ export class X3Client extends RawSocketClient {
    * Get activation cookie using best available method.
    * Tries CookieObserver first (IRC-based), falls back to Docker logs.
    * @param account - Account name to get cookie for
-   * @param observerNick - Nick of the CookieObserver bot (default: CookieBot)
+   * @param observerNick - Nick of the CookieObserver bot (auto-detected if not specified)
    * @param timeout - Max time to wait
    */
-  async getCookie(account: string, observerNick = 'CookieBot', timeout = 5000): Promise<string | null> {
+  async getCookie(account: string, observerNick?: string, timeout = 5000): Promise<string | null> {
+    // Use actual observer nick if available, otherwise try default
+    const actualNick = observerNick || getGlobalObserverNick() || 'CookieBot';
+
     // Try observer first (preferred - no Docker dependency)
-    const observerCookie = await this.getCookieFromObserver(account, observerNick, timeout / 2);
+    const observerCookie = await this.getCookieFromObserver(account, actualNick, timeout / 2);
     if (observerCookie) return observerCookie;
 
     // Fallback to Docker logs

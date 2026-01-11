@@ -35,8 +35,8 @@ export class CookieObserver extends RawSocketClient {
    * Create and initialize a CookieObserver.
    * Connects, authenticates as testadmin, and joins #MrSnoopy.
    */
-  static async create(nick = 'CookieBot'): Promise<CookieObserver> {
-    const observer = new CookieObserver(nick);
+  static async create(baseNick = 'CookieBot'): Promise<CookieObserver> {
+    const observer = new CookieObserver(baseNick);
     await observer.initialize();
     return observer;
   }
@@ -45,20 +45,46 @@ export class CookieObserver extends RawSocketClient {
     // Connect to IRC
     await this.connect(IRC_HOST, IRC_PORT);
 
-    // Register with nick
-    this.send(`NICK ${this.nick}`);
-    this.send(`USER ${this.nick} 0 * :Cookie Observer Bot`);
+    // Try to register with nick, handling collisions
+    let registered = false;
+    let attempts = 0;
+    const maxAttempts = 3;
 
-    // Wait for registration complete (001 welcome)
-    await this.waitForLine(/^:\S+ 001/, 10000);
+    while (!registered && attempts < maxAttempts) {
+      const tryNick = attempts === 0 ? this.nick : `${this.nick}${attempts}`;
+      this.send(`NICK ${tryNick}`);
+      if (attempts === 0) {
+        this.send(`USER ${this.nick} 0 * :Cookie Observer Bot`);
+      }
+
+      try {
+        // Wait for either welcome (001) or nick-in-use (433)
+        const response = await this.waitForLine(/^:\S+ (001|433)/, 5000);
+        if (response.includes(' 001 ')) {
+          // Successfully registered
+          (this as any).nick = tryNick; // Update nick if we used alternate
+          registered = true;
+        } else if (response.includes(' 433 ')) {
+          // Nick in use, try another
+          attempts++;
+          console.log(`[CookieObserver] Nick ${tryNick} in use, trying alternate...`);
+        }
+      } catch {
+        attempts++;
+      }
+    }
+
+    if (!registered) {
+      throw new Error('Failed to register CookieObserver after multiple attempts');
+    }
 
     // Authenticate as testadmin (oper account)
     const adminUser = process.env.X3_ADMIN || 'testadmin';
     const adminPass = process.env.X3_ADMIN_PASS || 'testadmin123';
     this.send(`PRIVMSG AuthServ :AUTH ${adminUser} ${adminPass}`);
 
-    // Wait for auth success
-    await this.waitForLine(/recognized|authenticated|logged in/i, 5000);
+    // Wait for auth success - AuthServ responds with "I recognize you."
+    await this.waitForLine(/I recognize you|authenticated|logged in/i, 5000);
 
     // Use SVSJOIN to join the invite-only snoop channel
     this.send(`PRIVMSG O3 :SVSJOIN ${this.nick} #MrSnoopy`);
@@ -159,6 +185,7 @@ export class CookieObserver extends RawSocketClient {
 
 /**
  * Singleton instance for test suites.
+ * Also stored on globalThis for cross-module access without circular dependencies.
  */
 let globalObserver: CookieObserver | null = null;
 
@@ -169,8 +196,19 @@ let globalObserver: CookieObserver | null = null;
 export async function getGlobalCookieObserver(): Promise<CookieObserver> {
   if (!globalObserver || !globalObserver.isReady()) {
     globalObserver = await CookieObserver.create();
+    // Store on globalThis for cross-module access
+    (globalThis as any).__cookieObserver = globalObserver;
   }
   return globalObserver;
+}
+
+/**
+ * Get the nick of the global observer if it exists.
+ * Returns null if no observer is running.
+ */
+export function getGlobalObserverNick(): string | null {
+  const observer = globalObserver || (globalThis as any).__cookieObserver;
+  return observer?.nick || null;
 }
 
 /**
