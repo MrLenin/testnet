@@ -34,18 +34,18 @@ describe('Edge Cases', () => {
       await sender.capLs();
       sender.capEnd();
       sender.register('emptysend1');
-      await sender.waitForLine(/001/);
+      await sender.waitForNumeric('001');
 
       await receiver.capLs();
       receiver.capEnd();
       receiver.register('emptyrecv1');
-      await receiver.waitForLine(/001/);
+      await receiver.waitForNumeric('001');
 
       const channel = uniqueChannel('empty');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
-      await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await receiver.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await sender.waitForJoin(channel);
+      await receiver.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       receiver.clearRawBuffer();
@@ -72,18 +72,18 @@ describe('Edge Cases', () => {
       await sender.capLs();
       sender.capEnd();
       sender.register('longsend1');
-      await sender.waitForLine(/001/);
+      await sender.waitForNumeric('001');
 
       await receiver.capLs();
       receiver.capEnd();
       receiver.register('longrecv1');
-      await receiver.waitForLine(/001/);
+      await receiver.waitForNumeric('001');
 
       const channel = uniqueChannel('long');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
-      await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await receiver.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await sender.waitForJoin(channel);
+      await receiver.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       receiver.clearRawBuffer();
@@ -110,18 +110,18 @@ describe('Edge Cases', () => {
       await sender.capLs();
       sender.capEnd();
       sender.register('unisend1');
-      await sender.waitForLine(/001/);
+      await sender.waitForNumeric('001');
 
       await receiver.capLs();
       receiver.capEnd();
       receiver.register('unirecv1');
-      await receiver.waitForLine(/001/);
+      await receiver.waitForNumeric('001');
 
       const channel = uniqueChannel('unicode');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
-      await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await receiver.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await sender.waitForJoin(channel);
+      await receiver.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       receiver.clearRawBuffer();
@@ -145,18 +145,18 @@ describe('Edge Cases', () => {
       await sender.capLs();
       sender.capEnd();
       sender.register('colsend1');
-      await sender.waitForLine(/001/);
+      await sender.waitForNumeric('001');
 
       await receiver.capLs();
       receiver.capEnd();
       receiver.register('colrecv1');
-      await receiver.waitForLine(/001/);
+      await receiver.waitForNumeric('001');
 
       const channel = uniqueChannel('colons');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
-      await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await receiver.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await sender.waitForJoin(channel);
+      await receiver.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       receiver.clearRawBuffer();
@@ -181,7 +181,7 @@ describe('Edge Cases', () => {
       await client.capLs();
       client.capEnd();
       client.register('channum1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -200,7 +200,7 @@ describe('Edge Cases', () => {
       await client.capLs();
       client.capEnd();
       client.register('chanhyp1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -219,7 +219,7 @@ describe('Edge Cases', () => {
       await client.capLs();
       client.capEnd();
       client.register('badchan1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -241,11 +241,11 @@ describe('Edge Cases', () => {
       await client.capLs();
       client.capEnd();
       client.register('user12345');
-      const welcome = await client.waitForLine(/001/);
+      const welcome = await client.waitForNumeric('001');
 
       // Verify the nick was accepted with numbers
-      expect(welcome).toContain('001');
-      expect(welcome).toContain('user12345');
+      expect(welcome.command).toBe('001');
+      expect(welcome.raw).toContain('user12345');
 
       client.send('QUIT');
     });
@@ -256,7 +256,7 @@ describe('Edge Cases', () => {
       await client.capLs();
       client.capEnd();
       client.register('samenick1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -284,8 +284,8 @@ describe('Edge Cases', () => {
       const longNick = 'abcdefghi';
       client.register(longNick);
 
-      const welcome = await client.waitForLine(/001/);
-      expect(welcome).toBeDefined();
+      const welcome = await client.waitForNumeric('001');
+      expect(welcome.command).toBe('001');
 
       client.send('QUIT');
     });
@@ -298,7 +298,7 @@ describe('Edge Cases', () => {
       await client.capLs();
       client.capEnd();
       client.register('rapidjp1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('rapid');
 
@@ -328,18 +328,18 @@ describe('Edge Cases', () => {
       await sender.capLs();
       sender.capEnd();
       sender.register('rapidsend1');
-      await sender.waitForLine(/001/);
+      await sender.waitForNumeric('001');
 
       await receiver.capLs();
       receiver.capEnd();
       receiver.register('rapidrecv1');
-      await receiver.waitForLine(/001/);
+      await receiver.waitForNumeric('001');
 
       const channel = uniqueChannel('rapidmsg');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
-      await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await receiver.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await sender.waitForJoin(channel);
+      await receiver.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       // Send multiple messages rapidly
@@ -369,7 +369,7 @@ describe('Edge Cases', () => {
       await client.capLs();
       client.capEnd();
       client.register('multichan1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Join multiple channels
       const channels = [];
@@ -399,11 +399,11 @@ describe('Edge Cases', () => {
       await client.capLs();
       client.capEnd();
       client.register('samemode1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('samemode');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       // First remove +m so we can set it, then set twice
@@ -433,11 +433,11 @@ describe('Edge Cases', () => {
       await client.capLs();
       client.capEnd();
       client.register('unsetmode1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('unsetmode');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       // Ensure -m is not set first, then try to unset it again
@@ -467,12 +467,12 @@ describe('Edge Cases', () => {
       await sender.capLs();
       sender.capEnd();
       sender.register('ctcpsend1');
-      await sender.waitForLine(/001/);
+      await sender.waitForNumeric('001');
 
       await receiver.capLs();
       receiver.capEnd();
       receiver.register('ctcprecv1');
-      await receiver.waitForLine(/001/);
+      await receiver.waitForNumeric('001');
 
       receiver.clearRawBuffer();
 
@@ -494,18 +494,18 @@ describe('Edge Cases', () => {
       await sender.capLs();
       sender.capEnd();
       sender.register('actionsend1');
-      await sender.waitForLine(/001/);
+      await sender.waitForNumeric('001');
 
       await receiver.capLs();
       receiver.capEnd();
       receiver.register('actionrecv1');
-      await receiver.waitForLine(/001/);
+      await receiver.waitForNumeric('001');
 
       const channel = uniqueChannel('action');
       sender.send(`JOIN ${channel}`);
       receiver.send(`JOIN ${channel}`);
-      await sender.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await receiver.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await sender.waitForJoin(channel);
+      await receiver.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       receiver.clearRawBuffer();
