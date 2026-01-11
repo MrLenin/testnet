@@ -503,8 +503,10 @@ describe('SASL Multi-line Payload', () => {
 
     client.send(`AUTHENTICATE ${payload}`);
 
+    // Small delay to allow server to process and respond
+    await new Promise(r => setTimeout(r, 100));
+
     // Should get response (success or failure)
-    // Keycloak async lookup for unknown accounts can take 10-15s
     const response = await client.waitForLine(/90[0-9]/i, 20000);
     expect(response).toBeDefined();
     client.send('QUIT');
