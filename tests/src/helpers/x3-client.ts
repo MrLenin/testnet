@@ -277,19 +277,25 @@ export class X3Client extends RawSocketClient {
     // Get observer from globalThis (set by cookie-observer.ts)
     const getObserver = () => (globalThis as any).__cookieObserver;
 
+    // Log initial state for debugging
+    const initialObserver = getObserver();
+    console.log(`[getCookieFromObserver] Starting for ${account}, observer=${initialObserver ? initialObserver.nick : 'null'}, timeout=${timeout}ms`);
+
     while (Date.now() - startTime < timeout) {
       const observer = getObserver();
       if (observer) {
         const cookie = observer.getCachedCookie(account);
         if (cookie) {
-          console.log(`[getCookieFromObserver] Got cookie for ${account} from cache`);
+          console.log(`[getCookieFromObserver] Got cookie for ${account} from cache (${Date.now() - startTime}ms)`);
           return cookie;
         }
       }
       await new Promise(r => setTimeout(r, pollInterval));
     }
 
-    console.log(`[getCookieFromObserver] No cookie found for ${account} after ${timeout}ms`);
+    // Log final state for debugging
+    const finalObserver = getObserver();
+    console.log(`[getCookieFromObserver] No cookie found for ${account} after ${timeout}ms, observer=${finalObserver ? finalObserver.nick : 'null'}`);
     return null;
   }
 
