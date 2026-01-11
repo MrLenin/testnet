@@ -42,11 +42,11 @@ describe('Core IRC Commands', () => {
       await client.capLs();
       client.capEnd();
       client.register('modetest1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('mode');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
 
       client.clearRawBuffer();
 
@@ -71,11 +71,11 @@ describe('Core IRC Commands', () => {
       await client.capLs();
       client.capEnd();
       client.register('modetest2');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('modem');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
 
       client.clearRawBuffer();
 
@@ -94,19 +94,19 @@ describe('Core IRC Commands', () => {
       await op.capLs();
       op.capEnd();
       op.register('opuser1');
-      await op.waitForLine(/001/);
+      await op.waitForNumeric('001');
 
       await user.capLs();
       user.capEnd();
       user.register('newop1');
-      await user.waitForLine(/001/);
+      await user.waitForNumeric('001');
 
       const channel = uniqueChannel('modeo');
       op.send(`JOIN ${channel}`);
-      await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await op.waitForJoin(channel);
 
       user.send(`JOIN ${channel}`);
-      await user.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await user.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       op.clearRawBuffer();
@@ -130,19 +130,19 @@ describe('Core IRC Commands', () => {
       await op.capLs();
       op.capEnd();
       op.register('chanop1');
-      await op.waitForLine(/001/);
+      await op.waitForNumeric('001');
 
       await user.capLs();
       user.capEnd();
       user.register('nonop1');
-      await user.waitForLine(/001/);
+      await user.waitForNumeric('001');
 
       const channel = uniqueChannel('moderej');
       op.send(`JOIN ${channel}`);
-      await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await op.waitForJoin(channel);
 
       user.send(`JOIN ${channel}`);
-      await user.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await user.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       user.clearRawBuffer();
@@ -165,11 +165,11 @@ describe('Core IRC Commands', () => {
       await client.capLs();
       client.capEnd();
       client.register('modequery1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('modeq');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
 
       // Set a mode first
       client.send(`MODE ${channel} +nt`);
@@ -196,19 +196,19 @@ describe('Core IRC Commands', () => {
       await op.capLs();
       op.capEnd();
       op.register('kickop1');
-      await op.waitForLine(/001/);
+      await op.waitForNumeric('001');
 
       await user.capLs();
       user.capEnd();
       user.register('kicked1');
-      await user.waitForLine(/001/);
+      await user.waitForNumeric('001');
 
       const channel = uniqueChannel('kick');
       op.send(`JOIN ${channel}`);
-      await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await op.waitForJoin(channel);
 
       user.send(`JOIN ${channel}`);
-      await user.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await user.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       user.clearRawBuffer();
@@ -234,26 +234,26 @@ describe('Core IRC Commands', () => {
       await op.capLs();
       op.capEnd();
       op.register('kickop2');
-      await op.waitForLine(/001/);
+      await op.waitForNumeric('001');
 
       await user1.capLs();
       user1.capEnd();
       user1.register('kicker1');
-      await user1.waitForLine(/001/);
+      await user1.waitForNumeric('001');
 
       await user2.capLs();
       user2.capEnd();
       user2.register('target1');
-      await user2.waitForLine(/001/);
+      await user2.waitForNumeric('001');
 
       const channel = uniqueChannel('kickrej');
       op.send(`JOIN ${channel}`);
-      await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await op.waitForJoin(channel);
 
       user1.send(`JOIN ${channel}`);
       user2.send(`JOIN ${channel}`);
-      await user1.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await user2.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await user1.waitForJoin(channel);
+      await user2.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       user1.clearRawBuffer();
@@ -279,26 +279,26 @@ describe('Core IRC Commands', () => {
       await op.capLs();
       op.capEnd();
       op.register('kickop3');
-      await op.waitForLine(/001/);
+      await op.waitForNumeric('001');
 
       await user.capLs();
       user.capEnd();
       user.register('kicked2');
-      await user.waitForLine(/001/);
+      await user.waitForNumeric('001');
 
       await observer.capLs();
       observer.capEnd();
       observer.register('observer1');
-      await observer.waitForLine(/001/);
+      await observer.waitForNumeric('001');
 
       const channel = uniqueChannel('kickbc');
       op.send(`JOIN ${channel}`);
-      await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await op.waitForJoin(channel);
 
       user.send(`JOIN ${channel}`);
       observer.send(`JOIN ${channel}`);
-      await user.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await observer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await user.waitForJoin(channel);
+      await observer.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       observer.clearRawBuffer();
@@ -324,11 +324,11 @@ describe('Core IRC Commands', () => {
       await client.capLs();
       client.capEnd();
       client.register('topicset1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('topic');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       client.clearRawBuffer();
@@ -352,11 +352,11 @@ describe('Core IRC Commands', () => {
       await client.capLs();
       client.capEnd();
       client.register('topicq1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('topicq');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       // Set a topic first
@@ -386,16 +386,16 @@ describe('Core IRC Commands', () => {
       await op.capLs();
       op.capEnd();
       op.register('topicop1');
-      await op.waitForLine(/001/);
+      await op.waitForNumeric('001');
 
       await user.capLs();
       user.capEnd();
       user.register('topicuser1');
-      await user.waitForLine(/001/);
+      await user.waitForNumeric('001');
 
       const channel = uniqueChannel('topict');
       op.send(`JOIN ${channel}`);
-      await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await op.waitForJoin(channel);
 
       // First remove +t (in case default), then set it
       op.send(`MODE ${channel} -t`);
@@ -407,7 +407,7 @@ describe('Core IRC Commands', () => {
       await op.waitForLine(/MODE.*\+t/i, 5000);
 
       user.send(`JOIN ${channel}`);
-      await user.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await user.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       user.clearRawBuffer();
@@ -432,16 +432,16 @@ describe('Core IRC Commands', () => {
       await inviter.capLs();
       inviter.capEnd();
       inviter.register('inviter1');
-      await inviter.waitForLine(/001/);
+      await inviter.waitForNumeric('001');
 
       await invitee.capLs();
       invitee.capEnd();
       invitee.register('invitee1');
-      await invitee.waitForLine(/001/);
+      await invitee.waitForNumeric('001');
 
       const channel = uniqueChannel('invite');
       inviter.send(`JOIN ${channel}`);
-      await inviter.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await inviter.waitForJoin(channel);
 
       invitee.clearRawBuffer();
       inviter.clearRawBuffer();
@@ -465,16 +465,16 @@ describe('Core IRC Commands', () => {
       await op.capLs();
       op.capEnd();
       op.register('inviteop1');
-      await op.waitForLine(/001/);
+      await op.waitForNumeric('001');
 
       await user.capLs();
       user.capEnd();
       user.register('invitejoin1');
-      await user.waitForLine(/001/);
+      await user.waitForNumeric('001');
 
       const channel = uniqueChannel('invitei');
       op.send(`JOIN ${channel}`);
-      await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await op.waitForJoin(channel);
 
       // Set +i (invite only)
       op.send(`MODE ${channel} +i`);
@@ -519,12 +519,12 @@ describe('Core IRC Commands', () => {
       await client.capLs();
       client.capEnd();
       client.register('whoisuser1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       await target.capLs();
       target.capEnd();
       target.register('whoistarget1');
-      await target.waitForLine(/001/);
+      await target.waitForNumeric('001');
 
       // Wait for target to be fully visible on network before WHOIS
       await new Promise(r => setTimeout(r, 500));
@@ -555,17 +555,17 @@ describe('Core IRC Commands', () => {
       await client.capLs();
       client.capEnd();
       client.register('whoisuser2');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       await target.capLs();
       target.capEnd();
       target.register('whoistarget2');
-      await target.waitForLine(/001/);
+      await target.waitForNumeric('001');
 
       // Target joins a channel
       const channel = uniqueChannel('whoischan');
       target.send(`JOIN ${channel}`);
-      await target.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await target.waitForJoin(channel);
 
       // Wait for join to be fully processed before WHOIS
       await new Promise(r => setTimeout(r, 500));
@@ -591,7 +591,7 @@ describe('Core IRC Commands', () => {
       await client.capLs();
       client.capEnd();
       client.register('whoisuser3');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -617,18 +617,18 @@ describe('Core IRC Commands', () => {
       await client1.capLs();
       client1.capEnd();
       client1.register('whouser1');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       await client2.capLs();
       client2.capEnd();
       client2.register('whouser2');
-      await client2.waitForLine(/001/);
+      await client2.waitForNumeric('001');
 
       const channel = uniqueChannel('who');
       client1.send(`JOIN ${channel}`);
       client2.send(`JOIN ${channel}`);
-      await client1.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await client2.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client1.waitForJoin(channel);
+      await client2.waitForJoin(channel);
 
       // Wait for joins to be processed
       await new Promise(r => setTimeout(r, 500));
@@ -656,12 +656,12 @@ describe('Core IRC Commands', () => {
       await client.capLs();
       client.capEnd();
       client.register('listuser1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Create a channel
       const channel = uniqueChannel('list');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
 
       // Wait for join to be processed
       await new Promise(r => setTimeout(r, 300));
@@ -691,11 +691,11 @@ describe('Core IRC Commands', () => {
       expect(capResult.ack).toContain('echo-message');
       client.capEnd();
       client.register('partuser1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('part');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
 
       // Small delay to ensure channel join is fully processed
       await new Promise(r => setTimeout(r, 100));
@@ -717,18 +717,18 @@ describe('Core IRC Commands', () => {
       await leaver.capLs();
       leaver.capEnd();
       leaver.register('leaver1');
-      await leaver.waitForLine(/001/);
+      await leaver.waitForNumeric('001');
 
       await stayer.capLs();
       stayer.capEnd();
       stayer.register('stayer1');
-      await stayer.waitForLine(/001/);
+      await stayer.waitForNumeric('001');
 
       const channel = uniqueChannel('partbc');
       leaver.send(`JOIN ${channel}`);
       stayer.send(`JOIN ${channel}`);
-      await leaver.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await stayer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await leaver.waitForJoin(channel);
+      await stayer.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       stayer.clearRawBuffer();
@@ -752,18 +752,18 @@ describe('Core IRC Commands', () => {
       await quitter.capLs();
       quitter.capEnd();
       quitter.register('quitter1');
-      await quitter.waitForLine(/001/);
+      await quitter.waitForNumeric('001');
 
       await observer.capLs();
       observer.capEnd();
       observer.register('quitobs1');
-      await observer.waitForLine(/001/);
+      await observer.waitForNumeric('001');
 
       const channel = uniqueChannel('quit');
       quitter.send(`JOIN ${channel}`);
       observer.send(`JOIN ${channel}`);
-      await quitter.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await observer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await quitter.waitForJoin(channel);
+      await observer.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       observer.clearRawBuffer();
