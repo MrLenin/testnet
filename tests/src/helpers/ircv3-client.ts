@@ -26,6 +26,189 @@ export interface CapState {
 }
 
 /**
+ * Parsed IRC message structure.
+ * Properly represents all components of an IRC message per RFC 1459 + IRCv3 extensions.
+ */
+export interface IRCMessage {
+  /** Raw line as received */
+  raw: string;
+  /** IRCv3 message tags (e.g., time, msgid) */
+  tags: Record<string, string>;
+  /** Message source (nick!user@host) */
+  source: {
+    nick: string;
+    user?: string;
+    host?: string;
+    /** Full prefix string */
+    full: string;
+  } | null;
+  /** IRC command (PRIVMSG, NOTICE, JOIN, etc.) */
+  command: string;
+  /** Command parameters */
+  params: string[];
+  /** Trailing parameter (after :) - also in params but convenient */
+  trailing?: string;
+}
+
+/**
+ * Parse an IRC message line into structured components.
+ * Handles IRCv3 message tags, source prefix, command, and parameters.
+ *
+ * Format: [@tags] [:source] COMMAND [params] [:trailing]
+ *
+ * Examples:
+ *   :server 001 nick :Welcome
+ *   :nick!user@host PRIVMSG #channel :Hello world
+ *   @time=2024-01-01T00:00:00Z :AuthServ!AuthServ@x3.services NOTICE nick :Message
+ */
+export function parseIRCMessage(line: string): IRCMessage {
+  const result: IRCMessage = {
+    raw: line,
+    tags: {},
+    source: null,
+    command: '',
+    params: [],
+  };
+
+  let pos = 0;
+
+  // Parse tags (if present)
+  if (line.startsWith('@')) {
+    const spaceIdx = line.indexOf(' ');
+    if (spaceIdx === -1) {
+      result.command = line.substring(1);
+      return result;
+    }
+    const tagStr = line.substring(1, spaceIdx);
+    for (const tag of tagStr.split(';')) {
+      const eqIdx = tag.indexOf('=');
+      if (eqIdx === -1) {
+        result.tags[tag] = '';
+      } else {
+        // Unescape tag values per IRCv3 spec
+        let value = tag.substring(eqIdx + 1);
+        value = value
+          .replace(/\\:/g, ';')
+          .replace(/\\s/g, ' ')
+          .replace(/\\r/g, '\r')
+          .replace(/\\n/g, '\n')
+          .replace(/\\\\/g, '\\');
+        result.tags[tag.substring(0, eqIdx)] = value;
+      }
+    }
+    pos = spaceIdx + 1;
+  }
+
+  // Skip leading spaces
+  while (line[pos] === ' ') pos++;
+
+  // Parse source (if present)
+  if (line[pos] === ':') {
+    const spaceIdx = line.indexOf(' ', pos);
+    if (spaceIdx === -1) {
+      result.command = line.substring(pos + 1);
+      return result;
+    }
+    const sourceStr = line.substring(pos + 1, spaceIdx);
+    result.source = parseSource(sourceStr);
+    pos = spaceIdx + 1;
+  }
+
+  // Skip leading spaces
+  while (line[pos] === ' ') pos++;
+
+  // Parse command and params
+  const rest = line.substring(pos);
+  const parts = rest.split(' ');
+
+  // First non-empty part is the command
+  let cmdIdx = 0;
+  while (cmdIdx < parts.length && parts[cmdIdx] === '') cmdIdx++;
+  if (cmdIdx < parts.length) {
+    result.command = parts[cmdIdx].toUpperCase();
+    cmdIdx++;
+  }
+
+  // Remaining parts are params, with : indicating trailing
+  for (let i = cmdIdx; i < parts.length; i++) {
+    if (parts[i].startsWith(':')) {
+      // Everything from here is the trailing param
+      const trailing = parts.slice(i).join(' ').substring(1);
+      result.params.push(trailing);
+      result.trailing = trailing;
+      break;
+    } else if (parts[i] !== '') {
+      result.params.push(parts[i]);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Parse a source prefix (nick!user@host) into components.
+ */
+function parseSource(source: string): IRCMessage['source'] {
+  const bangIdx = source.indexOf('!');
+  const atIdx = source.indexOf('@');
+
+  if (bangIdx === -1 && atIdx === -1) {
+    // Just a server name or nick
+    return { nick: source, full: source };
+  }
+
+  if (bangIdx !== -1 && atIdx !== -1 && atIdx > bangIdx) {
+    // Full nick!user@host
+    return {
+      nick: source.substring(0, bangIdx),
+      user: source.substring(bangIdx + 1, atIdx),
+      host: source.substring(atIdx + 1),
+      full: source,
+    };
+  }
+
+  if (bangIdx !== -1) {
+    // nick!user (no host)
+    return {
+      nick: source.substring(0, bangIdx),
+      user: source.substring(bangIdx + 1),
+      full: source,
+    };
+  }
+
+  // nick@host (no user) - unusual but possible
+  return {
+    nick: source.substring(0, atIdx),
+    host: source.substring(atIdx + 1),
+    full: source,
+  };
+}
+
+/**
+ * Check if a parsed message is from a specific service.
+ */
+export function isFromService(msg: IRCMessage, service: string): boolean {
+  if (!msg.source) return false;
+  return msg.source.nick.toLowerCase() === service.toLowerCase();
+}
+
+/**
+ * Check if a parsed message is a NOTICE from a specific service.
+ */
+export function isServiceNotice(msg: IRCMessage, service: string): boolean {
+  return msg.command === 'NOTICE' && isFromService(msg, service);
+}
+
+/**
+ * A line with both raw and parsed representations.
+ * Parsing is done once on arrival for efficiency.
+ */
+export interface ParsedLine {
+  raw: string;
+  parsed: IRCMessage;
+}
+
+/**
  * IRCv3-aware test client with CAP negotiation support.
  * Provides fine-grained control for testing CAP, SASL, and other IRCv3 features.
  */
@@ -538,10 +721,20 @@ export async function createRawIRCv3Client(
  * Pure socket-based IRC client for truly raw protocol testing.
  * Does not use irc-framework at all - just raw TCP socket.
  */
+/**
+ * Active batch being collected.
+ */
+export interface ActiveBatch {
+  id: string;
+  type: string;
+  params: string[];
+  messages: IRCMessage[];
+}
+
 export class RawSocketClient {
   private socket: Socket | null = null;
   private buffer = '';
-  private lines: string[] = [];
+  private lines: ParsedLine[] = [];
   private lineListeners: Array<(line: string, lineIndex: number) => void> = [];
   private availableCaps = new Map<string, string | null>();
   private enabledCaps = new Set<string>();
@@ -549,6 +742,10 @@ export class RawSocketClient {
   private clientId = Math.random().toString(36).substring(2, 8);
   private socketClosed = false;
   private dataChunks = 0;
+
+  // BATCH collection
+  private activeBatches = new Map<string, ActiveBatch>();
+  private completedBatches: ActiveBatch[] = [];
 
   private log(msg: string, ...args: unknown[]): void {
     if (this.debug) {
@@ -603,9 +800,22 @@ export class RawSocketClient {
               const pingArg = line.substring(5);
               this.send(`PONG ${pingArg}`);
             }
-            this.lines.push(line);
+            // Parse once on arrival, store both raw and parsed
+            const parsed = parseIRCMessage(line);
+            this.lines.push({ raw: line, parsed });
             const lineIndex = this.lines.length - 1;
             this.log(`LINE[${lineIndex}]: ${line}`);
+
+            // Track batch membership
+            const batchTag = parsed.tags?.batch;
+            if (batchTag && this.activeBatches.has(batchTag)) {
+              this.activeBatches.get(batchTag)!.messages.push(parsed);
+            }
+
+            // Handle BATCH start/end
+            if (parsed.command === 'BATCH' && parsed.params.length > 0) {
+              this.handleBatch(parsed);
+            }
 
             // Notify listeners
             const listenerCount = this.lineListeners.length;
@@ -635,6 +845,70 @@ export class RawSocketClient {
     this.socket?.write(line + '\r\n');
   }
 
+  /**
+   * Handle BATCH start/end commands.
+   * Tracks active batches and moves them to completed when done.
+   */
+  private handleBatch(msg: IRCMessage): void {
+    const refTag = msg.params[0];
+
+    if (refTag.startsWith('+')) {
+      // BATCH start: +<id> <type> [params...]
+      const id = refTag.slice(1);
+      const type = msg.params[1] || '';
+      const params = msg.params.slice(2);
+      this.activeBatches.set(id, { id, type, params, messages: [] });
+      this.log(`BATCH start: ${id} type=${type}`);
+    } else if (refTag.startsWith('-')) {
+      // BATCH end: -<id>
+      const id = refTag.slice(1);
+      const batch = this.activeBatches.get(id);
+      if (batch) {
+        this.activeBatches.delete(id);
+        this.completedBatches.push(batch);
+        this.log(`BATCH end: ${id} with ${batch.messages.length} messages`);
+      }
+    }
+  }
+
+  /**
+   * Wait for a completed batch of the specified type.
+   * Returns the batch with all its collected messages.
+   */
+  async waitForBatch(type: string, timeout = 5000): Promise<ActiveBatch> {
+    const startTime = Date.now();
+    this.log(`waitForBatch: type=${type}, timeout=${timeout}ms`);
+
+    while (Date.now() - startTime < timeout) {
+      // Check completed batches
+      const idx = this.completedBatches.findIndex(b => b.type === type);
+      if (idx !== -1) {
+        const batch = this.completedBatches.splice(idx, 1)[0];
+        this.log(`waitForBatch: found ${type} batch with ${batch.messages.length} messages`);
+        return batch;
+      }
+
+      // Wait a bit for more messages
+      await new Promise(r => setTimeout(r, 50));
+    }
+
+    throw new Error(`Timeout waiting for BATCH type: ${type}`);
+  }
+
+  /**
+   * Get all completed batches (doesn't consume them).
+   */
+  get allCompletedBatches(): ActiveBatch[] {
+    return [...this.completedBatches];
+  }
+
+  /**
+   * Clear completed batches.
+   */
+  clearCompletedBatches(): void {
+    this.completedBatches = [];
+  }
+
   private consumedIndices = new Set<number>();
 
   async waitForLine(pattern: RegExp, timeout = 5000): Promise<string> {
@@ -644,8 +918,8 @@ export class RawSocketClient {
     // Helper to find matching unconsumed line in buffer
     const findInBuffer = (): { line: string; index: number } | null => {
       for (let i = 0; i < this.lines.length; i++) {
-        if (!this.consumedIndices.has(i) && pattern.test(this.lines[i])) {
-          return { line: this.lines[i], index: i };
+        if (!this.consumedIndices.has(i) && pattern.test(this.lines[i].raw)) {
+          return { line: this.lines[i].raw, index: i };
         }
       }
       return null;
@@ -676,8 +950,8 @@ export class RawSocketClient {
         // Log all unconsumed lines for debugging
         const unconsumed = this.lines.filter((_, i) => !this.consumedIndices.has(i));
         this.log(`WAIT[${waitId}] Unconsumed lines: ${unconsumed.length}`);
-        unconsumed.forEach((line, i) => this.log(`  [${i}] ${line}`));
-        reject(new Error(`Timeout waiting for ${pattern}\nBuffer: ${this.lines.slice(-10).join('\\n')}`));
+        unconsumed.forEach((pl, i) => this.log(`  [${i}] ${pl.raw}`));
+        reject(new Error(`Timeout waiting for ${pattern}\nBuffer: ${this.lines.slice(-10).map(l => l.raw).join('\\n')}`));
       }, timeout);
 
       const handler = (line: string, lineIndex: number) => {
@@ -708,6 +982,77 @@ export class RawSocketClient {
     });
   }
 
+  /**
+   * Wait for a parsed message matching a predicate function.
+   * Uses proper IRC message parsing instead of regex on raw strings.
+   */
+  async waitForParsedLine(predicate: (msg: IRCMessage) => boolean, timeout = 5000): Promise<IRCMessage> {
+    const waitId = Math.random().toString(36).substring(2, 6);
+    this.log(`WAIT_PARSED[${waitId}] start: timeout=${timeout}ms, lines=${this.lines.length}`);
+
+    // Helper to find matching unconsumed parsed message in buffer
+    const findInBuffer = (): { msg: IRCMessage; index: number } | null => {
+      for (let i = 0; i < this.lines.length; i++) {
+        if (!this.consumedIndices.has(i) && predicate(this.lines[i].parsed)) {
+          return { msg: this.lines[i].parsed, index: i };
+        }
+      }
+      return null;
+    };
+
+    // Check existing lines first
+    const existing = findInBuffer();
+    if (existing) {
+      this.consumedIndices.add(existing.index);
+      this.log(`WAIT_PARSED[${waitId}] found in buffer at index ${existing.index}`);
+      return existing.msg;
+    }
+
+    this.log(`WAIT_PARSED[${waitId}] not in buffer, registering listener`);
+
+    return new Promise((resolve, reject) => {
+      let resolved = false;
+
+      const cleanup = () => {
+        const idx = this.lineListeners.indexOf(handler);
+        if (idx >= 0) this.lineListeners.splice(idx, 1);
+      };
+
+      const timer = setTimeout(() => {
+        if (resolved) return;
+        cleanup();
+        this.log(`WAIT_PARSED[${waitId}] TIMEOUT after ${timeout}ms`);
+        reject(new Error(`Timeout waiting for parsed message`));
+      }, timeout);
+
+      const handler = (line: string, lineIndex: number) => {
+        if (resolved) return;
+        const parsed = this.lines[lineIndex].parsed;
+        if (predicate(parsed)) {
+          resolved = true;
+          clearTimeout(timer);
+          cleanup();
+          this.consumedIndices.add(lineIndex);
+          this.log(`WAIT_PARSED[${waitId}] matched from listener at index ${lineIndex}`);
+          resolve(parsed);
+        }
+      };
+
+      this.lineListeners.push(handler);
+
+      // Re-check buffer after registering listener to catch race condition
+      const lateMatch = findInBuffer();
+      if (lateMatch && !resolved) {
+        resolved = true;
+        clearTimeout(timer);
+        cleanup();
+        this.consumedIndices.add(lateMatch.index);
+        this.log(`WAIT_PARSED[${waitId}] late match in buffer at index ${lateMatch.index}`);
+        resolve(lateMatch.msg);
+      }
+    });
+  }
+
   async collectLines(pattern: RegExp, stopPattern: RegExp, timeout = 5000): Promise<string[]> {
     const collected: string[] = [];
     const startTime = Date.now();
@@ -728,7 +1073,11 @@ export class RawSocketClient {
   }
 
   get allLines(): string[] {
-    return [...this.lines];
+    return this.lines.map(l => l.raw);
+  }
+
+  get allParsedLines(): IRCMessage[] {
+    return this.lines.map(l => l.parsed);
   }
 
   /**
@@ -762,9 +1111,9 @@ export class RawSocketClient {
     console.log(`  listeners: ${this.lineListeners.length}`);
     console.log(`  pendingBuffer: ${this.buffer.length} chars`);
     console.log(`  All lines:`);
-    this.lines.forEach((line, i) => {
+    this.lines.forEach((pl, i) => {
       const consumed = this.consumedIndices.has(i) ? '[C]' : '[ ]';
-      console.log(`    ${consumed} [${i}] ${line.substring(0, 100)}`);
+      console.log(`    ${consumed} [${i}] ${pl.raw.substring(0, 100)}`);
     });
   }
 

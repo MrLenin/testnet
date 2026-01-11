@@ -21,7 +21,7 @@
  *   500+:    Owner - Full control
  */
 
-import { RawSocketClient, createRawSocketClient, PRIMARY_SERVER } from './ircv3-client.js';
+import { RawSocketClient, createRawSocketClient, PRIMARY_SERVER, IRCMessage, isFromService } from './ircv3-client.js';
 import { uniqueId, retryAsync, waitForCondition } from './cap-bundles.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -90,53 +90,63 @@ export class X3Client extends RawSocketClient {
    * @returns Array of response lines
    */
   async serviceCmd(service: string, command: string, timeout = 10000): Promise<string[]> {
+    // Clear buffer of any stale messages from previous commands
     this.clearRawBuffer();
+
+    // Send command
     this.send(`PRIVMSG ${service} :${command}`);
+
+    // No fixed delays - waitForParsedLine sets up listener immediately
+    // Any response arriving after send() will be caught by the listener
 
     const lines: string[] = [];
     const startTime = Date.now();
 
-    // Helper to check if line is from our target service
-    const isServiceLine = (line: string): boolean => {
-      return line.includes('x3.services') ||
-             line.toLowerCase().includes(service.toLowerCase() + '!');
+    // Reliable service matching using proper IRC parsing
+    // Checks parsed source.nick instead of fragile string matching
+    const isFromTargetService = (msg: IRCMessage): boolean => {
+      return msg.command === 'NOTICE' && isFromService(msg, service);
     };
 
     // Wait for FIRST response with full timeout (server may be busy)
+    // Keep per-poll timeout short (2s) to maximize retry attempts within overall timeout
     while (Date.now() - startTime < timeout) {
       try {
-        const line = await this.waitForLine(
-          new RegExp(`NOTICE.*:`, 'i'),
+        const msg = await this.waitForParsedLine(
+          m => m.command === 'NOTICE',
           Math.min(2000, timeout - (Date.now() - startTime))
         );
 
-        if (isServiceLine(line)) {
-          lines.push(line);
+        if (isFromTargetService(msg)) {
+          lines.push(msg.raw);
           break; // Got first response, switch to fast collection
         }
         // Non-service NOTICE (server notice, etc.) - keep waiting
+        console.log(`[serviceCmd] Skipping non-${service} NOTICE: ${msg.source?.nick || 'unknown'}`);
       } catch {
         // Timeout - no response yet, keep waiting until overall timeout
+        console.log(`[serviceCmd] Poll timeout waiting for ${service} (${Date.now() - startTime}ms elapsed)`);
       }
     }
 
     // If no first response, return empty
     if (lines.length === 0) {
+      console.log(`[serviceCmd] No response from ${service} after ${timeout}ms for: ${command.substring(0, 30)}...`);
       return lines;
     }
 
-    // Collect remaining responses with short timeout
-    // Increased from 500ms to handle slow X3/Keycloak responses
-    const fastTimeout = 1000;
+    // Collect remaining responses with short inter-message timeout
+    // 500ms between messages - if no response in this window, service is done
+    const interMessageTimeout = 500;
     while (Date.now() - startTime < timeout) {
       try {
-        const line = await this.waitForLine(
-          new RegExp(`NOTICE.*:`, 'i'),
-          fastTimeout
+        const msg = await this.waitForParsedLine(
+          m => m.command === 'NOTICE',
+          interMessageTimeout
         );
 
-        if (isServiceLine(line)) {
-          lines.push(line);
+        if (isFromTargetService(msg)) {
+          lines.push(msg.raw);
         }
       } catch {
         // Timeout with no response = service is done responding
@@ -170,10 +180,14 @@ export class X3Client extends RawSocketClient {
     const success = lines.some(l =>
       l.includes('has been registered') ||
       l.includes('successfully') ||
-      l.includes('created')
+      l.includes('created') ||
+      // When email verification is enabled, X3 responds with this:
+      l.includes('check your email') ||
+      l.includes('To activate your account')
     );
     const error = lines.find(l =>
-      l.includes('already') ||
+      l.includes('already registered') ||  // Account already exists
+      l.includes('unused cookie outstanding') ||  // Email already has pending registration
       l.includes('error') ||
       l.includes('denied') ||
       l.includes('invalid')
@@ -202,44 +216,140 @@ export class X3Client extends RawSocketClient {
   }
 
   /**
-   * Register and activate an account by scraping the cookie from X3 logs.
-   * This is the preferred method for tests when email verification is enabled.
-   * Uses polling to handle race condition where logs may not be flushed immediately.
+   * Register and activate an account.
+   * Uses CookieObserver (IRC-based) or Docker logs to capture the activation cookie.
+   * @param account - Account name to register
+   * @param password - Password for the account
+   * @param email - Email address for the account
+   * @param observerNick - Nick of the CookieObserver bot (default: CookieBot)
    */
-  async registerAndActivate(account: string, password: string, email: string): Promise<ServiceResponse> {
+  async registerAndActivate(account: string, password: string, email: string, observerNick = 'CookieBot'): Promise<ServiceResponse> {
     // First register
     const regResult = await this.registerAccount(account, password, email);
     if (!regResult.success) {
+      console.log(`[registerAndActivate] REGISTER failed for ${account}: ${regResult.error}`);
+      console.log(`[registerAndActivate] REGISTER lines: ${JSON.stringify(regResult.lines)}`);
       return regResult;
     }
+    console.log(`[registerAndActivate] REGISTER succeeded for ${account}`);
 
-    // Poll for cookie in logs instead of fixed delay (handles race condition)
-    let cookie: string | null = null;
-    for (let attempt = 0; attempt < 10; attempt++) {
-      await new Promise(resolve => setTimeout(resolve, 300));
-      try {
-        const { stdout } = await execAsync(`docker logs x3 2>&1 | grep "Created cookie type=0 for ${account}:" | tail -1`);
-        const match = stdout.match(/Created cookie type=0 for \S+: (\S+)/);
-        if (match) {
-          cookie = match[1].trim();
-          break;
-        }
-      } catch {
-        // Continue polling - grep returns non-zero if no match
-      }
-    }
+    // Get the activation cookie (tries observer first, then Docker logs)
+    const cookie = await this.getCookie(account, observerNick, 5000);
 
     if (!cookie) {
-      return { lines: regResult.lines, success: false, error: 'Could not find activation cookie in logs after 10 attempts' };
+      console.log(`[registerAndActivate] No cookie found for ${account}`);
+      return { lines: regResult.lines, success: false, error: 'Could not find activation cookie' };
     }
 
     // Activate with the cookie (requires password for ACTIVATION cookies)
     const activateResult = await this.activateAccount(account, cookie, password);
+    console.log(`[registerAndActivate] COOKIE result for ${account}: success=${activateResult.success}, error=${activateResult.error}`);
+    console.log(`[registerAndActivate] COOKIE lines: ${JSON.stringify(activateResult.lines)}`);
+
     return {
       lines: [...regResult.lines, ...activateResult.lines],
       success: activateResult.success,
       error: activateResult.error,
     };
+  }
+
+  /**
+   * Get activation cookie from CookieObserver bot.
+   * The observer watches #MrSnoopy and caches cookies, responding to GETCOOKIE queries.
+   * @param account - Account name to get cookie for
+   * @param observerNick - Nick of the CookieObserver bot (default: CookieBot)
+   * @param timeout - Max time to wait for response
+   */
+  async getCookieFromObserver(account: string, observerNick = 'CookieBot', timeout = 5000): Promise<string | null> {
+    const startTime = Date.now();
+
+    // Query the observer for the cookie
+    this.send(`PRIVMSG ${observerNick} :GETCOOKIE ${account}`);
+
+    // Wait for response: "COOKIE account xyz" or "NOTFOUND account"
+    const cookiePattern = new RegExp(`COOKIE\\s+${account}\\s+(\\S+)`, 'i');
+    const notFoundPattern = new RegExp(`NOTFOUND\\s+${account}`, 'i');
+
+    while (Date.now() - startTime < timeout) {
+      try {
+        // Wait for NOTICE from observer
+        const msg = await this.waitForParsedLine(
+          m => m.command === 'NOTICE' &&
+               m.source?.nick?.toLowerCase() === observerNick.toLowerCase(),
+          Math.min(1000, timeout - (Date.now() - startTime))
+        );
+
+        const text = msg.params[1] || '';
+
+        // Check for cookie response
+        const cookieMatch = text.match(cookiePattern);
+        if (cookieMatch) {
+          console.log(`[getCookieFromObserver] Got cookie for ${account} from observer`);
+          return cookieMatch[1];
+        }
+
+        // Check for not found response
+        if (notFoundPattern.test(text)) {
+          console.log(`[getCookieFromObserver] Observer has no cookie for ${account} yet`);
+          // Cookie not cached yet, wait and retry
+          await new Promise(r => setTimeout(r, 300));
+          this.send(`PRIVMSG ${observerNick} :GETCOOKIE ${account}`);
+        }
+      } catch {
+        // Timeout, retry query
+        this.send(`PRIVMSG ${observerNick} :GETCOOKIE ${account}`);
+      }
+    }
+
+    console.log(`[getCookieFromObserver] No cookie found for ${account} after ${timeout}ms`);
+    return null;
+  }
+
+  /**
+   * Get activation cookie from Docker logs (fallback method).
+   * Polls docker logs for the cookie creation message.
+   */
+  async getCookieFromLogs(account: string, timeout = 3000): Promise<string | null> {
+    const startTime = Date.now();
+    const dockerHost = process.env.DOCKER_HOST;
+    const dockerCmd = dockerHost
+      ? `DOCKER_HOST=${dockerHost} docker logs --tail 100 x3 2>&1`
+      : `docker logs --tail 100 x3 2>&1`;
+
+    while (Date.now() - startTime < timeout) {
+      try {
+        const { stdout } = await execAsync(dockerCmd);
+        const pattern = new RegExp(`Created cookie type=0 for ${account}:\\s*(\\S+)`);
+        const match = stdout.match(pattern);
+        if (match) {
+          console.log(`[getCookieFromLogs] Found cookie for ${account}`);
+          return match[1].trim();
+        }
+      } catch {
+        // Docker command failed, retry
+      }
+      await new Promise(r => setTimeout(r, 300));
+    }
+
+    console.log(`[getCookieFromLogs] No cookie found for ${account} after ${timeout}ms`);
+    return null;
+  }
+
+  /**
+   * Get activation cookie using best available method.
+   * Tries CookieObserver first (IRC-based), falls back to Docker logs.
+   * @param account - Account name to get cookie for
+   * @param observerNick - Nick of the CookieObserver bot (default: CookieBot)
+   * @param timeout - Max time to wait
+   */
+  async getCookie(account: string, observerNick = 'CookieBot', timeout = 5000): Promise<string | null> {
+    // Try observer first (preferred - no Docker dependency)
+    const observerCookie = await this.getCookieFromObserver(account, observerNick, timeout / 2);
+    if (observerCookie) return observerCookie;
+
+    // Fallback to Docker logs
+    console.warn('[getCookie] Falling back to Docker log scraping');
+    return this.getCookieFromLogs(account, timeout / 2);
   }
 
   /**
@@ -370,17 +480,21 @@ export class X3Client extends RawSocketClient {
     this.clearRawBuffer();
     this.send(`PRIVMSG ChanServ :REGISTER ${channel}`);
 
+    // Small delay to let the command reach the server
+    await new Promise(r => setTimeout(r, 100));
+
     const lines: string[] = [];
     let success = false;
     let error: string | undefined;
     const startTime = Date.now();
     const timeout = 15000; // Increased timeout for slow Keycloak sync
 
-    // Watch for ChanServ joining (success) or NOTICE with error
+    // Watch for ChanServ joining (success) or ChanServ NOTICE with error
+    // IMPORTANT: Only match ChanServ notices, not AuthServ or other services
     while (Date.now() - startTime < timeout) {
       try {
         const line = await this.waitForLine(
-          /ChanServ.*JOIN|NOTICE.*:/i,
+          /ChanServ.*(JOIN|NOTICE)/i,
           Math.min(3000, timeout - (Date.now() - startTime))
         );
 
@@ -391,8 +505,8 @@ export class X3Client extends RawSocketClient {
           break;
         }
 
-        // NOTICE response (may be success or error)
-        if (line.includes('NOTICE')) {
+        // ChanServ NOTICE response (may be success or error)
+        if (line.includes('ChanServ') && line.includes('NOTICE')) {
           lines.push(line);
 
           // Check for success messages
@@ -563,9 +677,10 @@ export class X3Client extends RawSocketClient {
         continue;
       }
 
-      // Parse USERS table format: "Role  account  LastSeen  Status  Expiry"
-      // The role is first, followed by account name
-      const tableMatch = line.match(/:(\w+)\s+(\S+)\s+(Here|Never|\d+)/i);
+      // Parse USERS table format from IRC NOTICE: ":ChanServ NOTICE nick :Role  account  LastSeen..."
+      // Match role names at the start of the message content (after trailing :)
+      // The colon is the IRC trailing parameter marker
+      const tableMatch = line.match(/:(Owner|Coowner|Manager|Op|HalfOp|Peon|Voice)\s+(\S+)\s+(Here|Never|\d+)/i);
       if (tableMatch) {
         const role = tableMatch[1].toLowerCase();
         const acc = tableMatch[2];
@@ -573,6 +688,7 @@ export class X3Client extends RawSocketClient {
         if (level !== undefined) {
           accessList.push({ account: acc, level });
         }
+        continue;
       }
 
       // Also try ACCESS command format: "nick (account) has Role access (level) in #channel"
@@ -640,16 +756,20 @@ export class X3Client extends RawSocketClient {
    */
   async gline(mask: string, duration: string, reason: string): Promise<ServiceResponse> {
     const lines = await this.serviceCmd('O3', `GLINE ${mask} ${duration} ${reason}`);
-    const success = lines.some(l =>
-      l.includes('added') ||
-      l.includes('gline') ||
-      l.includes('G-line')
-    );
+    // Check for errors first
     const error = lines.find(l =>
-      l.includes('denied') ||
-      l.includes('access') ||
-      l.includes('must be') ||
-      l.includes('privileged')
+      l.toLowerCase().includes('denied') ||
+      l.toLowerCase().includes('invalid') ||
+      l.toLowerCase().includes('must be') ||
+      l.toLowerCase().includes('privileged')
+    );
+    // Success if: no error AND (empty response OR contains 'added' or 'gline')
+    const success = !error && (
+      lines.length === 0 ||  // Silent success
+      lines.some(l =>
+        l.toLowerCase().includes('added') ||
+        l.toLowerCase().includes('gline')
+      )
     );
     return { lines, success, error };
   }
@@ -667,11 +787,28 @@ export class X3Client extends RawSocketClient {
   }
 
   /**
-   * Force-join a channel (oper command).
+   * Force-join a user to a channel (oper command).
+   * Uses SVSJOIN which forces the target user to join.
    */
   async forceJoin(target: string, channel: string): Promise<ServiceResponse> {
-    const lines = await this.serviceCmd('O3', `JOIN ${target} ${channel}`);
-    return { lines, success: true };
+    // O3 SVSJOIN command: SVSJOIN <target> <channel>
+    const lines = await this.serviceCmd('O3', `SVSJOIN ${target} ${channel}`);
+    // Check for errors first - catch all possible error responses
+    const error = lines.find(l =>
+      l.toLowerCase().includes('denied') ||
+      l.toLowerCase().includes('not found') ||
+      l.toLowerCase().includes('privileged') ||
+      l.toLowerCase().includes('unknown') ||      // MSG_NICK_UNKNOWN
+      l.toLowerCase().includes('already') ||      // OSMSG_USER_ALREADY_THERE
+      l.toLowerCase().includes('invalid')         // OSMSG_BAD_SVSCMDTARGET
+    );
+    // Success if no error AND response contains expected text
+    // O3 responds with "Sent the SVSJOIN."
+    const success = !error && lines.some(l =>
+      l.toLowerCase().includes('svsjoin') ||
+      l.toLowerCase().includes('sent')
+    );
+    return { lines, success, error };
   }
 
   /**
@@ -702,6 +839,13 @@ export async function createX3Client(nick?: string): Promise<X3Client> {
   client.capEnd();
   client.register(nick || `x3test${uniqueId().slice(0, 5)}`);
   await client.waitForLine(/001/);
+
+  // Wait for connection to fully settle - server sends welcome messages after 001
+  // (NOTICE about PM history, MODE +x for hidden host, etc.)
+  await new Promise(r => setTimeout(r, 1000));
+
+  // Clear buffer to avoid welcome messages interfering with subsequent commands
+  client.clearRawBuffer();
 
   return client;
 }
@@ -774,6 +918,11 @@ export async function createOperClient(nick?: string): Promise<X3Client> {
   client.register(nick || `oper${uniqueId().slice(0, 5)}`);
   await client.waitForLine(/001/);
 
+  // Wait for connection to fully settle - server sends welcome messages after 001
+  // 1000ms needed because server sends NOTICE about PM history, MODE +x for hidden
+  // host, etc. which can interfere with OPER/AUTH commands if we send too early.
+  await new Promise(r => setTimeout(r, 1000));
+
   // Oper up
   client.send(`OPER ${IRC_OPER.name} ${IRC_OPER.password}`);
   try {
@@ -782,14 +931,48 @@ export async function createOperClient(nick?: string): Promise<X3Client> {
     console.warn('Failed to oper up - may affect O3 commands');
   }
 
-  // Auth with X3 admin account
+  // Auth with X3 admin account - clear buffer first to avoid matching stale data
+  client.clearRawBuffer();
   client.send(`PRIVMSG AuthServ :AUTH ${X3_ADMIN.account} ${X3_ADMIN.password}`);
   try {
-    await client.waitForLine(/I recognize you|authenticated/i, 5000);
+    // AuthServ responds with "I recognize you" on success
+    // Wait specifically for AuthServ NOTICE with recognition message
+    await client.waitForLine(/AuthServ.*NOTICE.*I recognize you/i, 5000);
   } catch {
     console.warn('Failed to auth with X3 - O3 commands may fail');
   }
 
+  // Verify oper level with retries - the sync can take variable time
+  // X3_ADMIN (first oper to register) should have olevel 1000
+  const expectedLevel = 1000;
+  let verified = false;
+  let lastLevel = 0;
+  for (let attempt = 0; attempt < 15; attempt++) {
+    await new Promise(r => setTimeout(r, 300));
+    lastLevel = await client.myAccess();
+    if (lastLevel === expectedLevel) {
+      verified = true;
+      break;
+    }
+    if (attempt > 0 && lastLevel > 0) {
+      // Got some level but not expected - log for debugging
+      console.warn(`createOperClient: myAccess returned ${lastLevel}, expected ${expectedLevel} (attempt ${attempt + 1})`);
+    }
+  }
+  if (!verified) {
+    // Try one more time with fresh auth
+    console.warn(`createOperClient: Retrying auth after failed verification (got ${lastLevel})`);
+    client.clearRawBuffer();
+    client.send(`PRIVMSG AuthServ :AUTH ${X3_ADMIN.account} ${X3_ADMIN.password}`);
+    await new Promise(r => setTimeout(r, 1000));
+    lastLevel = await client.myAccess();
+    if (lastLevel !== expectedLevel) {
+      console.warn(`createOperClient: Failed to verify oper level ${expectedLevel} after retry (got ${lastLevel})`);
+    }
+  }
+
+  // Clear buffer before returning to avoid stale data affecting subsequent commands
+  client.clearRawBuffer();
   return client;
 }
 

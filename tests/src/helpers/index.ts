@@ -17,9 +17,16 @@ export {
   isSecondaryServerAvailable,
   PRIMARY_SERVER,
   SECONDARY_SERVER,
+  // IRC message parsing utilities (parseIRCMessage already exported from message-parser.js)
+  isFromService,
+  isServiceNotice,
   type IRCv3Config,
   type CapState,
   type ServerConfig,
+  type IRCMessage,
+  type ParsedLine,
+  // BATCH collection
+  type ActiveBatch,
 } from './ircv3-client.js';
 
 export {
@@ -155,3 +162,10 @@ export {
   // Types
   type ServiceResponse,
 } from './x3-client.js';
+
+export {
+  // Cookie observer for capturing activation cookies via IRC
+  CookieObserver,
+  getGlobalCookieObserver,
+  shutdownGlobalCookieObserver,
+} from './cookie-observer.js';
