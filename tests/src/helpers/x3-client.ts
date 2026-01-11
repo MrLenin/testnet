@@ -265,51 +265,28 @@ export class X3Client extends RawSocketClient {
   }
 
   /**
-   * Get activation cookie from CookieObserver bot.
-   * The observer watches #MrSnoopy and caches cookies, responding to GETCOOKIE queries.
+   * Get activation cookie from CookieObserver's cache.
+   * Polls the in-process cache directly - no IRC messages needed.
    * @param account - Account name to get cookie for
-   * @param observerNick - Nick of the CookieObserver bot (default: CookieBot)
-   * @param timeout - Max time to wait for response
+   * @param timeout - Max time to wait for cookie to appear
    */
-  async getCookieFromObserver(account: string, observerNick = 'CookieBot', timeout = 5000): Promise<string | null> {
+  async getCookieFromObserver(account: string, _observerNick?: string, timeout = 5000): Promise<string | null> {
     const startTime = Date.now();
+    const pollInterval = 200;
 
-    // Query the observer for the cookie
-    this.send(`PRIVMSG ${observerNick} :GETCOOKIE ${account}`);
-
-    // Wait for response: "COOKIE account xyz" or "NOTFOUND account"
-    const cookiePattern = new RegExp(`COOKIE\\s+${account}\\s+(\\S+)`, 'i');
-    const notFoundPattern = new RegExp(`NOTFOUND\\s+${account}`, 'i');
+    // Get observer from globalThis (set by cookie-observer.ts)
+    const getObserver = () => (globalThis as any).__cookieObserver;
 
     while (Date.now() - startTime < timeout) {
-      try {
-        // Wait for NOTICE from observer
-        const msg = await this.waitForParsedLine(
-          m => m.command === 'NOTICE' &&
-               m.source?.nick?.toLowerCase() === observerNick.toLowerCase(),
-          Math.min(1000, timeout - (Date.now() - startTime))
-        );
-
-        const text = msg.params[1] || '';
-
-        // Check for cookie response
-        const cookieMatch = text.match(cookiePattern);
-        if (cookieMatch) {
-          console.log(`[getCookieFromObserver] Got cookie for ${account} from observer`);
-          return cookieMatch[1];
+      const observer = getObserver();
+      if (observer) {
+        const cookie = observer.getCachedCookie(account);
+        if (cookie) {
+          console.log(`[getCookieFromObserver] Got cookie for ${account} from cache`);
+          return cookie;
         }
-
-        // Check for not found response
-        if (notFoundPattern.test(text)) {
-          console.log(`[getCookieFromObserver] Observer has no cookie for ${account} yet`);
-          // Cookie not cached yet, wait and retry
-          await new Promise(r => setTimeout(r, 300));
-          this.send(`PRIVMSG ${observerNick} :GETCOOKIE ${account}`);
-        }
-      } catch {
-        // Timeout, retry query
-        this.send(`PRIVMSG ${observerNick} :GETCOOKIE ${account}`);
       }
+      await new Promise(r => setTimeout(r, pollInterval));
     }
 
     console.log(`[getCookieFromObserver] No cookie found for ${account} after ${timeout}ms`);
