@@ -526,14 +526,23 @@ describe('Core IRC Commands', () => {
       target.register('whoistarget1');
       await target.waitForLine(/001/);
 
+      // Wait for target to be fully visible on network before WHOIS
+      await new Promise(r => setTimeout(r, 500));
+
       client.clearRawBuffer();
 
       client.send('WHOIS whoistarget1');
 
-      // Should get RPL_WHOISUSER (311)
-      const whoisResponse = await client.waitForLine(/311.*whoistarget1/i, 5000);
-      expect(whoisResponse).toMatch(/311/);
-      expect(whoisResponse).toContain('whoistarget1');
+      // Should get RPL_WHOISUSER (311) - use parsed message matching
+      const whoisResponse = await client.waitForParsedLine(
+        msg => (msg.command === '311' && msg.params.some(p => p.toLowerCase().includes('whoistarget1'))) ||
+               msg.command === '401', // ERR_NOSUCHNICK means target not visible yet
+        5000
+      );
+
+      // Should be 311, not 401
+      expect(whoisResponse.command).toBe('311');
+      expect(whoisResponse.params.some(p => p.toLowerCase().includes('whoistarget1'))).toBe(true);
 
       client.send('QUIT');
       target.send('QUIT');
@@ -557,15 +566,19 @@ describe('Core IRC Commands', () => {
       const channel = uniqueChannel('whoischan');
       target.send(`JOIN ${channel}`);
       await target.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await new Promise(r => setTimeout(r, 300));
+
+      // Wait for join to be fully processed before WHOIS
+      await new Promise(r => setTimeout(r, 500));
 
       client.clearRawBuffer();
 
       client.send('WHOIS whoistarget2');
 
-      // Should get RPL_WHOISCHANNELS (319) showing the channel
-      const channelsResponse = await client.waitForLine(/319|318/i, 5000);
-      // 318 is end of WHOIS, 319 is channels
+      // Should get RPL_WHOISCHANNELS (319) or at least 318 (end of WHOIS)
+      const channelsResponse = await client.waitForParsedLine(
+        msg => msg.command === '319' || msg.command === '318',
+        5000
+      );
       expect(channelsResponse).toBeDefined();
 
       client.send('QUIT');
@@ -584,8 +597,11 @@ describe('Core IRC Commands', () => {
 
       client.send('WHOIS nonexistentuser12345');
 
-      // Should get ERR_NOSUCHNICK (401)
-      const errorResponse = await client.waitForLine(/401|318/i, 5000);
+      // Should get ERR_NOSUCHNICK (401) or end of WHOIS (318)
+      const errorResponse = await client.waitForParsedLine(
+        msg => msg.command === '401' || msg.command === '318',
+        5000
+      );
       // Some servers may just send 318 (end of WHOIS) for nonexistent users
       expect(errorResponse).toBeDefined();
 
@@ -613,15 +629,19 @@ describe('Core IRC Commands', () => {
       client2.send(`JOIN ${channel}`);
       await client1.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
       await client2.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
-      await new Promise(r => setTimeout(r, 300));
+
+      // Wait for joins to be processed
+      await new Promise(r => setTimeout(r, 500));
 
       client1.clearRawBuffer();
 
       client1.send(`WHO ${channel}`);
 
-      // Should get RPL_WHOREPLY (352) for users
-      const whoResponse = await client1.waitForLine(/352|315/i, 5000);
-      // 315 is end of WHO
+      // Should get RPL_WHOREPLY (352) or end of WHO (315)
+      const whoResponse = await client1.waitForParsedLine(
+        msg => msg.command === '352' || msg.command === '315',
+        5000
+      );
       expect(whoResponse).toBeDefined();
 
       client1.send('QUIT');
@@ -643,13 +663,18 @@ describe('Core IRC Commands', () => {
       client.send(`JOIN ${channel}`);
       await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
 
+      // Wait for join to be processed
+      await new Promise(r => setTimeout(r, 300));
+
       client.clearRawBuffer();
 
       client.send('LIST');
 
-      // Should get RPL_LISTEND (323)
-      const listEnd = await client.waitForLine(/322|323/i, 5000);
-      // 322 is list entry, 323 is end
+      // Should get RPL_LIST (322) or RPL_LISTEND (323)
+      const listEnd = await client.waitForParsedLine(
+        msg => msg.command === '322' || msg.command === '323',
+        5000
+      );
       expect(listEnd).toBeDefined();
 
       client.send('QUIT');
