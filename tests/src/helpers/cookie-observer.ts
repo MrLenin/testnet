@@ -36,8 +36,11 @@ export class CookieObserver extends RawSocketClient {
    * Create and initialize a CookieObserver.
    * Connects, authenticates as testadmin, and joins #MrSnoopy.
    */
-  static async create(baseNick = 'CookieBot'): Promise<CookieObserver> {
-    const observer = new CookieObserver(baseNick);
+  static async create(): Promise<CookieObserver> {
+    // Generate unique nick per run - avoids collision with ghost nicks from previous runs
+    const uniqueSuffix = Date.now().toString(36).slice(-5);
+    const nick = `CB${uniqueSuffix}`;
+    const observer = new CookieObserver(nick);
     await observer.initialize();
     return observer;
   }
@@ -46,37 +49,15 @@ export class CookieObserver extends RawSocketClient {
     // Connect to IRC
     await this.connect(IRC_HOST, IRC_PORT);
 
-    // Try to register with nick, handling collisions
-    let registered = false;
-    let attempts = 0;
-    const maxAttempts = 3;
+    // Register with our unique nick - should never collide
+    this.send(`NICK ${this.nick}`);
+    this.send(`USER cookiebot 0 * :Cookie Observer Bot`);
 
-    while (!registered && attempts < maxAttempts) {
-      const tryNick = attempts === 0 ? this.nick : `${this.nick}${attempts}`;
-      this.send(`NICK ${tryNick}`);
-      if (attempts === 0) {
-        this.send(`USER ${this.nick} 0 * :Cookie Observer Bot`);
-      }
-
-      try {
-        // Wait for either welcome (001) or nick-in-use (433)
-        const response = await this.waitForLine(/^:\S+ (001|433)/, 5000);
-        if (response.includes(' 001 ')) {
-          // Successfully registered
-          (this as any).nick = tryNick; // Update nick if we used alternate
-          registered = true;
-        } else if (response.includes(' 433 ')) {
-          // Nick in use, try another
-          attempts++;
-          console.log(`[CookieObserver] Nick ${tryNick} in use, trying alternate...`);
-        }
-      } catch {
-        attempts++;
-      }
-    }
-
-    if (!registered) {
-      throw new Error('Failed to register CookieObserver after multiple attempts');
+    // Wait for welcome
+    const response = await this.waitForLine(/^:\S+ (001|433)/, 5000);
+    if (response.includes(' 433 ')) {
+      // Extremely unlikely with timestamp-based nick, but handle it
+      throw new Error(`Nick ${this.nick} unexpectedly in use`);
     }
 
     // Authenticate as testadmin (oper account)
