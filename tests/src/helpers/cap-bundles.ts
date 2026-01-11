@@ -209,3 +209,105 @@ export async function collectChathistoryBatch(
 
   return { batchId, messages };
 }
+
+/**
+ * Query CHATHISTORY with polling until expected messages are found.
+ * This properly handles async LMDB persistence in Nefarious rather than using fixed delays.
+ *
+ * @param client - IRC client with send/waitForLine methods
+ * @param target - Channel or user to query history for
+ * @param options - Configuration options
+ * @returns Array of history messages
+ * @throws Error if timeout is reached before expected messages appear
+ */
+export async function waitForChathistory(
+  client: {
+    send: (line: string) => void;
+    waitForLine: (pattern: RegExp, timeout?: number) => Promise<string>;
+    clearRawBuffer: () => void;
+  },
+  target: string,
+  options: {
+    /** Minimum number of messages expected (default: 1) */
+    minMessages?: number;
+    /** Maximum time to wait for messages to appear (default: 10000ms) */
+    timeoutMs?: number;
+    /** Time between CHATHISTORY queries (default: 200ms) */
+    pollIntervalMs?: number;
+    /** CHATHISTORY subcommand (default: LATEST) */
+    subcommand?: 'LATEST' | 'BEFORE' | 'AFTER' | 'AROUND' | 'BETWEEN';
+    /** Timestamp for BEFORE/AFTER/AROUND (default: * for LATEST) */
+    timestamp?: string;
+    /** Second timestamp for BETWEEN */
+    timestamp2?: string;
+    /** Message limit (default: 50) */
+    limit?: number;
+  } = {}
+): Promise<string[]> {
+  const {
+    minMessages = 1,
+    timeoutMs = 10000,
+    pollIntervalMs = 200,
+    subcommand = 'LATEST',
+    timestamp = '*',
+    timestamp2,
+    limit = 50,
+  } = options;
+
+  const startTime = Date.now();
+  let lastMessages: string[] = [];
+
+  while (Date.now() - startTime < timeoutMs) {
+    // Clear buffer to avoid stale data
+    client.clearRawBuffer();
+
+    // Build CHATHISTORY command
+    let cmd: string;
+    if (subcommand === 'BETWEEN' && timestamp2) {
+      cmd = `CHATHISTORY BETWEEN ${target} timestamp=${timestamp} timestamp=${timestamp2} ${limit}`;
+    } else if (subcommand === 'LATEST') {
+      cmd = `CHATHISTORY LATEST ${target} ${timestamp} ${limit}`;
+    } else {
+      cmd = `CHATHISTORY ${subcommand} ${target} timestamp=${timestamp} ${limit}`;
+    }
+
+    client.send(cmd);
+
+    try {
+      // Wait for batch start
+      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 3000);
+      if (!batchStart) continue;
+
+      // Collect messages in batch
+      const messages: string[] = [];
+      const collectStart = Date.now();
+      while (Date.now() - collectStart < 5000) {
+        try {
+          const line = await client.waitForLine(/PRIVMSG|NOTICE|BATCH -/i, 1000);
+          if (line.includes('BATCH -')) break;
+          if (/PRIVMSG|NOTICE/.test(line)) messages.push(line);
+        } catch {
+          break; // Timeout = no more messages
+        }
+      }
+
+      lastMessages = messages;
+
+      // Check if we have enough messages
+      if (messages.length >= minMessages) {
+        return messages;
+      }
+
+      // Not enough yet - wait and retry
+      await new Promise(r => setTimeout(r, pollIntervalMs));
+    } catch {
+      // Query failed - wait and retry
+      await new Promise(r => setTimeout(r, pollIntervalMs));
+    }
+  }
+
+  // Timeout - return what we have (let caller decide if it's enough)
+  throw new Error(
+    `Timeout waiting for chathistory: expected ${minMessages} messages, got ${lastMessages.length} after ${timeoutMs}ms`
+  );
+}

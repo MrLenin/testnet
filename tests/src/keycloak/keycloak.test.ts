@@ -679,7 +679,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
         // Use chunked sending for large OAuth tokens
         await sendSaslPayload(client, payload);
 
-        const result = await client.waitForLine(/90[03]/, 5000);
+        // Increased timeout to 15s - Keycloak token validation can be slow, especially for auto-create
+        const result = await client.waitForLine(/90[03]/, 15000);
 
         if (result.includes('903') || result.includes('900')) {
           console.log('Auto-created account for:', uniqueUser);
