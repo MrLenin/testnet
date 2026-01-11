@@ -33,7 +33,7 @@ async function createRegisteredClient(server: typeof PRIMARY_SERVER, nick: strin
   await client.capLs();
   client.capEnd();
   client.register(nick);
-  await client.waitForLine(/001/, 5000);
+  await client.waitForNumeric('001', 5000);
   return client;
 }
 
@@ -225,10 +225,10 @@ describe.skipIf(!secondaryAvailable)('Disconnect Detection', () => {
 
     // Join channel
     remote.send(`JOIN ${channel}`);
-    await remote.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+    await remote.waitForJoin(channel, undefined, 5000);
 
     local.send(`JOIN ${channel}`);
-    await local.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+    await local.waitForJoin(channel, undefined, 5000);
 
     // Verify visibility
     local.send(`NAMES ${channel}`);
@@ -260,14 +260,14 @@ describe.skipIf(!secondaryAvailable)('Disconnect Detection', () => {
     const local = trackClient(await createRegisteredClient(PRIMARY_SERVER, localNick));
 
     local.send(`JOIN ${channel}`);
-    await local.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+    await local.waitForJoin(channel, undefined, 5000);
 
     // Create multiple remote users
     const remoteClients: RawSocketClient[] = [];
     for (const nick of remoteNicks) {
       const client = trackClient(await createRegisteredClient(SECONDARY_SERVER, nick));
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+      await client.waitForJoin(channel, undefined, 5000);
       remoteClients.push(client);
     }
 
@@ -311,7 +311,7 @@ describe.skipIf(!secondaryAvailable)('State After Reconnection', () => {
     let client = trackClient(await createRegisteredClient(PRIMARY_SERVER, nick));
 
     client.send(`JOIN ${channel}`);
-    await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+    await client.waitForJoin(channel, undefined, 5000);
 
     // Disconnect
     client.send('QUIT :Disconnect for test');
@@ -338,7 +338,7 @@ describe.skipIf(!secondaryAvailable)('State After Reconnection', () => {
 
     // Rejoin and verify
     client.send(`JOIN ${channel}`);
-    await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+    await client.waitForJoin(channel, undefined, 5000);
 
     client.send(`NAMES ${channel}`);
     const rejoinNames = await client.waitForLine(/353/, 5000);
@@ -355,7 +355,7 @@ describe.skipIf(!secondaryAvailable)('State After Reconnection', () => {
     const primary = trackClient(await createRegisteredClient(PRIMARY_SERVER, nick1));
 
     primary.send(`JOIN ${channel}`);
-    await primary.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+    await primary.waitForJoin(channel, undefined, 5000);
 
     primary.send(`MODE ${channel} +ms`);
     await primary.waitForLine(/MODE.*\+[ms]/i, 3000).catch(() => null);
@@ -364,7 +364,7 @@ describe.skipIf(!secondaryAvailable)('State After Reconnection', () => {
     const secondary = trackClient(await createRegisteredClient(SECONDARY_SERVER, nick2));
 
     secondary.send(`JOIN ${channel}`);
-    await secondary.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+    await secondary.waitForJoin(channel, undefined, 5000);
 
     // Check modes - should see modes from BURST
     secondary.send(`MODE ${channel}`);

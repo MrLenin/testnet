@@ -56,11 +56,11 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       await founder.capReq(['draft/channel-rename']);
       founder.capEnd();
       founder.register('renfound1');
-      await founder.waitForLine(/001/);
+      await founder.waitForNumeric('001');
 
       const oldName = uniqueChannel('renold');
       founder.send(`JOIN ${oldName}`);
-      await founder.waitForLine(new RegExp(`JOIN.*${oldName}`, 'i'));
+      await founder.waitForJoin(oldName);
 
       founder.clearRawBuffer();
 
@@ -86,11 +86,11 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       await client.capReq(['draft/channel-rename']);
       client.capEnd();
       client.register('renreason1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const oldName = uniqueChannel('renreas');
       client.send(`JOIN ${oldName}`);
-      await client.waitForLine(new RegExp(`JOIN.*${oldName}`, 'i'));
+      await client.waitForJoin(oldName);
 
       client.clearRawBuffer();
 
@@ -121,19 +121,19 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       await op.capReq(['draft/channel-rename']);
       op.capEnd();
       op.register('renop1');
-      await op.waitForLine(/001/);
+      await op.waitForNumeric('001');
 
       await member.capLs();
       await member.capReq(['draft/channel-rename']);
       member.capEnd();
       member.register('renmem1');
-      await member.waitForLine(/001/);
+      await member.waitForNumeric('001');
 
       const oldName = uniqueChannel('rennote');
       op.send(`JOIN ${oldName}`);
       member.send(`JOIN ${oldName}`);
-      await op.waitForLine(new RegExp(`JOIN.*${oldName}`, 'i'));
-      await member.waitForLine(new RegExp(`JOIN.*${oldName}`, 'i'));
+      await op.waitForJoin(oldName);
+      await member.waitForJoin(oldName);
       await new Promise(r => setTimeout(r, 300));
 
       member.clearRawBuffer();
@@ -163,20 +163,20 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       await op.capReq(['draft/channel-rename']);
       op.capEnd();
       op.register('renop2');
-      await op.waitForLine(/001/);
+      await op.waitForNumeric('001');
 
       // nocap does NOT request channel-rename
       await nocap.capLs();
       await nocap.capReq(['multi-prefix']);
       nocap.capEnd();
       nocap.register('rennocap1');
-      await nocap.waitForLine(/001/);
+      await nocap.waitForNumeric('001');
 
       const oldName = uniqueChannel('rennocap');
       op.send(`JOIN ${oldName}`);
       nocap.send(`JOIN ${oldName}`);
-      await op.waitForLine(new RegExp(`JOIN.*${oldName}`, 'i'));
-      await nocap.waitForLine(new RegExp(`JOIN.*${oldName}`, 'i'));
+      await op.waitForJoin(oldName);
+      await nocap.waitForJoin(oldName);
       await new Promise(r => setTimeout(r, 300));
 
       nocap.clearRawBuffer();
@@ -213,20 +213,20 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       await op.capReq(['draft/channel-rename']);
       op.capEnd();
       op.register('renop3');
-      await op.waitForLine(/001/);
+      await op.waitForNumeric('001');
 
       await user.capLs();
       await user.capReq(['draft/channel-rename']);
       user.capEnd();
       user.register('renuser1');
-      await user.waitForLine(/001/);
+      await user.waitForNumeric('001');
 
       const channel = uniqueChannel('renperm');
       op.send(`JOIN ${channel}`);
-      await op.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await op.waitForJoin(channel);
 
       user.send(`JOIN ${channel}`);
-      await user.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await user.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       user.clearRawBuffer();
@@ -255,15 +255,15 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       await client.capReq(['draft/channel-rename']);
       client.capEnd();
       client.register('renexist1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel1 = uniqueChannel('renexist1');
       const channel2 = uniqueChannel('renexist2');
 
       client.send(`JOIN ${channel1}`);
       client.send(`JOIN ${channel2}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel1}`, 'i'));
-      await client.waitForLine(new RegExp(`JOIN.*${channel2}`, 'i'));
+      await client.waitForJoin(channel1);
+      await client.waitForJoin(channel2);
       await new Promise(r => setTimeout(r, 300));
 
       client.clearRawBuffer();
@@ -289,11 +289,11 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       await client.capReq(['draft/channel-rename']);
       client.capEnd();
       client.register('renmode1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const oldName = uniqueChannel('renmode');
       client.send(`JOIN ${oldName}`);
-      await client.waitForLine(new RegExp(`JOIN.*${oldName}`, 'i'));
+      await client.waitForJoin(oldName);
 
       // Set some modes
       client.send(`MODE ${oldName} +nt`);

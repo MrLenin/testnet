@@ -39,7 +39,7 @@ async function createRegisteredClient(server: typeof PRIMARY_SERVER, nick: strin
   await client.capLs();
   client.capEnd();
   client.register(nick);
-  await client.waitForLine(/001/, 5000);
+  await client.waitForNumeric('001', 5000);
   return client;
 }
 
@@ -283,10 +283,10 @@ describe.skipIf(!secondaryAvailable)('Nick Collision Handling', () => {
     // Verify by checking each can see the other
     const channel = `#colltest-${testId}`;
     primary.send(`JOIN ${channel}`);
-    await primary.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+    await primary.waitForJoin(channel, undefined, 5000);
 
     secondary.send(`JOIN ${channel}`);
-    await secondary.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+    await secondary.waitForJoin(channel, undefined, 5000);
 
     primary.send(`NAMES ${channel}`);
     const names = await primary.waitForLine(/353/, 5000);
@@ -331,10 +331,10 @@ describe.skipIf(!secondaryAvailable)('Nick Change Propagation', () => {
 
     // Join channel on both
     primary.send(`JOIN ${channel}`);
-    await primary.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+    await primary.waitForJoin(channel, undefined, 5000);
 
     secondary.send(`JOIN ${channel}`);
-    await secondary.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+    await secondary.waitForJoin(channel, undefined, 5000);
 
     // Wait for visibility
     secondary.send(`NAMES ${channel}`);
@@ -367,10 +367,10 @@ describe.skipIf(!secondaryAvailable)('Nick Change Propagation', () => {
 
     // Join channel on both
     primary.send(`JOIN ${channel}`);
-    await primary.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+    await primary.waitForJoin(channel, undefined, 5000);
 
     secondary.send(`JOIN ${channel}`);
-    await secondary.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'), 5000);
+    await secondary.waitForJoin(channel, undefined, 5000);
 
     // Wait for visibility
     secondary.send(`NAMES ${channel}`);
