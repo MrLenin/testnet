@@ -13,7 +13,7 @@
  *   const cookie = await client.requestCookie('accountname', observer.nick);
  */
 
-import { RawSocketClient, parseIRCMessage, type IRCMessage } from './ircv3-client';
+import { RawSocketClient, parseIRCMessage, isFromService, type IRCMessage } from './ircv3-client';
 
 const IRC_HOST = process.env.IRC_HOST || 'localhost';
 const IRC_PORT = parseInt(process.env.IRC_PORT || '6667', 10);
@@ -53,9 +53,12 @@ export class CookieObserver extends RawSocketClient {
     this.send(`NICK ${this.nick}`);
     this.send(`USER cookiebot 0 * :Cookie Observer Bot`);
 
-    // Wait for welcome
-    const response = await this.waitForLine(/^:\S+ (001|433)/, 5000);
-    if (response.includes(' 433 ')) {
+    // Wait for welcome (001) or nick-in-use (433) using parsed message
+    const welcomeMsg = await this.waitForParsedLine(
+      msg => msg.command === '001' || msg.command === '433',
+      5000
+    );
+    if (welcomeMsg.command === '433') {
       // Extremely unlikely with timestamp-based nick, but handle it
       throw new Error(`Nick ${this.nick} unexpectedly in use`);
     }
@@ -65,15 +68,26 @@ export class CookieObserver extends RawSocketClient {
     const adminPass = process.env.X3_ADMIN_PASS || 'testadmin123';
     this.send(`PRIVMSG AuthServ :AUTH ${adminUser} ${adminPass}`);
 
-    // Wait for auth success - AuthServ responds with "I recognize you."
-    await this.waitForLine(/I recognize you|authenticated|logged in/i, 5000);
+    // Wait for auth success using parsed message - checks source.nick and content
+    await this.waitForParsedLine(
+      msg => msg.command === 'NOTICE' &&
+             isFromService(msg, 'AuthServ') &&
+             (msg.params[1]?.toLowerCase().includes('recognize') ||
+              msg.params[1]?.toLowerCase().includes('authenticated') ||
+              msg.params[1]?.toLowerCase().includes('logged in')),
+      5000
+    );
 
     // Use SVSJOIN to join the invite-only snoop channel
     this.send(`PRIVMSG O3 :SVSJOIN ${this.nick} #MrSnoopy`);
 
-    // Wait for join confirmation or SVSJOIN response
+    // Wait for join confirmation using parsed message
     try {
-      await this.waitForLine(/JOIN.*#MrSnoopy|SVSJOIN/i, 5000);
+      await this.waitForParsedLine(
+        msg => (msg.command === 'JOIN' && msg.params[0]?.toLowerCase() === '#mrsnoopy') ||
+               (msg.command === 'NOTICE' && msg.params[1]?.toLowerCase().includes('svsjoin')),
+        5000
+      );
     } catch {
       // May already be in channel or response format differs
     }
