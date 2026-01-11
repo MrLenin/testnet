@@ -45,6 +45,9 @@ describe('AuthServ', () => {
       const client = trackClient(await createX3Client());
       const { account, password, email } = await createTestAccount();
 
+      // Wait for connection to settle before sending service commands
+      await new Promise(r => setTimeout(r, 1000));
+
       // Register the account
       const result = await client.registerAccount(account, password, email);
 
@@ -253,6 +256,9 @@ describe('AuthServ', () => {
 
     it('should respond to VERSION command', async () => {
       const client = trackClient(await createX3Client());
+
+      // Wait for connection to settle before sending service commands
+      await new Promise(r => setTimeout(r, 1000));
 
       const lines = await client.serviceCmd('AuthServ', 'VERSION');
 

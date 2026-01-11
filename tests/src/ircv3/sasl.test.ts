@@ -121,12 +121,18 @@ describe('IRCv3 SASL Authentication', () => {
       await client.capLs();
       await client.capReq(['sasl']);
 
+      // Clear buffer before SASL flow to avoid interference
+      client.clearBuffer();
+
       client.send('AUTHENTICATE PLAIN');
       await client.waitForLine(/^AUTHENTICATE \+$/, 10000);
 
       // Send invalid credentials
       const invalidPayload = Buffer.from('invalid\0invalid\0wrongpass').toString('base64');
       client.send(`AUTHENTICATE ${invalidPayload}`);
+
+      // Small delay to let server process and respond
+      await new Promise(r => setTimeout(r, 100));
 
       // Should receive 904 (ERR_SASLFAIL)
       // Note: Keycloak takes longer (~6s) to reject invalid credentials vs accept valid ones (~100ms)

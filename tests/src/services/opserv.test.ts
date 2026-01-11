@@ -74,13 +74,14 @@ describe('OpServ (O3)', () => {
 
     it('should report higher access for authenticated oper user', async () => {
       // Use createOperClient which auths with X3_ADMIN (olevel 1000)
+      // createOperClient now verifies oper level before returning
       const client = trackClient(await createOperClient());
 
       const level = await client.myAccess();
       console.log('Oper MYACCESS level:', level);
 
       // X3_ADMIN (first oper to register) should have olevel 1000
-      expect(level).toBeGreaterThanOrEqual(100);
+      expect(level).toBe(1000);
     });
   });
 
@@ -89,7 +90,7 @@ describe('OpServ (O3)', () => {
       const client = trackClient(await createX3Client());
 
       // Try to GLINE without oper access - should fail
-      const result = await client.gline('*!*@test.example.com', '1h', 'Test gline');
+      const result = await client.gline('*@test.example.com', '1h', 'Test gline');
       console.log('Non-oper GLINE response:', result.lines);
 
       // Should be denied - O3 will say "privileged service"
@@ -99,14 +100,15 @@ describe('OpServ (O3)', () => {
 
     it('should allow GLINE from oper user', async () => {
       // Use createOperClient which auths with X3_ADMIN (olevel 1000)
+      // createOperClient now verifies oper level before returning
       const client = trackClient(await createOperClient());
 
       const level = await client.myAccess();
       console.log('Oper level:', level);
-      expect(level).toBeGreaterThanOrEqual(200);
+      expect(level).toBe(1000);
 
-      // Add a test GLINE
-      const testMask = `*!*@glinetest-${uniqueId().slice(0, 8)}.example.com`;
+      // Add a test GLINE (format: user@host, not nick!user@host)
+      const testMask = `*@glinetest-${uniqueId().slice(0, 8)}.example.com`;
       const result = await client.gline(testMask, '1m', 'Test gline from tests');
       console.log('Oper GLINE response:', result.lines);
 
@@ -118,15 +120,20 @@ describe('OpServ (O3)', () => {
 
     it('should remove GLINE with UNGLINE', async () => {
       // Use createOperClient which auths with X3_ADMIN (olevel 1000)
+      // createOperClient now verifies oper level before returning
       const client = trackClient(await createOperClient());
 
       const level = await client.myAccess();
       console.log('Oper level:', level);
-      expect(level).toBeGreaterThanOrEqual(200);
+      expect(level).toBe(1000);
 
-      // Add then remove a GLINE
-      const testMask = `*!*@ungline-${uniqueId().slice(0, 8)}.example.com`;
-      await client.gline(testMask, '1h', 'Test for ungline');
+      // Add then remove a GLINE (format: user@host, not nick!user@host)
+      const testMask = `*@ungline-${uniqueId().slice(0, 8)}.example.com`;
+      const glineResult = await client.gline(testMask, '1h', 'Test for ungline');
+      expect(glineResult.success).toBe(true);
+
+      // Wait for gline to propagate
+      await new Promise(r => setTimeout(r, 300));
 
       const result = await client.ungline(testMask);
       console.log('UNGLINE response:', result.lines);
@@ -138,89 +145,130 @@ describe('OpServ (O3)', () => {
   describe('User Operations', () => {
     it('should allow oper to force-join user to channel', async () => {
       // Use createOperClient which auths with X3_ADMIN (olevel 1000)
+      // createOperClient now verifies oper level before returning
       const operClient = trackClient(await createOperClient());
 
       const level = await operClient.myAccess();
       console.log('Oper level:', level);
-      expect(level).toBeGreaterThanOrEqual(200);
+      expect(level).toBe(1000);
 
       // Create a target user
       const targetClient = trackClient(await createX3Client());
       const targetNick = `target${uniqueId().slice(0, 5)}`;
 
-      // Register target with a known nick
+      // Change nick and wait for confirmation
       targetClient.send(`NICK ${targetNick}`);
-      await new Promise(r => setTimeout(r, 500));
+      await targetClient.waitForLine(new RegExp(`NICK.*${targetNick}|:${targetNick}!`, 'i'), 3000);
+
+      // Wait for nick change to propagate (important for O3 to see the new nick)
+      await new Promise(r => setTimeout(r, 300));
 
       // Force join target to a channel
       const channel = `#optest${uniqueId().slice(0, 5)}`;
       const result = await operClient.forceJoin(targetNick, channel);
-      console.log('FORCEJOIN response:', result.lines);
+      console.log('SVSJOIN response:', result.lines);
 
-      // Check if target is in channel
-      targetClient.clearRawBuffer();
-      targetClient.send(`NAMES ${channel}`);
-      const namesResponse = await targetClient.waitForLine(/353|366/, 3000);
-      console.log('NAMES after forcejoin:', namesResponse);
+      expect(result.success).toBe(true);
+
+      // Use retry logic for NAMES verification - SVSJOIN is async
+      let foundInChannel = false;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        await new Promise(r => setTimeout(r, 300));
+        targetClient.clearRawBuffer();
+        targetClient.send(`NAMES ${channel}`);
+        try {
+          const namesResponse = await targetClient.waitForLine(/353/, 2000);
+          console.log(`NAMES attempt ${attempt + 1}:`, namesResponse);
+          if (namesResponse.toLowerCase().includes(targetNick.toLowerCase())) {
+            foundInChannel = true;
+            break;
+          }
+        } catch {
+          console.log(`NAMES attempt ${attempt + 1}: no response`);
+        }
+      }
+
+      expect(foundInChannel).toBe(true);
     });
   });
 
   describe('Direct Commands', () => {
     it('should respond to STATS command', async () => {
-      const client = trackClient(await createX3Client());
+      // createOperClient now verifies oper level before returning
+      const client = trackClient(await createOperClient());
 
       const lines = await client.serviceCmd('O3', 'STATS');
       console.log('STATS response:', lines);
 
       expect(lines.length).toBeGreaterThan(0);
+      // Should get actual stats, not "privileged service"
+      expect(lines.some(l => l.includes('privileged'))).toBe(false);
     });
 
-    it('should respond to UPLINK command', async () => {
-      const client = trackClient(await createX3Client());
+    it('should respond to STATS UPLINK command', async () => {
+      // createOperClient now verifies oper level before returning
+      const client = trackClient(await createOperClient());
 
-      const lines = await client.serviceCmd('O3', 'UPLINK');
-      console.log('UPLINK response:', lines);
+      const lines = await client.serviceCmd('O3', 'STATS UPLINK');
+      console.log('STATS UPLINK response:', lines);
 
       expect(lines.length).toBeGreaterThan(0);
+      expect(lines.some(l => l.includes('privileged'))).toBe(false);
     });
 
-    it('should respond to UPTIME command', async () => {
-      const client = trackClient(await createX3Client());
+    it('should respond to STATS UPTIME command', async () => {
+      // createOperClient now verifies oper level before returning
+      const client = trackClient(await createOperClient());
 
-      const lines = await client.serviceCmd('O3', 'UPTIME');
-      console.log('UPTIME response:', lines);
+      const lines = await client.serviceCmd('O3', 'STATS UPTIME');
+      console.log('STATS UPTIME response:', lines);
 
       expect(lines.length).toBeGreaterThan(0);
+      expect(lines.some(l => l.includes('privileged'))).toBe(false);
     });
   });
 
   describe('Error Handling', () => {
     it('should reject GLINE without proper arguments', async () => {
-      const client = trackClient(await createX3Client());
+      // createOperClient now verifies oper level before returning
+      const client = trackClient(await createOperClient());
 
-      // GLINE without arguments
+      // GLINE without arguments - should get usage error
       const lines = await client.serviceCmd('O3', 'GLINE');
       console.log('Empty GLINE response:', lines);
 
-      // Should get usage/error message or "privileged service" (for non-opers)
       expect(lines.length).toBeGreaterThan(0);
-      const hasError = lines.some(l =>
+      // Should NOT get "privileged service" since we're an oper
+      expect(lines.some(l => l.includes('privileged'))).toBe(false);
+      // Should get usage/syntax error
+      const hasUsageError = lines.some(l =>
         l.toLowerCase().includes('usage') ||
         l.toLowerCase().includes('syntax') ||
         l.toLowerCase().includes('help') ||
         l.toLowerCase().includes('must') ||
-        l.toLowerCase().includes('privileged')
+        l.toLowerCase().includes('missing') ||
+        l.toLowerCase().includes('requires')
       );
-      expect(hasError).toBe(true);
+      expect(hasUsageError).toBe(true);
     });
 
     it('should handle unknown command gracefully', async () => {
-      const client = trackClient(await createX3Client());
+      // createOperClient now verifies oper level before returning
+      const client = trackClient(await createOperClient());
 
       const lines = await client.serviceCmd('O3', 'UNKNOWNCOMMAND123');
       console.log('Unknown command response:', lines);
 
       expect(lines.length).toBeGreaterThan(0);
+      // Should NOT get "privileged service" since we're an oper
+      expect(lines.some(l => l.includes('privileged'))).toBe(false);
+      // Should get "unknown command" or similar error
+      const hasUnknownError = lines.some(l =>
+        l.toLowerCase().includes('unknown') ||
+        l.toLowerCase().includes('invalid') ||
+        l.toLowerCase().includes('unrecognized')
+      );
+      expect(hasUnknownError).toBe(true);
     });
   });
 });

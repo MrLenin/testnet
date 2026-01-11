@@ -333,13 +333,16 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register('histerr1');
       await client.waitForLine(/001/);
 
+      // Wait for server to finish sending connection notices
+      await new Promise(r => setTimeout(r, 500));
       client.clearRawBuffer();
 
       // Try to get history for a channel we're not in
       client.send('CHATHISTORY LATEST #nonexistentchannel12345 * 10');
 
-      // Should receive FAIL (with standard-replies), NOTICE, or error numeric
-      const response = await client.waitForLine(/FAIL|NOTICE|ERR|4\d\d/, 3000);
+      // Should receive FAIL CHATHISTORY (with standard-replies) or error about the channel
+      // Be specific to avoid matching unrelated NOTICEs like "Highest connection count"
+      const response = await client.waitForLine(/FAIL CHATHISTORY|BATCH \+\S+ chathistory|#nonexistent|4\d\d.*#|no.*history|not.*member|cannot/i, 3000);
       expect(response).toBeDefined();
       console.log('Unauthorized history error:', response);
       client.send('QUIT');

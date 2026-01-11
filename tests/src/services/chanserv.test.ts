@@ -144,6 +144,9 @@ describe('ChanServ (X3)', () => {
       ownerAccount = account;
       channel = uniqueChannel();
 
+      // Wait for connection to settle before sending service commands
+      await new Promise(r => setTimeout(r, 1000));
+
       // Setup owner and registered channel
       await ownerClient.registerAndActivate(account, password, email);
       await ownerClient.auth(account, password);
@@ -157,6 +160,10 @@ describe('ChanServ (X3)', () => {
       // Create second user
       const user2Client = trackClient(await createX3Client());
       const { account: user2, password: pass2, email: email2 } = await createTestAccount();
+
+      // Wait for connection to settle before sending service commands
+      await new Promise(r => setTimeout(r, 1000));
+
       await user2Client.registerAndActivate(user2, pass2, email2);
 
       // Owner adds user2 with OP level
@@ -165,6 +172,13 @@ describe('ChanServ (X3)', () => {
 
       expect(addResult.lines.length).toBeGreaterThan(0);
       expect(addResult.success).toBe(true);
+
+      // Wait for access to propagate before verifying (8s timeout for Keycloak sync)
+      const accessOk = await waitForUserAccess(ownerClient, channel, user2, ACCESS_LEVELS.OP, 8000);
+      if (!accessOk) {
+        console.log('waitForUserAccess failed for user2');
+      }
+      expect(accessOk).toBe(true);
 
       // Verify access
       const accessList = await ownerClient.getAccess(channel);
@@ -177,6 +191,10 @@ describe('ChanServ (X3)', () => {
       // Create and add second user
       const user2Client = trackClient(await createX3Client());
       const { account: user2, password: pass2, email: email2 } = await createTestAccount();
+
+      // Wait for connection to settle before sending service commands
+      await new Promise(r => setTimeout(r, 1000));
+
       await user2Client.registerAndActivate(user2, pass2, email2);
       await ownerClient.addUser(channel, user2, ACCESS_LEVELS.OP);
 
@@ -195,6 +213,10 @@ describe('ChanServ (X3)', () => {
       // Create and add second user
       const user2Client = trackClient(await createX3Client());
       const { account: user2, password: pass2, email: email2 } = await createTestAccount();
+
+      // Wait for connection to settle before sending service commands
+      await new Promise(r => setTimeout(r, 1000));
+
       await user2Client.registerAndActivate(user2, pass2, email2);
       await ownerClient.addUser(channel, user2, ACCESS_LEVELS.OP);
 
@@ -216,6 +238,10 @@ describe('ChanServ (X3)', () => {
       // Note: registerAndActivate already authenticates the user via COOKIE
       const user2Client = trackClient(await createX3Client());
       const { account: user2, password: pass2, email: email2 } = await createTestAccount();
+
+      // Wait for connection to settle before sending service commands
+      await new Promise(r => setTimeout(r, 1000));
+
       await user2Client.registerAndActivate(user2, pass2, email2);
       await ownerClient.addUser(channel, user2, ACCESS_LEVELS.VOICE); // Low level
 
@@ -225,6 +251,10 @@ describe('ChanServ (X3)', () => {
       // Create user3
       const { account: user3, password: pass3, email: email3 } = await createTestAccount();
       const user3Client = trackClient(await createX3Client());
+
+      // Wait for connection to settle before sending service commands
+      await new Promise(r => setTimeout(r, 1000));
+
       await user3Client.registerAndActivate(user3, pass3, email3);
 
       // User2 tries to add user3 - should fail (needs MANAGER+ to add users)
@@ -244,6 +274,9 @@ describe('ChanServ (X3)', () => {
       const { account, password, email } = await createTestAccount();
       const channel = uniqueChannel();
 
+      // Wait for connection to settle before sending service commands
+      await new Promise(r => setTimeout(r, 1000));
+
       // Setup owner and channel
       // Note: registerAndActivate already authenticates the user via COOKIE
       const regResult = await client.registerAndActivate(account, password, email);
@@ -258,6 +291,10 @@ describe('ChanServ (X3)', () => {
       // Note: registerAndActivate already authenticates the user via COOKIE
       const { account: user2, password: pass2, email: email2 } = await createTestAccount();
       const user2Client = trackClient(await createX3Client(user2));
+
+      // Wait for connection to settle before sending service commands
+      await new Promise(r => setTimeout(r, 1000));
+
       const reg2Result = await user2Client.registerAndActivate(user2, pass2, email2);
       expect(reg2Result.success, `User2 registration failed: ${reg2Result.error}`).toBe(true);
 
@@ -295,6 +332,9 @@ describe('ChanServ (X3)', () => {
       const { account, password, email } = await createTestAccount();
       const channel = uniqueChannel();
 
+      // Wait for connection to settle before sending service commands
+      await new Promise(r => setTimeout(r, 1000));
+
       // Setup owner and channel
       // Note: registerAndActivate already authenticates the user via COOKIE
       const regResult = await client.registerAndActivate(account, password, email);
@@ -309,6 +349,10 @@ describe('ChanServ (X3)', () => {
       // Note: registerAndActivate already authenticates the user via COOKIE
       const { account: user2, password: pass2, email: email2 } = await createTestAccount();
       const user2Client = trackClient(await createX3Client(user2));
+
+      // Wait for connection to settle before sending service commands
+      await new Promise(r => setTimeout(r, 1000));
+
       const reg2Result = await user2Client.registerAndActivate(user2, pass2, email2);
       expect(reg2Result.success, `User2 registration failed: ${reg2Result.error}`).toBe(true);
 
@@ -370,6 +414,9 @@ describe('ChanServ (X3)', () => {
       const { account, password, email } = await createTestAccount();
       const channel = uniqueChannel();
 
+      // Wait for connection to settle before sending service commands
+      await new Promise(r => setTimeout(r, 1000));
+
       // Setup
       await client.registerAndActivate(account, password, email);
       await client.auth(account, password);
@@ -389,6 +436,9 @@ describe('ChanServ (X3)', () => {
       const client = trackClient(await createX3Client());
       const { account, password, email } = await createTestAccount();
       const channel = uniqueChannel();
+
+      // Wait for connection to settle before sending service commands
+      await new Promise(r => setTimeout(r, 1000));
 
       // Setup and ban
       await client.registerAndActivate(account, password, email);
