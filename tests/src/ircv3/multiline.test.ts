@@ -89,7 +89,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP END');
       client1.send('NICK mlsend1');
       client1.send('USER mlsend1 0 * :mlsend1');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       // Set up client2 with draft/multiline AND batch to receive multiline batches
       // Both capabilities are required to receive messages as a batch
@@ -100,14 +100,14 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send('CAP END');
       client2.send('NICK mlrecv1');
       client2.send('USER mlrecv1 0 * :mlrecv1');
-      await client2.waitForLine(/001/);
+      await client2.waitForNumeric('001');
 
       // Both join channel
       const channelName = uniqueChannel('mltest');
       client1.send(`JOIN ${channelName}`);
       client2.send(`JOIN ${channelName}`);
-      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
-      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client1.waitForJoin(channelName);
+      await client2.waitForJoin(channelName);
       await new Promise(r => setTimeout(r, 500));
 
       // Send multiline message using BATCH
@@ -150,11 +150,11 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client.send('CAP END');
       client.send('NICK mlcont1');
       client.send('USER mlcont1 0 * :mlcont1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channelName = uniqueChannel('mlcont');
       client.send(`JOIN ${channelName}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client.waitForJoin(channelName);
       // Wait for all post-join messages
       await new Promise(r => setTimeout(r, 500));
       // Clear buffer to capture only echo response
@@ -252,11 +252,11 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client.send('CAP END');
       client.send('NICK mlover1');
       client.send('USER mlover1 0 * :mlover1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channelName = uniqueChannel('mlover');
       client.send(`JOIN ${channelName}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client.waitForJoin(channelName);
 
       // Send more lines than allowed
       const batchId = `over${uniqueId()}`;
@@ -290,11 +290,11 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client.send('CAP END');
       client.send('NICK mllabel1');
       client.send('USER mllabel1 0 * :mllabel1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channelName = uniqueChannel('mllabel');
       client.send(`JOIN ${channelName}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client.waitForJoin(channelName);
 
       // Wait for post-join messages to complete
       await new Promise(r => setTimeout(r, 300));
@@ -349,7 +349,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP END');
       client1.send('NICK mlmsgid1');
       client1.send('USER mlmsgid1 0 * :mlmsgid1');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       // Client2 needs draft/multiline, batch AND message-tags to receive msgid
       client2.send('CAP LS 302');
@@ -359,16 +359,16 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send('CAP END');
       client2.send('NICK mlmsgid2');
       client2.send('USER mlmsgid2 0 * :mlmsgid2');
-      await client2.waitForLine(/001/);
+      await client2.waitForNumeric('001');
 
       const channelName = uniqueChannel('mlmsgid');
       // Join client1 first, then client2 to avoid race condition
       client1.send(`JOIN ${channelName}`);
-      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client1.waitForJoin(channelName);
 
       // Now join client2 - it will see client1 in NAMES
       client2.send(`JOIN ${channelName}`);
-      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client2.waitForJoin(channelName);
       // Wait for NAMES list to confirm both in channel
       await client2.waitForLine(/366.*End of.*NAMES/i, 2000);
 
@@ -423,7 +423,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP END');
       client1.send('NICK mlfallback1');
       client1.send('USER mlfallback1 0 * :mlfallback1');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       // Client2: NO multiline cap - only basic IRC
       client2.send('CAP LS 302');
@@ -431,15 +431,15 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send('CAP END');
       client2.send('NICK mlfallback2');
       client2.send('USER mlfallback2 0 * :mlfallback2');
-      await client2.waitForLine(/001/);
+      await client2.waitForNumeric('001');
 
       const channelName = uniqueChannel('mlfallback');
 
       // Both join channel
       client1.send(`JOIN ${channelName}`);
-      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client1.waitForJoin(channelName);
       client2.send(`JOIN ${channelName}`);
-      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client2.waitForJoin(channelName);
 
       // Wait for both to be in channel
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -485,7 +485,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP END');
       client1.send('NICK mllabel1');
       client1.send('USER mllabel1 0 * :mllabel1');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       // Client2: NO multiline
       client2.send('CAP LS 302');
@@ -493,14 +493,14 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send('CAP END');
       client2.send('NICK mllabel2');
       client2.send('USER mllabel2 0 * :mllabel2');
-      await client2.waitForLine(/001/);
+      await client2.waitForNumeric('001');
 
       const channelName = uniqueChannel('mllabel');
 
       client1.send(`JOIN ${channelName}`);
-      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client1.waitForJoin(channelName);
       client2.send(`JOIN ${channelName}`);
-      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client2.waitForJoin(channelName);
 
       await new Promise(resolve => setTimeout(resolve, 500));
       client1.clearRawBuffer();
@@ -543,7 +543,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP END');
       client1.send('NICK mltrunc1');
       client1.send('USER mltrunc1 0 * :mltrunc1');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       // Client2: NO multiline (will receive truncated fallback)
       client2.send('CAP LS 302');
@@ -551,14 +551,14 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send('CAP END');
       client2.send('NICK mltrunc2');
       client2.send('USER mltrunc2 0 * :mltrunc2');
-      await client2.waitForLine(/001/);
+      await client2.waitForNumeric('001');
 
       const channelName = uniqueChannel('mltrunc');
 
       client1.send(`JOIN ${channelName}`);
-      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client1.waitForJoin(channelName);
       client2.send(`JOIN ${channelName}`);
-      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client2.waitForJoin(channelName);
 
       await new Promise(resolve => setTimeout(resolve, 500));
       client2.clearRawBuffer();
@@ -613,7 +613,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP END');
       client1.send('NICK mlhint1');
       client1.send('USER mlhint1 0 * :mlhint1');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       // Client2: NO multiline
       client2.send('CAP LS 302');
@@ -621,14 +621,14 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send('CAP END');
       client2.send('NICK mlhint2');
       client2.send('USER mlhint2 0 * :mlhint2');
-      await client2.waitForLine(/001/);
+      await client2.waitForNumeric('001');
 
       const channelName = uniqueChannel('mlhint');
 
       client1.send(`JOIN ${channelName}`);
-      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client1.waitForJoin(channelName);
       client2.send(`JOIN ${channelName}`);
-      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client2.waitForJoin(channelName);
 
       await new Promise(resolve => setTimeout(resolve, 1000));
       client2.clearRawBuffer();
@@ -691,7 +691,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP END');
       client1.send('NICK mlmode1');
       client1.send('USER mlmode1 0 * :mlmode1');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       // Client2: NO multiline but will set +M to receive full content
       client2.send('CAP LS 302');
@@ -699,7 +699,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send('CAP END');
       client2.send('NICK mlmode2');
       client2.send('USER mlmode2 0 * :mlmode2');
-      await client2.waitForLine(/001/);
+      await client2.waitForNumeric('001');
 
       // Client2 sets +M mode (multiline receive mode)
       client2.send('MODE mlmode2 +M');
@@ -716,9 +716,9 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       const channelName = uniqueChannel('mlmode');
 
       client1.send(`JOIN ${channelName}`);
-      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client1.waitForJoin(channelName);
       client2.send(`JOIN ${channelName}`);
-      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client2.waitForJoin(channelName);
 
       await new Promise(resolve => setTimeout(resolve, 500));
       client2.clearRawBuffer();
@@ -766,7 +766,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP END');
       client1.send('NICK mlchhist1');
       client1.send('USER mlchhist1 0 * :mlchhist1');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       // Client2: has chathistory but NOT multiline (should get chathistory hint)
       client2.send('CAP LS 302');
@@ -776,14 +776,14 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send('CAP END');
       client2.send('NICK mlchhist2');
       client2.send('USER mlchhist2 0 * :mlchhist2');
-      await client2.waitForLine(/001/);
+      await client2.waitForNumeric('001');
 
       const channelName = uniqueChannel('mlchhist');
 
       client1.send(`JOIN ${channelName}`);
-      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client1.waitForJoin(channelName);
       client2.send(`JOIN ${channelName}`);
-      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client2.waitForJoin(channelName);
 
       await new Promise(resolve => setTimeout(resolve, 500));
       client2.clearRawBuffer();
@@ -872,7 +872,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP END');
       client1.send('NICK mlhserv1');
       client1.send('USER mlhserv1 0 * :mlhserv1');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       // Client2: NO multiline, NO chathistory (basic IRC client - should get HistServ hint)
       client2.send('CAP LS 302');
@@ -880,14 +880,14 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send('CAP END');
       client2.send('NICK mlhserv2');
       client2.send('USER mlhserv2 0 * :mlhserv2');
-      await client2.waitForLine(/001/);
+      await client2.waitForNumeric('001');
 
       const channelName = uniqueChannel('mlhserv');
 
       client1.send(`JOIN ${channelName}`);
-      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client1.waitForJoin(channelName);
       client2.send(`JOIN ${channelName}`);
-      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client2.waitForJoin(channelName);
 
       // Wait for join to fully complete and drain any server notices
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -984,7 +984,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP END');
       client1.send('NICK mlvirt1');
       client1.send('USER mlvirt1 0 * :mlvirt1');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       // Client2: NO multiline, NO chathistory (basic client)
       client2.send('CAP LS 302');
@@ -992,14 +992,14 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send('CAP END');
       client2.send('NICK mlvirt2');
       client2.send('USER mlvirt2 0 * :mlvirt2');
-      await client2.waitForLine(/001/);
+      await client2.waitForNumeric('001');
 
       const channelName = uniqueChannel('mlvirt');
 
       client1.send(`JOIN ${channelName}`);
-      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client1.waitForJoin(channelName);
       client2.send(`JOIN ${channelName}`);
-      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client2.waitForJoin(channelName);
 
       await new Promise(resolve => setTimeout(resolve, 1000));
       client1.clearRawBuffer();
@@ -1093,7 +1093,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP END');
       client1.send('NICK mlmatch1');
       client1.send('USER mlmatch1 0 * :mlmatch1');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       // Client2: receiver with message-tags (to see content)
       client2.send('CAP LS 302');
@@ -1103,7 +1103,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send('CAP END');
       client2.send('NICK mlmatch2');
       client2.send('USER mlmatch2 0 * :mlmatch2');
-      await client2.waitForLine(/001/);
+      await client2.waitForNumeric('001');
 
       const channelName = uniqueChannel('mlmatch');
       const expectedContent = [
@@ -1118,9 +1118,9 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       ];
 
       client1.send(`JOIN ${channelName}`);
-      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client1.waitForJoin(channelName);
       client2.send(`JOIN ${channelName}`);
-      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client2.waitForJoin(channelName);
 
       await new Promise(resolve => setTimeout(resolve, 500));
       client1.clearRawBuffer();

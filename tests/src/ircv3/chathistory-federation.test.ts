@@ -41,9 +41,9 @@ async function waitForServerLink(
       const waitStart = Date.now();
       while (Date.now() - waitStart < 3000) {
         try {
-          const line = await operClient.waitForLine(/364|365/, 500);
-          lines.push(line);
-          if (line.includes('365')) break; // End of /LINKS
+          const msg = await operClient.waitForNumeric(['364', '365'], 500);
+          lines.push(msg.raw);
+          if (msg.command === '365') break; // End of /LINKS
         } catch {
           break;
         }
@@ -134,12 +134,12 @@ describe('IRCv3 Chathistory Federation', () => {
       await operClient.capReq(['draft/chathistory', 'batch', 'server-time', 'message-tags']);
       operClient.capEnd();
       operClient.register('fedoper1');
-      await operClient.waitForLine(/001/);
+      await operClient.waitForNumeric('001');
 
       // Become oper
       operClient.send(`OPER ${IRC_OPER.name} ${IRC_OPER.password}`);
       try {
-        await operClient.waitForLine(/381/, 5000); // RPL_YOUREOPER
+        await operClient.waitForNumeric('381', 5000); // RPL_YOUREOPER
         console.log('Authenticated as oper');
       } catch (e) {
         console.log('Failed to oper up:', (e as Error).message);
@@ -160,7 +160,7 @@ describe('IRCv3 Chathistory Federation', () => {
       // Step 4: Create a unique channel and send messages
       const channelName = uniqueChannel('fedhist');
       operClient.send(`JOIN ${channelName}`);
-      await operClient.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await operClient.waitForJoin(channelName);
 
       // Send test messages (these go to primary's LMDB only since secondary is disconnected)
       const testMessages = [
@@ -212,11 +212,11 @@ describe('IRCv3 Chathistory Federation', () => {
       await secondaryClient.capReq(['draft/chathistory', 'batch', 'server-time', 'message-tags']);
       secondaryClient.capEnd();
       secondaryClient.register('fedclient1');
-      await secondaryClient.waitForLine(/001/);
+      await secondaryClient.waitForNumeric('001');
 
       // Join the channel
       secondaryClient.send(`JOIN ${channelName}`);
-      await secondaryClient.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await secondaryClient.waitForJoin(channelName);
 
       // Clear buffer before chathistory query
       secondaryClient.clearRawBuffer();
@@ -279,11 +279,11 @@ describe('IRCv3 Chathistory Federation', () => {
       await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'echo-message']);
       client1.capEnd();
       client1.register('dedup1');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       const channelName = uniqueChannel('dedup');
       client1.send(`JOIN ${channelName}`);
-      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client1.waitForJoin(channelName);
 
       // Send messages (these propagate to both servers via S2S)
       for (let i = 0; i < 5; i++) {
@@ -298,10 +298,10 @@ describe('IRCv3 Chathistory Federation', () => {
       await client2.capReq(['draft/chathistory', 'batch', 'server-time']);
       client2.capEnd();
       client2.register('dedup2');
-      await client2.waitForLine(/001/);
+      await client2.waitForNumeric('001');
 
       client2.send(`JOIN ${channelName}`);
-      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client2.waitForJoin(channelName);
 
       client2.clearRawBuffer();
       client2.send(`CHATHISTORY LATEST ${channelName} * 50`);
@@ -350,11 +350,11 @@ describe('IRCv3 Chathistory Federation', () => {
       await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'echo-message']);
       client1.capEnd();
       client1.register('consist1');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       const channelName = uniqueChannel('consist');
       client1.send(`JOIN ${channelName}`);
-      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client1.waitForJoin(channelName);
 
       // Send messages and capture their msgids
       const sentMsgIds: string[] = [];
@@ -396,10 +396,10 @@ describe('IRCv3 Chathistory Federation', () => {
       await client2.capReq(['draft/chathistory', 'batch', 'server-time']);
       client2.capEnd();
       client2.register('consist2');
-      await client2.waitForLine(/001/);
+      await client2.waitForNumeric('001');
 
       client2.send(`JOIN ${channelName}`);
-      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client2.waitForJoin(channelName);
 
       await new Promise(r => setTimeout(r, 500));
       client2.clearRawBuffer();
@@ -446,11 +446,11 @@ describe('IRCv3 Chathistory Federation', () => {
       await client1.capReq(['draft/chathistory', 'batch', 'server-time']);
       client1.capEnd();
       client1.register('order1');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       const channelName = uniqueChannel('order');
       client1.send(`JOIN ${channelName}`);
-      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client1.waitForJoin(channelName);
 
       // Send numbered messages
       for (let i = 1; i <= 5; i++) {
@@ -485,10 +485,10 @@ describe('IRCv3 Chathistory Federation', () => {
       await client2.capReq(['draft/chathistory', 'batch', 'server-time']);
       client2.capEnd();
       client2.register('order2');
-      await client2.waitForLine(/001/);
+      await client2.waitForNumeric('001');
 
       client2.send(`JOIN ${channelName}`);
-      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client2.waitForJoin(channelName);
 
       await new Promise(r => setTimeout(r, 500));
       client2.clearRawBuffer();
@@ -531,21 +531,21 @@ describe('IRCv3 Chathistory Federation', () => {
       await client1.capReq(['draft/chathistory', 'batch', 'server-time']);
       client1.capEnd();
       client1.register('mixed1');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       await client2.capLs();
       await client2.capReq(['draft/chathistory', 'batch', 'server-time']);
       client2.capEnd();
       client2.register('mixed2');
-      await client2.waitForLine(/001/);
+      await client2.waitForNumeric('001');
 
       const channelName = uniqueChannel('mixed');
 
       client1.send(`JOIN ${channelName}`);
-      await client1.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client1.waitForJoin(channelName);
 
       client2.send(`JOIN ${channelName}`);
-      await client2.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client2.waitForJoin(channelName);
       await new Promise(r => setTimeout(r, 500));
 
       // Send messages from both servers interleaved
@@ -600,12 +600,12 @@ describe('IRCv3 Chathistory Federation', () => {
       await operClient.capReq(['draft/chathistory', 'batch', 'server-time']);
       operClient.capEnd();
       operClient.register('netsplit1');
-      await operClient.waitForLine(/001/);
+      await operClient.waitForNumeric('001');
 
       // Become oper
       operClient.send(`OPER ${IRC_OPER.name} ${IRC_OPER.password}`);
       try {
-        await operClient.waitForLine(/381/, 5000);
+        await operClient.waitForNumeric('381', 5000);
       } catch {
         console.log('Cannot oper up - skipping netsplit test');
         operClient.send('QUIT');
@@ -622,7 +622,7 @@ describe('IRCv3 Chathistory Federation', () => {
 
       const channelName = uniqueChannel('netsplit');
       operClient.send(`JOIN ${channelName}`);
-      await operClient.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await operClient.waitForJoin(channelName);
 
       // Send messages before netsplit
       for (let i = 1; i <= 3; i++) {
@@ -639,13 +639,13 @@ describe('IRCv3 Chathistory Federation', () => {
 
       // Wait for and verify SQUIT succeeded (look for SQUIT confirmation, not 402 error)
       try {
-        const squitResponse = await operClient.waitForLine(/SQUIT|402/, 3000);
-        if (squitResponse.includes('402')) {
-          console.log('SQUIT failed - server not linked:', squitResponse);
+        const squitResponse = await operClient.waitForParsedLine(msg => msg.command === 'SQUIT' || msg.command === '402', 3000);
+        if (squitResponse.command === '402') {
+          console.log('SQUIT failed - server not linked:', squitResponse.raw);
           operClient.send('QUIT');
           return;
         }
-        console.log('SQUIT confirmed:', squitResponse);
+        console.log('SQUIT confirmed:', squitResponse.raw);
       } catch {
         // No explicit response, check if link is down
       }
@@ -670,11 +670,11 @@ describe('IRCv3 Chathistory Federation', () => {
       await queryClient.capReq(['draft/chathistory', 'batch', 'server-time', 'message-tags']);
       queryClient.capEnd();
       queryClient.register('histquery1');
-      await queryClient.waitForLine(/001/);
+      await queryClient.waitForNumeric('001');
 
       // Join the channel to have access
       queryClient.send(`JOIN ${channelName}`);
-      await queryClient.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await queryClient.waitForJoin(channelName);
       await new Promise(r => setTimeout(r, 500));
 
       // Query history - messages from both before and during netsplit should be preserved
@@ -719,11 +719,11 @@ describe('IRCv3 Chathistory Federation', () => {
       await operClient.capReq(['draft/chathistory', 'batch', 'server-time']);
       operClient.capEnd();
       operClient.register('catchup1');
-      await operClient.waitForLine(/001/);
+      await operClient.waitForNumeric('001');
 
       operClient.send(`OPER ${IRC_OPER.name} ${IRC_OPER.password}`);
       try {
-        await operClient.waitForLine(/381/, 5000);
+        await operClient.waitForNumeric('381', 5000);
       } catch {
         console.log('Cannot oper up - skipping catchup test');
         operClient.send('QUIT');
@@ -740,20 +740,20 @@ describe('IRCv3 Chathistory Federation', () => {
 
       const channelName = uniqueChannel('catchup');
       operClient.send(`JOIN ${channelName}`);
-      await operClient.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await operClient.waitForJoin(channelName);
 
       // SQUIT secondary and verify it worked
       operClient.clearRawBuffer();
       operClient.send(`SQUIT ${SECONDARY_SERVER_NAME} :Catchup test`);
 
       try {
-        const squitResponse = await operClient.waitForLine(/SQUIT|402/, 3000);
-        if (squitResponse.includes('402')) {
-          console.log('SQUIT failed - server not linked:', squitResponse);
+        const squitResponse = await operClient.waitForParsedLine(msg => msg.command === 'SQUIT' || msg.command === '402', 3000);
+        if (squitResponse.command === '402') {
+          console.log('SQUIT failed - server not linked:', squitResponse.raw);
           operClient.send('QUIT');
           return;
         }
-        console.log('SQUIT confirmed:', squitResponse);
+        console.log('SQUIT confirmed:', squitResponse.raw);
       } catch {
         // No explicit response
       }
@@ -787,10 +787,10 @@ describe('IRCv3 Chathistory Federation', () => {
       await secondaryClient.capReq(['draft/chathistory', 'batch', 'server-time']);
       secondaryClient.capEnd();
       secondaryClient.register('catchup2');
-      await secondaryClient.waitForLine(/001/);
+      await secondaryClient.waitForNumeric('001');
 
       secondaryClient.send(`JOIN ${channelName}`);
-      await secondaryClient.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await secondaryClient.waitForJoin(channelName);
 
       secondaryClient.clearRawBuffer();
       secondaryClient.send(`CHATHISTORY LATEST ${channelName} * 10`);
