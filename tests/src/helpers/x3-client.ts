@@ -933,8 +933,16 @@ export async function createOperClient(nick?: string): Promise<X3Client> {
   client.send(`PRIVMSG AuthServ :AUTH ${X3_ADMIN.account} ${X3_ADMIN.password}`);
   try {
     // AuthServ responds with "I recognize you" on success
-    // Wait specifically for AuthServ NOTICE with recognition message
-    await client.waitForLine(/AuthServ.*NOTICE.*I recognize you/i, 5000);
+    // Use proper parser instead of regex - checks parsed source.nick and message content
+    // X3+Keycloak can be slow (~8-10s), so allow up to 15s
+    await client.waitForParsedLine(
+      msg => msg.command === 'NOTICE' &&
+             isFromService(msg, 'AuthServ') &&
+             (msg.params[1]?.toLowerCase().includes('recognize') ||
+              msg.params[1]?.toLowerCase().includes('authenticated') ||
+              msg.params[1]?.toLowerCase().includes('logged in')),
+      15000
+    );
   } catch {
     console.warn('Failed to auth with X3 - O3 commands may fail');
   }
