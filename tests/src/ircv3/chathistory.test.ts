@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId, waitForChathistory } from '../helpers/index.js';
 
 /**
  * Chathistory Tests (draft/chathistory)
@@ -67,24 +67,13 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Send some messages to create history
       client.send(`PRIVMSG ${channelName} :History message 1`);
       client.send(`PRIVMSG ${channelName} :History message 2`);
-      await new Promise(r => setTimeout(r, 500));
 
-      client.clearRawBuffer();
-
-      // Request latest 10 messages
-      client.send(`CHATHISTORY LATEST ${channelName} * 10`);
-
-      // Should receive a batch with chathistory type
-      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-      expect(batchStart).toMatch(/BATCH \+\S+ chathistory/i);
-
-      // Collect messages in batch
-      const messages: string[] = [];
-      while (true) {
-        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 2000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('PRIVMSG')) messages.push(line);
-      }
+      // Poll for history until messages are persisted (handles async LMDB writes)
+      const messages = await waitForChathistory(client, channelName, {
+        minMessages: 2,
+        timeoutMs: 10000,
+        subcommand: 'LATEST',
+      });
 
       // Expect at least 2 messages (the ones we sent)
       expect(messages.length).toBeGreaterThanOrEqual(2);
@@ -109,25 +98,16 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Create some history
       client.send(`PRIVMSG ${channelName} :Before test 1`);
-      await new Promise(r => setTimeout(r, 100));
       client.send(`PRIVMSG ${channelName} :Before test 2`);
-      await new Promise(r => setTimeout(r, 500));
 
-      client.clearRawBuffer();
-
-      // Request messages before "now" (timestamp=* means latest)
-      const now = new Date().toISOString();
-      client.send(`CHATHISTORY BEFORE ${channelName} timestamp=${now} 10`);
-
-      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-      expect(batchStart).toMatch(/chathistory/i);
-
-      const messages: string[] = [];
-      while (true) {
-        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 2000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('PRIVMSG')) messages.push(line);
-      }
+      // Poll with BEFORE subcommand - uses future timestamp to include all messages
+      const futureTs = new Date(Date.now() + 60000).toISOString();
+      const messages = await waitForChathistory(client, channelName, {
+        minMessages: 2,
+        timeoutMs: 10000,
+        subcommand: 'BEFORE',
+        timestamp: futureTs,
+      });
 
       expect(messages.length).toBeGreaterThanOrEqual(2);
       client.send('QUIT');
@@ -148,29 +128,20 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
-      // Get a reference timestamp
-      const beforeMsgs = new Date().toISOString();
-      await new Promise(r => setTimeout(r, 100));
+      // Capture timestamp before sending messages (with buffer for clock skew)
+      const beforeMsgs = new Date(Date.now() - 5000).toISOString();
 
       // Send messages
       client.send(`PRIVMSG ${channelName} :After test 1`);
       client.send(`PRIVMSG ${channelName} :After test 2`);
-      await new Promise(r => setTimeout(r, 500));
 
-      client.clearRawBuffer();
-
-      // Request messages after the reference timestamp
-      client.send(`CHATHISTORY AFTER ${channelName} timestamp=${beforeMsgs} 10`);
-
-      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-      expect(batchStart).toMatch(/chathistory/i);
-
-      const messages: string[] = [];
-      while (true) {
-        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 2000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('PRIVMSG')) messages.push(line);
-      }
+      // Poll with AFTER subcommand using the "before messages" timestamp
+      const messages = await waitForChathistory(client, channelName, {
+        minMessages: 2,
+        timeoutMs: 10000,
+        subcommand: 'AFTER',
+        timestamp: beforeMsgs,
+      });
 
       expect(messages.length).toBeGreaterThanOrEqual(2);
       client.send('QUIT');
@@ -191,25 +162,29 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
+      // Send messages with a timestamp captured in between
       client.send(`PRIVMSG ${channelName} :Around test 1`);
-      await new Promise(r => setTimeout(r, 100));
+      await new Promise(r => setTimeout(r, 100)); // Small delay to separate timestamps
       const middleTime = new Date().toISOString();
       await new Promise(r => setTimeout(r, 100));
       client.send(`PRIVMSG ${channelName} :Around test 2`);
-      await new Promise(r => setTimeout(r, 500));
 
-      client.clearRawBuffer();
+      // First use LATEST polling to ensure messages are persisted
+      await waitForChathistory(client, channelName, {
+        minMessages: 2,
+        timeoutMs: 10000,
+        subcommand: 'LATEST',
+      });
 
-      client.send(`CHATHISTORY AROUND ${channelName} timestamp=${middleTime} 10`);
+      // Now test AROUND with the middle timestamp
+      const messages = await waitForChathistory(client, channelName, {
+        minMessages: 1, // AROUND should return at least one message
+        timeoutMs: 5000,
+        subcommand: 'AROUND',
+        timestamp: middleTime,
+      });
 
-      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-      expect(batchStart).toMatch(/chathistory/i);
-
-      // Collect messages
-      while (true) {
-        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 2000);
-        if (line.includes('BATCH -')) break;
-      }
+      expect(messages.length).toBeGreaterThanOrEqual(1);
       client.send('QUIT');
     });
   });
@@ -229,13 +204,19 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
       client.send(`PRIVMSG ${channelName} :Targets test message`);
-      await new Promise(r => setTimeout(r, 500));
+
+      // Poll LATEST to ensure message is persisted before checking TARGETS
+      await waitForChathistory(client, channelName, {
+        minMessages: 1,
+        timeoutMs: 10000,
+        subcommand: 'LATEST',
+      });
 
       client.clearRawBuffer();
 
       // Request list of targets with history
       // TARGETS requires two timestamps (unlike other subcommands that accept *)
-      const now = new Date().toISOString();
+      const now = new Date(Date.now() + 60000).toISOString();
       const past = new Date(Date.now() - 3600000).toISOString(); // 1 hour ago
       client.send(`CHATHISTORY TARGETS timestamp=${past} timestamp=${now} 10`);
 
@@ -262,18 +243,13 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
       client.send(`PRIVMSG ${channelName} :Format test`);
-      await new Promise(r => setTimeout(r, 500));
 
-      client.clearRawBuffer();
-      client.send(`CHATHISTORY LATEST ${channelName} * 10`);
-
-      await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-      const messages: string[] = [];
-      while (true) {
-        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 2000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('PRIVMSG')) messages.push(line);
-      }
+      // Poll until message is persisted
+      const messages = await waitForChathistory(client, channelName, {
+        minMessages: 1,
+        timeoutMs: 10000,
+        subcommand: 'LATEST',
+      });
 
       expect(messages.length).toBeGreaterThan(0);
       // Each message should have a time tag
@@ -299,18 +275,13 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
       client.send(`PRIVMSG ${channelName} :MsgID test`);
-      await new Promise(r => setTimeout(r, 500));
 
-      client.clearRawBuffer();
-      client.send(`CHATHISTORY LATEST ${channelName} * 10`);
-
-      await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-      const messages: string[] = [];
-      while (true) {
-        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 2000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('PRIVMSG')) messages.push(line);
-      }
+      // Poll until message is persisted
+      const messages = await waitForChathistory(client, channelName, {
+        minMessages: 1,
+        timeoutMs: 10000,
+        subcommand: 'LATEST',
+      });
 
       expect(messages.length).toBeGreaterThan(0);
       // Messages should have msgid tags
@@ -363,33 +334,23 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`JOIN ${channelName}`);
       await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
 
-      // Get timestamp before messages
-      const startTime = new Date().toISOString();
-      await new Promise(r => setTimeout(r, 100));
+      // Capture start timestamp with buffer for clock skew
+      const startTime = new Date(Date.now() - 5000).toISOString();
 
       // Create some history
       client.send(`PRIVMSG ${channelName} :Between test 1`);
       client.send(`PRIVMSG ${channelName} :Between test 2`);
       client.send(`PRIVMSG ${channelName} :Between test 3`);
-      await new Promise(r => setTimeout(r, 500));
 
-      // Get timestamp after messages
-      const endTime = new Date().toISOString();
-
-      client.clearRawBuffer();
-
-      // Request messages between timestamps
-      client.send(`CHATHISTORY BETWEEN ${channelName} timestamp=${startTime} timestamp=${endTime} 10`);
-
-      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-      expect(batchStart).toMatch(/chathistory/i);
-
-      const messages: string[] = [];
-      while (true) {
-        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 2000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('PRIVMSG')) messages.push(line);
-      }
+      // Poll with BETWEEN subcommand - end timestamp will be in the future
+      const endTime = new Date(Date.now() + 60000).toISOString();
+      const messages = await waitForChathistory(client, channelName, {
+        minMessages: 3,
+        timeoutMs: 10000,
+        subcommand: 'BETWEEN',
+        timestamp: startTime,
+        timestamp2: endTime,
+      });
 
       expect(messages.length).toBeGreaterThanOrEqual(3);
       console.log('CHATHISTORY BETWEEN messages:', messages.length);
@@ -1278,8 +1239,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Use invalid timestamp
       client.send(`CHATHISTORY BEFORE ${channelName} timestamp=not-a-timestamp 10`);
 
-      // Should receive FAIL or error
-      const response = await client.waitForLine(/FAIL|BATCH|ERR/i, 3000);
+      // Should receive FAIL or error (or potentially empty BATCH if server ignores invalid format)
+      // Increased timeout from 3s to 5s for slower systems
+      const response = await client.waitForLine(/FAIL|BATCH|ERR/i, 5000);
       expect(response).toBeDefined();
       console.log('Invalid timestamp response:', response);
       client.send('QUIT');

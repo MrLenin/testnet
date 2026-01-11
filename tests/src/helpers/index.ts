@@ -39,6 +39,7 @@ export {
   retryAsync,
   waitForCondition,
   collectChathistoryBatch,
+  waitForChathistory,
   type CapBundle,
 } from './cap-bundles.js';
 
