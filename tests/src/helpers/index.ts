@@ -168,5 +168,6 @@ export {
   // Cookie observer for capturing activation cookies via IRC
   CookieObserver,
   getGlobalCookieObserver,
+  getGlobalObserverNick,
   shutdownGlobalCookieObserver,
 } from './cookie-observer.js';
