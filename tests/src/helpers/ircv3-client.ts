@@ -1053,6 +1053,61 @@ export class RawSocketClient {
     });
   }
 
+  /**
+   * Wait for a specific IRC numeric response (e.g., '001', '311', '401').
+   * Accepts a single numeric or array of numerics to match.
+   */
+  async waitForNumeric(numerics: string | string[], timeout = 5000): Promise<IRCMessage> {
+    const numericSet = Array.isArray(numerics) ? new Set(numerics) : new Set([numerics]);
+    return this.waitForParsedLine(msg => numericSet.has(msg.command), timeout);
+  }
+
+  /**
+   * Wait for a JOIN to a specific channel.
+   * Optionally filter by nick (the user who joined).
+   */
+  async waitForJoin(channel: string, nick?: string, timeout = 5000): Promise<IRCMessage> {
+    const channelLower = channel.toLowerCase();
+    return this.waitForParsedLine(
+      msg => msg.command === 'JOIN' &&
+             msg.params[0]?.toLowerCase() === channelLower &&
+             (nick === undefined || msg.source?.nick?.toLowerCase() === nick.toLowerCase()),
+      timeout
+    );
+  }
+
+  /**
+   * Wait for a specific IRC command (PRIVMSG, NOTICE, MODE, etc.).
+   * Use waitForParsedLine directly for complex predicates.
+   */
+  async waitForCommand(command: string, timeout = 5000): Promise<IRCMessage> {
+    return this.waitForParsedLine(msg => msg.command === command.toUpperCase(), timeout);
+  }
+
+  /**
+   * Wait for a PRIVMSG or NOTICE to/from a specific target.
+   * @param target - Channel or nick the message is sent to
+   * @param options - Additional filtering options
+   */
+  async waitForMessage(
+    target: string,
+    options: { command?: 'PRIVMSG' | 'NOTICE'; from?: string; containing?: string; timeout?: number } = {}
+  ): Promise<IRCMessage> {
+    const { command, from, containing, timeout = 5000 } = options;
+    const targetLower = target.toLowerCase();
+    return this.waitForParsedLine(
+      msg => {
+        if (command && msg.command !== command) return false;
+        if (!command && msg.command !== 'PRIVMSG' && msg.command !== 'NOTICE') return false;
+        if (msg.params[0]?.toLowerCase() !== targetLower) return false;
+        if (from && msg.source?.nick?.toLowerCase() !== from.toLowerCase()) return false;
+        if (containing && !msg.params[1]?.toLowerCase().includes(containing.toLowerCase())) return false;
+        return true;
+      },
+      timeout
+    );
+  }
+
   async collectLines(pattern: RegExp, stopPattern: RegExp, timeout = 5000): Promise<string[]> {
     const collected: string[] = [];
     const startTime = Date.now();
