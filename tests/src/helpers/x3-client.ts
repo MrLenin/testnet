@@ -438,14 +438,14 @@ export class X3Client extends RawSocketClient {
   }
 
   /**
-   * Set a user setting via USET.
+   * Set a user setting via AuthServ SET command.
    */
-  async uset(setting: string, value: string): Promise<ServiceResponse> {
-    const lines = await this.serviceCmd('AuthServ', `USET ${setting} ${value}`);
+  async setUserOption(setting: string, value: string): Promise<ServiceResponse> {
+    const lines = await this.serviceCmd('AuthServ', `SET ${setting} ${value}`);
     const success = lines.some(l =>
       l.includes('set to') ||
       l.includes('changed') ||
-      l.includes('updated')
+      l.includes('now')
     );
     return { lines, success };
   }
