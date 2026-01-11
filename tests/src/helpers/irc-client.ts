@@ -36,6 +36,11 @@ export interface RawEvent {
 /**
  * Wrapper around irc-framework Client with async helpers for testing.
  * Inspired by ZNC's ReadUntil pattern.
+ *
+ * @deprecated Use RawSocketClient or IRCv3TestClient instead.
+ * TestIRCClient uses irc-framework's event-based model which has different
+ * timing characteristics than the consumption-based model in RawSocketClient.
+ * For reliable protocol testing, prefer RawSocketClient.
  */
 export class TestIRCClient {
   private client: Client;
