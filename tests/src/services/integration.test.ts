@@ -13,7 +13,9 @@ import {
   X3Client,
   createX3Client,
   createAuthenticatedX3Client,
-  createTestAccount,
+  getTestAccount,
+  setupTestAccount,
+  releaseTestAccount,
   ACCESS_LEVELS,
   uniqueChannel,
   uniqueId,
@@ -23,6 +25,7 @@ import {
 
 describe('Services Integration', () => {
   const clients: X3Client[] = [];
+  const poolAccounts: string[] = [];  // Track pool accounts for cleanup
 
   const trackClient = (client: X3Client): X3Client => {
     clients.push(client);
@@ -30,6 +33,13 @@ describe('Services Integration', () => {
   };
 
   afterEach(() => {
+    // Release pool accounts first
+    for (const account of poolAccounts) {
+      releaseTestAccount(account);
+    }
+    poolAccounts.length = 0;
+
+    // Then close clients
     for (const client of clients) {
       try {
         client.send('QUIT');
@@ -43,13 +53,17 @@ describe('Services Integration', () => {
 
   describe('AuthServ + ChanServ Integration', () => {
     it('should maintain channel access across reconnects', async () => {
-      const { account, password, email } = await createTestAccount();
+      const { account, password, email, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
       const channel = uniqueChannel();
 
       // First connection: register account and channel
-      // Note: registerAndActivate already authenticates the user via COOKIE
       const client1 = trackClient(await createX3Client());
-      await client1.registerAndActivate(account, password, email);
+      if (fromPool) {
+        await client1.auth(account, password);
+      } else {
+        await client1.registerAndActivate(account, password, email);
+      }
       client1.send(`JOIN ${channel}`);
       await client1.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
@@ -85,14 +99,17 @@ describe('Services Integration', () => {
     it('should allow channel owner to promote user to coowner', async () => {
       // X3 does not allow CLVL to owner level (500) - you can only give access
       // levels lower than your own. This test verifies promoting to COOWNER (400).
-      const { account: owner, password: ownerPass, email: ownerEmail } = await createTestAccount();
-      const { account: coowner, password: coownerPass, email: coownerEmail } = await createTestAccount();
+      const ownerClient = trackClient(await createX3Client());
+      const { account: owner, fromPool: ownerPool } = await setupTestAccount(ownerClient);
+      if (ownerPool) poolAccounts.push(owner);
+
+      const coownerClient = trackClient(await createX3Client());
+      const { account: coowner, fromPool: coownerPool } = await setupTestAccount(coownerClient);
+      if (coownerPool) poolAccounts.push(coowner);
+
       const channel = uniqueChannel();
 
       // Setup owner
-      // Note: registerAndActivate already authenticates the user via COOKIE
-      const ownerClient = trackClient(await createX3Client());
-      await ownerClient.registerAndActivate(owner, ownerPass, ownerEmail);
       ownerClient.send(`JOIN ${channel}`);
       await ownerClient.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
@@ -104,10 +121,6 @@ describe('Services Integration', () => {
         console.log('Channel registration failed, skipping test');
         return;
       }
-
-      // Setup coowner account
-      const coownerClient = trackClient(await createX3Client());
-      await coownerClient.registerAndActivate(coowner, coownerPass, coownerEmail);
 
       // Small delay to ensure account is fully synced before ADDUSER
       await new Promise(r => setTimeout(r, 300));
@@ -149,13 +162,12 @@ describe('Services Integration', () => {
     }, 60000); // Extended timeout for 2 account registrations (~10s each)
 
     it('should enforce channel settings on all users', async () => {
-      const { account: owner, password: ownerPass, email: ownerEmail } = await createTestAccount();
+      const ownerClient = trackClient(await createX3Client());
+      const { account: owner, fromPool } = await setupTestAccount(ownerClient);
+      if (fromPool) poolAccounts.push(owner);
       const channel = uniqueChannel();
 
       // Setup owner and channel
-      // Note: registerAndActivate already authenticates the user via COOKIE
-      const ownerClient = trackClient(await createX3Client());
-      await ownerClient.registerAndActivate(owner, ownerPass, ownerEmail);
       ownerClient.send(`JOIN ${channel}`);
       await ownerClient.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
@@ -188,18 +200,22 @@ describe('Services Integration', () => {
 
   describe('Multiple Account Management', () => {
     it('should track multiple concurrent logins', async () => {
-      const { account, password, email } = await createTestAccount();
+      const { account, password, email, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
 
-      // Register account (registerAndActivate also authenticates via COOKIE)
+      // Setup account (AUTH for pool, registerAndActivate for fresh)
       const client1 = trackClient(await createX3Client());
 
       // Wait for connection to fully settle before sending service commands
       await new Promise(r => setTimeout(r, 1000));
 
-      const regResult = await client1.registerAndActivate(account, password, email);
-
-      // registerAndActivate returns success:true if COOKIE auth worked
-      expect(regResult.success).toBe(true);
+      if (fromPool) {
+        const authResult = await client1.auth(account, password);
+        expect(authResult.success).toBe(true);
+      } else {
+        const regResult = await client1.registerAndActivate(account, password, email);
+        expect(regResult.success).toBe(true);
+      }
 
       const client2 = trackClient(await createX3Client());
       const authResult2 = await client2.auth(account, password);
@@ -213,18 +229,23 @@ describe('Services Integration', () => {
     });
 
     it('should share channel access between logged-in clients', async () => {
-      const { account, password, email } = await createTestAccount();
+      const { account, password, email, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
       const channel = uniqueChannel();
 
       // Setup account and channel
-      // Note: registerAndActivate already authenticates the user via COOKIE
       const client1 = trackClient(await createX3Client());
 
       // Wait for connection to settle before sending service commands
       await new Promise(r => setTimeout(r, 1000));
 
-      const regResult = await client1.registerAndActivate(account, password, email);
-      expect(regResult.success).toBe(true);
+      if (fromPool) {
+        const authResult = await client1.auth(account, password);
+        expect(authResult.success).toBe(true);
+      } else {
+        const regResult = await client1.registerAndActivate(account, password, email);
+        expect(regResult.success).toBe(true);
+      }
 
       client1.send(`JOIN ${channel}`);
       await client1.waitForJoin(channel, undefined, 5000);
