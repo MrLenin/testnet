@@ -26,6 +26,7 @@ export interface PoolAccount {
   password: string;
   email: string;
   inUse: boolean;
+  verified: boolean;  // True if AUTH succeeded with expected password
 }
 
 class AccountPool {
@@ -75,32 +76,56 @@ class AccountPool {
         password: `${this.POOL_PASSWORD_BASE}${num}`,
         email: `${account}@${this.POOL_EMAIL_DOMAIN}`,
         inUse: false,
+        verified: false,
       });
     }
 
-    // Check which accounts already exist
-    const existingAccounts = await this.checkExistingAccounts();
-    console.log(`[AccountPool] Found ${existingAccounts.size} existing accounts`);
+    // Check which accounts already exist and verify passwords
+    const { working, broken, missing } = await this.checkExistingAccounts();
+    console.log(`[AccountPool] Found ${working.size} working, ${broken.size} broken, ${missing.size} missing accounts`);
+
+    // Mark working accounts as verified
+    for (const account of working) {
+      const spec = this.accounts.get(account);
+      if (spec) spec.verified = true;
+    }
 
     // Create missing accounts
-    const missing = Array.from(this.accounts.values())
-      .filter(a => !existingAccounts.has(a.account));
+    const missingSpecs = Array.from(this.accounts.values())
+      .filter(a => missing.has(a.account));
 
-    if (missing.length > 0) {
-      console.log(`[AccountPool] Creating ${missing.length} missing accounts...`);
-      await this.createAccounts(missing);
+    if (missingSpecs.length > 0) {
+      console.log(`[AccountPool] Creating ${missingSpecs.length} missing accounts...`);
+      await this.createAccounts(missingSpecs);
+    }
+
+    // Handle broken accounts (exist but wrong password) - skip them for now
+    // They'll be excluded from checkout since verified=false
+    if (broken.size > 0) {
+      console.log(`[AccountPool] ${broken.size} accounts have wrong passwords and will be skipped`);
+      console.log(`[AccountPool] To fix, run: npm run cleanup -- --include-pool`);
     }
 
     const elapsed = Date.now() - startTime;
-    console.log(`[AccountPool] Initialized in ${elapsed}ms`);
+    const stats = this.getStats();
+    console.log(`[AccountPool] Initialized in ${elapsed}ms - ${stats.available} accounts available for tests`);
   }
 
   /**
-   * Check which pool accounts already exist in X3.
-   * Uses AUTH attempt - "Incorrect password" or success means account exists.
+   * Check which pool accounts already exist in X3 and verify passwords.
+   * Returns three sets:
+   * - working: AUTH succeeds with expected password
+   * - broken: Account exists but password doesn't match
+   * - missing: Account doesn't exist
    */
-  private async checkExistingAccounts(): Promise<Set<string>> {
-    const existing = new Set<string>();
+  private async checkExistingAccounts(): Promise<{
+    working: Set<string>;
+    broken: Set<string>;
+    missing: Set<string>;
+  }> {
+    const working = new Set<string>();
+    const broken = new Set<string>();
+    const missing = new Set<string>();
     let client: X3Client | null = null;
 
     try {
@@ -109,12 +134,18 @@ class AccountPool {
       for (const [account, spec] of this.accounts) {
         const result = await client.auth(account, spec.password);
 
-        // Account exists if we get success or "Incorrect password"
-        // (password mismatch means account exists but different password)
-        if (result.success || result.error?.includes('Incorrect')) {
-          existing.add(account);
+        if (result.success) {
+          // AUTH succeeded - account exists with correct password
+          working.add(account);
+        } else if (result.error?.toLowerCase().includes('not registered') ||
+                   result.error?.toLowerCase().includes('no such account')) {
+          // Account genuinely doesn't exist
+          missing.add(account);
+        } else {
+          // Account exists but has some issue (wrong password, not activated, suspended, etc.)
+          // Don't try to re-register these
+          broken.add(account);
         }
-        // "not registered" means account doesn't exist - nothing to do
 
         // Small delay to avoid flooding
         await new Promise(r => setTimeout(r, 100));
@@ -126,7 +157,7 @@ class AccountPool {
       }
     }
 
-    return existing;
+    return { working, broken, missing };
   }
 
   /**
@@ -157,6 +188,9 @@ class AccountPool {
 
         if (activateResult.success) {
           console.log(`[AccountPool] Created ${spec.account}`);
+          // Mark as verified in the pool
+          const poolSpec = this.accounts.get(spec.account);
+          if (poolSpec) poolSpec.verified = true;
         } else {
           console.warn(`[AccountPool] Failed to activate ${spec.account}: ${activateResult.error}`);
         }
@@ -173,11 +207,12 @@ class AccountPool {
 
   /**
    * Checkout an available account from the pool.
+   * Only returns verified accounts (AUTH succeeded with expected password).
    * Returns null if no accounts available (caller should create fresh).
    */
   checkout(): PoolAccount | null {
     for (const spec of this.accounts.values()) {
-      if (!spec.inUse) {
+      if (!spec.inUse && spec.verified) {
         spec.inUse = true;
         return { ...spec }; // Return copy to prevent modification
       }
@@ -198,14 +233,24 @@ class AccountPool {
   /**
    * Get pool statistics.
    */
-  getStats(): { total: number; available: number; inUse: number } {
+  getStats(): { total: number; verified: number; available: number; inUse: number; broken: number } {
+    let verified = 0;
     let available = 0;
     let inUse = 0;
     for (const spec of this.accounts.values()) {
-      if (spec.inUse) inUse++;
-      else available++;
+      if (spec.verified) {
+        verified++;
+        if (spec.inUse) inUse++;
+        else available++;
+      }
     }
-    return { total: this.accounts.size, available, inUse };
+    return {
+      total: this.accounts.size,
+      verified,
+      available,
+      inUse,
+      broken: this.accounts.size - verified
+    };
   }
 
   /**
