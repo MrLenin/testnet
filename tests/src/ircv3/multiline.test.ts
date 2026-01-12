@@ -879,9 +879,12 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('USER mlhserv1 0 * :mlhserv1');
       await client1.waitForNumeric('001');
 
-      // Client2: NO multiline, NO chathistory (basic IRC client - should get HistServ hint)
+      // Client2: has batch but NO multiline, NO chathistory - should get HistServ hint
+      // (Note: clients need at least batch cap to receive multiline fallback content)
       client2.send('CAP LS 302');
       await client2.waitForLine(/CAP.*LS/i);
+      client2.send('CAP REQ :batch');
+      await client2.waitForLine(/CAP.*ACK/i);
       client2.send('CAP END');
       client2.send('NICK mlhserv2');
       client2.send('USER mlhserv2 0 * :mlhserv2');
@@ -907,8 +910,17 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       }
       client1.send(`BATCH -${batchId}`);
 
-      // Give server time to process and relay to client2
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Wait for client1's echo to confirm server processed the batch
+      // Client1 has echo-message implicitly via multiline, so it sees its own messages
+      const echoStart = Date.now();
+      while (Date.now() - echoStart < 3000) {
+        try {
+          const line = await client1.waitForLine(/PRIVMSG.*HistServ fallback line/i, 500);
+          if (line.includes('line 1')) break; // Got first echo
+        } catch {
+          break;
+        }
+      }
 
       // Client2 should receive truncated message with HistServ hint or &ml- channel
       let foundHistServHint = false;
