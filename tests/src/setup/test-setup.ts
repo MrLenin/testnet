@@ -8,6 +8,7 @@
 
 import { checkKeycloakAvailable } from './keycloak-check.js';
 import { getGlobalCookieObserver, shutdownGlobalCookieObserver } from '../helpers/cookie-observer.js';
+import { initializeAccountPool, getPoolStats } from '../helpers/account-pool.js';
 
 // Start CookieObserver for capturing activation cookies via #MrSnoopy
 // This is preferred over Docker log scraping for reliability
@@ -30,6 +31,18 @@ if (keycloakAvailable) {
   console.log('Keycloak: Available (testnet realm configured)');
 } else {
   console.log('Keycloak: Not available (auth tests will be skipped)');
+}
+
+// Initialize account pool for fast test account checkout
+// Pool accounts persist across test runs - only missing accounts are created
+try {
+  await initializeAccountPool();
+  const stats = getPoolStats();
+  console.log(`AccountPool: Ready (${stats.available} accounts available)`);
+} catch (error) {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  console.log('AccountPool: Failed to initialize -', errorMessage);
+  console.log('  Tests will create accounts on demand (slower)');
 }
 
 // Cleanup CookieObserver on process exit

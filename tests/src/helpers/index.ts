@@ -151,6 +151,9 @@ export {
   createAuthenticatedX3Client,
   createTestAccount,
   createOperClient,
+  // Account pool helpers
+  getTestAccount,
+  releaseTestAccount,
   // State verification helpers
   waitForUserAccess,
   waitForAccountExists,
@@ -163,6 +166,17 @@ export {
   // Types
   type ServiceResponse,
 } from './x3-client.js';
+
+export {
+  // Account pool management
+  accountPool,
+  initializeAccountPool,
+  checkoutPoolAccount,
+  checkinPoolAccount,
+  getPoolStats,
+  isPoolInitialized,
+  type PoolAccount,
+} from './account-pool.js';
 
 export {
   // Cookie observer for capturing activation cookies via IRC
