@@ -51,7 +51,7 @@ describe('Services Integration', () => {
       const client1 = trackClient(await createX3Client());
       await client1.registerAndActivate(account, password, email);
       client1.send(`JOIN ${channel}`);
-      await client1.waitForLine(/JOIN/i, 5000);
+      await client1.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
       const regResult = await client1.registerChannel(channel);
 
@@ -71,7 +71,7 @@ describe('Services Integration', () => {
       const client2 = trackClient(await createX3Client());
       await client2.auth(account, password);
       client2.send(`JOIN ${channel}`);
-      await client2.waitForLine(/JOIN/i, 5000);
+      await client2.waitForJoin(channel, undefined, 5000);
 
       // Should still be able to manage channel
       const accessList = await client2.getAccess(channel);
@@ -94,7 +94,7 @@ describe('Services Integration', () => {
       const ownerClient = trackClient(await createX3Client());
       await ownerClient.registerAndActivate(owner, ownerPass, ownerEmail);
       ownerClient.send(`JOIN ${channel}`);
-      await ownerClient.waitForLine(/JOIN/i, 5000);
+      await ownerClient.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
 
       // Register channel and verify success
@@ -157,7 +157,7 @@ describe('Services Integration', () => {
       const ownerClient = trackClient(await createX3Client());
       await ownerClient.registerAndActivate(owner, ownerPass, ownerEmail);
       ownerClient.send(`JOIN ${channel}`);
-      await ownerClient.waitForLine(/JOIN/i, 5000);
+      await ownerClient.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
       await ownerClient.registerChannel(channel);
 
@@ -169,7 +169,10 @@ describe('Services Integration', () => {
       guestClient.send(`JOIN ${channel}`);
 
       // Should get invite-only error
-      const joinResponse = await guestClient.waitForLine(/JOIN|473/, 5000);
+      const joinResponse = await guestClient.waitForParsedLine(
+        msg => msg.command === 'JOIN' || msg.command === '473',
+        5000
+      );
       console.log('Guest join response:', joinResponse);
 
       // 473 is ERR_INVITEONLYCHAN
@@ -224,7 +227,7 @@ describe('Services Integration', () => {
       expect(regResult.success).toBe(true);
 
       client1.send(`JOIN ${channel}`);
-      await client1.waitForLine(/JOIN/i, 5000);
+      await client1.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
 
       const chanRegResult = await client1.registerChannel(channel);
@@ -244,7 +247,7 @@ describe('Services Integration', () => {
       console.log('Client2 auth result:', authResult.success);
 
       client2.send(`JOIN ${channel}`);
-      await client2.waitForLine(/JOIN/i, 5000);
+      await client2.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
 
       // Both should be able to get channel access
