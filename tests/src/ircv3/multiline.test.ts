@@ -837,12 +837,52 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       expect(receivedLines.length).toBeGreaterThan(0);
 
       // If chathistory hint was provided, verify we can retrieve via CHATHISTORY
-      // Note: This is a best-effort check - LMDB writes are async so messages
-      // may not be available yet. The main test (receiving fallback hint) passed.
+      // Poll with retries since LMDB writes are async
       if (foundChathistoryHint && capturedMsgid) {
-        console.log('Chathistory hint was received - fallback mechanism works');
-        // Skip CHATHISTORY retrieval verification since LMDB async timing
-        // makes it unreliable. The important thing is we got the hint.
+        console.log('Verifying CHATHISTORY retrieval with msgid:', capturedMsgid);
+
+        // Poll CHATHISTORY until messages appear (LMDB async timing)
+        const pollStart = Date.now();
+        const pollTimeout = 10000;
+        let historyMessages: string[] = [];
+
+        while (Date.now() - pollStart < pollTimeout) {
+          client2.clearRawBuffer();
+          client2.send(`CHATHISTORY AROUND ${channelName} msgid=${capturedMsgid} 20`);
+
+          try {
+            // Wait for batch start
+            await client2.waitForLine(/BATCH \+\S+ chathistory/i, 3000);
+
+            // Collect messages in batch
+            const messages: string[] = [];
+            const collectStart = Date.now();
+            while (Date.now() - collectStart < 5000) {
+              try {
+                const line = await client2.waitForLine(/PRIVMSG|BATCH -/i, 1000);
+                if (line.includes('BATCH -')) break;
+                if (line.includes('PRIVMSG')) messages.push(line);
+              } catch {
+                break;
+              }
+            }
+
+            if (messages.length > receivedLines.length) {
+              historyMessages = messages;
+              break; // Got more than truncated - success
+            }
+
+            // Not enough yet - wait and retry
+            await new Promise(r => setTimeout(r, 200));
+          } catch {
+            // Query failed - wait and retry
+            await new Promise(r => setTimeout(r, 200));
+          }
+        }
+
+        console.log('Retrieved via CHATHISTORY:', historyMessages.length, 'lines');
+        // Should retrieve more content than the truncated version
+        expect(historyMessages.length).toBeGreaterThan(receivedLines.length);
       }
 
       client1.send('QUIT');
@@ -921,7 +961,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
 
           // Look for HistServ FETCH hint with msgid
           // Format: [N more lines - /msg HistServ FETCH #channel msgid]
-          const histServMatch = line.match(/HistServ FETCH \S+ (\S+)/i);
+          const histServMatch = line.match(/HistServ FETCH \S+ ([^\s\]]+)/i);
           if (histServMatch) {
             foundHistServHint = true;
             histServMsgid = histServMatch[1];
