@@ -799,7 +799,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send(`BATCH -${batchId}`);
 
       // Give server time to process and relay to client2
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       // Client2 should receive truncated message with chathistory hint
       let foundChathistoryHint = false;
@@ -908,7 +908,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send(`BATCH -${batchId}`);
 
       // Give server time to process and relay to client2
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       // Client2 should receive truncated message with HistServ hint or &ml- channel
       let foundHistServHint = false;
