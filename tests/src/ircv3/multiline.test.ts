@@ -903,12 +903,10 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('USER mlhserv1 0 * :mlhserv1');
       await client1.waitForNumeric('001');
 
-      // Client2: has batch but NO multiline, NO chathistory - should get HistServ hint
-      // (Note: clients need at least batch cap to receive multiline fallback content)
+      // Client2: NO caps at all - basic IRC client testing fallback
+      // Testing if clients without batch cap receive multiline fallback PRIVMSGs
       client2.send('CAP LS 302');
       await client2.waitForLine(/CAP.*LS/i);
-      client2.send('CAP REQ :batch');
-      await client2.waitForLine(/CAP.*ACK/i);
       client2.send('CAP END');
       client2.send('NICK mlhserv2');
       client2.send('USER mlhserv2 0 * :mlhserv2');
