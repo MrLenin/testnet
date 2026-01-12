@@ -302,10 +302,15 @@ describe('ChanServ (X3)', () => {
       // Wait for user access to be visible before joining
       await waitForUserAccess(client, channel, user2, ACCESS_LEVELS.OP);
 
-      // Verify access list shows user2 with OP level
+      // Allow Keycloak async operations to settle - bidirectional sync can race with ADDUSER
+      // and briefly overwrite the level with 0 from a previous test's cleanup
+      await new Promise(r => setTimeout(r, 2000));
+
+      // Verify access list shows user2 with OP level (after settling)
       const accessList = await client.getAccess(channel);
       const user2Access = accessList.find(e => e.account.toLowerCase() === user2.toLowerCase());
       console.log(`[auto-op] User2 access in ${channel}: level=${user2Access?.level}`);
+      expect(user2Access?.level, `Access level should be ${ACCESS_LEVELS.OP} after settling`).toBe(ACCESS_LEVELS.OP);
 
       // User2 joins - should get opped
       user2Client.send(`JOIN ${channel}`);
@@ -364,10 +369,14 @@ describe('ChanServ (X3)', () => {
       // Wait for user access to be visible before joining
       await waitForUserAccess(client, channel, user2, ACCESS_LEVELS.VOICE);
 
-      // Verify access list shows user2 with VOICE level
+      // Allow Keycloak async operations to settle - bidirectional sync can race with ADDUSER
+      await new Promise(r => setTimeout(r, 2000));
+
+      // Verify access list shows user2 with VOICE level (after settling)
       const accessList = await client.getAccess(channel);
       const user2Access = accessList.find(e => e.account.toLowerCase() === user2.toLowerCase());
       console.log(`[auto-voice] User2 access in ${channel}: level=${user2Access?.level}`);
+      expect(user2Access?.level, `Access level should be ${ACCESS_LEVELS.VOICE} after settling`).toBe(ACCESS_LEVELS.VOICE);
 
       // User2 joins - should get voiced
       user2Client.send(`JOIN ${channel}`);
