@@ -1696,25 +1696,18 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Set a topic
       const topicText = `Test topic ${uniqueId()}`;
       client.send(`TOPIC ${channelName} :${topicText}`);
-      await new Promise(r => setTimeout(r, 500));
+      // Wait for TOPIC confirmation
+      await client.waitForCommand('TOPIC', 3000);
 
-      client.clearRawBuffer();
-
-      // Query history
-      client.send(`CHATHISTORY LATEST ${channelName} * 10`);
-
-      // MUST receive batch
-      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-      expect(batchStart).toBeDefined();
-
-      const topics: string[] = [];
-      while (true) {
-        const line = await client.waitForLine(/TOPIC|JOIN|PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('TOPIC')) topics.push(line);
-      }
+      // Use polling helper to wait for LMDB async persistence
+      const messages = await waitForChathistory(client, channelName, {
+        minMessages: 1,
+        timeoutMs: 10000,
+        eventTypes: ['TOPIC', 'JOIN', 'PRIVMSG'],
+      });
 
       // TOPIC events must be stored when event-playback is enabled
+      const topics = messages.filter(m => m.includes('TOPIC'));
       expect(topics.length).toBeGreaterThan(0);
       const hasTopicText = topics.some(t => t.includes(topicText));
       expect(hasTopicText).toBe(true);
@@ -1738,26 +1731,17 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Set a mode that isn't default (+tn is default, use +m for moderated)
       client.send(`MODE ${channelName} +m`);
       // Wait for MODE to be broadcast to channel members
-      await client.waitForLine(/MODE.*\+m/i, 3000);
-      await new Promise(r => setTimeout(r, 500));
+      await client.waitForCommand('MODE', 3000);
 
-      client.clearRawBuffer();
-
-      // Query history
-      client.send(`CHATHISTORY LATEST ${channelName} * 10`);
-
-      // MUST receive batch
-      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-      expect(batchStart).toBeDefined();
-
-      const modes: string[] = [];
-      while (true) {
-        const line = await client.waitForLine(/MODE|JOIN|PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('MODE')) modes.push(line);
-      }
+      // Use polling helper to wait for LMDB async persistence
+      const messages = await waitForChathistory(client, channelName, {
+        minMessages: 1,
+        timeoutMs: 10000,
+        eventTypes: ['MODE', 'JOIN', 'PRIVMSG'],
+      });
 
       // MODE events must be stored when event-playback is enabled
+      const modes = messages.filter(m => m.includes('MODE'));
       expect(modes.length).toBeGreaterThan(0);
       // Verify we got the +m mode change
       const hasModeM = modes.some(m => m.includes('+m'));
