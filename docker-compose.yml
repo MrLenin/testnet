@@ -35,12 +35,23 @@ services:
         additional_contexts:
           - data=./data
     user: "1234:1234"  # nefarious user
+    # Valgrind needs more memory (2-3x normal)
+    mem_limit: 2g
+    memswap_limit: 2g
+    # Enable core dumps for crash debugging
+    ulimits:
+      core:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 8192
+        hard: 16384
     networks:
       irc_net:
         ipv4_address: 172.29.0.2
         aliases:
           - testnet.fractalrealities.net
-    command: ["/home/nefarious/bin/ircd", "-n", "-x", "8", "-f", "ircd.conf"]
+    command: ["valgrind", "--leak-check=full", "--show-leak-kinds=all", "--track-origins=yes", "--log-file=/home/nefarious/ircd/cores/valgrind.log", "/home/nefarious/bin/ircd", "-n", "-x", "8", "-f", "ircd.conf"]
     volumes:
      - ./data/ircd.conf:/home/nefarious/ircd/local.conf
      - ./data/saslusers:/home/nefarious/ircd/saslusers
@@ -48,12 +59,13 @@ services:
      - metadata_data:/home/nefarious/ircd/metadata
      - gitsync_data:/home/nefarious/ircd/gitsync
      - ssl_data:/home/nefarious/ircd/ssl
+     - ./nefcores:/home/nefarious/ircd/cores  # Valgrind log directory
     ports:
-      - 127.0.0.1:6667:6667
-      - 127.0.0.1:6697:6697
-      - 127.0.0.1:4497:4497
-      - 127.0.0.1:9998:9998
-      - 127.0.0.1:8443:8443  # WebSocket (SSL)
+      - 0.0.0.0:6667:6667
+      - 0.0.0.0:6697:6697
+      - 0.0.0.0:4497:4497
+      - 0.0.0.0:9998:9998
+      - 0.0.0.0:8443:8443  # WebSocket (SSL)
     env_file:
       - .env
       - .env.local
@@ -381,6 +393,35 @@ services:
 ##      - .env
 ##      - .env.local
 
+  # PowerDNS Recursor for Consul DNS forwarding
+  pdns-recursor:
+    container_name: pdns-recursor
+    image: powerdns/pdns-recursor-master:latest
+    networks:
+      irc_net:
+        ipv4_address: 172.29.0.20
+    volumes:
+      - ./data/recursor.conf:/etc/powerdns/recursor.yml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "rec_control ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Build webhook SPI JAR for Keycloak
+  keycloak-spi-build:
+    container_name: keycloak-spi-build
+    image: maven:3.9-eclipse-temurin-17
+    volumes:
+      - ./keycloak-webhook-spi:/src:ro
+      - keycloak_providers:/providers
+    command: >
+      sh -c "cp -r /src /build && cd /build && mvn -q package -DskipTests &&
+             rm -f /providers/keycloak-webhook-*.jar /providers/original-*.jar &&
+             cp target/keycloak-webhook-spi-*.jar /providers/ &&
+             echo 'Webhook SPI JAR built and copied to providers'"
+
   keycloak-init:
     container_name: keycloak-init
     image: quay.io/keycloak/keycloak:26.4.7
@@ -390,9 +431,14 @@ services:
       - |
         chown -R 1000:1000 /opt/keycloak/data
         chmod -R 750 /opt/keycloak/data
-        echo "Keycloak data permissions fixed"
+        chown -R 1000:1000 /opt/keycloak/providers
+        echo "Keycloak data and providers permissions fixed"
     volumes:
       - keycloak_data:/opt/keycloak/data
+      - keycloak_providers:/opt/keycloak/providers
+    depends_on:
+      keycloak-spi-build:
+        condition: service_completed_successfully
 
   keycloak:
     container_name: keycloak
@@ -401,22 +447,40 @@ services:
     networks:
       irc_net:
         ipv4_address: 172.29.0.10
+    # Use pdns-recursor for Consul DNS forwarding
+    dns:
+      - 172.29.0.20
     ports:
-      - 127.0.0.1:8080:8080
+      - 0.0.0.0:8080:8080
     environment:
       - KC_BOOTSTRAP_ADMIN_USERNAME=admin
       - KC_BOOTSTRAP_ADMIN_PASSWORD=admin
       - KC_HOSTNAME=localhost
       - KC_HOSTNAME_PORT=8080
       - KC_HOSTNAME_STRICT=false
+      # PostgreSQL database (uses Consul DNS for HA failover)
+      - KC_DB=${KC_DB:-postgres}
+      - KC_DB_URL=${KC_DB_URL}
+      - KC_DB_USERNAME=${KC_DB_USERNAME}
+      - KC_DB_PASSWORD=${KC_DB_PASSWORD}
+      # Webhook SPI configuration
+      - KC_SPI_EVENTS_LISTENER_WEBHOOK_EVENTS_URL=${KC_SPI_EVENTS_LISTENER_WEBHOOK_EVENTS_URL}
+      - KC_SPI_EVENTS_LISTENER_WEBHOOK_EVENTS_SECRET=${KC_SPI_EVENTS_LISTENER_WEBHOOK_EVENTS_SECRET}
       # JVM tuning: use 75% of container memory + G1 GC for consistent performance
       - JAVA_OPTS_APPEND=-XX:MaxRAMPercentage=75 -XX:InitialRAMPercentage=75 -XX:+UseG1GC
     command: start-dev
+    # Memory limits to prevent OOM during test suite runs
+    # Keycloak can spike to 3-4GB during sequential test runs
+    mem_limit: 4g
+    memswap_limit: 4g
     volumes:
       - keycloak_data:/opt/keycloak/data
+      - keycloak_providers:/opt/keycloak/providers
     depends_on:
       keycloak-init:
         condition: service_completed_successfully
+      pdns-recursor:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080"]
       interval: 10s
@@ -450,8 +514,40 @@ services:
       keycloak:
         condition: service_healthy
 
+  # Add PostgreSQL indexes for Keycloak user attributes (SCRAM, x509, etc.)
+  keycloak-db-indexes:
+    container_name: keycloak-db-indexes
+    image: postgres:16-alpine
+    networks:
+      irc_net:
+        ipv4_address: 172.29.0.12
+    dns:
+      - 172.29.0.20
+    environment:
+      - PGHOST=master.postgresql.service.consul
+      - PGPORT=5432
+      - PGDATABASE=db_keycloak
+      - PGUSER=${KC_DB_USERNAME}
+      - PGPASSWORD=${KC_DB_PASSWORD}
+    volumes:
+      - ./scripts/keycloak-db-indexes.sql:/indexes.sql:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for Keycloak setup to complete..."
+        sleep 5
+        echo "Adding performance indexes to Keycloak database..."
+        psql -f /indexes.sql 2>&1 || echo "Index creation may have failed (already exists?)"
+        echo "Done"
+    depends_on:
+      keycloak-setup:
+        condition: service_completed_successfully
+      pdns-recursor:
+        condition: service_healthy
+
 volumes:
   keycloak_data:
+  keycloak_providers:
   history_data:
   metadata_data:
   history_data2:
