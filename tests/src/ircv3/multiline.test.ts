@@ -1043,7 +1043,8 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
         const fetchStart = Date.now();
         while (Date.now() - fetchStart < 3000) {
           try {
-            const line = await client2.waitForLine(/NOTICE.*HistServ|PRIVMSG/i, 500);
+            // Match NOTICEs from HistServ (format: :HistServ!... NOTICE target :message)
+            const line = await client2.waitForLine(/:HistServ.*NOTICE|PRIVMSG/i, 500);
             histServLines.push(line);
             console.log('HistServ FETCH response:', line);
           } catch {
