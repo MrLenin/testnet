@@ -106,7 +106,8 @@ describe('IRCv3 SASL Authentication', () => {
       // Server should respond with AUTHENTICATE +
       // Use longer timeout (10s) due to occasional IRCd→X3→IRCd roundtrip delays
       const response = await client.waitForCommand('AUTHENTICATE', 10000);
-      expect(response).toBe('AUTHENTICATE +');
+      expect(response.command).toBe('AUTHENTICATE');
+      expect(response.params[0] || response.trailing).toBe('+');
 
       // Properly abort SASL session before quitting to prevent
       // race conditions with subsequent tests
@@ -139,7 +140,7 @@ describe('IRCv3 SASL Authentication', () => {
       // Use 20s timeout to handle load conditions
       const result = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 20000);
       // 904 = SASLFAIL, 902 = NICK_LOCKED
-      expect(result).toMatch(/90[24]/);
+      expect(result.command).toMatch(/90[24]/);
       client.send('QUIT');
     });
 
@@ -159,7 +160,7 @@ describe('IRCv3 SASL Authentication', () => {
       client.register('authtest3');
 
       const welcome = await client.waitForNumeric('001');
-      expect(welcome).toContain('authtest3');
+      expect(welcome.raw).toContain('authtest3');
       client.send('QUIT');
     });
 
@@ -178,7 +179,7 @@ describe('IRCv3 SASL Authentication', () => {
 
       client.send('AUTHENTICATE PLAIN');
       const authPlus = await client.waitForCommand('AUTHENTICATE', 10000);
-      console.log('Got AUTHENTICATE +:', authPlus);
+      console.log('Got AUTHENTICATE +:', authPlus.raw);
 
       const payload = Buffer.from(`${TEST_ACCOUNT}\0${TEST_ACCOUNT}\0${TEST_PASSWORD}`).toString('base64');
       console.log('Sending credentials payload');
@@ -191,7 +192,7 @@ describe('IRCv3 SASL Authentication', () => {
       // Test will fail if account doesn't exist - that's expected
       // Note: Keycloak can take 3-6s under load
       const result = await client.waitForNumeric(['900', '903'], 20000);
-      expect(result).toMatch(/(900|903)/);
+      expect(result.command).toMatch(/^(900|903)$/);
       client.send('QUIT');
     });
   });
@@ -277,7 +278,7 @@ describe('IRCv3 SASL Authentication', () => {
       regClient.send(`REGISTER ${uniqueAccount} ${uniqueAccount}@example.com ${uniquePassword}`);
 
       const response = await regClient.waitForNumeric('920', 5000);
-      expect(response).toMatch(/SUCCESS|920/);
+      expect(response.command).toBe('920');
 
       regClient.send('QUIT');
       await new Promise(r => setTimeout(r, 500));
@@ -346,7 +347,7 @@ describe('SASL Error Handling', () => {
       3000
     );
     expect(response).toBeDefined();
-    console.log('Unknown mechanism response:', response);
+    console.log('Unknown mechanism response:', response.raw);
     client.send('QUIT');
   });
 
@@ -365,7 +366,7 @@ describe('SASL Error Handling', () => {
     // IRCv3 spec: AUTHENTICATE * should trigger 906 (ERR_SASLABORTED)
     // X3 now properly handles abort and responds with D A
     const response = await client.waitForNumeric('906', 5000);
-    expect(response).toMatch(/906/);
+    expect(response.command).toBe('906');
     client.send('QUIT');
   });
 
@@ -388,7 +389,7 @@ describe('SASL Error Handling', () => {
     // Note: Error path can be slow under load
     const response = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 20000);
     expect(response).toBeDefined();
-    console.log('Malformed base64 response:', response);
+    console.log('Malformed base64 response:', response.raw);
     client.send('QUIT');
   });
 
@@ -442,7 +443,7 @@ describe('SASL Error Handling', () => {
     client.capEnd();
     client.register('noauthtest');
     const welcome = await client.waitForNumeric('001');
-    expect(welcome).toContain('001');
+    expect(welcome.command).toBe('001');
     client.send('QUIT');
   });
 
@@ -577,7 +578,7 @@ describe('SASL with account-notify', () => {
     // Keycloak and testuser should always be available
     // Use 20s timeout to handle load conditions
     const response = await client.waitForNumeric('903', 20000);
-    expect(response).toMatch(/903/);
+    expect(response.command).toBe('903');
 
     client.send('QUIT');
   });

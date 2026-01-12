@@ -273,7 +273,7 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
       // Join the same channel from secondary
       secondary.send(`JOIN ${channel}`);
       const joinResponse = await secondary.waitForJoin(channel, undefined, 5000);
-      expect(joinResponse).toContain(channel);
+      expect(joinResponse.raw).toContain(channel);
 
       // Verify both users see each other in NAMES
       secondary.send(`NAMES ${channel}`);

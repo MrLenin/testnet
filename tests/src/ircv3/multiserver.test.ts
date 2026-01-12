@@ -65,7 +65,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client.register('multitest1');
       const welcome = await client.waitForNumeric('001');
 
-      expect(welcome).toContain('001');
+      expect(welcome.command).toBe('001');
       client.send('QUIT');
     });
 
