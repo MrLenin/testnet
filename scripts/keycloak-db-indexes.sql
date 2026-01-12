@@ -2,13 +2,15 @@
 -- Run after Keycloak initial schema creation
 --
 -- These indexes optimize lookups for X3/IRC-specific operations:
--- - User attributes (SCRAM, x509, opserv level)
--- - Group memberships (ChanServ channel access)
+-- - User attributes (SCRAM, x509, opserv level, channel access)
 -- - Credentials (password validation)
 -- - Event logging
+--
+-- NOTE: Channel access is stored in USER_ATTRIBUTE, not group memberships.
+-- Groups are only used for x3-opers (network operator status).
 
 -- =============================================================================
--- USER_ATTRIBUTE indexes (SCRAM, fingerprints, opserv level)
+-- USER_ATTRIBUTE indexes (primary storage for IRC data)
 -- =============================================================================
 
 -- General attribute name lookup
@@ -37,45 +39,42 @@ CREATE INDEX IF NOT EXISTS idx_user_attribute_opserv
   ON user_attribute (user_id, value)
   WHERE name = 'x3_opserv_level';
 
+-- Partial index for ChanServ channel access attributes
+-- Channel access stored as: chanserv_#channel = access_level
+-- Speeds up: "What channels does user X have access to?"
+CREATE INDEX IF NOT EXISTS idx_user_attribute_chanserv
+  ON user_attribute (user_id, name, value)
+  WHERE name LIKE 'chanserv_%';
+
+-- Reverse lookup for channel access
+-- Speeds up: "Who has access to #channel?"
+CREATE INDEX IF NOT EXISTS idx_user_attribute_chanserv_by_name
+  ON user_attribute (name, value)
+  WHERE name LIKE 'chanserv_%';
+
 -- =============================================================================
--- GROUP indexes (ChanServ channel access via /irc-channels/#channel/level)
+-- GROUP indexes (x3-opers network operator group only)
 -- =============================================================================
 
--- Group name lookup (for finding channel groups)
--- Speeds up: "Find group named '#channel'" under irc-channels
+-- Group name lookup (for x3-opers group)
 CREATE INDEX IF NOT EXISTS idx_keycloak_group_name
   ON keycloak_group (name);
-
--- Parent group lookup (for hierarchical channel access)
--- Speeds up: "Find all subgroups of irc-channels"
-CREATE INDEX IF NOT EXISTS idx_keycloak_group_parent
-  ON keycloak_group (parent_group);
 
 -- Realm + name for realm-scoped group lookups
 CREATE INDEX IF NOT EXISTS idx_keycloak_group_realm_name
   ON keycloak_group (realm_id, name);
 
 -- =============================================================================
--- USER_GROUP_MEMBERSHIP indexes (who has access to what channels)
+-- USER_GROUP_MEMBERSHIP indexes (x3-opers membership)
 -- =============================================================================
 
--- User's group memberships
--- Speeds up: "What groups/channels is user X in?"
+-- User's group memberships (for checking oper status)
 CREATE INDEX IF NOT EXISTS idx_user_group_membership_user
   ON user_group_membership (user_id);
 
--- Group's members
--- Speeds up: "Who has access to channel X?"
+-- Group's members (for listing all opers)
 CREATE INDEX IF NOT EXISTS idx_user_group_membership_group
   ON user_group_membership (group_id);
-
--- =============================================================================
--- GROUP_ATTRIBUTE indexes (channel metadata, settings)
--- =============================================================================
-
--- Group attribute lookups
-CREATE INDEX IF NOT EXISTS idx_group_attribute_group_name
-  ON group_attribute (group_id, name);
 
 -- =============================================================================
 -- CREDENTIAL indexes (password/SCRAM validation)
@@ -129,7 +128,6 @@ CREATE INDEX IF NOT EXISTS idx_user_entity_realm_username
 ANALYZE user_attribute;
 ANALYZE keycloak_group;
 ANALYZE user_group_membership;
-ANALYZE group_attribute;
 ANALYZE credential;
 ANALYZE fed_user_attribute;
 ANALYZE event_entity;
