@@ -364,8 +364,8 @@ export class X3Client extends RawSocketClient {
   /**
    * Authenticate via AuthServ.
    */
-  async auth(account: string, password: string): Promise<ServiceResponse> {
-    const lines = await this.serviceCmd('AuthServ', `AUTH ${account} ${password}`);
+  async auth(account: string, password: string, timeout?: number): Promise<ServiceResponse> {
+    const lines = await this.serviceCmd('AuthServ', `AUTH ${account} ${password}`, timeout);
     const success = lines.some(l =>
       l.includes('recognized') ||
       l.includes('authenticated') ||

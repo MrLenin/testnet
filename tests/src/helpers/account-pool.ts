@@ -132,19 +132,26 @@ class AccountPool {
       client = await createX3Client('poolchk');
 
       for (const [account, spec] of this.accounts) {
-        const result = await client.auth(account, spec.password);
+        let result = await client.auth(account, spec.password);
+
+        // If timeout, retry once with longer timeout
+        if (!result.error && result.lines.length === 0) {
+          console.warn(`[AccountPool] AUTH timeout for ${account}, retrying...`);
+          await new Promise(r => setTimeout(r, 500));
+          result = await client.auth(account, spec.password, 15000);
+        }
 
         if (result.success) {
           // AUTH succeeded - account exists with correct password
           working.add(account);
-        } else if (!result.error || result.lines.length === 0) {
-          // No response (timeout) - can't determine state, treat as missing to allow creation
-          console.warn(`[AccountPool] AUTH timeout for ${account}, treating as missing`);
-          missing.add(account);
         } else if (result.error?.toLowerCase().includes('not registered') ||
                    result.error?.toLowerCase().includes('no such account')) {
           // Account genuinely doesn't exist
           missing.add(account);
+        } else if (!result.error || result.lines.length === 0) {
+          // Still no response after retry - mark broken (don't try to re-create)
+          console.warn(`[AccountPool] AUTH still timing out for ${account}, marking broken`);
+          broken.add(account);
         } else {
           // Account exists but has some issue (wrong password, not activated, suspended, etc.)
           // Don't try to re-register these
