@@ -14,6 +14,8 @@
  *   npm run cleanup
  *   # Or with custom credentials:
  *   X3_ACCOUNT=admin X3_PASSWORD=secret npm run cleanup
+ *   # To also delete pool accounts (pool00-pool29):
+ *   npm run cleanup -- --include-pool
  *
  * Environment variables:
  *   IRC_HOST       - IRC server host (default: localhost)
@@ -42,6 +44,10 @@ const X3_PASSWORD = process.env.X3_PASSWORD || 'testadmin123';
 const KEYCLOAK_URL = process.env.KEYCLOAK_URL || 'http://localhost:8080';
 const KEYCLOAK_REALM = process.env.KEYCLOAK_REALM || 'testnet';
 const DEBUG = process.env.DEBUG === '1';
+// Command line flags
+const INCLUDE_POOL = process.argv.includes('--include-pool');
+// Pool account pattern (pool00-pool99)
+const POOL_PATTERN = /^pool\d{2}$/;
 
 interface CleanupStats {
   accountsFound: string[];
@@ -256,44 +262,63 @@ async function cleanup(): Promise<void> {
     // Search for test accounts using AuthServ
     // AuthServ SEARCH supports: handlemask, accountmask, account (all synonyms)
     // Use limit 500 to get more results (default may be capped)
-    // Search for both test* and bisync* patterns (bidirectional sync tests use bisync prefix)
+    // Search patterns cover all test account prefixes used in the test suite
+    const ACCOUNT_SEARCH_PATTERNS = [
+      'test*',       // test[hex] from createTestAccount
+      'bisync*',     // bisync, bisyncadd, bisyncclvl, bisyncdel
+      'bisown*',     // keycloak owner accounts
+      'kcauto*',     // keycloak autocreate tests
+      'sl*',         // SASL tests
+      'regtest*',    // account-registration tests (handles regtest_*)
+      'emailtest*',  // account-registration tests
+      'noemail*',    // account-registration tests
+      'afterauth*',  // account-registration tests
+      'duptest*',    // account-registration tests
+      'unreg*',      // keycloak tests
+      'synerr*',     // keycloak tests
+      'clvl*',       // keycloak tests
+      'delown*',     // keycloak tests
+      'pool*',       // pool accounts (filtered by POOL_PATTERN unless --include-pool)
+    ];
+
     console.log('\nSearching for test accounts...');
     const accountSearchStart = lines.length; // Track buffer position before search
-    send('PRIVMSG AuthServ :SEARCH PRINT handlemask test* limit 500');
-    await waitForSearchComplete(30000);
-    await new Promise(r => setTimeout(r, 2000)); // Anti-flood delay
 
-    console.log('Searching for bisync accounts...');
-    send('PRIVMSG AuthServ :SEARCH PRINT handlemask bisync* limit 500');
-    await waitForSearchComplete(30000);
-    await new Promise(r => setTimeout(r, 2000)); // Anti-flood delay
+    for (const pattern of ACCOUNT_SEARCH_PATTERNS) {
+      if (DEBUG) console.log(`DEBUG: Searching for ${pattern}`);
+      send(`PRIVMSG AuthServ :SEARCH PRINT handlemask ${pattern} limit 500`);
+      await waitForSearchComplete(30000);
+      await new Promise(r => setTimeout(r, 1000)); // Anti-flood delay
+    }
 
     // Accounts to never delete (admin accounts, main test fixtures)
     const PROTECTED_ACCOUNTS = ['testadmin', 'testuser'];
 
     // Parse search results for accounts (only look at lines since search started)
+    // Format is ":AuthServ NOTICE bot :Match: accountname"
     const parseAccounts = (startIndex: number = 0) => {
       for (let i = startIndex; i < lines.length; i++) {
         const line = lines[i];
-        // Look for test account names in Match: lines
-        // Format is ":AuthServ NOTICE bot :Match: test01f17b"
-        // Patterns: test + 6 hex chars, or bisync variants + 4-5 hex chars
         if (line.includes('Match:')) {
-          // Match test accounts (test + 6 hex)
-          const testMatch = line.match(/(test[0-9a-f]{6})/i);
-          if (testMatch &&
-              !stats.accountsFound.includes(testMatch[1]) &&
-              !PROTECTED_ACCOUNTS.includes(testMatch[1].toLowerCase())) {
-            stats.accountsFound.push(testMatch[1]);
-            if (DEBUG) console.log(`DEBUG: Found account ${testMatch[1]}`);
-          }
-          // Match bisync accounts (bisync, bisyncadd, bisyncclvl, bisyncdel + hex chars)
-          const bisyncMatch = line.match(/(bisync(?:add|clvl|del)?[0-9a-f]{4,6})/i);
-          if (bisyncMatch &&
-              !stats.accountsFound.includes(bisyncMatch[1]) &&
-              !PROTECTED_ACCOUNTS.includes(bisyncMatch[1].toLowerCase())) {
-            stats.accountsFound.push(bisyncMatch[1]);
-            if (DEBUG) console.log(`DEBUG: Found account ${bisyncMatch[1]}`);
+          // Extract account name from Match: line
+          const match = line.match(/Match:\s*(\S+)/i);
+          if (match) {
+            const account = match[1].toLowerCase();
+
+            // Skip if already found
+            if (stats.accountsFound.includes(account)) continue;
+
+            // Skip protected accounts
+            if (PROTECTED_ACCOUNTS.includes(account)) continue;
+
+            // Skip pool accounts unless --include-pool flag
+            if (POOL_PATTERN.test(account) && !INCLUDE_POOL) {
+              if (DEBUG) console.log(`DEBUG: Skipping pool account ${account} (use --include-pool to delete)`);
+              continue;
+            }
+
+            stats.accountsFound.push(account);
+            if (DEBUG) console.log(`DEBUG: Found account ${account}`);
           }
         }
       }
@@ -302,17 +327,12 @@ async function cleanup(): Promise<void> {
     parseAccounts(accountSearchStart);
     if (DEBUG) console.log(`DEBUG: lines array has ${lines.length} entries`);
 
-    // Check if more results were truncated and re-search if needed
-    const hasMoreAccounts = lines.slice(accountSearchStart).some(l => l.includes('more match') || l.includes('truncated'));
-    if (hasMoreAccounts) {
-      console.log('Results may be truncated, searching again with higher limit...');
-      const retryStart = lines.length;
-      send('PRIVMSG AuthServ :SEARCH PRINT handlemask test* limit 1000');
-      await waitForSearchComplete(30000);
-      parseAccounts(retryStart);
+    // Log pool account notice
+    if (!INCLUDE_POOL) {
+      console.log('(Pool accounts preserved - use --include-pool to delete them)');
     }
 
-    console.log(`Found ${stats.accountsFound.length} test accounts`);
+    console.log(`Found ${stats.accountsFound.length} test accounts to delete`);
 
     // Enable GOD mode for cleanup operations (required for OUNREGISTER and UNREGISTER)
     // GOD mode grants UL_HELPER (600) access which allows deleting other users' accounts/channels
@@ -347,47 +367,39 @@ async function cleanup(): Promise<void> {
 
     // Search for orphaned test channels (not deleted with their owner accounts)
     // This catches channels registered by non-test accounts, or edge cases
+    // Search patterns cover all test channel prefixes used in the test suite
+    const CHANNEL_SEARCH_PATTERNS = [
+      '#test-*',     // main test channels
+      '#bisync*',    // bisync channels
+      '#bidisync*',  // bidisync channels
+      '#optest*',    // opserv tests
+      '#multi-*',    // edge-cases tests
+    ];
+
     console.log('\nSearching for orphaned test channels...');
     const channelSearchStart = lines.length; // Track buffer position before search
-    send('PRIVMSG O3 :CSEARCH PRINT name #test-* limit 500');
-    await waitForSearchComplete(30000);
-    await new Promise(r => setTimeout(r, 2000)); // Anti-flood delay
 
-    console.log('Searching for orphaned bisync channels...');
-    send('PRIVMSG O3 :CSEARCH PRINT name #bisync* limit 500');
-    await waitForSearchComplete(30000);
-    await new Promise(r => setTimeout(r, 2000)); // Anti-flood delay
+    for (const pattern of CHANNEL_SEARCH_PATTERNS) {
+      if (DEBUG) console.log(`DEBUG: Searching for channels ${pattern}`);
+      send(`PRIVMSG O3 :CSEARCH PRINT name ${pattern} limit 500`);
+      await waitForSearchComplete(30000);
+      await new Promise(r => setTimeout(r, 1000)); // Anti-flood delay
+    }
 
-    console.log('Searching for orphaned bidisync channels...');
-    send('PRIVMSG O3 :CSEARCH PRINT name #bidisync* limit 500');
-    await waitForSearchComplete(30000);
-    await new Promise(r => setTimeout(r, 2000)); // Anti-flood delay
-
-    // Parse channel list - look for test, bisync, and bidisync channel patterns
+    // Parse channel list - extract channel names from search results
     // Only look at lines since channel search started to avoid picking up
     // channel names from earlier OUNREGISTER responses
     const parseChannels = (startIndex: number = 0) => {
       for (let i = startIndex; i < lines.length; i++) {
         const line = lines[i];
-        // Match channel names like #test-a0da46b0 (8 hex chars)
-        const testMatches = line.matchAll(/(#test-[a-f0-9]{6,8})/gi);
-        for (const match of testMatches) {
-          if (!stats.channelsFound.includes(match[1])) {
-            stats.channelsFound.push(match[1]);
-          }
-        }
-        // Match bisync channel names like #bisyncadd-a0da46b0, #bisyncclvl-..., etc.
-        const bisyncMatches = line.matchAll(/(#bisync(?:add|clvl|del|unreg)?-[a-f0-9]{6,8})/gi);
-        for (const match of bisyncMatches) {
-          if (!stats.channelsFound.includes(match[1])) {
-            stats.channelsFound.push(match[1]);
-          }
-        }
-        // Match bidisync channel names like #bidisync-a0da46b0
-        const bidisyncMatches = line.matchAll(/(#bidisync-[a-f0-9]{6,8})/gi);
-        for (const match of bidisyncMatches) {
-          if (!stats.channelsFound.includes(match[1])) {
-            stats.channelsFound.push(match[1]);
+        // Match any channel name starting with # followed by test patterns
+        // Patterns: #test-*, #bisync*, #bidisync*, #optest*, #multi-*
+        const channelMatches = line.matchAll(/(#(?:test-|bisync|bidisync|optest|multi-)[^\s,]+)/gi);
+        for (const match of channelMatches) {
+          const channel = match[1].toLowerCase();
+          if (!stats.channelsFound.includes(channel)) {
+            stats.channelsFound.push(channel);
+            if (DEBUG) console.log(`DEBUG: Found channel ${channel}`);
           }
         }
       }

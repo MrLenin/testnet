@@ -23,6 +23,7 @@
 
 import { RawSocketClient, createRawSocketClient, PRIMARY_SERVER, IRCMessage, isFromService } from './ircv3-client.js';
 import { uniqueId, retryAsync, waitForCondition } from './cap-bundles.js';
+import { checkoutPoolAccount, checkinPoolAccount, isPoolInitialized, type PoolAccount } from './account-pool.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -899,6 +900,52 @@ export async function createTestAccount(): Promise<{ account: string; password: 
     password: `pass${id}`,
     email: `test${id}@example.com`,
   };
+}
+
+/**
+ * Get a test account - prefers pool, falls back to fresh creation.
+ *
+ * Pool accounts are pre-registered and persist across test runs, eliminating
+ * the 15-20s registration overhead. Tests should call releaseTestAccount()
+ * when done to return the account to the pool.
+ *
+ * @param options.requireFresh - Force fresh account creation (for duplicate registration tests)
+ */
+export async function getTestAccount(options?: { requireFresh?: boolean }): Promise<{
+  account: string;
+  password: string;
+  email: string;
+  fromPool: boolean;
+}> {
+  // If fresh required or pool not initialized, create new account
+  if (options?.requireFresh || !isPoolInitialized()) {
+    const account = await createTestAccount();
+    return { ...account, fromPool: false };
+  }
+
+  // Try pool first
+  const poolAccount = checkoutPoolAccount();
+  if (poolAccount) {
+    return {
+      account: poolAccount.account,
+      password: poolAccount.password,
+      email: poolAccount.email,
+      fromPool: true,
+    };
+  }
+
+  // Pool exhausted, fall back to fresh
+  console.warn('[getTestAccount] Pool exhausted, creating fresh account');
+  const account = await createTestAccount();
+  return { ...account, fromPool: false };
+}
+
+/**
+ * Return a pool account after test completion.
+ * Safe to call with non-pool accounts (will be ignored).
+ */
+export function releaseTestAccount(account: string): void {
+  checkinPoolAccount(account);
 }
 
 /**
