@@ -760,9 +760,9 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
 
       // Client1: has multiline (sender)
       client1.send('CAP LS 302');
-      await client1.waitForLine(/CAP.*LS/i);
+      await client1.waitForParsedLine(msg => msg.command === 'CAP');
       client1.send('CAP REQ :draft/multiline batch message-tags');
-      await client1.waitForLine(/CAP.*ACK/i);
+      await client1.waitForParsedLine(msg => msg.command === 'CAP' && msg.params.includes('ACK'));
       client1.send('CAP END');
       client1.send('NICK mlchhist1');
       client1.send('USER mlchhist1 0 * :mlchhist1');
@@ -770,9 +770,9 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
 
       // Client2: has chathistory but NOT multiline (should get chathistory hint)
       client2.send('CAP LS 302');
-      await client2.waitForLine(/CAP.*LS/i);
+      await client2.waitForParsedLine(msg => msg.command === 'CAP');
       client2.send('CAP REQ :draft/chathistory batch message-tags');
-      await client2.waitForLine(/CAP.*ACK/i);
+      await client2.waitForParsedLine(msg => msg.command === 'CAP' && msg.params.includes('ACK'));
       client2.send('CAP END');
       client2.send('NICK mlchhist2');
       client2.send('USER mlchhist2 0 * :mlchhist2');
@@ -790,7 +790,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.clearRawBuffer();
       client2.clearRawBuffer();
 
-      // Send large multiline to trigger truncation
+      // Send large multiline to trigger truncation (12 lines, default truncation at 6)
       const batchId = `chhist${uniqueId()}`;
       client1.send(`BATCH +${batchId} draft/multiline ${channelName}`);
       for (let i = 1; i <= 12; i++) {
@@ -804,37 +804,44 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       // Client2 should receive truncated message with chathistory hint
       let foundChathistoryHint = false;
       let capturedMsgid: string | null = null;
-      const receivedLines: string[] = [];
+      const receivedContent: string[] = [];
       const startTime = Date.now();
 
       while (Date.now() - startTime < 5000) {
         try {
-          const line = await client2.waitForLine(/PRIVMSG|NOTICE/i, 1000);
-          receivedLines.push(line);
+          const line = await client2.waitForParsedLine(
+            msg => msg.command === 'PRIVMSG' || msg.command === 'NOTICE',
+            1000
+          );
           console.log('Chathistory fallback test:', line);
 
-          // Look for CHATHISTORY hint
+          // Look for CHATHISTORY hint in NOTICE
           if (line.toLowerCase().includes('chathistory') || line.includes('AROUND')) {
             foundChathistoryHint = true;
             console.log('Found CHATHISTORY hint:', line);
-          }
-
-          // Capture msgid for later verification
-          const msgidMatch = line.match(/msgid=([^\s;]+)/);
-          if (msgidMatch) {
-            capturedMsgid = msgidMatch[1];
+            // Extract msgid from the hint
+            const msgidMatch = line.match(/msgid=([^\s;]+)/);
+            if (msgidMatch) {
+              capturedMsgid = msgidMatch[1];
+            }
+          } else if (line.includes('PRIVMSG')) {
+            // Collect the content of PRIVMSGs (truncated lines)
+            const colonIdx = line.lastIndexOf(' :');
+            if (colonIdx !== -1) {
+              receivedContent.push(line.slice(colonIdx + 2));
+            }
           }
         } catch {
           break;
         }
       }
 
-      console.log('Received lines:', receivedLines.length);
+      console.log('Received truncated lines:', receivedContent.length);
       console.log('Found chathistory hint:', foundChathistoryHint);
       console.log('Captured msgid:', capturedMsgid);
 
       // Verify we got some truncated content
-      expect(receivedLines.length).toBeGreaterThan(0);
+      expect(receivedContent.length).toBeGreaterThan(0);
 
       // If chathistory hint was provided, verify we can retrieve via CHATHISTORY
       // Poll with retries since LMDB writes are async
@@ -844,45 +851,81 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
         // Poll CHATHISTORY until messages appear (LMDB async timing)
         const pollStart = Date.now();
         const pollTimeout = 10000;
-        let historyMessages: string[] = [];
+        let retrievedContent = '';
 
         while (Date.now() - pollStart < pollTimeout) {
           client2.clearRawBuffer();
           client2.send(`CHATHISTORY AROUND ${channelName} msgid=${capturedMsgid} 20`);
 
           try {
-            // Wait for batch start
-            await client2.waitForLine(/BATCH \+\S+ chathistory/i, 3000);
+            // Wait for BATCH start or FAIL
+            const batchStart = await client2.waitForParsedLine(
+              msg => msg.command === 'BATCH' || msg.command === 'FAIL',
+              3000
+            );
+            console.log('CHATHISTORY response:', batchStart);
 
-            // Collect messages in batch
+            // Check for FAIL
+            if (batchStart.includes('FAIL')) {
+              console.log('CHATHISTORY returned FAIL - waiting and retrying');
+              await new Promise(r => setTimeout(r, 500));
+              continue;
+            }
+
+            // Collect messages until BATCH end
             const messages: string[] = [];
             const collectStart = Date.now();
             while (Date.now() - collectStart < 5000) {
               try {
-                const line = await client2.waitForLine(/PRIVMSG|BATCH -/i, 1000);
+                const line = await client2.waitForParsedLine(
+                  msg => msg.command === 'PRIVMSG' || msg.command === 'BATCH',
+                  1000
+                );
                 if (line.includes('BATCH -')) break;
-                if (line.includes('PRIVMSG')) messages.push(line);
+                if (line.includes('PRIVMSG')) {
+                  messages.push(line);
+                  // Extract message content
+                  const colonIdx = line.lastIndexOf(' :');
+                  if (colonIdx !== -1) {
+                    retrievedContent += line.slice(colonIdx + 2) + '\n';
+                  }
+                }
               } catch {
                 break;
               }
             }
 
-            if (messages.length > receivedLines.length) {
-              historyMessages = messages;
-              break; // Got more than truncated - success
+            console.log(`CHATHISTORY batch had ${messages.length} PRIVMSG(s)`);
+            if (messages.length > 0) {
+              console.log('First message:', messages[0].slice(0, 200));
+              console.log('Retrieved content length:', retrievedContent.length);
             }
 
-            // Not enough yet - wait and retry
+            // Multiline is stored as ONE concatenated message, so we get 1 PRIVMSG
+            // containing all original lines joined with newlines
+            if (messages.length > 0) {
+              break; // Got the message
+            }
+
+            // Not found yet - wait and retry
             await new Promise(r => setTimeout(r, 200));
-          } catch {
+          } catch (e) {
             // Query failed - wait and retry
+            console.log('CHATHISTORY query error:', e);
             await new Promise(r => setTimeout(r, 200));
           }
         }
 
-        console.log('Retrieved via CHATHISTORY:', historyMessages.length, 'lines');
-        // Should retrieve more content than the truncated version
-        expect(historyMessages.length).toBeGreaterThan(receivedLines.length);
+        console.log('Retrieved content via CHATHISTORY:', retrievedContent.length, 'chars');
+
+        // The stored multiline should contain ALL original lines (12 lines joined)
+        // This should be more content than the truncated version (5-6 lines)
+        // Count how many "Chathistory fallback line N" patterns appear
+        const retrievedLineCount = (retrievedContent.match(/Chathistory fallback line \d+/g) || []).length;
+        console.log('Retrieved line count:', retrievedLineCount, 'vs truncated:', receivedContent.length);
+
+        // Should have more lines in stored content than truncated delivery
+        expect(retrievedLineCount).toBeGreaterThan(receivedContent.length);
       }
 
       client1.send('QUIT');
