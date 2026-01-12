@@ -39,6 +39,8 @@ try {
   await initializeAccountPool();
   const stats = getPoolStats();
   console.log(`AccountPool: Ready (${stats.available} accounts available)`);
+  // Brief settling delay to let X3 process any backlog from pool AUTH commands
+  await new Promise(r => setTimeout(r, 500));
 } catch (error) {
   const errorMessage = error instanceof Error ? error.message : String(error);
   console.log('AccountPool: Failed to initialize -', errorMessage);
