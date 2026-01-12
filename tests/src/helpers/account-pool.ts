@@ -137,6 +137,10 @@ class AccountPool {
         if (result.success) {
           // AUTH succeeded - account exists with correct password
           working.add(account);
+        } else if (!result.error || result.lines.length === 0) {
+          // No response (timeout) - can't determine state, treat as missing to allow creation
+          console.warn(`[AccountPool] AUTH timeout for ${account}, treating as missing`);
+          missing.add(account);
         } else if (result.error?.toLowerCase().includes('not registered') ||
                    result.error?.toLowerCase().includes('no such account')) {
           // Account genuinely doesn't exist
