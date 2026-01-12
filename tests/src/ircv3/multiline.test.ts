@@ -1385,10 +1385,18 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
           while (Date.now() - collectStart < 3000) {
             try {
               const line = await client2.waitForLine(/NOTICE|PRIVMSG/i, 500);
-              // HistServ returns content via NOTICE from HistServ
+              // HistServ returns content via NOTICE from HistServ with format: <nick> content
               const textMatch = line.match(/NOTICE [^\s]+ :(.+)$/);
-              if (textMatch && expectedContent.some(exp => textMatch[1].includes(exp.substring(0, 10)))) {
-                fullContent.push(textMatch[1]);
+              if (textMatch) {
+                let content = textMatch[1];
+                // Strip <nick> prefix from HistServ formatted output
+                const nickPrefixMatch = content.match(/^<[^>]+> (.+)$/);
+                if (nickPrefixMatch) {
+                  content = nickPrefixMatch[1];
+                }
+                if (expectedContent.some(exp => content.includes(exp.substring(0, 10)))) {
+                  fullContent.push(content);
+                }
               }
             } catch {
               break;
@@ -1399,15 +1407,17 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
 
       if (fullContent.length > 0) {
         console.log('Full content retrieved:', fullContent.length, 'lines');
+        console.log('Expected content:', expectedContent.length, 'lines');
 
-        // Verify content matches
+        // With HistServ multiline fix, all retrieval methods now return proper line-by-line content
+        // Verify content matches (order may vary slightly between retrieval methods)
         for (let i = 0; i < Math.min(fullContent.length, expectedContent.length); i++) {
           console.log(`Line ${i + 1}: expected "${expectedContent[i]}", got "${fullContent[i]}"`);
           expect(fullContent[i]).toBe(expectedContent[i]);
         }
 
-        // Retrieved content should have more lines than truncated preview
-        expect(fullContent.length).toBeGreaterThanOrEqual(truncatedContent.length);
+        // Retrieved content should have at least as many lines as expected
+        expect(fullContent.length).toBeGreaterThanOrEqual(expectedContent.length);
       } else {
         // If retrieval failed, at least verify truncated content is correct
         console.log('Retrieval not available, verifying truncated content');
