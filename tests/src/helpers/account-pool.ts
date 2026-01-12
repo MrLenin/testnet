@@ -132,12 +132,12 @@ class AccountPool {
       client = await createX3Client('poolchk');
 
       for (const [account, spec] of this.accounts) {
-        // Use shorter initial timeout (3s) - retry with longer if needed
-        let result = await client.auth(account, spec.password, 3000);
+        // Use short initial timeout (1s) - if X3 is responsive, this is plenty
+        let result = await client.auth(account, spec.password, 1000);
 
-        // If timeout, retry once with longer timeout
+        // If timeout, retry once with slightly longer timeout
         if (!result.error && result.lines.length === 0) {
-          result = await client.auth(account, spec.password, 10000);
+          result = await client.auth(account, spec.password, 3000);
         }
 
         if (result.success) {
@@ -157,8 +157,8 @@ class AccountPool {
           broken.add(account);
         }
 
-        // Small delay to avoid flooding
-        await new Promise(r => setTimeout(r, 100));
+        // Minimal delay between checks
+        await new Promise(r => setTimeout(r, 50));
       }
     } finally {
       if (client) {
