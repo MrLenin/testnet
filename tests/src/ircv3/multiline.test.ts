@@ -903,10 +903,12 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('USER mlhserv1 0 * :mlhserv1');
       await client1.waitForNumeric('001');
 
-      // Client2: NO caps at all - basic IRC client testing fallback
-      // Testing if clients without batch cap receive multiline fallback PRIVMSGs
+      // Client2: message-tags ONLY - no batch, chathistory, or multiline
+      // Testing if the issue is "no caps at all" vs "no batch cap specifically"
       client2.send('CAP LS 302');
       await client2.waitForLine(/CAP.*LS/i);
+      client2.send('CAP REQ :message-tags');
+      await client2.waitForLine(/CAP.*ACK/i);
       client2.send('CAP END');
       client2.send('NICK mlhserv2');
       client2.send('USER mlhserv2 0 * :mlhserv2');
