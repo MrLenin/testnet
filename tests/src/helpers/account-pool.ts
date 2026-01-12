@@ -157,8 +157,9 @@ class AccountPool {
           broken.add(account);
         }
 
-        // Minimal delay between checks
-        await new Promise(r => setTimeout(r, 50));
+        // Delay between checks to avoid overloading X3/Keycloak
+        // Each AUTH triggers Keycloak validation which can queue up
+        await new Promise(r => setTimeout(r, 200));
       }
     } finally {
       if (client) {

@@ -39,9 +39,10 @@ try {
   await initializeAccountPool();
   const stats = getPoolStats();
   console.log(`AccountPool: Ready (${stats.available} accounts available)`);
-  // Let X3 settle after pool AUTH commands before tests start
-  console.log('AccountPool: Settling (2s)...');
-  await new Promise(r => setTimeout(r, 2000));
+  // Let X3/Keycloak settle after pool AUTH commands before tests start
+  // Pool AUTH commands trigger Keycloak validation which can queue up
+  console.log('AccountPool: Settling (5s)...');
+  await new Promise(r => setTimeout(r, 5000));
 } catch (error) {
   const errorMessage = error instanceof Error ? error.message : String(error);
   console.log('AccountPool: Failed to initialize -', errorMessage);

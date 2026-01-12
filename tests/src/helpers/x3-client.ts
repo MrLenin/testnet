@@ -138,9 +138,27 @@ export class X3Client extends RawSocketClient {
       }
     }
 
-    // If no first response, return empty
+    // If no first response, dump diagnostic info
     if (lines.length === 0) {
       console.log(`[serviceCmd] No response from ${service} after ${timeout}ms for: ${command.substring(0, 30)}...`);
+      // Dump buffer state for debugging
+      const allLines = this.allLines;
+      const unconsumed = this.getUnconsumedLines();
+      console.log(`[serviceCmd] Buffer: ${allLines.length} total lines, ${unconsumed.length} unconsumed`);
+      if (unconsumed.length > 0) {
+        console.log(`[serviceCmd] Recent unconsumed:`);
+        unconsumed.slice(-5).forEach((line, i) => {
+          console.log(`  [${i}] ${line.substring(0, 100)}`);
+        });
+      }
+      // Check if there ARE service responses that somehow didn't match
+      const serviceLines = allLines.filter(l =>
+        l.toLowerCase().includes(service.toLowerCase()) && l.includes('NOTICE')
+      );
+      if (serviceLines.length > 0) {
+        console.log(`[serviceCmd] Found ${serviceLines.length} ${service} NOTICE lines in buffer (were they consumed?):`);
+        serviceLines.slice(-3).forEach(l => console.log(`  ${l.substring(0, 100)}`));
+      }
       return lines;
     }
 
@@ -1035,23 +1053,15 @@ export async function createOperClient(nick?: string): Promise<X3Client> {
     console.warn('Failed to oper up - may affect O3 commands');
   }
 
-  // Auth with X3 admin account - clear buffer first to avoid matching stale data
-  client.clearRawBuffer();
-  client.send(`PRIVMSG AuthServ :AUTH ${X3_ADMIN.account} ${X3_ADMIN.password}`);
-  try {
-    // AuthServ responds with "I recognize you" on success
-    // Use proper parser instead of regex - checks parsed source.nick and message content
-    // X3+Keycloak can be slow (~8-10s), so allow up to 15s
-    await client.waitForParsedLine(
-      msg => msg.command === 'NOTICE' &&
-             isFromService(msg, 'AuthServ') &&
-             (msg.params[1]?.toLowerCase().includes('recognize') ||
-              msg.params[1]?.toLowerCase().includes('authenticated') ||
-              msg.params[1]?.toLowerCase().includes('logged in')),
-      15000
-    );
-  } catch {
-    console.warn('Failed to auth with X3 - O3 commands may fail');
+  // Auth with X3 admin account - use auth() method for consistent handling
+  // X3+Keycloak can be slow (~8-10s), so allow up to 15s
+  const authResult = await client.auth(X3_ADMIN.account, X3_ADMIN.password, 15000);
+  if (!authResult.success) {
+    console.warn(`createOperClient: Auth failed - ${authResult.error || 'no response'}`);
+    if (authResult.lines.length > 0) {
+      console.warn(`  Response: ${authResult.lines[0].substring(0, 100)}`);
+    }
+    console.warn('  O3 commands may fail');
   }
 
   // Verify oper level with retries - the sync can take variable time
