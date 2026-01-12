@@ -356,7 +356,7 @@ export function assertTag(
   expectedValue?: string | RegExp
 ): void {
   if (!msg.tags.has(tagName)) {
-    throw new Error(`Expected tag '${tagName}' not found. Tags: ${[...msg.tags.keys()].join(', ')}`);
+    throw new Error(`Expected tag '${tagName}' not found. Tags: ${Array.from(msg.tags.keys()).join(', ')}`);
   }
 
   if (expectedValue !== undefined) {

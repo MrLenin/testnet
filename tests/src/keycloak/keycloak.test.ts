@@ -1243,6 +1243,7 @@ describe.skipIf(!isKeycloakAvailable() || SKIP_KEYCLOAK_API_TESTS)('Keycloak Cha
     // Get the coowner group - should exist after creation
     const group = await getGroupByPath(adminToken, '/irc-channels/testchan/coowner');
     expect(group).toBeDefined();
+    if (!group) return; // TypeScript guard
 
     // Add test user to coowner group
     // First find user - test user should always exist
