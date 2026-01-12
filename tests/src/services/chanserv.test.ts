@@ -25,7 +25,9 @@ import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import {
   X3Client,
   createX3Client,
-  createTestAccount,
+  getTestAccount,
+  setupTestAccount,
+  releaseTestAccount,
   ACCESS_LEVELS,
   uniqueChannel,
   uniqueId,
@@ -35,6 +37,7 @@ import {
 
 describe('ChanServ (X3)', () => {
   const clients: X3Client[] = [];
+  const poolAccounts: string[] = [];  // Track pool accounts for cleanup
 
   const trackClient = (client: X3Client): X3Client => {
     clients.push(client);
@@ -42,6 +45,13 @@ describe('ChanServ (X3)', () => {
   };
 
   afterEach(() => {
+    // Release pool accounts first
+    for (const account of poolAccounts) {
+      releaseTestAccount(account);
+    }
+    poolAccounts.length = 0;
+
+    // Then close clients
     for (const client of clients) {
       try {
         client.send('QUIT');
@@ -56,13 +66,9 @@ describe('ChanServ (X3)', () => {
   describe('Channel Registration', () => {
     it('should register a channel when authenticated and opped', async () => {
       const client = trackClient(await createX3Client());
-      const { account, password, email } = await createTestAccount();
+      const { account, fromPool } = await setupTestAccount(client);
+      if (fromPool) poolAccounts.push(account);
       const channel = uniqueChannel();
-
-      // Register and activate account (COOKIE activation also authenticates)
-      const regResult = await client.registerAndActivate(account, password, email);
-      console.log('REGISTER account response:', regResult.lines);
-      expect(regResult.success).toBe(true);
 
       // Join channel - should get ops as first user
       client.send(`JOIN ${channel}`);
@@ -95,11 +101,10 @@ describe('ChanServ (X3)', () => {
 
     it('should set registering user as owner (level 500)', async () => {
       const client = trackClient(await createX3Client());
-      const { account, password, email } = await createTestAccount();
+      const { account, fromPool } = await setupTestAccount(client);
+      if (fromPool) poolAccounts.push(account);
       const channel = uniqueChannel();
 
-      // Setup (registerAndActivate also authenticates via COOKIE)
-      await client.registerAndActivate(account, password, email);
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
@@ -127,15 +132,14 @@ describe('ChanServ (X3)', () => {
 
     beforeEach(async () => {
       ownerClient = trackClient(await createX3Client());
-      const { account, password, email } = await createTestAccount();
+      const { account, fromPool } = await setupTestAccount(ownerClient);
+      if (fromPool) poolAccounts.push(account);
       ownerAccount = account;
       channel = uniqueChannel();
 
       // Wait for connection to settle before sending service commands
       await new Promise(r => setTimeout(r, 1000));
 
-      // Setup owner and registered channel (registerAndActivate also authenticates)
-      await ownerClient.registerAndActivate(account, password, email);
       ownerClient.send(`JOIN ${channel}`);
       await ownerClient.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
@@ -145,12 +149,11 @@ describe('ChanServ (X3)', () => {
     it('should add user with specified access level', async () => {
       // Create second user
       const user2Client = trackClient(await createX3Client());
-      const { account: user2, password: pass2, email: email2 } = await createTestAccount();
+      const { account: user2, fromPool: user2Pool } = await setupTestAccount(user2Client);
+      if (user2Pool) poolAccounts.push(user2);
 
       // Wait for connection to settle before sending service commands
       await new Promise(r => setTimeout(r, 1000));
-
-      await user2Client.registerAndActivate(user2, pass2, email2);
 
       // Owner adds user2 with OP level
       const addResult = await ownerClient.addUser(channel, user2, ACCESS_LEVELS.OP);
@@ -176,12 +179,12 @@ describe('ChanServ (X3)', () => {
     it('should change user access level with CLVL', async () => {
       // Create and add second user
       const user2Client = trackClient(await createX3Client());
-      const { account: user2, password: pass2, email: email2 } = await createTestAccount();
+      const { account: user2, fromPool: user2Pool } = await setupTestAccount(user2Client);
+      if (user2Pool) poolAccounts.push(user2);
 
       // Wait for connection to settle before sending service commands
       await new Promise(r => setTimeout(r, 1000));
 
-      await user2Client.registerAndActivate(user2, pass2, email2);
       await ownerClient.addUser(channel, user2, ACCESS_LEVELS.OP);
 
       // Wait for user to appear in access list before changing level
@@ -198,12 +201,12 @@ describe('ChanServ (X3)', () => {
     it('should remove user with DELUSER', async () => {
       // Create and add second user
       const user2Client = trackClient(await createX3Client());
-      const { account: user2, password: pass2, email: email2 } = await createTestAccount();
+      const { account: user2, fromPool: user2Pool } = await setupTestAccount(user2Client);
+      if (user2Pool) poolAccounts.push(user2);
 
       // Wait for connection to settle before sending service commands
       await new Promise(r => setTimeout(r, 1000));
 
-      await user2Client.registerAndActivate(user2, pass2, email2);
       await ownerClient.addUser(channel, user2, ACCESS_LEVELS.OP);
 
       // Wait for user to appear in access list before deleting
@@ -221,27 +224,25 @@ describe('ChanServ (X3)', () => {
     // ~10s for registerAndActivate. Use 60s timeout to handle this.
     it('should reject ADDUSER from user without sufficient access', async () => {
       // Create user2 with low access
-      // Note: registerAndActivate already authenticates the user via COOKIE
       const user2Client = trackClient(await createX3Client());
-      const { account: user2, password: pass2, email: email2 } = await createTestAccount();
+      const { account: user2, fromPool: user2Pool } = await setupTestAccount(user2Client);
+      if (user2Pool) poolAccounts.push(user2);
 
       // Wait for connection to settle before sending service commands
       await new Promise(r => setTimeout(r, 1000));
 
-      await user2Client.registerAndActivate(user2, pass2, email2);
       await ownerClient.addUser(channel, user2, ACCESS_LEVELS.VOICE); // Low level
 
       // Wait for user2's access to be visible before they try to use it
       await waitForUserAccess(ownerClient, channel, user2, ACCESS_LEVELS.VOICE);
 
       // Create user3
-      const { account: user3, password: pass3, email: email3 } = await createTestAccount();
       const user3Client = trackClient(await createX3Client());
+      const { account: user3, fromPool: user3Pool } = await setupTestAccount(user3Client);
+      if (user3Pool) poolAccounts.push(user3);
 
       // Wait for connection to settle before sending service commands
       await new Promise(r => setTimeout(r, 1000));
-
-      await user3Client.registerAndActivate(user3, pass3, email3);
 
       // User2 tries to add user3 - should fail (needs MANAGER+ to add users)
       const addResult = await user2Client.addUser(channel, user3, ACCESS_LEVELS.VOICE);
@@ -257,16 +258,14 @@ describe('ChanServ (X3)', () => {
     // registerAndActivate, plus additional waits. Use 45s timeout.
     it('should auto-op users with level >= 200', async () => {
       const client = trackClient(await createX3Client());
-      const { account, password, email } = await createTestAccount();
+      const { account, fromPool } = await setupTestAccount(client);
+      if (fromPool) poolAccounts.push(account);
       const channel = uniqueChannel();
 
       // Wait for connection to settle before sending service commands
       await new Promise(r => setTimeout(r, 1000));
 
       // Setup owner and channel
-      // Note: registerAndActivate already authenticates the user via COOKIE
-      const regResult = await client.registerAndActivate(account, password, email);
-      expect(regResult.success, `Registration failed: ${regResult.error}`).toBe(true);
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
@@ -274,20 +273,27 @@ describe('ChanServ (X3)', () => {
       expect(chanResult.success, `Channel reg failed: ${chanResult.error}`).toBe(true);
 
       // Create second user with OP level - use account name as nick for easy assertion
-      // Note: registerAndActivate already authenticates the user via COOKIE
-      const { account: user2, password: pass2, email: email2 } = await createTestAccount();
-      const user2Client = trackClient(await createX3Client(user2));
+      // Need to get account first, then create client with matching nick
+      const { account: user2, password: pass2, email: email2, fromPool: user2Pool } = await getTestAccount();
+      if (user2Pool) poolAccounts.push(user2);
+      const user2Client = trackClient(await createX3Client(user2));  // nick = account
 
       // Wait for connection to settle before sending service commands
       await new Promise(r => setTimeout(r, 1000));
 
-      const reg2Result = await user2Client.registerAndActivate(user2, pass2, email2);
-      expect(reg2Result.success, `User2 registration failed: ${reg2Result.error}`).toBe(true);
+      // AUTH (pool) or register+activate (fresh)
+      if (user2Pool) {
+        const authResult = await user2Client.auth(user2, pass2);
+        expect(authResult.success, `User2 AUTH failed: ${authResult.error}`).toBe(true);
+      } else {
+        const reg2Result = await user2Client.registerAndActivate(user2, pass2, email2);
+        expect(reg2Result.success, `User2 registration failed: ${reg2Result.error}`).toBe(true);
+      }
 
       // Verify user2 is actually authenticated before proceeding
       const authStatus = await user2Client.checkAuth();
       console.log(`[auto-op] User2 auth status: authenticated=${authStatus.authenticated}, account=${authStatus.account}`);
-      expect(authStatus.authenticated, 'User2 should be authenticated after registerAndActivate').toBe(true);
+      expect(authStatus.authenticated, 'User2 should be authenticated').toBe(true);
 
       const addResult = await client.addUser(channel, user2, ACCESS_LEVELS.OP);
       expect(addResult.success, `ADDUSER failed: ${addResult.error}`).toBe(true);
@@ -315,16 +321,14 @@ describe('ChanServ (X3)', () => {
 
     it('should auto-voice users with level >= 100', async () => {
       const client = trackClient(await createX3Client());
-      const { account, password, email } = await createTestAccount();
+      const { account, fromPool } = await setupTestAccount(client);
+      if (fromPool) poolAccounts.push(account);
       const channel = uniqueChannel();
 
       // Wait for connection to settle before sending service commands
       await new Promise(r => setTimeout(r, 1000));
 
       // Setup owner and channel
-      // Note: registerAndActivate already authenticates the user via COOKIE
-      const regResult = await client.registerAndActivate(account, password, email);
-      expect(regResult.success, `Registration failed: ${regResult.error}`).toBe(true);
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
@@ -332,20 +336,26 @@ describe('ChanServ (X3)', () => {
       expect(chanResult.success, `Channel reg failed: ${chanResult.error}`).toBe(true);
 
       // Create second user with VOICE level - use account name as nick for easy assertion
-      // Note: registerAndActivate already authenticates the user via COOKIE
-      const { account: user2, password: pass2, email: email2 } = await createTestAccount();
-      const user2Client = trackClient(await createX3Client(user2));
+      const { account: user2, password: pass2, email: email2, fromPool: user2Pool } = await getTestAccount();
+      if (user2Pool) poolAccounts.push(user2);
+      const user2Client = trackClient(await createX3Client(user2));  // nick = account
 
       // Wait for connection to settle before sending service commands
       await new Promise(r => setTimeout(r, 1000));
 
-      const reg2Result = await user2Client.registerAndActivate(user2, pass2, email2);
-      expect(reg2Result.success, `User2 registration failed: ${reg2Result.error}`).toBe(true);
+      // AUTH (pool) or register+activate (fresh)
+      if (user2Pool) {
+        const authResult = await user2Client.auth(user2, pass2);
+        expect(authResult.success, `User2 AUTH failed: ${authResult.error}`).toBe(true);
+      } else {
+        const reg2Result = await user2Client.registerAndActivate(user2, pass2, email2);
+        expect(reg2Result.success, `User2 registration failed: ${reg2Result.error}`).toBe(true);
+      }
 
       // Verify user2 is actually authenticated before proceeding
       const authStatus = await user2Client.checkAuth();
       console.log(`[auto-voice] User2 auth status: authenticated=${authStatus.authenticated}, account=${authStatus.account}`);
-      expect(authStatus.authenticated, 'User2 should be authenticated after registerAndActivate').toBe(true);
+      expect(authStatus.authenticated, 'User2 should be authenticated').toBe(true);
 
       const addResult = await client.addUser(channel, user2, ACCESS_LEVELS.VOICE);
       expect(addResult.success, `ADDUSER failed: ${addResult.error}`).toBe(true);
@@ -375,11 +385,10 @@ describe('ChanServ (X3)', () => {
   describe('Channel Settings', () => {
     it('should set channel modes via SET command', async () => {
       const client = trackClient(await createX3Client());
-      const { account, password, email } = await createTestAccount();
+      const { account, fromPool } = await setupTestAccount(client);
+      if (fromPool) poolAccounts.push(account);
       const channel = uniqueChannel();
 
-      // Setup (registerAndActivate also authenticates)
-      await client.registerAndActivate(account, password, email);
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
@@ -396,14 +405,13 @@ describe('ChanServ (X3)', () => {
   describe('Ban Management', () => {
     it('should ban a user from the channel', async () => {
       const client = trackClient(await createX3Client());
-      const { account, password, email } = await createTestAccount();
+      const { account, fromPool } = await setupTestAccount(client);
+      if (fromPool) poolAccounts.push(account);
       const channel = uniqueChannel();
 
       // Wait for connection to settle before sending service commands
       await new Promise(r => setTimeout(r, 1000));
 
-      // Setup (registerAndActivate also authenticates)
-      await client.registerAndActivate(account, password, email);
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
@@ -418,14 +426,13 @@ describe('ChanServ (X3)', () => {
 
     it('should unban a user from the channel', async () => {
       const client = trackClient(await createX3Client());
-      const { account, password, email } = await createTestAccount();
+      const { account, fromPool } = await setupTestAccount(client);
+      if (fromPool) poolAccounts.push(account);
       const channel = uniqueChannel();
 
       // Wait for connection to settle before sending service commands
       await new Promise(r => setTimeout(r, 1000));
 
-      // Setup and ban (registerAndActivate also authenticates)
-      await client.registerAndActivate(account, password, email);
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
@@ -452,11 +459,10 @@ describe('ChanServ (X3)', () => {
 
     it('should respond to INFO command for registered channel', async () => {
       const client = trackClient(await createX3Client());
-      const { account, password, email } = await createTestAccount();
+      const { account, fromPool } = await setupTestAccount(client);
+      if (fromPool) poolAccounts.push(account);
       const channel = uniqueChannel();
 
-      // Setup registered channel (registerAndActivate also authenticates)
-      await client.registerAndActivate(account, password, email);
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));

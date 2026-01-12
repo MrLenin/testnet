@@ -154,6 +154,7 @@ export {
   // Account pool helpers
   getTestAccount,
   releaseTestAccount,
+  setupTestAccount,
   // State verification helpers
   waitForUserAccess,
   waitForAccountExists,
