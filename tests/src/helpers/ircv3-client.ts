@@ -1136,6 +1136,15 @@ export class RawSocketClient {
   }
 
   /**
+   * Get all unconsumed (not yet matched) lines.
+   */
+  getUnconsumedLines(): string[] {
+    return this.lines
+      .filter((_, i) => !this.consumedIndices.has(i))
+      .map(l => l.raw);
+  }
+
+  /**
    * Clear the buffer to reset line consumption.
    * This marks all existing lines as consumed so waitForLine only matches new lines.
    */
