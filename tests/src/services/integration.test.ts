@@ -173,10 +173,10 @@ describe('Services Integration', () => {
         msg => msg.command === 'JOIN' || msg.command === '473',
         5000
       );
-      console.log('Guest join response:', joinResponse);
+      console.log('Guest join response:', joinResponse.raw);
 
       // 473 is ERR_INVITEONLYCHAN
-      const isInviteOnly = joinResponse.includes('473');
+      const isInviteOnly = joinResponse.command === '473';
       if (isInviteOnly) {
         expect(isInviteOnly).toBe(true);
       } else {

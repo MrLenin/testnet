@@ -809,26 +809,29 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
 
       while (Date.now() - startTime < 5000) {
         try {
-          const line = await client2.waitForParsedLine(
-            msg => msg.command === 'PRIVMSG' || msg.command === 'NOTICE',
+          const msg = await client2.waitForParsedLine(
+            m => m.command === 'PRIVMSG' || m.command === 'NOTICE',
             1000
           );
-          console.log('Chathistory fallback test:', line);
+          console.log('Chathistory fallback test:', msg.raw);
 
-          // Look for CHATHISTORY hint in NOTICE
-          if (line.toLowerCase().includes('chathistory') || line.includes('AROUND')) {
+          // Look for CHATHISTORY hint in NOTICE (trailing contains hint text)
+          const content = msg.trailing || msg.params[1] || '';
+          if (msg.command === 'NOTICE' &&
+              (content.toLowerCase().includes('chathistory') || content.includes('AROUND'))) {
             foundChathistoryHint = true;
-            console.log('Found CHATHISTORY hint:', line);
-            // Extract msgid from the hint
-            const msgidMatch = line.match(/msgid=([^\s;]+)/);
+            console.log('Found CHATHISTORY hint:', msg.raw);
+            // Extract msgid from the hint text
+            const msgidMatch = content.match(/msgid=([^\s\]]+)/);
             if (msgidMatch) {
               capturedMsgid = msgidMatch[1];
             }
-          } else if (line.includes('PRIVMSG')) {
+          } else if (msg.command === 'PRIVMSG') {
             // Collect the content of PRIVMSGs (truncated lines)
-            const colonIdx = line.lastIndexOf(' :');
-            if (colonIdx !== -1) {
-              receivedContent.push(line.slice(colonIdx + 2));
+            receivedContent.push(content);
+            // Also capture msgid from tags if present
+            if (msg.tags?.msgid && !capturedMsgid) {
+              capturedMsgid = msg.tags.msgid;
             }
           }
         } catch {
@@ -859,14 +862,14 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
 
           try {
             // Wait for BATCH start or FAIL
-            const batchStart = await client2.waitForParsedLine(
-              msg => msg.command === 'BATCH' || msg.command === 'FAIL',
+            const batchMsg = await client2.waitForParsedLine(
+              m => m.command === 'BATCH' || m.command === 'FAIL',
               3000
             );
-            console.log('CHATHISTORY response:', batchStart);
+            console.log('CHATHISTORY response:', batchMsg.raw);
 
             // Check for FAIL
-            if (batchStart.includes('FAIL')) {
+            if (batchMsg.command === 'FAIL') {
               console.log('CHATHISTORY returned FAIL - waiting and retrying');
               await new Promise(r => setTimeout(r, 500));
               continue;
@@ -877,18 +880,17 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
             const collectStart = Date.now();
             while (Date.now() - collectStart < 5000) {
               try {
-                const line = await client2.waitForParsedLine(
-                  msg => msg.command === 'PRIVMSG' || msg.command === 'BATCH',
+                const msg = await client2.waitForParsedLine(
+                  m => m.command === 'PRIVMSG' || m.command === 'BATCH',
                   1000
                 );
-                if (line.includes('BATCH -')) break;
-                if (line.includes('PRIVMSG')) {
-                  messages.push(line);
-                  // Extract message content
-                  const colonIdx = line.lastIndexOf(' :');
-                  if (colonIdx !== -1) {
-                    retrievedContent += line.slice(colonIdx + 2) + '\n';
-                  }
+                // Check for BATCH end (params[0] starts with '-')
+                if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+                if (msg.command === 'PRIVMSG') {
+                  messages.push(msg.raw);
+                  // Extract message content from trailing
+                  const content = msg.trailing || msg.params[1] || '';
+                  retrievedContent += content + '\n';
                 }
               } catch {
                 break;
