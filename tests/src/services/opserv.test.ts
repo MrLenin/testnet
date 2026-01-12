@@ -158,7 +158,7 @@ describe('OpServ (O3)', () => {
 
       // Change nick and wait for confirmation
       targetClient.send(`NICK ${targetNick}`);
-      await targetClient.waitForLine(new RegExp(`NICK.*${targetNick}|:${targetNick}!`, 'i'), 3000);
+      await targetClient.waitForCommand('NICK', 3000);
 
       // Wait for nick change to propagate (important for O3 to see the new nick)
       await new Promise(r => setTimeout(r, 300));
@@ -177,7 +177,7 @@ describe('OpServ (O3)', () => {
         targetClient.clearRawBuffer();
         targetClient.send(`NAMES ${channel}`);
         try {
-          const namesResponse = await targetClient.waitForLine(/353/, 2000);
+          const namesResponse = await targetClient.waitForNumeric('353', 2000);
           console.log(`NAMES attempt ${attempt + 1}:`, namesResponse);
           if (namesResponse.toLowerCase().includes(targetNick.toLowerCase())) {
             foundInChannel = true;

@@ -66,7 +66,7 @@ describe('ChanServ (X3)', () => {
 
       // Join channel - should get ops as first user
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(/JOIN/i, 5000);
+      await client.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 1000)); // Let modes settle
 
       // Register the channel
@@ -82,7 +82,7 @@ describe('ChanServ (X3)', () => {
 
       // Join channel without authenticating
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(/JOIN/i, 5000);
+      await client.waitForJoin(channel, undefined, 5000);
 
       // Try to register
       const result = await client.registerChannel(channel);
@@ -101,7 +101,7 @@ describe('ChanServ (X3)', () => {
       // Setup (registerAndActivate also authenticates via COOKIE)
       await client.registerAndActivate(account, password, email);
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(/JOIN/i, 5000);
+      await client.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
 
       // Register
@@ -137,7 +137,7 @@ describe('ChanServ (X3)', () => {
       // Setup owner and registered channel (registerAndActivate also authenticates)
       await ownerClient.registerAndActivate(account, password, email);
       ownerClient.send(`JOIN ${channel}`);
-      await ownerClient.waitForLine(/JOIN/i, 5000);
+      await ownerClient.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
       await ownerClient.registerChannel(channel);
     });
@@ -268,7 +268,7 @@ describe('ChanServ (X3)', () => {
       const regResult = await client.registerAndActivate(account, password, email);
       expect(regResult.success, `Registration failed: ${regResult.error}`).toBe(true);
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(/JOIN/i, 5000);
+      await client.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
       const chanResult = await client.registerChannel(channel);
       expect(chanResult.success, `Channel reg failed: ${chanResult.error}`).toBe(true);
@@ -305,7 +305,7 @@ describe('ChanServ (X3)', () => {
       user2Client.send(`JOIN ${channel}`);
 
       // Wait for JOIN first
-      await user2Client.waitForLine(/JOIN/i, 5000);
+      await user2Client.waitForJoin(channel, undefined, 5000);
 
       // Wait for ChanServ to grant ops (polls NAMES with retries)
       // Extended timeout to 10s to handle slow ChanServ processing
@@ -326,7 +326,7 @@ describe('ChanServ (X3)', () => {
       const regResult = await client.registerAndActivate(account, password, email);
       expect(regResult.success, `Registration failed: ${regResult.error}`).toBe(true);
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(/JOIN/i, 5000);
+      await client.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
       const chanResult = await client.registerChannel(channel);
       expect(chanResult.success, `Channel reg failed: ${chanResult.error}`).toBe(true);
@@ -363,7 +363,7 @@ describe('ChanServ (X3)', () => {
       user2Client.send(`JOIN ${channel}`);
 
       // Wait for JOIN first
-      await user2Client.waitForLine(/JOIN/i, 5000);
+      await user2Client.waitForJoin(channel, undefined, 5000);
 
       // Wait for ChanServ to grant voice (polls NAMES with retries)
       // Extended timeout to 10s to handle slow ChanServ processing
@@ -381,7 +381,7 @@ describe('ChanServ (X3)', () => {
       // Setup (registerAndActivate also authenticates)
       await client.registerAndActivate(account, password, email);
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(/JOIN/i, 5000);
+      await client.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
       await client.registerChannel(channel);
 
@@ -405,7 +405,7 @@ describe('ChanServ (X3)', () => {
       // Setup (registerAndActivate also authenticates)
       await client.registerAndActivate(account, password, email);
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(/JOIN/i, 5000);
+      await client.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
       await client.registerChannel(channel);
 
@@ -427,7 +427,7 @@ describe('ChanServ (X3)', () => {
       // Setup and ban (registerAndActivate also authenticates)
       await client.registerAndActivate(account, password, email);
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(/JOIN/i, 5000);
+      await client.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
       await client.registerChannel(channel);
       await client.ban(channel, '*!*@banned.example.com', 'Test ban');
@@ -458,7 +458,7 @@ describe('ChanServ (X3)', () => {
       // Setup registered channel (registerAndActivate also authenticates)
       await client.registerAndActivate(account, password, email);
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(/JOIN/i, 5000);
+      await client.waitForJoin(channel, undefined, 5000);
       await new Promise(r => setTimeout(r, 500));
       await client.registerChannel(channel);
 

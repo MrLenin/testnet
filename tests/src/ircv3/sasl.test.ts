@@ -51,7 +51,7 @@ describe('IRCv3 SASL Authentication', () => {
     client.send('AUTHENTICATE PLAIN');
 
     try {
-      await client.waitForLine(/^AUTHENTICATE \+$/, 10000);
+      await client.waitForCommand('AUTHENTICATE', 10000);
     } catch {
       return false;
     }
@@ -65,7 +65,7 @@ describe('IRCv3 SASL Authentication', () => {
 
     try {
       // Use longer timeout (20s) since Keycloak can be slow under load
-      await client.waitForLine(/903/, 20000); // RPL_SASLSUCCESS
+      await client.waitForNumeric('903', 20000); // RPL_SASLSUCCESS
       return true;
     } catch {
       return false;
@@ -105,13 +105,13 @@ describe('IRCv3 SASL Authentication', () => {
 
       // Server should respond with AUTHENTICATE +
       // Use longer timeout (10s) due to occasional IRCd→X3→IRCd roundtrip delays
-      const response = await client.waitForLine(/^AUTHENTICATE \+$/, 10000);
+      const response = await client.waitForCommand('AUTHENTICATE', 10000);
       expect(response).toBe('AUTHENTICATE +');
 
       // Properly abort SASL session before quitting to prevent
       // race conditions with subsequent tests
       client.send('AUTHENTICATE *');
-      await client.waitForLine(/906/, 5000);  // Wait for abort confirmation
+      await client.waitForNumeric('906', 5000);  // Wait for abort confirmation
       client.send('QUIT');
     });
 
@@ -125,7 +125,7 @@ describe('IRCv3 SASL Authentication', () => {
       client.clearBuffer();
 
       client.send('AUTHENTICATE PLAIN');
-      await client.waitForLine(/^AUTHENTICATE \+$/, 10000);
+      await client.waitForCommand('AUTHENTICATE', 10000);
 
       // Send invalid credentials
       const invalidPayload = Buffer.from('invalid\0invalid\0wrongpass').toString('base64');
@@ -137,7 +137,7 @@ describe('IRCv3 SASL Authentication', () => {
       // Should receive 904 (ERR_SASLFAIL)
       // Note: Keycloak takes longer (~6s) to reject invalid credentials vs accept valid ones (~100ms)
       // Use 20s timeout to handle load conditions
-      const result = await client.waitForLine(/90[0-9]/, 20000);
+      const result = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 20000);
       // 904 = SASLFAIL, 902 = NICK_LOCKED
       expect(result).toMatch(/90[24]/);
       client.send('QUIT');
@@ -158,7 +158,7 @@ describe('IRCv3 SASL Authentication', () => {
       client.capEnd();
       client.register('authtest3');
 
-      const welcome = await client.waitForLine(/001/);
+      const welcome = await client.waitForNumeric('001');
       expect(welcome).toContain('authtest3');
       client.send('QUIT');
     });
@@ -177,7 +177,7 @@ describe('IRCv3 SASL Authentication', () => {
       await client.capReq(['sasl']);
 
       client.send('AUTHENTICATE PLAIN');
-      const authPlus = await client.waitForLine(/^AUTHENTICATE \+$/, 10000);
+      const authPlus = await client.waitForCommand('AUTHENTICATE', 10000);
       console.log('Got AUTHENTICATE +:', authPlus);
 
       const payload = Buffer.from(`${TEST_ACCOUNT}\0${TEST_ACCOUNT}\0${TEST_PASSWORD}`).toString('base64');
@@ -190,7 +190,7 @@ describe('IRCv3 SASL Authentication', () => {
       // Server MUST send 900 (RPL_LOGGEDIN) or 903 (RPL_SASLSUCCESS)
       // Test will fail if account doesn't exist - that's expected
       // Note: Keycloak can take 3-6s under load
-      const result = await client.waitForLine(/(900|903)/, 20000);
+      const result = await client.waitForNumeric(['900', '903'], 20000);
       expect(result).toMatch(/(900|903)/);
       client.send('QUIT');
     });
@@ -209,7 +209,10 @@ describe('IRCv3 SASL Authentication', () => {
 
       // Server should respond - either with AUTHENTICATE continuation or error
       // Without a client cert, we expect either 904/908 (failed) or AUTHENTICATE +
-      const response = await client.waitForLine(/(AUTHENTICATE|90[048])/, 5000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'AUTHENTICATE' || ['900', '904', '908'].includes(msg.command),
+        5000
+      );
       expect(response).toBeDefined();
       client.send('QUIT');
     });
@@ -231,7 +234,7 @@ describe('IRCv3 SASL Authentication', () => {
 
       client.capEnd();
       client.register('accttest1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Small delay to ensure registration is fully processed
       await new Promise(r => setTimeout(r, 200));
@@ -239,7 +242,7 @@ describe('IRCv3 SASL Authentication', () => {
       // Join a channel and check for extended-join with account
       client.send('JOIN #accttestchan');
 
-      const joinMsg = await client.waitForLine(/JOIN.*#accttestchan/i, 5000);
+      const joinMsg = await client.waitForJoin('#accttestchan', undefined, 5000);
       expect(joinMsg).toBeDefined();
 
       // With extended-join, JOIN includes account name
@@ -264,7 +267,7 @@ describe('IRCv3 SASL Authentication', () => {
 
       regClient.capEnd();
       regClient.register('saslreg1');
-      await regClient.waitForLine(/001/);
+      await regClient.waitForNumeric('001');
 
       // Generate unique account name (max 15 chars for ACCOUNTLEN)
       const uniqueAccount = `sl${uniqueId()}`;
@@ -273,7 +276,7 @@ describe('IRCv3 SASL Authentication', () => {
       // Format per spec: REGISTER <account> <email> <password>
       regClient.send(`REGISTER ${uniqueAccount} ${uniqueAccount}@example.com ${uniquePassword}`);
 
-      const response = await regClient.waitForLine(/REGISTER SUCCESS|920/, 5000);
+      const response = await regClient.waitForNumeric('920', 5000);
       expect(response).toMatch(/SUCCESS|920/);
 
       regClient.send('QUIT');
@@ -290,11 +293,11 @@ describe('IRCv3 SASL Authentication', () => {
 
       authClient.capEnd();
       authClient.register('saslauth1');
-      await authClient.waitForLine(/001/);
+      await authClient.waitForNumeric('001');
 
       // Verify we're logged in - WHOIS should show account
       authClient.send(`WHOIS saslauth1`);
-      const whoisResponse = await authClient.waitForLine(/330|WHOIS|311/i, 3000);
+      const whoisResponse = await authClient.waitForNumeric(['330', '311'], 3000);
       expect(whoisResponse).toBeDefined();
 
       authClient.send('QUIT');
@@ -338,7 +341,10 @@ describe('SASL Error Handling', () => {
     client.send('AUTHENTICATE UNKNOWN_MECHANISM');
 
     // Should receive 908 (RPL_SASLMECHS) or other error
-    const response = await client.waitForLine(/90[48]|AUTHENTICATE/i, 3000);
+    const response = await client.waitForParsedLine(
+      msg => msg.command === 'AUTHENTICATE' || ['904', '908'].includes(msg.command),
+      3000
+    );
     expect(response).toBeDefined();
     console.log('Unknown mechanism response:', response);
     client.send('QUIT');
@@ -351,14 +357,14 @@ describe('SASL Error Handling', () => {
     await client.capReq(['sasl']);
 
     client.send('AUTHENTICATE PLAIN');
-    await client.waitForLine(/AUTHENTICATE \+/, 10000);
+    await client.waitForCommand('AUTHENTICATE', 10000);
 
     // Abort authentication
     client.send('AUTHENTICATE *');
 
     // IRCv3 spec: AUTHENTICATE * should trigger 906 (ERR_SASLABORTED)
     // X3 now properly handles abort and responds with D A
-    const response = await client.waitForLine(/906/i, 5000);
+    const response = await client.waitForNumeric('906', 5000);
     expect(response).toMatch(/906/);
     client.send('QUIT');
   });
@@ -373,14 +379,14 @@ describe('SASL Error Handling', () => {
     await client.capReq(['sasl']);
 
     client.send('AUTHENTICATE PLAIN');
-    await client.waitForLine(/AUTHENTICATE \+/, 10000);
+    await client.waitForCommand('AUTHENTICATE', 10000);
 
     // Send invalid base64
     client.send('AUTHENTICATE !!!invalid-base64!!!');
 
     // Should receive error
     // Note: Error path can be slow under load
-    const response = await client.waitForLine(/90[0-9]|FAIL/i, 20000);
+    const response = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 20000);
     expect(response).toBeDefined();
     console.log('Malformed base64 response:', response);
     client.send('QUIT');
@@ -396,14 +402,14 @@ describe('SASL Error Handling', () => {
     await client.capReq(['sasl']);
 
     client.send('AUTHENTICATE PLAIN');
-    await client.waitForLine(/AUTHENTICATE \+/, 10000);
+    await client.waitForCommand('AUTHENTICATE', 10000);
 
     // Send empty payload (just +)
     client.send('AUTHENTICATE +');
 
     // Should receive error (empty SASL response)
     // Note: Keycloak auth can take ~6s for error responses
-    const response = await client.waitForLine(/90[0-9]|FAIL/i, 20000);
+    const response = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 20000);
     expect(response).toBeDefined();
     client.send('QUIT');
   });
@@ -419,7 +425,10 @@ describe('SASL Error Handling', () => {
     // Nefarious code (m_authenticate.c:131-132) returns 0 without response if SASL cap not active
     // This is intentional - verify by checking we can still complete registration
     try {
-      await client.waitForLine(/AUTHENTICATE|90[0-9]/i, 2000);
+      await client.waitForParsedLine(
+        msg => msg.command === 'AUTHENTICATE' || /^90\d$/.test(msg.command),
+        2000
+      );
       // If we get here, server responded (unexpected but not wrong)
       throw new Error('Server responded to AUTHENTICATE without SASL cap enabled');
     } catch (error) {
@@ -432,7 +441,7 @@ describe('SASL Error Handling', () => {
     // Verify client can still complete registration normally
     client.capEnd();
     client.register('noauthtest');
-    const welcome = await client.waitForLine(/001/);
+    const welcome = await client.waitForNumeric('001');
     expect(welcome).toContain('001');
     client.send('QUIT');
   });
@@ -446,11 +455,11 @@ describe('SASL Error Handling', () => {
     await client.capReq(['sasl']);
 
     client.send('AUTHENTICATE PLAIN');
-    await client.waitForLine(/AUTHENTICATE \+/, 10000);
+    await client.waitForCommand('AUTHENTICATE', 10000);
 
     // Don't send credentials - wait for timeout (typically 30 seconds)
     // Server should eventually send 906 (ERR_SASLABORTED) or disconnect
-    const response = await client.waitForLine(/906|ERROR/i, 45000);
+    const response = await client.waitForNumeric('906', 45000);
     expect(response).toBeDefined();
     client.send('QUIT');
   });
@@ -492,7 +501,7 @@ describe('SASL Multi-line Payload', () => {
     await client.capReq(['sasl']);
 
     client.send('AUTHENTICATE PLAIN');
-    await client.waitForLine(/AUTHENTICATE \+/, 10000);
+    await client.waitForCommand('AUTHENTICATE', 10000);
 
     // Create a long payload that would need chunking (>400 bytes base64)
     // Actually, PLAIN auth payloads are typically small, so this tests
@@ -507,7 +516,7 @@ describe('SASL Multi-line Payload', () => {
     await new Promise(r => setTimeout(r, 100));
 
     // Should get response (success or failure)
-    const response = await client.waitForLine(/90[0-9]/i, 20000);
+    const response = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 20000);
     expect(response).toBeDefined();
     client.send('QUIT');
   });
@@ -552,7 +561,7 @@ describe('SASL with account-notify', () => {
     await client.capReq(['sasl', 'account-notify']);
 
     client.send('AUTHENTICATE PLAIN');
-    await client.waitForLine(/AUTHENTICATE \+/, 10000);
+    await client.waitForCommand('AUTHENTICATE', 10000);
 
     // Use test credentials
     const user = process.env.IRC_TEST_ACCOUNT ?? 'testuser';
@@ -567,7 +576,7 @@ describe('SASL with account-notify', () => {
     // Should receive 903 (success) and possibly ACCOUNT message
     // Keycloak and testuser should always be available
     // Use 20s timeout to handle load conditions
-    const response = await client.waitForLine(/903/i, 20000);
+    const response = await client.waitForNumeric('903', 20000);
     expect(response).toMatch(/903/);
 
     client.send('QUIT');
