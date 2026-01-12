@@ -242,6 +242,12 @@ export async function waitForChathistory(
     timestamp2?: string;
     /** Message limit (default: 50) */
     limit?: number;
+    /**
+     * Event types to collect (for event-playback capability).
+     * Default: ['PRIVMSG', 'NOTICE']
+     * Use ['MODE', 'TOPIC', 'JOIN', 'PART', 'KICK'] for event-playback tests.
+     */
+    eventTypes?: string[];
   } = {}
 ): Promise<string[]> {
   const {
@@ -252,6 +258,7 @@ export async function waitForChathistory(
     timestamp = '*',
     timestamp2,
     limit = 50,
+    eventTypes = ['PRIVMSG', 'NOTICE'],
   } = options;
 
   const startTime = Date.now();
@@ -281,11 +288,14 @@ export async function waitForChathistory(
       // Collect messages in batch
       const messages: string[] = [];
       const collectStart = Date.now();
+      // Build pattern to match any of the requested event types plus BATCH end
+      const eventPattern = new RegExp(`${eventTypes.join('|')}|BATCH -`, 'i');
+      const eventMatch = new RegExp(eventTypes.join('|'), 'i');
       while (Date.now() - collectStart < 5000) {
         try {
-          const line = await client.waitForLine(/PRIVMSG|NOTICE|BATCH -/i, 1000);
+          const line = await client.waitForLine(eventPattern, 1000);
           if (line.includes('BATCH -')) break;
-          if (/PRIVMSG|NOTICE/.test(line)) messages.push(line);
+          if (eventMatch.test(line)) messages.push(line);
         } catch {
           break; // Timeout = no more messages
         }
