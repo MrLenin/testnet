@@ -36,7 +36,7 @@ class AccountPool {
   private initPromise: Promise<void> | null = null;
 
   // Pool configuration
-  private readonly POOL_SIZE = 30;
+  private readonly POOL_SIZE = 10;
   private readonly POOL_PREFIX = 'pool';
   private readonly POOL_PASSWORD_BASE = 'poolpass';
   private readonly POOL_EMAIL_DOMAIN = 'pool.test';
