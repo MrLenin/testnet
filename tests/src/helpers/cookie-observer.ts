@@ -180,7 +180,7 @@ export class CookieObserver extends RawSocketClient {
       clearInterval((this as any)._checkInterval);
     }
     this.send('QUIT :Observer shutting down');
-    await this.disconnect();
+    this.close();
   }
 }
 

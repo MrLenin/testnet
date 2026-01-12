@@ -2042,7 +2042,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client2.waitForJoin(channel);
 
       // Wait for cross-server sync
-      await client1.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick?.startsWith('p10test2'), 5000);
+      await client1.waitForParsedLine(msg => msg.command === 'JOIN' && (msg.source?.nick?.startsWith('p10test2') ?? false), 5000);
 
       // Try to get P10 logs from docker
       // Note: Log visibility depends on server debug configuration
@@ -2107,7 +2107,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client2.waitForJoin(channel);
 
       // Wait for cross-server sync
-      await client1.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick?.startsWith('num2'), 5000);
+      await client1.waitForParsedLine(msg => msg.command === 'JOIN' && (msg.source?.nick?.startsWith('num2') ?? false), 5000);
 
       // WHOIS should return consistent info from both servers
       client1.send(`WHOIS ${nick2}`);
