@@ -11,11 +11,15 @@ import org.keycloak.events.admin.AdminEvent;
 import org.keycloak.events.admin.ResourceType;
 import org.keycloak.models.KeycloakSession;
 
+import org.keycloak.models.RealmModel;
+import org.keycloak.models.UserModel;
+
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
@@ -115,6 +119,11 @@ public class WebhookEventListenerProvider implements EventListenerProvider {
 
     /**
      * Format a User Event as JSON matching X3's expected format.
+     *
+     * <p>For credential change events (UPDATE_PASSWORD, RESET_PASSWORD, etc.),
+     * this method also fetches the user's SCRAM-SHA-256 credentials from
+     * user attributes and includes them in the payload. This allows X3 to
+     * pre-populate its SCRAM cache without waiting for the first SASL attempt.</p>
      */
     private String formatUserEvent(Event event) {
         JsonObject json = new JsonObject();
@@ -138,7 +147,87 @@ public class WebhookEventListenerProvider implements EventListenerProvider {
             json.add("details", details);
         }
 
+        // For credential change events, include SCRAM credentials and username
+        if (isCredentialChangeEvent(event.getType()) && event.getUserId() != null) {
+            try {
+                addUserScramCredentials(json, event.getRealmId(), event.getUserId());
+            } catch (Exception e) {
+                LOG.warnf("Failed to fetch SCRAM credentials for user %s: %s",
+                    event.getUserId(), e.getMessage());
+            }
+        }
+
         return gson.toJson(json);
+    }
+
+    /**
+     * Check if this event type represents a credential change.
+     */
+    private boolean isCredentialChangeEvent(EventType type) {
+        return type == EventType.UPDATE_PASSWORD ||
+               type == EventType.RESET_PASSWORD ||
+               type == EventType.UPDATE_CREDENTIAL;
+    }
+
+    /**
+     * Fetch user's SCRAM credentials from attributes and add to JSON payload.
+     *
+     * <p>Looks for attributes set by ScramCredentialProvider:</p>
+     * <ul>
+     *   <li>x3_scram_salt - Base64-encoded salt</li>
+     *   <li>x3_scram_iterations - Iteration count</li>
+     *   <li>x3_scram_stored_key - Base64-encoded StoredKey</li>
+     *   <li>x3_scram_server_key - Base64-encoded ServerKey</li>
+     * </ul>
+     */
+    private void addUserScramCredentials(JsonObject json, String realmId, String userId) {
+        RealmModel realm = session.realms().getRealm(realmId);
+        if (realm == null) {
+            LOG.warnf("Realm not found: %s", realmId);
+            return;
+        }
+
+        UserModel user = session.users().getUserById(realm, userId);
+        if (user == null) {
+            LOG.warnf("User not found: %s", userId);
+            return;
+        }
+
+        // Add username for X3 lookup
+        json.addProperty("username", user.getUsername());
+
+        // Fetch SCRAM attributes
+        String salt = getFirstAttribute(user, ScramCredentialProvider.ATTR_SCRAM_SALT);
+        String iterations = getFirstAttribute(user, ScramCredentialProvider.ATTR_SCRAM_ITERATIONS);
+        String storedKey = getFirstAttribute(user, ScramCredentialProvider.ATTR_SCRAM_STORED_KEY);
+        String serverKey = getFirstAttribute(user, ScramCredentialProvider.ATTR_SCRAM_SERVER_KEY);
+
+        // Only include SCRAM object if all credentials are present
+        if (salt != null && iterations != null && storedKey != null && serverKey != null) {
+            JsonObject scram = new JsonObject();
+            scram.addProperty("salt", salt);
+            scram.addProperty("iterations", Integer.parseInt(iterations));
+            scram.addProperty("storedKey", storedKey);
+            scram.addProperty("serverKey", serverKey);
+            json.add("scram", scram);
+
+            LOG.infof("Including SCRAM credentials in webhook for user %s", user.getUsername());
+        } else {
+            LOG.debugf("SCRAM credentials not available for user %s (salt=%s, iter=%s, stored=%s, server=%s)",
+                user.getUsername(),
+                salt != null ? "present" : "missing",
+                iterations != null ? "present" : "missing",
+                storedKey != null ? "present" : "missing",
+                serverKey != null ? "present" : "missing");
+        }
+    }
+
+    /**
+     * Get first value of a user attribute, or null if not present.
+     */
+    private String getFirstAttribute(UserModel user, String name) {
+        List<String> values = user.getAttributeStream(name).toList();
+        return values.isEmpty() ? null : values.get(0);
     }
 
     /**
