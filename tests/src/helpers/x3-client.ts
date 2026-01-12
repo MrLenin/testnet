@@ -960,6 +960,55 @@ export function releaseTestAccount(account: string): void {
 }
 
 /**
+ * Get and authenticate a test account on the given client.
+ * - For pool accounts: AUTH only (already registered)
+ * - For fresh accounts: full registerAndActivate flow
+ *
+ * This is the recommended way to get authenticated test accounts.
+ * Call releaseTestAccount(account) when done.
+ *
+ * @param client - X3Client to authenticate on
+ * @param options.requireFresh - Force fresh account creation
+ * @returns Account info and whether it came from pool
+ */
+export async function setupTestAccount(
+  client: X3Client,
+  options?: { requireFresh?: boolean }
+): Promise<{
+  account: string;
+  password: string;
+  email: string;
+  fromPool: boolean;
+}> {
+  const { account, password, email, fromPool } = await getTestAccount(options);
+
+  if (fromPool) {
+    // Pool account - just AUTH (already registered/activated)
+    const authResult = await client.auth(account, password);
+    if (!authResult.success) {
+      // Pool account failed auth - might be stale, fall back to fresh
+      console.warn(`[setupTestAccount] Pool account ${account} failed auth: ${authResult.error}`);
+      releaseTestAccount(account);
+      // Create fresh instead
+      const fresh = await createTestAccount();
+      const regResult = await client.registerAndActivate(fresh.account, fresh.password, fresh.email);
+      if (!regResult.success) {
+        throw new Error(`Failed to register fresh account: ${regResult.error}`);
+      }
+      return { ...fresh, fromPool: false };
+    }
+  } else {
+    // Fresh account - full registration flow
+    const regResult = await client.registerAndActivate(account, password, email);
+    if (!regResult.success) {
+      throw new Error(`Failed to register account: ${regResult.error}`);
+    }
+  }
+
+  return { account, password, email, fromPool };
+}
+
+/**
  * Create an oper client that's authenticated with AuthServ.
  * Uses IRC_OPER for oper access and X3_ADMIN for AuthServ.
  * This gives access to O3 (OpServ) commands.
