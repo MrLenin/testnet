@@ -17,11 +17,15 @@ import {
   X3Client,
   createX3Client,
   createTestAccount,
+  getTestAccount,
+  setupTestAccount,
+  releaseTestAccount,
   uniqueId,
 } from '../helpers/index.js';
 
 describe('AuthServ', () => {
   const clients: X3Client[] = [];
+  const poolAccounts: string[] = [];  // Track pool accounts for cleanup
 
   const trackClient = (client: X3Client): X3Client => {
     clients.push(client);
@@ -29,6 +33,13 @@ describe('AuthServ', () => {
   };
 
   afterEach(() => {
+    // Release pool accounts first
+    for (const account of poolAccounts) {
+      releaseTestAccount(account);
+    }
+    poolAccounts.length = 0;
+
+    // Then close clients
     for (const client of clients) {
       try {
         client.send('QUIT');
@@ -119,50 +130,40 @@ describe('AuthServ', () => {
 
   describe('Authentication', () => {
     it('should authenticate with valid credentials', async () => {
+      // Get a test account (pool or fresh) - setupTestAccount handles AUTH/register
       const client = trackClient(await createX3Client());
-      const { account, password, email } = await createTestAccount();
+      const { account, password, fromPool } = await setupTestAccount(client);
+      if (fromPool) poolAccounts.push(account);
 
-      // Register and activate (scrapes cookie from logs)
-      const regResult = await client.registerAndActivate(account, password, email);
+      // Now try to auth on a new connection to verify credentials work
+      const client2 = trackClient(await createX3Client());
+      const authResult = await client2.auth(account, password);
 
-      if (regResult.success) {
-        // Now try to auth - need a new connection
-        const client2 = trackClient(await createX3Client());
-        const authResult = await client2.auth(account, password);
+      expect(authResult.lines.length).toBeGreaterThan(0);
+      console.log('AUTH response:', authResult.lines);
 
-        expect(authResult.lines.length).toBeGreaterThan(0);
-        console.log('AUTH response:', authResult.lines);
-
-        // Should succeed
-        expect(authResult.success).toBe(true);
-      } else {
-        console.log('Skipping AUTH test - registration did not succeed:', regResult.error);
-      }
+      // Should succeed
+      expect(authResult.success).toBe(true);
     });
 
     it('should reject authentication with wrong password', async () => {
+      // Get a test account to test wrong password against
       const client = trackClient(await createX3Client());
-      const { account, password, email } = await createTestAccount();
+      const { account, fromPool } = await setupTestAccount(client);
+      if (fromPool) poolAccounts.push(account);
 
-      // Register and activate
-      const regResult = await client.registerAndActivate(account, password, email);
+      // Try to auth with wrong password on new connection
+      const client2 = trackClient(await createX3Client());
+      const authResult = await client2.auth(account, 'wrongpassword');
 
-      if (regResult.success) {
-        // Try to auth with wrong password
-        const client2 = trackClient(await createX3Client());
-        const authResult = await client2.auth(account, 'wrongpassword');
+      expect(authResult.lines.length).toBeGreaterThan(0);
+      console.log('Wrong password response:', authResult.lines);
 
-        expect(authResult.lines.length).toBeGreaterThan(0);
-        console.log('Wrong password response:', authResult.lines);
-
-        // Should fail - X3 returns "Incorrect password; please try again."
-        expect(authResult.success).toBe(false);
-        // Error may or may not be populated depending on timing
-        if (authResult.error) {
-          expect(authResult.error).toContain('Incorrect');
-        }
-      } else {
-        console.log('Skipping wrong password test - registration did not succeed');
+      // Should fail - X3 returns "Incorrect password; please try again."
+      expect(authResult.success).toBe(false);
+      // Error may or may not be populated depending on timing
+      if (authResult.error) {
+        expect(authResult.error).toContain('Incorrect');
       }
     });
 
@@ -194,11 +195,8 @@ describe('AuthServ', () => {
   describe('SET (User Settings)', () => {
     it('should allow setting user preferences after authentication', async () => {
       const client = trackClient(await createX3Client());
-      const { account, password, email } = await createTestAccount();
-
-      // Register and activate (also authenticates via COOKIE)
-      const regResult = await client.registerAndActivate(account, password, email);
-      expect(regResult.success).toBe(true);
+      const { account, fromPool } = await setupTestAccount(client);
+      if (fromPool) poolAccounts.push(account);
 
       // Try to set a preference (STYLE is a valid SET option)
       const setResult = await client.setUserOption('STYLE', 'def');
@@ -215,22 +213,14 @@ describe('AuthServ', () => {
   describe('Hostmask Management', () => {
     it('should add hostmask for authentication after registering', async () => {
       const client = trackClient(await createX3Client());
-      const { account, password, email } = await createTestAccount();
+      const { account, fromPool } = await setupTestAccount(client);
+      if (fromPool) poolAccounts.push(account);
 
-      // Register and activate
-      const regResult = await client.registerAndActivate(account, password, email);
+      // Add a hostmask
+      const maskResult = await client.addMask('*!*@test.example.com');
 
-      if (regResult.success) {
-        const authResult = await client.auth(account, password);
-
-        if (authResult.success) {
-          // Add a hostmask
-          const maskResult = await client.addMask('*!*@test.example.com');
-
-          expect(maskResult.lines.length).toBeGreaterThan(0);
-          console.log('ADDMASK response:', maskResult.lines);
-        }
-      }
+      expect(maskResult.lines.length).toBeGreaterThan(0);
+      console.log('ADDMASK response:', maskResult.lines);
     });
   });
 
@@ -267,11 +257,8 @@ describe('AuthServ', () => {
 
     it('should show hostmasks via ACCOUNTINFO command (when authenticated)', async () => {
       const client = trackClient(await createX3Client());
-      const { account, password, email } = await createTestAccount();
-
-      // Register and activate (also authenticates via COOKIE)
-      const regResult = await client.registerAndActivate(account, password, email);
-      expect(regResult.success).toBe(true);
+      const { account, fromPool } = await setupTestAccount(client);
+      if (fromPool) poolAccounts.push(account);
 
       // ACCOUNTINFO shows account details including hostmasks
       const lines = await client.serviceCmd('AuthServ', 'ACCOUNTINFO');
