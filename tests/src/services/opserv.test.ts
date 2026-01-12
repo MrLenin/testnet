@@ -178,8 +178,10 @@ describe('OpServ (O3)', () => {
         targetClient.send(`NAMES ${channel}`);
         try {
           const namesResponse = await targetClient.waitForNumeric('353', 2000);
-          console.log(`NAMES attempt ${attempt + 1}:`, namesResponse);
-          if (namesResponse.toLowerCase().includes(targetNick.toLowerCase())) {
+          console.log(`NAMES attempt ${attempt + 1}:`, namesResponse.raw);
+          // NAMES 353 has nick list in trailing parameter
+          const nickList = namesResponse.trailing || namesResponse.params[namesResponse.params.length - 1] || '';
+          if (nickList.toLowerCase().includes(targetNick.toLowerCase())) {
             foundInChannel = true;
             break;
           }
