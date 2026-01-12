@@ -205,6 +205,17 @@ export class X3Client extends RawSocketClient {
   }
 
   /**
+   * Fire-and-forget registration - sends REGISTER without waiting for response.
+   * Used for bulk account creation where cookie appearance is the success signal.
+   * Returns immediately after sending the command.
+   */
+  async registerAccountFireAndForget(account: string, password: string, email: string): Promise<void> {
+    this.send(`PRIVMSG AuthServ :REGISTER ${account} ${password} ${email}`);
+    // Small delay to let the message be sent
+    await new Promise(r => setTimeout(r, 100));
+  }
+
+  /**
    * Activate an account using a cookie.
    * For ACTIVATION cookies, password is required (verifies original registration password).
    * Uses 20s timeout because Keycloak async operations can take 10-15s.

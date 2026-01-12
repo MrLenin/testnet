@@ -131,7 +131,8 @@ class AccountPool {
 
   /**
    * Create missing pool accounts.
-   * Creates accounts sequentially (Keycloak doesn't handle parallel well).
+   * Uses fire-and-forget registration with cookie appearance as success signal.
+   * This avoids depending on serviceCmd timeouts when X3 is under load.
    */
   private async createAccounts(accounts: PoolAccount[]): Promise<void> {
     for (const spec of accounts) {
@@ -139,14 +140,25 @@ class AccountPool {
       try {
         client = await createX3Client(`reg${spec.account.slice(-2)}`);
 
-        const result = await client.registerAndActivate(
-          spec.account, spec.password, spec.email
-        );
+        // Fire-and-forget registration - don't wait for NOTICE response
+        await client.registerAccountFireAndForget(spec.account, spec.password, spec.email);
 
-        if (result.success) {
+        // Wait for cookie to appear (proves registration succeeded)
+        // Use longer timeout (30s) to handle Keycloak backlog
+        const cookie = await client.getCookie(spec.account, undefined, 30000);
+
+        if (!cookie) {
+          console.warn(`[AccountPool] No cookie received for ${spec.account} - registration may have failed`);
+          continue;
+        }
+
+        // Activate with the cookie
+        const activateResult = await client.activateAccount(spec.account, cookie, spec.password);
+
+        if (activateResult.success) {
           console.log(`[AccountPool] Created ${spec.account}`);
         } else {
-          console.warn(`[AccountPool] Failed to create ${spec.account}: ${result.error}`);
+          console.warn(`[AccountPool] Failed to activate ${spec.account}: ${activateResult.error}`);
         }
       } catch (error) {
         console.warn(`[AccountPool] Error creating ${spec.account}:`, error);
