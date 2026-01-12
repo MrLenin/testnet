@@ -1197,7 +1197,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch']);
+      await client.capReq(['draft/chathistory', 'batch', 'server-time']);
       client.capEnd();
       client.register('histiso1');
       await client.waitForNumeric('001');
@@ -1207,17 +1207,23 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       await client.waitForJoin(channelName);
 
       client.send(`PRIVMSG ${channelName} :ISO timestamp test`);
-      await new Promise(r => setTimeout(r, 500));
 
-      client.clearRawBuffer();
+      // Wait for message to persist to LMDB
+      await new Promise(r => setTimeout(r, 1000));
 
-      // Use full ISO8601 format
-      const now = new Date().toISOString();
-      client.send(`CHATHISTORY BEFORE ${channelName} timestamp=${now} 10`);
+      // Use waitForChathistory with BEFORE subcommand and ISO8601 timestamp
+      // Get a future timestamp so BEFORE definitely includes our message
+      const futureTs = new Date(Date.now() + 60000).toISOString();
+      const messages = await waitForChathistory(client, channelName, {
+        minMessages: 1,
+        timeoutMs: 10000,
+        subcommand: 'BEFORE',
+        timestamp: futureTs,
+      });
 
-      const response = await client.waitForLine(/BATCH|FAIL/i, 5000);
-      expect(response).toBeDefined();
-      console.log('ISO timestamp accepted:', response);
+      expect(messages.length).toBeGreaterThanOrEqual(1);
+      expect(messages.some(m => m.includes('ISO timestamp test'))).toBe(true);
+      console.log('ISO timestamp accepted, received', messages.length, 'messages');
       client.send('QUIT');
     });
 
