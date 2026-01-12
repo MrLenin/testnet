@@ -143,18 +143,24 @@ class AccountPool {
         if (result.success) {
           // AUTH succeeded - account exists with correct password
           working.add(account);
-        } else if (result.error?.toLowerCase().includes('not registered') ||
-                   result.error?.toLowerCase().includes('no such account')) {
-          // Account genuinely doesn't exist
-          missing.add(account);
-        } else if (!result.error || result.lines.length === 0) {
-          // Still no response after retry - mark broken (don't try to re-create)
-          console.warn(`[AccountPool] AUTH still timing out for ${account}, marking broken`);
+        } else if (result.lines.length === 0) {
+          // True timeout - no response at all after retry
+          console.warn(`[AccountPool] AUTH timeout for ${account}, marking broken`);
           broken.add(account);
         } else {
-          // Account exists but has some issue (wrong password, not activated, suspended, etc.)
-          // Don't try to re-register these
-          broken.add(account);
+          // Got a response - check if account doesn't exist
+          const responseText = result.lines.join(' ').toLowerCase();
+          const accountMissing = responseText.includes('not registered') ||
+                                 responseText.includes('no such account') ||
+                                 responseText.includes("don't recognize") ||
+                                 responseText.includes('does not exist');
+          if (accountMissing) {
+            missing.add(account);
+          } else {
+            // Account exists but has some issue (wrong password, not activated, etc.)
+            console.warn(`[AccountPool] ${account}: ${result.lines[0]?.substring(0, 80)}`);
+            broken.add(account);
+          }
         }
 
         // Delay between checks to avoid overloading X3/Keycloak
