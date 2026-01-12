@@ -153,7 +153,8 @@ class AccountPool {
           const accountMissing = responseText.includes('not registered') ||
                                  responseText.includes('no such account') ||
                                  responseText.includes("don't recognize") ||
-                                 responseText.includes('does not exist');
+                                 responseText.includes('does not exist') ||
+                                 responseText.includes('could not find');
           if (accountMissing) {
             missing.add(account);
           } else {
