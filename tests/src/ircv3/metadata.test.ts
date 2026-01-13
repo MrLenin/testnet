@@ -299,20 +299,19 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.register('metaerr2');
       await client.waitForNumeric('001');
 
-      // Try to get metadata for non-existent channel (immediate local error)
+      // Try to get metadata for non-existent channel (queries X3, gets NOTARGET error)
       client.send('METADATA GET #nonexistentchannel12345 avatar');
 
-      try {
-        // FAIL TARGET_INVALID expected for non-existent channel
-        const response = await client.waitForParsedLine(
-          msg => ['401', '403', '764', 'FAIL'].includes(msg.command),
-          3000
-        );
-        expect(response).toBeDefined();
-        console.log('METADATA channel error response:', response.raw);
-      } catch {
-        console.log('No METADATA channel error response');
-      }
+      // TARGET_INVALID expected for non-existent channel
+      // Server sends NOTICE fallback without standard-replies cap
+      const response = await client.waitForParsedLine(
+        msg => (msg.command === 'FAIL' || msg.command === 'NOTICE') &&
+               msg.raw.includes('TARGET_INVALID'),
+        5000
+      );
+      expect(response).toBeDefined();
+      expect(response.raw).toContain('TARGET_INVALID');
+      console.log('METADATA channel error response:', response.raw);
 
       client.send('QUIT');
     });
@@ -328,12 +327,17 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client.waitForNumeric('001');
 
       // Try to get metadata for non-existent account (queries X3, gets NOTARGET error)
-      // This should return immediately with FAIL TARGET_INVALID, not timeout
+      // This should return immediately with TARGET_INVALID, not timeout
       client.send('METADATA GET nonexistentaccount12345 avatar');
 
-      // Should get FAIL TARGET_INVALID within 5 seconds (not 30 second timeout)
+      // Should get TARGET_INVALID within 5 seconds (not 30 second timeout)
+      // Without standard-replies cap, server sends NOTICE fallback:
+      //   :server NOTICE nick :FAIL METADATA TARGET_INVALID target :description
+      // With standard-replies cap, server sends FAIL command:
+      //   FAIL METADATA TARGET_INVALID target :description
       const response = await client.waitForParsedLine(
-        msg => msg.command === 'FAIL' && msg.raw.includes('TARGET_INVALID'),
+        msg => (msg.command === 'FAIL' || msg.command === 'NOTICE') &&
+               msg.raw.includes('TARGET_INVALID'),
         5000
       );
       expect(response).toBeDefined();
