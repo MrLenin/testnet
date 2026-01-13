@@ -169,9 +169,12 @@ describe('Core IRC Commands', () => {
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel);
 
+      // Clear buffer to avoid catching initial channel modes from JOIN
+      client.clearRawBuffer();
+
       // Set a mode first
       client.send(`MODE ${channel} +nt`);
-      await client.waitForMode(channel, '+', 5000);
+      await client.waitForMode(channel, '+nt', 5000);
 
       // Small settle delay to let any additional mode-related messages arrive
       await new Promise(r => setTimeout(r, 200));

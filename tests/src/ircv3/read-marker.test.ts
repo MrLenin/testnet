@@ -266,7 +266,8 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['draft/read-marker']);
+      // Request standard-replies so server sends FAIL instead of NOTICE fallback
+      await client.capReq(['draft/read-marker', 'standard-replies']);
       client.capEnd();
       client.register('rmerr1');
       await client.waitForNumeric('001');
@@ -282,17 +283,19 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       const timestamp = new Date().toISOString();
       client.send(`MARKREAD ${channel} timestamp=${timestamp}`);
 
-      // Should receive error (FAIL or 4xx numeric)
+      // Should receive error - FAIL, NOTICE fallback, or error numeric
       const response = await client.waitForParsedLine(
         msg => msg.command === 'FAIL' ||
                msg.command === '731' ||
                /^4\d\d$/.test(msg.command) ||
-               msg.command === 'MARKREAD',
+               msg.command === 'MARKREAD' ||
+               // NOTICE fallback if standard-replies wasn't enabled
+               (msg.command === 'NOTICE' && msg.raw.includes('ACCOUNT_REQUIRED')),
         5000
       );
 
       // If MARKREAD returned, it should be an error or empty marker
-      // If FAIL or error numeric, that's expected
+      // If FAIL, NOTICE, or error numeric, that's expected
       expect(response).toBeDefined();
       console.log('Unauthenticated MARKREAD response:', response.raw);
 
