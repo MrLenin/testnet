@@ -515,7 +515,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
       await client.capReq(['sasl']);
 
       client.send('AUTHENTICATE PLAIN');
-      await client.waitForLine(/AUTHENTICATE \+/);
+      await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
 
       // SASL PLAIN: base64(authzid\0authcid\0password)
       const payload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
@@ -523,19 +523,19 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
 
       // Wait for SASL result - should succeed with proper Keycloak user
       // Increased timeout for slow Keycloak responses
-      const result = await client.waitForLine(/90[03]/, 15000);
-      expect(result).toMatch(/90[03]/);
-      console.log('SASL PLAIN auth result:', result);
+      const result = await client.waitForNumeric(['900', '903'], 15000);
+      expect(result.command).toMatch(/90[03]/);
+      console.log('SASL PLAIN auth result:', result.raw);
 
       // Complete connection
       client.capEnd();
       client.register('kctest1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Check logged in
       client.send('WHOIS kctest1');
-      const whois = await client.waitForLine(/330|311/, 3000);
-      console.log('WHOIS response:', whois);
+      const whois = await client.waitForNumeric(['330', '311'], 3000);
+      console.log('WHOIS response:', whois.raw);
 
       client.send('QUIT');
     });
@@ -547,15 +547,15 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
       await client.capReq(['sasl']);
 
       client.send('AUTHENTICATE PLAIN');
-      await client.waitForLine(/AUTHENTICATE \+/);
+      await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
 
       // Wrong password
       const payload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0wrongpassword`).toString('base64');
       client.send(`AUTHENTICATE ${payload}`);
 
-      const result = await client.waitForLine(/90[24]/, 5000);
+      const result = await client.waitForNumeric(['902', '904'], 5000);
       // 904 = SASLFAIL, 902 = NICKLOCKED
-      expect(result).toMatch(/90[24]/);
+      expect(result.command).toMatch(/90[24]/);
 
       client.send('QUIT');
     });
@@ -595,7 +595,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
       await client.capReq(['sasl']);
 
       client.send('AUTHENTICATE OAUTHBEARER');
-      await client.waitForLine(/AUTHENTICATE \+/, 3000);
+      await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
 
       // OAUTHBEARER format: base64("n,,\x01auth=Bearer <token>\x01\x01")
       const oauthPayload = `n,,\x01auth=Bearer ${token}\x01\x01`;
@@ -605,13 +605,13 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
       await sendSaslPayload(client, payload);
 
       // Increased timeout for slow Keycloak token validation
-      const result = await client.waitForLine(/90[03]/, 15000);
-      expect(result).toMatch(/90[03]/);
-      console.log('OAUTHBEARER auth result:', result);
+      const result = await client.waitForNumeric(['900', '903'], 15000);
+      expect(result.command).toMatch(/90[03]/);
+      console.log('OAUTHBEARER auth result:', result.raw);
 
       client.capEnd();
       client.register('kcoauth1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.send('QUIT');
     });
@@ -628,15 +628,15 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
       await client.capReq(['sasl']);
 
       client.send('AUTHENTICATE OAUTHBEARER');
-      await client.waitForLine(/AUTHENTICATE \+/, 3000);
+      await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
 
       // Invalid token
       const oauthPayload = `n,,\x01auth=Bearer invalidtoken123\x01\x01`;
       const payload = Buffer.from(oauthPayload).toString('base64');
       await sendSaslPayload(client, payload);
 
-      const result = await client.waitForLine(/90[24]/, 5000);
-      expect(result).toMatch(/90[24]/);
+      const result = await client.waitForNumeric(['902', '904'], 5000);
+      expect(result.command).toMatch(/90[24]/);
 
       client.send('QUIT');
     });
@@ -670,7 +670,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
         await client.capReq(['sasl']);
 
         client.send('AUTHENTICATE OAUTHBEARER');
-        await client.waitForLine(/AUTHENTICATE \+/);
+        await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
 
         // OAUTHBEARER format: base64("n,,\x01auth=Bearer <token>\x01\x01")
         const oauthPayload = `n,,\x01auth=Bearer ${userToken}\x01\x01`;
@@ -680,19 +680,19 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
         await sendSaslPayload(client, payload);
 
         // Increased timeout to 15s - Keycloak token validation can be slow, especially for auto-create
-        const result = await client.waitForLine(/90[03]/, 15000);
+        const result = await client.waitForNumeric(['900', '903'], 15000);
 
-        if (result.includes('903') || result.includes('900')) {
+        if (result.command === '903' || result.command === '900') {
           console.log('Auto-created account for:', uniqueUser);
 
           client.capEnd();
           client.register('kcauto1');
-          await client.waitForLine(/001/);
+          await client.waitForNumeric('001');
 
           // Verify logged in to the new account
           client.send(`WHOIS kcauto1`);
-          const whois = await client.waitForLine(/330|311/, 3000);
-          console.log('WHOIS:', whois);
+          const whois = await client.waitForNumeric(['330', '311'], 3000);
+          console.log('WHOIS:', whois.raw);
         }
 
         client.send('QUIT');
@@ -945,13 +945,13 @@ describe('Keycloak Error Handling', () => {
     client.send('AUTHENTICATE PLAIN');
 
     try {
-      await client.waitForLine(/AUTHENTICATE \+/, 3000);
+      await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
       // Server still responding - send test creds
       const payload = Buffer.from('test\0test\0test').toString('base64');
       client.send(`AUTHENTICATE ${payload}`);
 
       // Should get some response (success if fallback, or fail)
-      const result = await client.waitForLine(/90[0-9]/, 5000);
+      const result = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 5000);
       expect(result).toBeDefined();
     } catch {
       // Timeout is acceptable if Keycloak is totally unavailable
@@ -970,8 +970,8 @@ describe('Keycloak Error Handling', () => {
     client.capEnd();
     client.register('fallback1');
 
-    const welcome = await client.waitForLine(/001/, 5000);
-    expect(welcome).toContain('fallback1');
+    const welcome = await client.waitForNumeric('001', 5000);
+    expect(welcome.raw).toContain('fallback1');
 
     client.send('QUIT');
   });
@@ -1416,18 +1416,24 @@ async function unregisterChannel(client: RawSocketClient, channelName: string): 
 
   try {
     // Wait for the confirmation prompt - format: "use 'unregister #channel CODE'"
-    const response = await client.waitForLine(/unregister.*\s([a-f0-9]{8})'/i, 5000);
+    const response = await client.waitForParsedLine(
+      msg => msg.command === 'NOTICE' && /unregister.*\s[a-f0-9]{8}'/i.test(msg.raw),
+      5000
+    );
     // Extract the 8-character hex confirmation code at the end before the quote
-    const match = response.match(/unregister\s+\S+\s+([a-f0-9]{8})'/i);
+    const match = response.raw.match(/unregister\s+\S+\s+([a-f0-9]{8})'/i);
     if (match) {
       const confirmCode = match[1];
       console.log(`Confirming unregister of ${channelName} with code ${confirmCode}`);
       client.send(`PRIVMSG ChanServ :UNREGISTER ${channelName} ${confirmCode}`);
       // Wait for success confirmation - X3 says "has been unregistered"
-      await client.waitForLine(/has been unregistered|unregistered|removed/i, 5000);
+      await client.waitForParsedLine(
+        msg => msg.command === 'NOTICE' && /has been unregistered|unregistered|removed/i.test(msg.trailing || ''),
+        5000
+      );
       console.log(`Successfully unregistered ${channelName}`);
     } else {
-      console.log(`Could not extract confirmation code from: ${response}`);
+      console.log(`Could not extract confirmation code from: ${response.raw}`);
     }
   } catch (e) {
     console.log(`Could not unregister ${channelName} - ${(e as Error).message}`);
@@ -1447,15 +1453,15 @@ async function authenticateSecondUser(
     await client.capReq(['sasl']);
 
     client.send('AUTHENTICATE PLAIN');
-    await client.waitForLine(/AUTHENTICATE \+/);
+    await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
 
     const payload = Buffer.from(`${username}\0${username}\0${password}`).toString('base64');
     client.send(`AUTHENTICATE ${payload}`);
 
-    await client.waitForLine(/903/, 5000);
+    await client.waitForNumeric('903', 5000);
     client.capEnd();
     client.register(`${username.slice(0, 7)}${uniqueId().slice(0,3)}`);
-    await client.waitForLine(/001/);
+    await client.waitForNumeric('001');
 
     return client;
   } catch {
@@ -1519,21 +1525,21 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
       await client.capReq(['sasl']);
 
       client.send('AUTHENTICATE PLAIN');
-      await client.waitForLine(/AUTHENTICATE \+/);
+      await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
 
       const payload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
       client.send(`AUTHENTICATE ${payload}`);
 
       // SASL auth should always succeed with Keycloak
-      await client.waitForLine(/903/, 5000);
+      await client.waitForNumeric('903', 5000);
 
       client.capEnd();
       client.register(`bisync${uniqueId().slice(0,4)}`);
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Register channel (becomes owner - should create Keycloak group)
       client.send(`JOIN ${channelName}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client.waitForJoin(channelName);
 
       // Register the channel with ChanServ
       client.send(`PRIVMSG ChanServ :REGISTER ${channelName}`);
@@ -1541,7 +1547,10 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
       // Wait for registration confirmation or error
       // ChanServ responds with "You now have ownership of #channel"
       try {
-        await client.waitForLine(/ownership|registered|already|error/i, 5000);
+        await client.waitForParsedLine(
+          msg => msg.command === 'NOTICE' && /ownership|registered|already|error/i.test(msg.trailing || ''),
+          5000
+        );
       } catch {
         console.log('Channel registration timed out');
       }
@@ -1593,26 +1602,29 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         await ownerClient.capReq(['sasl']);
 
         ownerClient.send('AUTHENTICATE PLAIN');
-        await ownerClient.waitForLine(/AUTHENTICATE \+/);
+        await ownerClient.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
 
         const ownerPayload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
         ownerClient.send(`AUTHENTICATE ${ownerPayload}`);
 
         // SASL auth should always succeed with Keycloak
-        await ownerClient.waitForLine(/903/, 5000);
+        await ownerClient.waitForNumeric('903', 5000);
 
         ownerClient.capEnd();
         ownerClient.register(`bisown${uniqueId().slice(0,4)}`);
-        await ownerClient.waitForLine(/001/);
+        await ownerClient.waitForNumeric('001');
 
         // Register channel
         ownerClient.send(`JOIN ${channelName}`);
-        await ownerClient.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+        await ownerClient.waitForJoin(channelName);
 
         ownerClient.send(`PRIVMSG ChanServ :REGISTER ${channelName}`);
 
         try {
-          await ownerClient.waitForLine(/ownership|registered|already/i, 5000);
+          await ownerClient.waitForParsedLine(
+            msg => msg.command === 'NOTICE' && /ownership|registered|already/i.test(msg.trailing || ''),
+            5000
+          );
         } catch {
           console.log('Registration result not received');
         }
@@ -1633,7 +1645,10 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         ownerClient.send(`PRIVMSG ChanServ :ADDUSER ${channelName} *${secondUser} 200`);
 
         try {
-          await ownerClient.waitForLine(/added|access/i, 5000);
+          await ownerClient.waitForParsedLine(
+            msg => msg.command === 'NOTICE' && /added|access/i.test(msg.trailing || ''),
+            5000
+          );
           console.log(`Added ${secondUser} to ${channelName} at level 200`);
         } catch {
           console.log('ADDUSER result not received');
@@ -1687,21 +1702,21 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         await ownerClient.capReq(['sasl']);
 
         ownerClient.send('AUTHENTICATE PLAIN');
-        await ownerClient.waitForLine(/AUTHENTICATE \+/);
+        await ownerClient.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
 
         const payload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
         ownerClient.send(`AUTHENTICATE ${payload}`);
 
         // SASL auth should always succeed with Keycloak
-        await ownerClient.waitForLine(/903/, 5000);
+        await ownerClient.waitForNumeric('903', 5000);
 
         ownerClient.capEnd();
         ownerClient.register(`clvl${uniqueId().slice(0,4)}`);
-        await ownerClient.waitForLine(/001/);
+        await ownerClient.waitForNumeric('001');
 
         // Register channel
         ownerClient.send(`JOIN ${channelName}`);
-        await ownerClient.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+        await ownerClient.waitForJoin(channelName);
 
         ownerClient.send(`PRIVMSG ChanServ :REGISTER ${channelName}`);
         await new Promise(r => setTimeout(r, 1000));
@@ -1726,7 +1741,10 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         ownerClient.send(`PRIVMSG ChanServ :CLVL ${channelName} *${secondUser} 300`);
 
         try {
-          await ownerClient.waitForLine(/access.*changed|level.*changed|300/i, 5000);
+          await ownerClient.waitForParsedLine(
+            msg => msg.command === 'NOTICE' && /access.*changed|level.*changed|300/i.test(msg.trailing || ''),
+            5000
+          );
           console.log(`Changed ${secondUser} access level to 300`);
         } catch {
           console.log('CLVL result not received');
@@ -1771,21 +1789,21 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         await ownerClient.capReq(['sasl']);
 
         ownerClient.send('AUTHENTICATE PLAIN');
-        await ownerClient.waitForLine(/AUTHENTICATE \+/);
+        await ownerClient.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
 
         const payload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
         ownerClient.send(`AUTHENTICATE ${payload}`);
 
         // SASL auth should always succeed with Keycloak
-        await ownerClient.waitForLine(/903/, 5000);
+        await ownerClient.waitForNumeric('903', 5000);
 
         ownerClient.capEnd();
         ownerClient.register(`delown${uniqueId().slice(0,4)}`);
-        await ownerClient.waitForLine(/001/);
+        await ownerClient.waitForNumeric('001');
 
         // Register channel and add user
         ownerClient.send(`JOIN ${channelName}`);
-        await ownerClient.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+        await ownerClient.waitForJoin(channelName);
 
         ownerClient.send(`PRIVMSG ChanServ :REGISTER ${channelName}`);
         await new Promise(r => setTimeout(r, 1000));
@@ -1815,7 +1833,10 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         ownerClient.send(`PRIVMSG ChanServ :DELUSER ${channelName} *${secondUser}`);
 
         try {
-          await ownerClient.waitForLine(/removed|deleted|access/i, 5000);
+          await ownerClient.waitForParsedLine(
+            msg => msg.command === 'NOTICE' && /removed|deleted|access/i.test(msg.trailing || ''),
+            5000
+          );
           console.log(`Deleted ${secondUser} from ${channelName}`);
         } catch {
           console.log('DELUSER result not received');
@@ -1857,26 +1878,29 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
       await client.capReq(['sasl']);
 
       client.send('AUTHENTICATE PLAIN');
-      await client.waitForLine(/AUTHENTICATE \+/);
+      await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
 
       const payload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
       client.send(`AUTHENTICATE ${payload}`);
 
       // SASL auth should always succeed with Keycloak
-      await client.waitForLine(/903/, 5000);
+      await client.waitForNumeric('903', 5000);
 
       client.capEnd();
       client.register(`unreg${uniqueId().slice(0,4)}`);
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Register channel
       client.send(`JOIN ${channelName}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client.waitForJoin(channelName);
 
       client.send(`PRIVMSG ChanServ :REGISTER ${channelName}`);
 
       try {
-        await client.waitForLine(/ownership|registered|already/i, 5000);
+        await client.waitForParsedLine(
+          msg => msg.command === 'NOTICE' && /ownership|registered|already/i.test(msg.trailing || ''),
+          5000
+        );
       } catch {
         console.log('Registration result not received');
       }
@@ -1925,20 +1949,23 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
       await client.capLs();
       client.capEnd();
       client.register(`synerr${uniqueId().slice(0,4)}`);
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channelName = uniqueChannel('syncerr');
 
       // Join and register without authentication
       client.send(`JOIN ${channelName}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+      await client.waitForJoin(channelName);
 
       // Try to register - should work or fail based on auth, not Keycloak
       client.send(`PRIVMSG ChanServ :REGISTER ${channelName}`);
 
       try {
-        const response = await client.waitForLine(/registered|must.*identify|authenticated|error/i, 5000);
-        console.log('Register response:', response);
+        const response = await client.waitForParsedLine(
+          msg => msg.command === 'NOTICE' && /registered|must.*identify|authenticated|error/i.test(msg.trailing || ''),
+          5000
+        );
+        console.log('Register response:', response.raw);
         // Either registered (if auth not required) or authentication required - both are valid
         expect(response).toBeDefined();
       } catch {
