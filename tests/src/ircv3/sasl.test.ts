@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createRawSocketClient, RawSocketClient, uniqueId } from '../helpers/index.js';
+import { getTestAccount, releaseTestAccount } from '../helpers/x3-client.js';
 
 /**
  * SASL Authentication Tests
@@ -164,14 +165,11 @@ describe('IRCv3 SASL Authentication', () => {
       client.send('QUIT');
     });
 
-    it('receives 900 on successful authentication', async () => {
-      // Extra delay for test isolation - previous test also authenticates same account
-      // X3 needs time to clean up SASL sessions
-      await new Promise(r => setTimeout(r, 1000));
+    it('receives 900 on successful authentication', { retry: 2 }, async () => {
+      // Use pool account to avoid collision with previous test
+      const { account, password, fromPool } = await getTestAccount();
 
       const client = trackClient(await createRawSocketClient());
-
-      // Clear buffer to avoid interference from previous tests
       client.clearBuffer();
 
       await client.capLs();
@@ -181,18 +179,17 @@ describe('IRCv3 SASL Authentication', () => {
       const authPlus = await client.waitForCommand('AUTHENTICATE', 10000);
       console.log('Got AUTHENTICATE +:', authPlus.raw);
 
-      const payload = Buffer.from(`${TEST_ACCOUNT}\0${TEST_ACCOUNT}\0${TEST_PASSWORD}`).toString('base64');
-      console.log('Sending credentials payload');
+      const payload = Buffer.from(`${account}\0${account}\0${password}`).toString('base64');
+      console.log(`Sending credentials for ${account}`);
       client.send(`AUTHENTICATE ${payload}`);
 
-      // Small delay to allow server to process and respond
-      await new Promise(r => setTimeout(r, 50));
-
       // Server MUST send 900 (RPL_LOGGEDIN) or 903 (RPL_SASLSUCCESS)
-      // Test will fail if account doesn't exist - that's expected
       // Note: Keycloak can take 3-6s under load
       const result = await client.waitForNumeric(['900', '903'], 20000);
       expect(result.command).toMatch(/^(900|903)$/);
+      console.log(`Got ${result.command} for ${account}`);
+
+      if (fromPool) releaseTestAccount(account);
       client.send('QUIT');
     });
   });
