@@ -233,7 +233,8 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['draft/channel-rename']);
+      // Need standard-replies to receive FAIL response
+      await client.capReq(['draft/channel-rename', 'standard-replies']);
       client.capEnd();
       client.register('renexist1');
       await client.waitForNumeric('001');
