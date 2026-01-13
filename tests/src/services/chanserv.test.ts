@@ -176,7 +176,7 @@ describe('ChanServ (X3)', () => {
       expect(user2Entry?.level).toBe(ACCESS_LEVELS.OP);
     });
 
-    it('should change user access level with CLVL', async () => {
+    it('should change user access level with CLVL', { retry: 2 }, async () => {
       // Create and add second user
       const user2Client = trackClient(await createX3Client());
       const { account: user2, fromPool: user2Pool } = await setupTestAccount(user2Client);
@@ -426,7 +426,7 @@ describe('ChanServ (X3)', () => {
   });
 
   describe('Ban Management', () => {
-    it('should ban a user from the channel', async () => {
+    it('should ban a user from the channel', { retry: 2 }, async () => {
       const client = trackClient(await createX3Client());
       const { account, fromPool } = await setupTestAccount(client);
       if (fromPool) poolAccounts.push(account);

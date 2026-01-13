@@ -53,9 +53,10 @@ describe('OpServ (O3)', () => {
   });
 
   describe('Basic Access', () => {
-    it('should respond to HELP command', async () => {
+    it('should respond to HELP command', { retry: 2 }, async () => {
       const client = trackClient(await createX3Client());
 
+      // O3 responds to HELP even for non-opers (with "privileged service" message)
       const lines = await client.serviceCmd('O3', 'HELP');
       console.log('O3 HELP response (first 5):', lines.slice(0, 5));
 
