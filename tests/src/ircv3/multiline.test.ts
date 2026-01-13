@@ -126,9 +126,12 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       // Collect all messages in the batch
       const messages: string[] = [];
       while (true) {
-        const line = await client2.waitForLine(/PRIVMSG|BATCH -/, 2000);
-        messages.push(line);
-        if (line.includes('BATCH -')) break;
+        const msg = await client2.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          2000
+        );
+        messages.push(msg.raw);
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
       }
       console.log('Multiline messages:', messages);
 
@@ -176,9 +179,12 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       console.log('Multiline echo batch start:', batchStartEchoMsg.raw);
 
       while (true) {
-        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 2000);
-        allLines.push(line);
-        if (line.includes('BATCH -')) break;
+        const msg = await client.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          2000
+        );
+        allLines.push(msg.raw);
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
       }
       console.log('All lines received:', allLines);
 
@@ -332,9 +338,12 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       // Collect rest of batch to verify multiline works
       const messages: string[] = [];
       while (true) {
-        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 2000);
-        messages.push(line);
-        if (line.includes('BATCH -')) break;
+        const msg = await client.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          2000
+        );
+        messages.push(msg.raw);
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
       }
       expect(messages.length).toBeGreaterThanOrEqual(3); // 2 PRIVMSG + BATCH -
       console.log('Labeled multiline messages:', messages);
@@ -397,9 +406,12 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       // Collect messages until BATCH -
       const messages: string[] = [];
       while (true) {
-        const line = await client2.waitForLine(/PRIVMSG|BATCH -/, 2000);
-        messages.push(line);
-        if (line.includes('BATCH -')) break;
+        const msg = await client2.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          2000
+        );
+        messages.push(msg.raw);
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
       }
       console.log('Multiline messages:', messages);
 
@@ -477,9 +489,12 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       }
 
       // Client2 should receive truncated fallback (individual PRIVMSGs, not full batch)
-      const received = await client2.waitForLine(/PRIVMSG.*Line 1/i, 3000);
-      console.log('Client2 received fallback:', received);
-      expect(received).toContain('PRIVMSG');
+      const received = await client2.waitForParsedLine(
+        msg => msg.command === 'PRIVMSG' && msg.raw.includes('Line 1'),
+        3000
+      );
+      console.log('Client2 received fallback:', received.raw);
+      expect(received.command).toBe('PRIVMSG');
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -592,9 +607,13 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       const startTime = Date.now();
       while (Date.now() - startTime < 3000) {
         try {
-          const line = await client2.waitForLine(/PRIVMSG.*Content line|truncat|more lines/i, 500);
-          receivedLines.push(line);
-          console.log('Truncation test received:', line);
+          const msg = await client2.waitForParsedLine(
+            m => m.command === 'PRIVMSG' && (m.raw.includes('Content line') ||
+                 m.raw.toLowerCase().includes('truncat') || m.raw.includes('more lines')),
+            500
+          );
+          receivedLines.push(msg.raw);
+          console.log('Truncation test received:', msg.raw);
         } catch {
           break;
         }
@@ -665,17 +684,20 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       const startTime = Date.now();
       while (Date.now() - startTime < 4000) {
         try {
-          const line = await client2.waitForLine(/PRIVMSG|NOTICE/i, 500);
+          const msg = await client2.waitForParsedLine(
+            m => m.command === 'PRIVMSG' || m.command === 'NOTICE',
+            500
+          );
           receivedLines++;
-          console.log('Retrieval hint test:', line);
+          console.log('Retrieval hint test:', msg.raw);
 
-          if (line.toLowerCase().includes('histserv')) {
+          if (msg.raw.toLowerCase().includes('histserv')) {
             foundHistServHint = true;
-            console.log('Found HistServ retrieval hint:', line);
+            console.log('Found HistServ retrieval hint:', msg.raw);
           }
-          if (line.includes('&ml-')) {
+          if (msg.raw.includes('&ml-')) {
             foundMlChannelHint = true;
-            console.log('Found &ml- retrieval hint:', line);
+            console.log('Found &ml- retrieval hint:', msg.raw);
           }
         } catch {
           break;
@@ -753,8 +775,11 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       const startTime = Date.now();
       while (Date.now() - startTime < 3000) {
         try {
-          const line = await client2.waitForLine(/PRIVMSG.*Full content line/i, 500);
-          receivedLines.push(line);
+          const msg = await client2.waitForParsedLine(
+            m => m.command === 'PRIVMSG' && m.raw.includes('Full content line'),
+            500
+          );
+          receivedLines.push(msg.raw);
         } catch {
           break;
         }
@@ -1000,8 +1025,11 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       const echoStart = Date.now();
       while (Date.now() - echoStart < 3000) {
         try {
-          const line = await client1.waitForLine(/PRIVMSG.*HistServ fallback line/i, 500);
-          if (line.includes('line 1')) break; // Got first echo
+          const msg = await client1.waitForParsedLine(
+            m => m.command === 'PRIVMSG' && m.raw.includes('HistServ fallback line'),
+            500
+          );
+          if (msg.raw.includes('line 1')) break; // Got first echo
         } catch {
           break;
         }
@@ -1016,13 +1044,16 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
 
       while (Date.now() - startTime < 5000) {
         try {
-          const line = await client2.waitForLine(/PRIVMSG|NOTICE/i, 1000);
-          receivedLines.push(line);
-          console.log('HistServ fallback test:', line);
+          const msg = await client2.waitForParsedLine(
+            m => m.command === 'PRIVMSG' || m.command === 'NOTICE',
+            1000
+          );
+          receivedLines.push(msg.raw);
+          console.log('HistServ fallback test:', msg.raw);
 
           // Look for HistServ FETCH hint with msgid
           // Format: [N more lines - /msg HistServ FETCH #channel msgid]
-          const histServMatch = line.match(/HistServ FETCH \S+ ([^\s\]]+)/i);
+          const histServMatch = msg.raw.match(/HistServ FETCH \S+ ([^\s\]]+)/i);
           if (histServMatch) {
             foundHistServHint = true;
             histServMsgid = histServMatch[1];
@@ -1030,9 +1061,9 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
           }
 
           // Look for &ml- local channel hint (fallback when HistServ unavailable)
-          if (line.includes('&ml-')) {
+          if (msg.raw.includes('&ml-')) {
             foundLocalChannel = true;
-            console.log('Found &ml- local channel hint:', line);
+            console.log('Found &ml- local channel hint:', msg.raw);
           }
         } catch {
           break;
@@ -1139,15 +1170,18 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
 
         // Also check individual messages in the echo batch for msgid
         while (true) {
-          const line = await client1.waitForLine(/PRIVMSG|BATCH -/i, 1000);
+          const msg = await client1.waitForParsedLine(
+            m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+            1000
+          );
           if (!capturedMsgid) {
-            const lineMatch = line.match(/msgid=([^\s;]+)/);
+            const lineMatch = msg.raw.match(/msgid=([^\s;]+)/);
             if (lineMatch) {
               capturedMsgid = lineMatch[1];
               console.log('Captured msgid from echo message:', capturedMsgid);
             }
           }
-          if (line.includes('BATCH -')) break;
+          if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
         }
       } catch (e) {
         console.log('Echo capture failed:', e);
@@ -1158,12 +1192,15 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       const startTime = Date.now();
       while (Date.now() - startTime < 3000) {
         try {
-          const line = await client2.waitForLine(/PRIVMSG|NOTICE/i, 500);
-          console.log('Fallback test (client2):', line);
+          const msg = await client2.waitForParsedLine(
+            m => m.command === 'PRIVMSG' || m.command === 'NOTICE',
+            500
+          );
+          console.log('Fallback test (client2):', msg.raw);
 
-          if (line.includes('NOTICE')) {
+          if (msg.command === 'NOTICE') {
             // Try HistServ pattern: "[X more lines - /msg HistServ FETCH #channel MSGID]"
-            const histServMatch = line.match(/HistServ FETCH [^\s]+ ([A-Za-z0-9_-]+)/);
+            const histServMatch = msg.raw.match(/HistServ FETCH [^\s]+ ([A-Za-z0-9_-]+)/);
             if (histServMatch) {
               if (!capturedMsgid) capturedMsgid = histServMatch[1];
               fallbackType = 'histserv';
@@ -1171,7 +1208,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
             }
 
             // Try &ml- pattern: "[X more lines - /join &ml-MSGID to view]"
-            const mlMatch = line.match(/&ml-([A-Za-z0-9_-]+)/);
+            const mlMatch = msg.raw.match(/&ml-([A-Za-z0-9_-]+)/);
             if (mlMatch) {
               if (!capturedMsgid) capturedMsgid = mlMatch[1];
               fallbackType = 'ml-channel';
@@ -1230,11 +1267,14 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
         const collectStart = Date.now();
         while (Date.now() - collectStart < 3000) {
           try {
-            const line = await client2.waitForLine(/NOTICE|PRIVMSG/i, 500);
-            console.log('HistServ FETCH response:', line);
+            const msg = await client2.waitForParsedLine(
+              m => m.command === 'NOTICE' || m.command === 'PRIVMSG',
+              500
+            );
+            console.log('HistServ FETCH response:', msg.raw);
 
-            if (line.includes('Retrieval test line')) {
-              contentLines.push(line);
+            if (msg.raw.includes('Retrieval test line')) {
+              contentLines.push(msg.raw);
             }
           } catch {
             break;
@@ -1322,12 +1362,15 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
 
         // Also check individual messages for msgid
         while (true) {
-          const line = await client1.waitForLine(/PRIVMSG|BATCH -/i, 1000);
+          const msg = await client1.waitForParsedLine(
+            m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+            1000
+          );
           if (!capturedMsgid) {
-            const lineMatch = line.match(/msgid=([^\s;]+)/);
+            const lineMatch = msg.raw.match(/msgid=([^\s;]+)/);
             if (lineMatch) capturedMsgid = lineMatch[1];
           }
-          if (line.includes('BATCH -')) break;
+          if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
         }
       } catch {
         // Continue without msgid
@@ -1340,18 +1383,20 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
 
       while (Date.now() - startTime < 4000) {
         try {
-          const line = await client2.waitForLine(/PRIVMSG|NOTICE/i, 500);
+          const msg = await client2.waitForParsedLine(
+            m => m.command === 'PRIVMSG' || m.command === 'NOTICE',
+            500
+          );
 
           // Extract message text from PRIVMSGs
-          const textMatch = line.match(/PRIVMSG [^\s]+ :(.+)$/);
-          if (textMatch) {
-            truncatedContent.push(textMatch[1]);
+          if (msg.command === 'PRIVMSG' && msg.trailing) {
+            truncatedContent.push(msg.trailing);
           }
 
           // Detect fallback mechanism from NOTICE
-          if (line.includes('NOTICE')) {
+          if (msg.command === 'NOTICE') {
             // HistServ pattern: "[X more lines - /msg HistServ FETCH #channel MSGID]"
-            const histServMatch = line.match(/HistServ FETCH [^\s]+ ([A-Za-z0-9_-]+)/);
+            const histServMatch = msg.raw.match(/HistServ FETCH [^\s]+ ([A-Za-z0-9_-]+)/);
             if (histServMatch) {
               if (!capturedMsgid) capturedMsgid = histServMatch[1];
               fallbackType = 'histserv';
@@ -1359,7 +1404,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
             }
 
             // &ml- pattern: "[X more lines - /join &ml-MSGID to view]"
-            const mlMatch = line.match(/&ml-([A-Za-z0-9_-]+)/);
+            const mlMatch = msg.raw.match(/&ml-([A-Za-z0-9_-]+)/);
             if (mlMatch) {
               if (!capturedMsgid) capturedMsgid = mlMatch[1];
               fallbackType = 'ml-channel';
@@ -1411,11 +1456,13 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
           const collectStart = Date.now();
           while (Date.now() - collectStart < 3000) {
             try {
-              const line = await client2.waitForLine(/NOTICE|PRIVMSG/i, 500);
+              const msg = await client2.waitForParsedLine(
+                m => m.command === 'NOTICE' || m.command === 'PRIVMSG',
+                500
+              );
               // HistServ returns content via NOTICE from HistServ with format: <nick> content
-              const textMatch = line.match(/NOTICE [^\s]+ :(.+)$/);
-              if (textMatch) {
-                let content = textMatch[1];
+              if (msg.command === 'NOTICE' && msg.trailing) {
+                let content = msg.trailing;
                 // Strip <nick> prefix from HistServ formatted output
                 const nickPrefixMatch = content.match(/^<[^>]+> (.+)$/);
                 if (nickPrefixMatch) {

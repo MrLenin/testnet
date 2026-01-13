@@ -221,9 +221,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`CHATHISTORY TARGETS timestamp=${past} timestamp=${now} 10`);
 
       // Response includes CHATHISTORY lines listing targets
-      const response = await client.waitForLine(/BATCH.*chathistory|CHATHISTORY/i, 5000);
+      const response = await client.waitForParsedLine(
+        msg => (msg.command === 'BATCH' && msg.raw.includes('chathistory')) || msg.command === 'CHATHISTORY',
+        5000
+      );
       expect(response).toBeDefined();
-      console.log('CHATHISTORY TARGETS response:', response);
+      console.log('CHATHISTORY TARGETS response:', response.raw);
       client.send('QUIT');
     });
   });
@@ -313,9 +316,16 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Should receive FAIL CHATHISTORY (with standard-replies) or error about the channel
       // Be specific to avoid matching unrelated NOTICEs like "Highest connection count"
-      const response = await client.waitForLine(/FAIL CHATHISTORY|BATCH \+\S+ chathistory|#nonexistent|4\d\d.*#|no.*history|not.*member|cannot/i, 3000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'FAIL' ||
+               (msg.command === 'BATCH' && msg.raw.includes('chathistory')) ||
+               msg.raw.includes('#nonexistent') ||
+               /^4\d\d$/.test(msg.command) ||
+               /no.*history|not.*member|cannot/i.test(msg.trailing || ''),
+        3000
+      );
       expect(response).toBeDefined();
-      console.log('Unauthorized history error:', response);
+      console.log('Unauthorized history error:', response.raw);
       client.send('QUIT');
     });
   });
@@ -376,7 +386,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       for (let i = 0; i < 10; i++) {
         client.send(`PRIVMSG ${channelName} :Limit test message ${i}`);
       }
-      await client.waitForLine(/Limit test message 9/, 5000);
+      await client.waitForParsedLine(msg => msg.trailing?.includes('Limit test message 9') === true, 5000);
       await new Promise(r => setTimeout(r, 500));
 
       client.clearRawBuffer();
@@ -390,9 +400,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       const messages: string[] = [];
       while (true) {
-        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 2000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('PRIVMSG')) messages.push(line);
+        const msg = await client.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          2000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'PRIVMSG') messages.push(msg.raw);
       }
 
       // Should have at most 3 messages
@@ -424,9 +437,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Should receive either an empty batch or a FAIL response
       // Use longer timeout to account for server processing time
-      const response = await client.waitForLine(/BATCH|FAIL/i, 8000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'BATCH' || msg.command === 'FAIL',
+        8000
+      );
       expect(response).toBeDefined();
-      console.log('Zero limit response:', response);
+      console.log('Zero limit response:', response.raw);
       client.send('QUIT');
     });
 
@@ -453,9 +469,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Should receive a batch response (server caps the limit)
       // Use longer timeout to account for server processing time
-      const response = await client.waitForLine(/BATCH|FAIL/i, 8000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'BATCH' || msg.command === 'FAIL',
+        8000
+      );
       expect(response).toBeDefined();
-      console.log('Large limit response:', response);
+      console.log('Large limit response:', response.raw);
       client.send('QUIT');
     });
   });
@@ -479,8 +498,11 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       await new Promise(r => setTimeout(r, 100));
       client.send(`PRIVMSG ${channelName} :Second message`);
 
-      const echo = await client.waitForLine(/PRIVMSG.*Second message/i, 3000);
-      const match = echo.match(/msgid=([^\s;]+)/);
+      const echo = await client.waitForParsedLine(
+        msg => msg.command === 'PRIVMSG' && msg.trailing?.includes('Second message') === true,
+        3000
+      );
+      const match = echo.raw.match(/msgid=([^\s;]+)/);
       expect(match).not.toBeNull();
       const msgid = match![1];
 
@@ -497,9 +519,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       const messages: string[] = [];
       while (true) {
-        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('PRIVMSG')) messages.push(line);
+        const msg = await client.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'PRIVMSG') messages.push(msg.raw);
       }
 
       // Should have at least the first message
@@ -527,17 +552,26 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Send first message and capture msgid - MUST succeed
       client.send(`PRIVMSG ${channelName} :Reference message`);
-      const echo = await client.waitForLine(/PRIVMSG.*Reference message/i, 3000);
-      const match = echo.match(/msgid=([^\s;]+)/);
+      const echo = await client.waitForParsedLine(
+        msg => msg.command === 'PRIVMSG' && msg.trailing?.includes('Reference message') === true,
+        3000
+      );
+      const match = echo.raw.match(/msgid=([^\s;]+)/);
       expect(match).not.toBeNull();
       const msgid = match![1];
 
       // Send more messages after capturing the reference msgid
       await new Promise(r => setTimeout(r, 100));
       client.send(`PRIVMSG ${channelName} :After message 1`);
-      await client.waitForLine(/PRIVMSG.*After message 1/i, 3000);
+      await client.waitForParsedLine(
+        msg => msg.command === 'PRIVMSG' && msg.trailing?.includes('After message 1') === true,
+        3000
+      );
       client.send(`PRIVMSG ${channelName} :After message 2`);
-      await client.waitForLine(/PRIVMSG.*After message 2/i, 3000);
+      await client.waitForParsedLine(
+        msg => msg.command === 'PRIVMSG' && msg.trailing?.includes('After message 2') === true,
+        3000
+      );
 
       // Wait for history backend to persist
       await new Promise(r => setTimeout(r, 1000));
@@ -552,9 +586,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       const messages: string[] = [];
       while (true) {
-        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('PRIVMSG')) messages.push(line);
+        const msg = await client.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'PRIVMSG') messages.push(msg.raw);
       }
 
       // Should have at least 2 messages
@@ -614,9 +651,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       const messages: string[] = [];
       // Collect messages until batch end
       while (true) {
-        const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('PRIVMSG')) messages.push(line);
+        const msg = await client1.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'PRIVMSG') messages.push(msg.raw);
       }
 
       // In multi-party mode (2), messages should NOT be stored without both opting in
@@ -645,12 +685,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // BOTH parties opt in - MUST get 761 response confirming the SET
       client1.send('METADATA SET * chathistory.pm * :1');
-      const meta1Response = await client1.waitForLine(/761.*chathistory\.pm/i, 3000);
-      expect(meta1Response).toMatch(/761/);
+      const meta1Response = await client1.waitForNumeric('761', 3000);
+      expect(meta1Response.command).toBe('761');
 
       client2.send('METADATA SET * chathistory.pm * :1');
-      const meta2Response = await client2.waitForLine(/761.*chathistory\.pm/i, 3000);
-      expect(meta2Response).toMatch(/761/);
+      const meta2Response = await client2.waitForNumeric('761', 3000);
+      expect(meta2Response.command).toBe('761');
 
       await new Promise(r => setTimeout(r, 300));
 
@@ -673,9 +713,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       const messages: string[] = [];
       // Collect messages until batch end
       while (true) {
-        const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('PRIVMSG')) messages.push(line);
+        const msg = await client1.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'PRIVMSG') messages.push(msg.raw);
       }
 
       // With both opted in, PM history MUST be stored
@@ -704,8 +747,8 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Only sender opts in - MUST get 761 response
       client1.send('METADATA SET * chathistory.pm * :1');
-      const metaResponse = await client1.waitForLine(/761.*chathistory\.pm/i, 3000);
-      expect(metaResponse).toMatch(/761/);
+      const metaResponse = await client1.waitForNumeric('761', 3000);
+      expect(metaResponse.command).toBe('761');
       await new Promise(r => setTimeout(r, 300));
 
       // Send messages
@@ -725,9 +768,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       const messages: string[] = [];
       // Collect messages until batch end
       while (true) {
-        const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('PRIVMSG')) messages.push(line);
+        const msg = await client1.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'PRIVMSG') messages.push(msg.raw);
       }
 
       // In multi-party mode, messages should NOT be stored with only sender consent
@@ -756,8 +802,8 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Only recipient opts in - MUST get 761 response
       client2.send('METADATA SET * chathistory.pm * :1');
-      const metaResponse = await client2.waitForLine(/761.*chathistory\.pm/i, 3000);
-      expect(metaResponse).toMatch(/761/);
+      const metaResponse = await client2.waitForNumeric('761', 3000);
+      expect(metaResponse.command).toBe('761');
       await new Promise(r => setTimeout(r, 300));
 
       // Send messages
@@ -777,9 +823,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       const messages: string[] = [];
       // Collect messages until batch end
       while (true) {
-        const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('PRIVMSG')) messages.push(line);
+        const msg = await client1.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'PRIVMSG') messages.push(msg.raw);
       }
 
       // In multi-party mode, messages should NOT be stored with only recipient consent
@@ -808,13 +857,13 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Client1 opts in - MUST get 761 response
       client1.send('METADATA SET * chathistory.pm * :1');
-      const meta1Response = await client1.waitForLine(/761.*chathistory\.pm/i, 3000);
-      expect(meta1Response).toMatch(/761/);
+      const meta1Response = await client1.waitForNumeric('761', 3000);
+      expect(meta1Response.command).toBe('761');
 
       // Client2 explicitly opts out - MUST get 761 response
       client2.send('METADATA SET * chathistory.pm * :0');
-      const meta2Response = await client2.waitForLine(/761.*chathistory\.pm/i, 3000);
-      expect(meta2Response).toMatch(/761/);
+      const meta2Response = await client2.waitForNumeric('761', 3000);
+      expect(meta2Response.command).toBe('761');
       await new Promise(r => setTimeout(r, 300));
 
       // Send messages
@@ -834,9 +883,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       const messages: string[] = [];
       // Collect messages until batch end
       while (true) {
-        const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('PRIVMSG')) messages.push(line);
+        const msg = await client1.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'PRIVMSG') messages.push(msg.raw);
       }
 
       // Explicit opt-out should override any opt-in
@@ -865,12 +917,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Both opt in - MUST get 761 response for each
       client1.send('METADATA SET * chathistory.pm * :1');
-      const meta1Response = await client1.waitForLine(/761.*chathistory\.pm/i, 3000);
-      expect(meta1Response).toMatch(/761/);
+      const meta1Response = await client1.waitForNumeric('761', 3000);
+      expect(meta1Response.command).toBe('761');
 
       client2.send('METADATA SET * chathistory.pm * :1');
-      const meta2Response = await client2.waitForLine(/761.*chathistory\.pm/i, 3000);
-      expect(meta2Response).toMatch(/761/);
+      const meta2Response = await client2.waitForNumeric('761', 3000);
+      expect(meta2Response.command).toBe('761');
       await new Promise(r => setTimeout(r, 300));
 
       // First message (should be stored)
@@ -880,8 +932,8 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Client2 revokes consent - MUST get 761 response
       client2.send('METADATA SET * chathistory.pm * :0');
-      const revokeResponse = await client2.waitForLine(/761.*chathistory\.pm/i, 3000);
-      expect(revokeResponse).toMatch(/761/);
+      const revokeResponse = await client2.waitForNumeric('761', 3000);
+      expect(revokeResponse.command).toBe('761');
       await new Promise(r => setTimeout(r, 300));
 
       // Second message (should NOT be stored)
@@ -901,9 +953,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       const messages: string[] = [];
       // Collect messages until batch end
       while (true) {
-        const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('PRIVMSG')) messages.push(line);
+        const msg = await client1.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'PRIVMSG') messages.push(msg.raw);
       }
 
       // Verify consent change worked: post-revoke message should NOT be stored
@@ -930,18 +985,18 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Set opt-in - MUST get 761 response
       client.send('METADATA SET * chathistory.pm * :1');
-      const setResponse = await client.waitForLine(/761.*chathistory\.pm/i, 3000);
-      expect(setResponse).toMatch(/761/);
+      const setResponse = await client.waitForNumeric('761', 3000);
+      expect(setResponse.command).toBe('761');
       await new Promise(r => setTimeout(r, 200));
 
       client.clearRawBuffer();
 
       // Query own status - MUST get 761 response with value
       client.send('METADATA GET * chathistory.pm');
-      const getResponse = await client.waitForLine(/761.*chathistory\.pm/i, 3000);
-      expect(getResponse).toContain('chathistory.pm');
+      const getResponse = await client.waitForNumeric('761', 3000);
+      expect(getResponse.raw).toContain('chathistory.pm');
       // Value should be '1' - verify the opt-in value is returned
-      expect(getResponse).toMatch(/:1/);
+      expect(getResponse.trailing).toBe('1');
 
       client.send('QUIT');
     });
@@ -965,18 +1020,18 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Client2 sets public opt-in - MUST get 761 response
       client2.send('METADATA SET * chathistory.pm * :1');
-      const setResponse = await client2.waitForLine(/761.*chathistory\.pm/i, 3000);
-      expect(setResponse).toMatch(/761/);
+      const setResponse = await client2.waitForNumeric('761', 3000);
+      expect(setResponse.command).toBe('761');
       await new Promise(r => setTimeout(r, 300));
 
       client1.clearRawBuffer();
 
       // Client1 queries Client2's status - MUST get 761 response (public visibility)
       client1.send(`METADATA GET pmqry2_${testId} chathistory.pm`);
-      const getResponse = await client1.waitForLine(/761.*chathistory\.pm/i, 3000);
-      expect(getResponse).toContain('chathistory.pm');
+      const getResponse = await client1.waitForNumeric('761', 3000);
+      expect(getResponse.raw).toContain('chathistory.pm');
       // Verify other user's opt-in value is visible
-      expect(getResponse).toMatch(/:1/);
+      expect(getResponse.trailing).toBe('1');
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -999,10 +1054,10 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Wait for 001 and collect lines
       while (Date.now() - startTime < 10000) {
         try {
-          const line = await client.waitForLine(/./, 500);
-          registrationLines.push(line);
+          const msg = await client.waitForParsedLine(() => true, 500);
+          registrationLines.push(msg.raw);
           // Stop after MOTD end or reasonable time
-          if (line.includes('376') || line.includes('422')) {
+          if (msg.command === '376' || msg.command === '422') {
             // Wait a bit more for any post-MOTD notices
             await new Promise(r => setTimeout(r, 500));
             break;
@@ -1045,9 +1100,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       while (Date.now() - startTime < 10000) {
         try {
-          const line = await client.waitForLine(/./, 500);
-          registrationLines.push(line);
-          if (line.includes('376') || line.includes('422')) {
+          const msg = await client.waitForParsedLine(() => true, 500);
+          registrationLines.push(msg.raw);
+          if (msg.command === '376' || msg.command === '422') {
             await new Promise(r => setTimeout(r, 500));
             break;
           }
@@ -1089,9 +1144,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       while (Date.now() - startTime < 10000) {
         try {
-          const line = await client.waitForLine(/./, 500);
-          registrationLines.push(line);
-          if (line.includes('376') || line.includes('422')) {
+          const msg = await client.waitForParsedLine(() => true, 500);
+          registrationLines.push(msg.raw);
+          if (msg.command === '376' || msg.command === '422') {
             await new Promise(r => setTimeout(r, 500));
             break;
           }
@@ -1247,9 +1302,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`CHATHISTORY BEFORE ${channelName} timestamp=not-a-timestamp 10`);
 
       // Expect FAIL CHATHISTORY INVALID_PARAMS per IRCv3 spec
-      const response = await client.waitForLine(/FAIL\s+CHATHISTORY\s+INVALID_PARAMS/i, 5000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'FAIL' && msg.raw.includes('CHATHISTORY') && msg.raw.includes('INVALID_PARAMS'),
+        5000
+      );
       expect(response).toBeDefined();
-      expect(response).toMatch(/FAIL\s+CHATHISTORY\s+INVALID_PARAMS/i);
+      expect(response.command).toBe('FAIL');
       console.log('Server correctly rejected invalid timestamp with FAIL');
 
       client.send('QUIT');
@@ -1286,9 +1344,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       const messages: string[] = [];
       while (true) {
-        const line = await client.waitForLine(/NOTICE|PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('NOTICE')) messages.push(line);
+        const msg = await client.waitForParsedLine(
+          m => m.command === 'NOTICE' || m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'NOTICE') messages.push(msg.raw);
       }
 
       // Should have NOTICE messages in history
@@ -1334,10 +1395,13 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       const privmsgs: string[] = [];
       const notices: string[] = [];
       while (true) {
-        const line = await client.waitForLine(/NOTICE|PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('NOTICE')) notices.push(line);
-        else if (line.includes('PRIVMSG')) privmsgs.push(line);
+        const msg = await client.waitForParsedLine(
+          m => m.command === 'NOTICE' || m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'NOTICE') notices.push(msg.raw);
+        else if (msg.command === 'PRIVMSG') privmsgs.push(msg.raw);
       }
 
       expect(privmsgs.length).toBeGreaterThanOrEqual(2);
@@ -1384,9 +1448,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       const messages: string[] = [];
       while (true) {
-        const line = await client.waitForLine(/TAGMSG|PRIVMSG|NOTICE|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('TAGMSG')) messages.push(line);
+        const msg = await client.waitForParsedLine(
+          m => m.command === 'TAGMSG' || m.command === 'PRIVMSG' || m.command === 'NOTICE' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'TAGMSG') messages.push(msg.raw);
       }
 
       // TAGMSG must be stored when event-playback is enabled
@@ -1416,8 +1483,11 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Send original message and get msgid - MUST get echo with msgid
       client.send(`PRIVMSG ${channelName} :Original message for reply`);
-      const echo = await client.waitForLine(/PRIVMSG.*Original message/i, 3000);
-      const match = echo.match(/msgid=([^\s;]+)/);
+      const echo = await client.waitForParsedLine(
+        msg => msg.command === 'PRIVMSG' && msg.trailing?.includes('Original message') === true,
+        3000
+      );
+      const match = echo.raw.match(/msgid=([^\s;]+)/);
       expect(match).not.toBeNull();
       const originalMsgid = match![1];
 
@@ -1436,9 +1506,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       const messages: string[] = [];
       while (true) {
-        const line = await client.waitForLine(/TAGMSG|PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        messages.push(line);
+        const msg = await client.waitForParsedLine(
+          m => m.command === 'TAGMSG' || m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        messages.push(msg.raw);
       }
 
       // Check if reply tag links back to original
@@ -1497,9 +1570,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       const joins: string[] = [];
       while (true) {
-        const line = await client1.waitForLine(/JOIN|PRIVMSG|NOTICE|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('JOIN')) joins.push(line);
+        const msg = await client1.waitForParsedLine(
+          m => m.command === 'JOIN' || m.command === 'PRIVMSG' || m.command === 'NOTICE' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'JOIN') joins.push(msg.raw);
       }
 
       // JOIN events must be stored when event-playback is enabled
@@ -1552,9 +1628,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       const parts: string[] = [];
       while (true) {
-        const line = await client1.waitForLine(/PART|JOIN|PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('PART')) parts.push(line);
+        const msg = await client1.waitForParsedLine(
+          m => m.command === 'PART' || m.command === 'JOIN' || m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'PART') parts.push(msg.raw);
       }
 
       // PART events must be stored when event-playback is enabled
@@ -1609,9 +1688,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       const kicks: string[] = [];
       while (true) {
-        const line = await op.waitForLine(/KICK|JOIN|PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('KICK')) kicks.push(line);
+        const msg = await op.waitForParsedLine(
+          m => m.command === 'KICK' || m.command === 'JOIN' || m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'KICK') kicks.push(msg.raw);
       }
 
       // KICK events must be stored when event-playback is enabled
@@ -1666,9 +1748,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       const quits: string[] = [];
       while (true) {
-        const line = await client1.waitForLine(/QUIT|JOIN|PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('QUIT')) quits.push(line);
+        const msg = await client1.waitForParsedLine(
+          m => m.command === 'QUIT' || m.command === 'JOIN' || m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'QUIT') quits.push(msg.raw);
       }
 
       // QUIT events must be stored when event-playback is enabled
@@ -1771,8 +1856,11 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       const sentMsgIds: string[] = [];
       for (let i = 1; i <= 10; i++) {
         client.send(`PRIVMSG ${channelName} :Pagination message ${i}`);
-        const echo = await client.waitForLine(new RegExp(`Pagination message ${i}`), 3000);
-        const match = echo.match(/msgid=([^\s;]+)/);
+        const echo = await client.waitForParsedLine(
+          msg => msg.trailing?.includes(`Pagination message ${i}`) === true,
+          3000
+        );
+        const match = echo.raw.match(/msgid=([^\s;]+)/);
         expect(match).not.toBeNull();
         sentMsgIds.push(match![1]);
         await new Promise(r => setTimeout(r, 50));
@@ -1791,10 +1879,13 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       const page1: { content: string; msgid: string }[] = [];
       while (true) {
-        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        const msgidMatch = line.match(/msgid=([^\s;]+)/);
-        const contentMatch = line.match(/Pagination message (\d+)/);
+        const msg = await client.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        const msgidMatch = msg.raw.match(/msgid=([^\s;]+)/);
+        const contentMatch = msg.raw.match(/Pagination message (\d+)/);
         if (msgidMatch && contentMatch) {
           page1.push({ content: contentMatch[1], msgid: msgidMatch[1] });
         }
@@ -1815,10 +1906,13 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       const page2: { content: string; msgid: string }[] = [];
       while (true) {
-        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        const msgidMatch = line.match(/msgid=([^\s;]+)/);
-        const contentMatch = line.match(/Pagination message (\d+)/);
+        const msg = await client.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        const msgidMatch = msg.raw.match(/msgid=([^\s;]+)/);
+        const contentMatch = msg.raw.match(/Pagination message (\d+)/);
         if (msgidMatch && contentMatch) {
           page2.push({ content: contentMatch[1], msgid: msgidMatch[1] });
         }
@@ -1861,8 +1955,11 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       let firstMsgId: string | null = null;
       for (let i = 1; i <= 8; i++) {
         client.send(`PRIVMSG ${channelName} :Forward page ${i}`);
-        const echo = await client.waitForLine(new RegExp(`Forward page ${i}`), 3000);
-        const match = echo.match(/msgid=([^\s;]+)/);
+        const echo = await client.waitForParsedLine(
+          msg => msg.trailing?.includes(`Forward page ${i}`) === true,
+          3000
+        );
+        const match = echo.raw.match(/msgid=([^\s;]+)/);
         expect(match).not.toBeNull();
         if (i === 1) firstMsgId = match![1];
         await new Promise(r => setTimeout(r, 50));
@@ -1881,9 +1978,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       const afterFirst: string[] = [];
       while (true) {
-        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        const contentMatch = line.match(/Forward page (\d+)/);
+        const msg = await client.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        const contentMatch = msg.raw.match(/Forward page (\d+)/);
         if (contentMatch) afterFirst.push(contentMatch[1]);
       }
 
@@ -1913,8 +2013,11 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       let firstMsgId: string | null = null;
       for (let i = 1; i <= 3; i++) {
         client.send(`PRIVMSG ${channelName} :End test ${i}`);
-        const echo = await client.waitForLine(new RegExp(`End test ${i}`), 3000);
-        const match = echo.match(/msgid=([^\s;]+)/);
+        const echo = await client.waitForParsedLine(
+          msg => msg.trailing?.includes(`End test ${i}`) === true,
+          3000
+        );
+        const match = echo.raw.match(/msgid=([^\s;]+)/);
         expect(match).not.toBeNull();
         if (i === 1) firstMsgId = match![1];
         await new Promise(r => setTimeout(r, 50));
@@ -1928,18 +2031,21 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`CHATHISTORY BEFORE ${channelName} msgid=${firstMsgId} 10`);
 
       // MUST receive batch
-      const batchStart = await client.waitForLine(/BATCH \+(\S+) chathistory/i, 5000);
+      const batchStart = await client.waitForBatchStart('chathistory', 5000);
       expect(batchStart).toBeDefined();
-      const batchMatch = batchStart.match(/BATCH \+(\S+)/);
+      const batchMatch = batchStart.raw.match(/BATCH \+(\S+)/);
       expect(batchMatch).not.toBeNull();
       const batchId = batchMatch![1];
 
       // Should get batch end with no messages (empty batch at start of history)
       const messages: string[] = [];
       while (true) {
-        const line = await client.waitForLine(/PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        messages.push(line);
+        const msg = await client.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        messages.push(msg.raw);
       }
 
       // At start of history, there should be no messages before the first one
@@ -1992,9 +2098,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       const initialMsgs: string[] = [];
       while (true) {
-        const line = await reader.waitForLine(/PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('Initial')) initialMsgs.push(line);
+        const msg = await reader.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.raw.includes('Initial')) initialMsgs.push(msg.raw);
       }
 
       expect(initialMsgs.length).toBeGreaterThan(0);
@@ -2010,9 +2119,12 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       const allMsgs: string[] = [];
       while (true) {
-        const line = await reader.waitForLine(/PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        allMsgs.push(line);
+        const msg = await reader.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        allMsgs.push(msg.raw);
       }
 
       // Follow-up should have at least as many as initial plus concurrent
