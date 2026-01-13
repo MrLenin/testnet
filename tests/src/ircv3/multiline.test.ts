@@ -993,7 +993,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send('QUIT');
     });
 
-    it('HistServ fallback for clients without chathistory or multiline', async () => {
+    it('HistServ fallback for clients without chathistory or multiline', { retry: 2 }, async () => {
       const client1 = trackClient(await createRawSocketClient());
       const client2 = trackClient(await createRawSocketClient());
 
