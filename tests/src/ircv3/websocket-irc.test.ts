@@ -223,9 +223,10 @@ describe('IRC-over-WebSocket Protocol', () => {
       await client1.waitForText('366', 5000);
       await client2.waitForText('366', 5000);
 
-      // Clear buffers
+      // Clear buffers and settle delay to avoid consuming stale frames
       client1.clearFrames();
       client2.clearFrames();
+      await new Promise(r => setTimeout(r, 200));
 
       // Client1 sends message
       client1.send(`PRIVMSG ${channel} :${message}`);
@@ -245,8 +246,9 @@ describe('IRC-over-WebSocket Protocol', () => {
       client.send(`JOIN ${channel}`);
       await client.waitForText('366', 5000);
 
-      // Clear frames
+      // Clear frames and settle delay to avoid consuming stale frames
       client.clearFrames();
+      await new Promise(r => setTimeout(r, 200));
 
       // Query channel modes (returns 324 RPL_CHANNELMODEIS)
       client.send(`MODE ${channel}`);
@@ -277,9 +279,10 @@ describe('IRC-over-WebSocket Protocol', () => {
       await wsClient.waitForText('366', 5000);
       await rawClient.waitForNumeric('366', 5000);
 
-      // Clear buffers
+      // Clear buffers and settle delay to avoid consuming stale frames
       wsClient.clearFrames();
       rawClient.clearRawBuffer();
+      await new Promise(r => setTimeout(r, 200));
 
       // WebSocket → Raw Socket
       wsClient.send(`PRIVMSG ${channel} :${wsMessage}`);
@@ -324,6 +327,7 @@ describe('IRC-over-WebSocket Protocol', () => {
       // Wait for ws to be fully joined
       await wsClient.waitForText('366', 5000);
       wsClient.clearFrames();
+      await new Promise(r => setTimeout(r, 200));
 
       // WebSocket client parts - raw should see PART
       wsClient.send(`PART ${channel}`);
@@ -343,8 +347,10 @@ describe('IRC-over-WebSocket Protocol', () => {
       await client1.register(nick1);
       await client2.register(nick2);
 
+      // Clear frames and settle delay to avoid consuming stale frames
       client1.clearFrames();
       client2.clearFrames();
+      await new Promise(r => setTimeout(r, 200));
 
       // Send DM from client1 to client2
       client1.send(`PRIVMSG ${nick2} :${message}`);
@@ -365,7 +371,9 @@ describe('IRC-over-WebSocket Protocol', () => {
       await client1.register(nick1);
       await client2.register(nick2);
 
+      // Clear frames and settle delay to avoid consuming stale frames
       client2.clearFrames();
+      await new Promise(r => setTimeout(r, 200));
 
       // Send NOTICE from client1 to client2
       client1.send(`NOTICE ${nick2} :${notice}`);
@@ -434,12 +442,14 @@ describe('IRC-over-WebSocket Protocol', () => {
         client.send(`JOIN ${channel}`);
       }
 
-      // All should receive join confirmations
+      // All should receive join confirmations in parallel
       // Use longer timeout to account for concurrent connection overhead
-      for (const { client } of results) {
+      const joinPromises = results.map(async ({ client }) => {
         const join = await client.waitForText('366', 10000);
         expect(join).toContain(channel);
-      }
+        return join;
+      });
+      await Promise.all(joinPromises);
     });
   });
 
@@ -502,7 +512,10 @@ describe('IRC-over-WebSocket Protocol', () => {
       client2.send(`JOIN ${channel}`);
       await client1.waitForText('366', 5000);
       await client2.waitForText('366', 5000);
+
+      // Clear frames and settle delay to avoid consuming stale frames
       client2.clearFrames();
+      await new Promise(r => setTimeout(r, 200));
 
       // Send UTF-8 message
       const utf8Message = 'Hello 世界 🌍 émoji';
@@ -527,7 +540,10 @@ describe('IRC-over-WebSocket Protocol', () => {
       client2.send(`JOIN ${channel}`);
       await client1.waitForText('366', 5000);
       await client2.waitForText('366', 5000);
+
+      // Clear frames and settle delay to avoid consuming stale frames
       client2.clearFrames();
+      await new Promise(r => setTimeout(r, 200));
 
       // Send message with IRC color/bold codes
       // \x02 = bold, \x03 = color

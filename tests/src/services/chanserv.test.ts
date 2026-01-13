@@ -212,6 +212,10 @@ describe('ChanServ (X3)', () => {
       // Wait for user to appear in access list before deleting
       await waitForUserAccess(ownerClient, channel, user2);
 
+      // Settle delay and buffer clear to avoid race with ChanServ responses from polling
+      await new Promise(r => setTimeout(r, 200));
+      ownerClient.clearRawBuffer();
+
       // Remove user
       const delResult = await ownerClient.delUser(channel, user2);
       console.log('DELUSER response:', delResult.lines);
@@ -318,6 +322,11 @@ describe('ChanServ (X3)', () => {
       // Wait for JOIN first
       await user2Client.waitForJoin(channel, undefined, 5000);
 
+      // Settle delay and buffer clear - JOIN sends NAMES (353) which may show user
+      // without ops if ChanServ hasn't granted yet. Clear stale 353 before polling.
+      await new Promise(r => setTimeout(r, 500));
+      user2Client.clearRawBuffer();
+
       // Wait for ChanServ to grant ops (polls NAMES with retries)
       // Extended timeout to 10s to handle slow ChanServ processing
       const hasOps = await waitForChannelMode(user2Client, channel, user2, '@', 10000);
@@ -383,6 +392,11 @@ describe('ChanServ (X3)', () => {
 
       // Wait for JOIN first
       await user2Client.waitForJoin(channel, undefined, 5000);
+
+      // Settle delay and buffer clear - JOIN sends NAMES (353) which may show user
+      // without voice if ChanServ hasn't granted yet. Clear stale 353 before polling.
+      await new Promise(r => setTimeout(r, 500));
+      user2Client.clearRawBuffer();
 
       // Wait for ChanServ to grant voice (polls NAMES with retries)
       // Extended timeout to 10s to handle slow ChanServ processing

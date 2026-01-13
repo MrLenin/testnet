@@ -173,17 +173,21 @@ describe('Core IRC Commands', () => {
       client.send(`MODE ${channel} +nt`);
       await client.waitForMode(channel, '+', 5000);
 
+      // Small settle delay to let any additional mode-related messages arrive
+      await new Promise(r => setTimeout(r, 200));
       client.clearRawBuffer();
 
       // Query modes
       client.send(`MODE ${channel}`);
 
-      // Should receive mode info (324 = RPL_CHANNELMODEIS) or MODE response
+      // Should receive 324 RPL_CHANNELMODEIS with channel and modes
       const modeInfo = await client.waitForParsedLine(
-        msg => msg.command === '324' || msg.command === 'MODE',
+        msg => msg.command === '324' && msg.raw.includes(channel),
         5000
       );
       expect(modeInfo).toBeDefined();
+      expect(modeInfo.command).toBe('324');
+      console.log('MODE query response:', modeInfo.raw);
 
       client.send('QUIT');
     });
