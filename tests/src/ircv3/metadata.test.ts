@@ -289,7 +289,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.send('QUIT');
     });
 
-    it('returns error for metadata on non-existent target', async () => {
+    it('returns error for metadata on non-existent channel', async () => {
       const client = trackClient(await createRawSocketClient());
 
       const caps = await client.capLs();
@@ -299,7 +299,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.register('metaerr2');
       await client.waitForNumeric('001');
 
-      // Try to get metadata for non-existent channel (immediate error, no X3 query)
+      // Try to get metadata for non-existent channel (immediate local error)
       client.send('METADATA GET #nonexistentchannel12345 avatar');
 
       try {
@@ -309,10 +309,36 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
           3000
         );
         expect(response).toBeDefined();
-        console.log('METADATA target error response:', response.raw);
+        console.log('METADATA channel error response:', response.raw);
       } catch {
-        console.log('No METADATA target error response');
+        console.log('No METADATA channel error response');
       }
+
+      client.send('QUIT');
+    });
+
+    it('returns error for metadata on non-existent account', async () => {
+      const client = trackClient(await createRawSocketClient());
+
+      const caps = await client.capLs();
+      const metaCap = caps.has('draft/metadata-2') ? 'draft/metadata-2' : 'draft/metadata';
+      await client.capReq([metaCap]);
+      client.capEnd();
+      client.register('metaerr3');
+      await client.waitForNumeric('001');
+
+      // Try to get metadata for non-existent account (queries X3, gets NOTARGET error)
+      // This should return immediately with FAIL TARGET_INVALID, not timeout
+      client.send('METADATA GET nonexistentaccount12345 avatar');
+
+      // Should get FAIL TARGET_INVALID within 5 seconds (not 30 second timeout)
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'FAIL' && msg.raw.includes('TARGET_INVALID'),
+        5000
+      );
+      expect(response).toBeDefined();
+      expect(response.raw).toContain('TARGET_INVALID');
+      console.log('METADATA account error response:', response.raw);
 
       client.send('QUIT');
     });
