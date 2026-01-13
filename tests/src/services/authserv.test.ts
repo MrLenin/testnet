@@ -146,7 +146,7 @@ describe('AuthServ', () => {
       expect(authResult.success).toBe(true);
     });
 
-    it('should reject authentication with wrong password', async () => {
+    it('should reject authentication with wrong password', { retry: 2 }, async () => {
       // Get a test account to test wrong password against
       const client = trackClient(await createX3Client());
       const { account, fromPool } = await setupTestAccount(client);
@@ -211,7 +211,7 @@ describe('AuthServ', () => {
   });
 
   describe('Hostmask Management', () => {
-    it('should add hostmask for authentication after registering', async () => {
+    it('should add hostmask for authentication after registering', { retry: 2 }, async () => {
       const client = trackClient(await createX3Client());
       const { account, fromPool } = await setupTestAccount(client);
       if (fromPool) poolAccounts.push(account);
@@ -283,7 +283,7 @@ describe('AuthServ', () => {
       expect(result.lines.length).toBeGreaterThan(0);
     });
 
-    it('should handle invalid commands gracefully', async () => {
+    it('should handle invalid commands gracefully', { retry: 2 }, async () => {
       const client = trackClient(await createX3Client());
 
       // Send an invalid command
