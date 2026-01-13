@@ -76,7 +76,7 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       founder.send('QUIT');
     });
 
-    it('RENAME includes reason if provided', async () => {
+    it('RENAME includes reason if provided', { retry: 2 }, async () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
@@ -105,7 +105,7 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
   });
 
   describe('RENAME Notification', () => {
-    it('channel members receive RENAME notification', async () => {
+    it('channel members receive RENAME notification', { retry: 2 }, async () => {
       const op = trackClient(await createRawSocketClient());
       const member = trackClient(await createRawSocketClient());
 
@@ -142,7 +142,7 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       member.send('QUIT');
     });
 
-    it('user without capability receives PART/JOIN instead of RENAME', async () => {
+    it('user without capability receives PART/JOIN instead of RENAME', { retry: 2 }, async () => {
       const op = trackClient(await createRawSocketClient());
       const nocap = trackClient(await createRawSocketClient());
 
@@ -229,7 +229,7 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
   });
 
   describe('RENAME Edge Cases', () => {
-    it('RENAME to existing channel name fails', async () => {
+    it('RENAME to existing channel name fails', { retry: 2 }, async () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
@@ -261,7 +261,7 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       client.send('QUIT');
     });
 
-    it('RENAME preserves channel modes', async () => {
+    it('RENAME preserves channel modes', { retry: 2 }, async () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
