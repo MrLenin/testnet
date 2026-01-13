@@ -26,13 +26,16 @@ describe('X3 Services', () => {
     await client.capLs();
     client.capEnd();
     client.register('authtest1');
-    await client.waitForLine(/001/);
+    await client.waitForNumeric('001');
 
     // Send a message to AuthServ
     client.send('PRIVMSG AuthServ :HELP');
 
     // Wait for a response from AuthServ
-    const response = await client.waitForLine(/AuthServ.*NOTICE/i, 10000);
+    const response = await client.waitForParsedLine(
+      msg => msg.command === 'NOTICE' && msg.source?.nick?.toLowerCase() === 'authserv',
+      10000
+    );
     expect(response).toBeDefined();
     client.send('QUIT');
   });
@@ -43,13 +46,16 @@ describe('X3 Services', () => {
     await client.capLs();
     client.capEnd();
     client.register('chantest1');
-    await client.waitForLine(/001/);
+    await client.waitForNumeric('001');
 
     // Send a message to ChanServ
     client.send('PRIVMSG ChanServ :HELP');
 
     // Wait for a response from ChanServ
-    const response = await client.waitForLine(/ChanServ.*NOTICE/i, 10000);
+    const response = await client.waitForParsedLine(
+      msg => msg.command === 'NOTICE' && msg.source?.nick?.toLowerCase() === 'chanserv',
+      10000
+    );
     expect(response).toBeDefined();
     client.send('QUIT');
   });
@@ -60,18 +66,21 @@ describe('X3 Services', () => {
     await client.capLs();
     client.capEnd();
     client.register('chanreg1');
-    await client.waitForLine(/001/);
+    await client.waitForNumeric('001');
 
     // First join the channel to become op
     const channelName = uniqueChannel('testchan');
     client.send(`JOIN ${channelName}`);
-    await client.waitForLine(new RegExp(`JOIN.*${channelName}`, 'i'));
+    await client.waitForJoin(channelName);
 
     // Try to register (this may fail without auth, but we test the interaction)
     client.send(`PRIVMSG ChanServ :REGISTER ${channelName}`);
 
     // Wait for some response from ChanServ
-    const response = await client.waitForLine(/ChanServ/i, 10000);
+    const response = await client.waitForParsedLine(
+      msg => msg.source?.nick?.toLowerCase() === 'chanserv',
+      10000
+    );
     expect(response).toBeDefined();
     client.send('QUIT');
   });
@@ -102,14 +111,17 @@ describe('X3 OpServ', () => {
     await client.capLs();
     client.capEnd();
     client.register('optest1');
-    await client.waitForLine(/001/);
+    await client.waitForNumeric('001');
 
     // Try to communicate with OpServ
     client.send('PRIVMSG OpServ :HELP');
 
     // OpServ typically requires oper status, but should still respond
     // Wait for any response (could be help or access denied)
-    const response = await client.waitForLine(/OpServ|NOTICE/i, 10000);
+    const response = await client.waitForParsedLine(
+      msg => msg.source?.nick?.toLowerCase() === 'opserv' || msg.command === 'NOTICE',
+      10000
+    );
     expect(response).toBeDefined();
     client.send('QUIT');
   });

@@ -65,8 +65,8 @@ describe('IRCv3 setname', () => {
       client.send('SETNAME :New Realname Here');
 
       // Should receive SETNAME confirmation
-      const response = await client.waitForLine(/SETNAME.*New Realname/i, 5000);
-      expect(response).toContain('New Realname Here');
+      const response = await client.waitForCommand('SETNAME', 5000);
+      expect(response.raw).toContain('New Realname Here');
 
       client.send('QUIT');
     });
@@ -100,9 +100,9 @@ describe('IRCv3 setname', () => {
       changer.send('SETNAME :Updated Name');
 
       // Observer should see SETNAME
-      const notification = await observer.waitForLine(/SETNAME.*Updated Name/i, 5000);
-      expect(notification).toContain('snchanger1');
-      expect(notification).toContain('Updated Name');
+      const notification = await observer.waitForCommand('SETNAME', 5000);
+      expect(notification.raw).toContain('snchanger1');
+      expect(notification.raw).toContain('Updated Name');
 
       changer.send('QUIT');
       observer.send('QUIT');
@@ -119,7 +119,7 @@ describe('IRCv3 setname', () => {
 
       // Change name
       client.send('SETNAME :WHOIS Test Name');
-      await client.waitForLine(/SETNAME/i);
+      await client.waitForCommand('SETNAME');
 
       client.clearRawBuffer();
 
@@ -127,8 +127,8 @@ describe('IRCv3 setname', () => {
       client.send('WHOIS snwhois1');
 
       // 311 is RPL_WHOISUSER which includes realname
-      const whoisReply = await client.waitForLine(/311.*snwhois1/i, 5000);
-      expect(whoisReply).toContain('WHOIS Test Name');
+      const whoisReply = await client.waitForNumeric('311', 5000);
+      expect(whoisReply.raw).toContain('WHOIS Test Name');
 
       client.send('QUIT');
     });
@@ -163,7 +163,7 @@ describe('IRCv3 setname', () => {
 
       // Observer should NOT receive SETNAME
       try {
-        await observer.waitForLine(/SETNAME/i, 2000);
+        await observer.waitForCommand('SETNAME', 2000);
         throw new Error('Should not receive SETNAME without capability');
       } catch (error) {
         if (error instanceof Error && error.message.includes('Should not')) {
@@ -194,8 +194,11 @@ describe('IRCv3 setname', () => {
 
       // May receive error or just be ignored
       try {
-        const response = await client.waitForLine(/(SETNAME|FAIL|4\d\d)/i, 3000);
-        console.log('Empty SETNAME response:', response);
+        const response = await client.waitForParsedLine(
+          msg => msg.command === 'SETNAME' || msg.command === 'FAIL' || /^4\d\d$/.test(msg.command),
+          3000
+        );
+        console.log('Empty SETNAME response:', response.raw);
       } catch {
         console.log('No response to empty SETNAME');
       }
@@ -218,7 +221,10 @@ describe('IRCv3 setname', () => {
       const longName = 'A'.repeat(500);
       client.send(`SETNAME :${longName}`);
 
-      const response = await client.waitForLine(/SETNAME|FAIL|4\d\d/i, 5000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'SETNAME' || msg.command === 'FAIL' || /^4\d\d$/.test(msg.command),
+        5000
+      );
       // Either accepted (possibly truncated) or rejected
       expect(response).toBeDefined();
 
@@ -409,14 +415,17 @@ describe('IRCv3 account-tag', () => {
 
       sender.send(`PRIVMSG ${channel} :Test message from unauthed user`);
 
-      const msg = await receiver.waitForLine(/PRIVMSG.*Test message/i, 5000);
+      const msg = await receiver.waitForParsedLine(
+        m => m.command === 'PRIVMSG' && m.raw.includes('Test message'),
+        5000
+      );
 
       // Unauthenticated sender should not have account= tag
       // (or have account=* which indicates no account)
-      if (msg.startsWith('@')) {
+      if (msg.raw.startsWith('@')) {
         // If there's an account tag, it should be * for unauthed
-        if (msg.includes('account=')) {
-          expect(msg).toMatch(/account=\*/);
+        if (msg.raw.includes('account=')) {
+          expect(msg.raw).toMatch(/account=\*/);
         }
       }
 

@@ -58,8 +58,8 @@ describe('Edge Cases', () => {
       // Nefarious returns ERR_NOTEXTTOSEND (412) for empty messages
       // per RFC 1459: "No text to send"
       // The message is NOT relayed - this is correct per spec
-      const errorResponse = await sender.waitForLine(/412/i, 5000);
-      expect(errorResponse).toMatch(/412/);
+      const errorResponse = await sender.waitForNumeric('412', 5000);
+      expect(errorResponse.command).toBe('412');
 
       sender.send('QUIT');
       receiver.send('QUIT');
@@ -93,9 +93,9 @@ describe('Edge Cases', () => {
       sender.send(`PRIVMSG ${channel} :${longText}`);
 
       // Should receive the message (possibly truncated)
-      const received = await receiver.waitForLine(/PRIVMSG/i, 5000);
-      expect(received).toContain('PRIVMSG');
-      expect(received).toContain('AAAA'); // At least some of the As
+      const received = await receiver.waitForCommand('PRIVMSG', 5000);
+      expect(received.command).toBe('PRIVMSG');
+      expect(received.raw).toContain('AAAA'); // At least some of the As
 
       sender.send('QUIT');
       receiver.send('QUIT');
@@ -130,8 +130,8 @@ describe('Edge Cases', () => {
       const unicodeText = 'Hello 世界 🌍 émojis';
       sender.send(`PRIVMSG ${channel} :${unicodeText}`);
 
-      const received = await receiver.waitForLine(/PRIVMSG/i, 5000);
-      expect(received).toContain('PRIVMSG');
+      const received = await receiver.waitForCommand('PRIVMSG', 5000);
+      expect(received.command).toBe('PRIVMSG');
       // The message should be delivered (content may vary by encoding)
 
       sender.send('QUIT');
@@ -165,9 +165,9 @@ describe('Edge Cases', () => {
       const colonText = 'Check this URL: https://example.com:8080/path';
       sender.send(`PRIVMSG ${channel} :${colonText}`);
 
-      const received = await receiver.waitForLine(/PRIVMSG/i, 5000);
-      expect(received).toContain('PRIVMSG');
-      expect(received).toContain('https://example.com:8080');
+      const received = await receiver.waitForCommand('PRIVMSG', 5000);
+      expect(received.command).toBe('PRIVMSG');
+      expect(received.raw).toContain('https://example.com:8080');
 
       sender.send('QUIT');
       receiver.send('QUIT');
@@ -187,7 +187,10 @@ describe('Edge Cases', () => {
 
       client.send('JOIN #12345');
 
-      const joinResponse = await client.waitForLine(/JOIN.*#12345|403/i, 5000);
+      const joinResponse = await client.waitForParsedLine(
+        msg => (msg.command === 'JOIN' && msg.raw.includes('#12345')) || msg.command === '403',
+        5000
+      );
       // Either we join or get error - both are valid server responses
       expect(joinResponse).toBeDefined();
 
@@ -206,9 +209,9 @@ describe('Edge Cases', () => {
 
       client.send('JOIN #test-channel_name');
 
-      const joinResponse = await client.waitForLine(/JOIN.*#test-channel_name/i, 5000);
-      expect(joinResponse).toContain('JOIN');
-      expect(joinResponse).toContain('#test-channel_name');
+      const joinResponse = await client.waitForJoin('#test-channel_name', undefined, 5000);
+      expect(joinResponse.command).toBe('JOIN');
+      expect(joinResponse.raw).toContain('#test-channel_name');
 
       client.send('QUIT');
     });
@@ -227,7 +230,10 @@ describe('Edge Cases', () => {
       client.send('JOIN badchanname');
 
       // Should get an error
-      const response = await client.waitForLine(/403|476|461/i, 5000);
+      const response = await client.waitForParsedLine(
+        msg => ['403', '476', '461'].includes(msg.command),
+        5000
+      );
       expect(response).toBeDefined();
 
       client.send('QUIT');
@@ -267,8 +273,11 @@ describe('Edge Cases', () => {
       // Verify we can still operate by sending PING
       await new Promise(r => setTimeout(r, 300));
       client.send('PING :sametest');
-      const pong = await client.waitForLine(/PONG.*sametest/i, 5000);
-      expect(pong).toContain('PONG');
+      const pong = await client.waitForParsedLine(
+        msg => msg.command === 'PONG' && msg.raw.includes('sametest'),
+        5000
+      );
+      expect(pong.command).toBe('PONG');
 
       client.send('QUIT');
     });
@@ -315,8 +324,8 @@ describe('Edge Cases', () => {
 
       // Verify we can still operate
       client.send('PING :test');
-      const pong = await client.waitForLine(/PONG/i, 5000);
-      expect(pong).toContain('PONG');
+      const pong = await client.waitForCommand('PONG', 5000);
+      expect(pong.command).toBe('PONG');
 
       client.send('QUIT');
     });
@@ -354,8 +363,8 @@ describe('Edge Cases', () => {
       sender.clearRawBuffer();
       sender.send('PING :stillalive');
 
-      const pong = await sender.waitForLine(/PONG/i, 5000);
-      expect(pong).toContain('PONG');
+      const pong = await sender.waitForCommand('PONG', 5000);
+      expect(pong.command).toBe('PONG');
 
       sender.send('QUIT');
       receiver.send('QUIT');
@@ -385,8 +394,8 @@ describe('Edge Cases', () => {
       // Verify we're still connected
       client.clearRawBuffer();
       client.send('PING :multichan');
-      const pong = await client.waitForLine(/PONG/i, 5000);
-      expect(pong).toContain('PONG');
+      const pong = await client.waitForCommand('PONG', 5000);
+      expect(pong.command).toBe('PONG');
 
       client.send('QUIT');
     });
@@ -412,7 +421,10 @@ describe('Edge Cases', () => {
       client.clearRawBuffer();
 
       client.send(`MODE ${channel} +m`);
-      await client.waitForLine(/MODE.*\+m/i, 5000);
+      await client.waitForParsedLine(
+        msg => msg.command === 'MODE' && msg.raw.includes('+m'),
+        5000
+      );
 
       client.clearRawBuffer();
       client.send(`MODE ${channel} +m`);
@@ -421,7 +433,10 @@ describe('Edge Cases', () => {
       // Verify by checking we can still query modes
       await new Promise(r => setTimeout(r, 300));
       client.send(`MODE ${channel}`);
-      const modeResponse = await client.waitForLine(/324|MODE/i, 5000);
+      const modeResponse = await client.waitForParsedLine(
+        msg => msg.command === '324' || msg.command === 'MODE',
+        5000
+      );
       expect(modeResponse).toBeDefined();
 
       client.send('QUIT');
@@ -452,7 +467,10 @@ describe('Edge Cases', () => {
       // Verify by checking we can still query modes
       await new Promise(r => setTimeout(r, 300));
       client.send(`MODE ${channel}`);
-      const modeResponse = await client.waitForLine(/324|MODE/i, 5000);
+      const modeResponse = await client.waitForParsedLine(
+        msg => msg.command === '324' || msg.command === 'MODE',
+        5000
+      );
       expect(modeResponse).toBeDefined();
 
       client.send('QUIT');
@@ -480,8 +498,11 @@ describe('Edge Cases', () => {
       sender.send('PRIVMSG ctcprecv1 :\x01VERSION\x01');
 
       // Receiver should get the CTCP
-      const ctcp = await receiver.waitForLine(/VERSION/i, 5000);
-      expect(ctcp).toContain('VERSION');
+      const ctcp = await receiver.waitForParsedLine(
+        msg => msg.raw.includes('VERSION'),
+        5000
+      );
+      expect(ctcp.raw).toContain('VERSION');
 
       sender.send('QUIT');
       receiver.send('QUIT');
@@ -514,9 +535,12 @@ describe('Edge Cases', () => {
       sender.send(`PRIVMSG ${channel} :\x01ACTION waves hello\x01`);
 
       // Receiver should get the ACTION
-      const action = await receiver.waitForLine(/ACTION/i, 5000);
-      expect(action).toContain('ACTION');
-      expect(action).toContain('waves hello');
+      const action = await receiver.waitForParsedLine(
+        msg => msg.raw.includes('ACTION'),
+        5000
+      );
+      expect(action.raw).toContain('ACTION');
+      expect(action.raw).toContain('waves hello');
 
       sender.send('QUIT');
       receiver.send('QUIT');

@@ -270,12 +270,12 @@ describe('IRC-over-WebSocket Protocol', () => {
 
       await wsClient.register(wsNick);
       rawClient.register(rawNick);
-      await rawClient.waitForLine(/001/, 10000);
+      await rawClient.waitForNumeric('001', 10000);
 
       wsClient.send(`JOIN ${channel}`);
       rawClient.send(`JOIN ${channel}`);
       await wsClient.waitForText('366', 5000);
-      await rawClient.waitForLine(/366/, 5000);
+      await rawClient.waitForNumeric('366', 5000);
 
       // Clear buffers
       wsClient.clearFrames();
@@ -283,8 +283,11 @@ describe('IRC-over-WebSocket Protocol', () => {
 
       // WebSocket → Raw Socket
       wsClient.send(`PRIVMSG ${channel} :${wsMessage}`);
-      const rawReceived = await rawClient.waitForLine(new RegExp(wsMessage), 5000);
-      expect(rawReceived).toContain(wsMessage);
+      const rawReceived = await rawClient.waitForParsedLine(
+        msg => msg.command === 'PRIVMSG' && msg.raw.includes(wsMessage),
+        5000
+      );
+      expect(rawReceived.raw).toContain(wsMessage);
 
       // Raw Socket → WebSocket
       rawClient.send(`PRIVMSG ${channel} :${rawMessage}`);
@@ -302,18 +305,21 @@ describe('IRC-over-WebSocket Protocol', () => {
 
       await wsClient.register(wsNick);
       rawClient.register(rawNick);
-      await rawClient.waitForLine(/001/, 10000);
+      await rawClient.waitForNumeric('001', 10000);
 
       // Raw client joins first
       rawClient.send(`JOIN ${channel}`);
-      await rawClient.waitForLine(/366/, 5000);
+      await rawClient.waitForNumeric('366', 5000);
 
       // WebSocket client joins - raw should see JOIN
       rawClient.clearRawBuffer();
       wsClient.send(`JOIN ${channel}`);
 
-      const rawSeesJoin = await rawClient.waitForLine(new RegExp(`JOIN.*${channel}`), 5000);
-      expect(rawSeesJoin).toContain(wsNick);
+      const rawSeesJoin = await rawClient.waitForParsedLine(
+        msg => msg.command === 'JOIN' && msg.raw.includes(channel),
+        5000
+      );
+      expect(rawSeesJoin.raw).toContain(wsNick);
 
       // Wait for ws to be fully joined
       await wsClient.waitForText('366', 5000);
@@ -321,8 +327,8 @@ describe('IRC-over-WebSocket Protocol', () => {
 
       // WebSocket client parts - raw should see PART
       wsClient.send(`PART ${channel}`);
-      const rawSeesPart = await rawClient.waitForLine(new RegExp(`PART.*${channel}`), 5000);
-      expect(rawSeesPart).toContain(wsNick);
+      const rawSeesPart = await rawClient.waitForPart(channel, wsNick, 5000);
+      expect(rawSeesPart.raw).toContain(wsNick);
     });
   });
 
