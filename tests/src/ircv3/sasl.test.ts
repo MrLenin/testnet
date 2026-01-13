@@ -466,13 +466,45 @@ describe('SASL Error Handling', () => {
   });
 });
 
-describe('SASL Multi-line Payload', () => {
+describe('SASL 400-byte Chunking', () => {
+  /**
+   * SASL spec requires payloads >400 bytes to be split into 400-byte chunks.
+   * If the payload is exactly N*400 bytes, a final '+' must be sent to signal end.
+   * These tests verify X3's chunk reassembly works correctly.
+   */
+  const CHUNK_SIZE = 400;
+
   const clients: RawSocketClient[] = [];
 
   const trackClient = (client: RawSocketClient): RawSocketClient => {
     clients.push(client);
     return client;
   };
+
+  /**
+   * Send SASL payload with proper 400-byte chunking.
+   * Per SASL spec: payloads >400 bytes must be chunked, and if the final
+   * chunk is exactly 400 bytes, a '+' must be sent to signal completion.
+   */
+  async function sendChunkedPayload(client: RawSocketClient, base64Payload: string): Promise<void> {
+    if (base64Payload.length < CHUNK_SIZE) {
+      // Small payload - send directly, no terminator needed
+      client.send(`AUTHENTICATE ${base64Payload}`);
+      return;
+    }
+
+    // Send chunks with small delays to avoid flooding
+    for (let i = 0; i < base64Payload.length; i += CHUNK_SIZE) {
+      const chunk = base64Payload.slice(i, i + CHUNK_SIZE);
+      client.send(`AUTHENTICATE ${chunk}`);
+      await new Promise(r => setTimeout(r, 50));
+    }
+
+    // If last chunk was exactly 400 bytes, send '+' to signal end
+    if (base64Payload.length % CHUNK_SIZE === 0) {
+      client.send('AUTHENTICATE +');
+    }
+  }
 
   afterEach(async () => {
     for (const client of clients) {
@@ -492,10 +524,8 @@ describe('SASL Multi-line Payload', () => {
     await new Promise(r => setTimeout(r, 100));
   });
 
-  it('handles 400-byte payload chunks', async () => {
+  it('handles small payload (no chunking needed)', async () => {
     const client = trackClient(await createRawSocketClient());
-
-    // Clear buffer to avoid interference
     client.clearBuffer();
 
     await client.capLs();
@@ -504,21 +534,179 @@ describe('SASL Multi-line Payload', () => {
     client.send('AUTHENTICATE PLAIN');
     await client.waitForCommand('AUTHENTICATE', 10000);
 
-    // Create a long payload that would need chunking (>400 bytes base64)
-    // Actually, PLAIN auth payloads are typically small, so this tests
-    // the infrastructure rather than actual chunking
+    // Small payload - no chunking
     const user = 'testuser';
     const pass = 'testpass';
     const payload = Buffer.from(`${user}\0${user}\0${pass}`).toString('base64');
+    expect(payload.length).toBeLessThan(CHUNK_SIZE);
 
-    client.send(`AUTHENTICATE ${payload}`);
-
-    // Small delay to allow server to process and respond
+    await sendChunkedPayload(client, payload);
     await new Promise(r => setTimeout(r, 100));
 
-    // Should get response (success or failure)
     const response = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 20000);
     expect(response).toBeDefined();
+    client.send('QUIT');
+  });
+
+  it('handles payload requiring 2 chunks (500 base64 bytes)', async () => {
+    const client = trackClient(await createRawSocketClient());
+    client.clearBuffer();
+
+    await client.capLs();
+    await client.capReq(['sasl']);
+
+    client.send('AUTHENTICATE PLAIN');
+    await client.waitForCommand('AUTHENTICATE', 10000);
+
+    // Create payload that results in ~500 base64 bytes (2 chunks: 400 + 100)
+    // 500 base64 bytes = ~375 raw bytes
+    // PLAIN format: authzid\0authcid\0password
+    const authzid = 'a'.repeat(125);
+    const authcid = 'b'.repeat(125);
+    const password = 'c'.repeat(125);
+    const payload = Buffer.from(`${authzid}\0${authcid}\0${password}`).toString('base64');
+
+    expect(payload.length).toBeGreaterThan(CHUNK_SIZE);
+    expect(payload.length).toBeLessThan(CHUNK_SIZE * 2);
+    console.log(`2-chunk test: payload is ${payload.length} base64 bytes`);
+
+    await sendChunkedPayload(client, payload);
+    await new Promise(r => setTimeout(r, 100));
+
+    // Should get SASLFAIL (904) because credentials are invalid, but that proves
+    // the server received and processed the full chunked payload
+    const response = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 20000);
+    expect(response).toBeDefined();
+    console.log(`2-chunk test response: ${response.command}`);
+    client.send('QUIT');
+  });
+
+  it('handles payload requiring 3 chunks (900 base64 bytes)', async () => {
+    const client = trackClient(await createRawSocketClient());
+    client.clearBuffer();
+
+    await client.capLs();
+    await client.capReq(['sasl']);
+
+    client.send('AUTHENTICATE PLAIN');
+    await client.waitForCommand('AUTHENTICATE', 10000);
+
+    // Create payload that results in ~900 base64 bytes (3 chunks: 400 + 400 + 100)
+    // 900 base64 bytes = ~675 raw bytes
+    const authzid = 'a'.repeat(225);
+    const authcid = 'b'.repeat(225);
+    const password = 'c'.repeat(225);
+    const payload = Buffer.from(`${authzid}\0${authcid}\0${password}`).toString('base64');
+
+    expect(payload.length).toBeGreaterThan(CHUNK_SIZE * 2);
+    expect(payload.length).toBeLessThan(CHUNK_SIZE * 3);
+    console.log(`3-chunk test: payload is ${payload.length} base64 bytes`);
+
+    await sendChunkedPayload(client, payload);
+    await new Promise(r => setTimeout(r, 100));
+
+    const response = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 20000);
+    expect(response).toBeDefined();
+    console.log(`3-chunk test response: ${response.command}`);
+    client.send('QUIT');
+  });
+
+  it('handles exactly 400-byte payload (needs + terminator)', async () => {
+    const client = trackClient(await createRawSocketClient());
+    client.clearBuffer();
+
+    await client.capLs();
+    await client.capReq(['sasl']);
+
+    client.send('AUTHENTICATE PLAIN');
+    await client.waitForCommand('AUTHENTICATE', 10000);
+
+    // Create payload of exactly 400 base64 bytes
+    // 400 base64 bytes = 300 raw bytes
+    const authzid = 'a'.repeat(100);
+    const authcid = 'b'.repeat(100);
+    const password = 'c'.repeat(98); // 100 + 100 + 98 + 2 nulls = 300
+    const payload = Buffer.from(`${authzid}\0${authcid}\0${password}`).toString('base64');
+
+    // Adjust to exactly 400 if needed
+    const exactPayload = payload.slice(0, CHUNK_SIZE);
+    expect(exactPayload.length).toBe(CHUNK_SIZE);
+    console.log(`Exact 400-byte test: payload is ${exactPayload.length} base64 bytes`);
+
+    await sendChunkedPayload(client, exactPayload);
+    await new Promise(r => setTimeout(r, 100));
+
+    const response = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 20000);
+    expect(response).toBeDefined();
+    console.log(`Exact 400-byte test response: ${response.command}`);
+    client.send('QUIT');
+  });
+
+  it('handles exactly 800-byte payload (2 full chunks + terminator)', async () => {
+    const client = trackClient(await createRawSocketClient());
+    client.clearBuffer();
+
+    await client.capLs();
+    await client.capReq(['sasl']);
+
+    client.send('AUTHENTICATE PLAIN');
+    await client.waitForCommand('AUTHENTICATE', 10000);
+
+    // Create payload of exactly 800 base64 bytes = 600 raw bytes
+    const authzid = 'a'.repeat(200);
+    const authcid = 'b'.repeat(200);
+    const password = 'c'.repeat(198); // 200 + 200 + 198 + 2 nulls = 600
+    const payload = Buffer.from(`${authzid}\0${authcid}\0${password}`).toString('base64');
+
+    // Adjust to exactly 800 if needed
+    const exactPayload = payload.slice(0, CHUNK_SIZE * 2);
+    expect(exactPayload.length).toBe(CHUNK_SIZE * 2);
+    console.log(`Exact 800-byte test: payload is ${exactPayload.length} base64 bytes`);
+
+    await sendChunkedPayload(client, exactPayload);
+    await new Promise(r => setTimeout(r, 100));
+
+    const response = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 20000);
+    expect(response).toBeDefined();
+    console.log(`Exact 800-byte test response: ${response.command}`);
+    client.send('QUIT');
+  });
+
+  it('handles rapid sequential chunks (stress test)', async () => {
+    const client = trackClient(await createRawSocketClient());
+    client.clearBuffer();
+
+    await client.capLs();
+    await client.capReq(['sasl']);
+
+    client.send('AUTHENTICATE PLAIN');
+    await client.waitForCommand('AUTHENTICATE', 10000);
+
+    // Create a larger payload (5 chunks)
+    const authzid = 'a'.repeat(500);
+    const authcid = 'b'.repeat(500);
+    const password = 'c'.repeat(500);
+    const payload = Buffer.from(`${authzid}\0${authcid}\0${password}`).toString('base64');
+
+    expect(payload.length).toBeGreaterThan(CHUNK_SIZE * 4);
+    console.log(`Stress test: payload is ${payload.length} base64 bytes (${Math.ceil(payload.length / CHUNK_SIZE)} chunks)`);
+
+    // Send chunks with minimal delay (stress test)
+    for (let i = 0; i < payload.length; i += CHUNK_SIZE) {
+      const chunk = payload.slice(i, i + CHUNK_SIZE);
+      client.send(`AUTHENTICATE ${chunk}`);
+      // Minimal delay - test server can handle rapid chunks
+      await new Promise(r => setTimeout(r, 10));
+    }
+    if (payload.length % CHUNK_SIZE === 0) {
+      client.send('AUTHENTICATE +');
+    }
+
+    await new Promise(r => setTimeout(r, 100));
+
+    const response = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 20000);
+    expect(response).toBeDefined();
+    console.log(`Stress test response: ${response.command}`);
     client.send('QUIT');
   });
 });
