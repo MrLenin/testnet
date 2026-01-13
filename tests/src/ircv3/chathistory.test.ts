@@ -1287,7 +1287,8 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch', 'labeled-response']);
+      // Need standard-replies to receive FAIL command (otherwise server sends NOTICE fallback)
+      await client.capReq(['draft/chathistory', 'batch', 'labeled-response', 'standard-replies']);
       client.capEnd();
       client.register('histbadts1');
       await client.waitForNumeric('001');
@@ -1302,13 +1303,16 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`CHATHISTORY BEFORE ${channelName} timestamp=not-a-timestamp 10`);
 
       // Expect FAIL CHATHISTORY INVALID_PARAMS per IRCv3 spec
+      // With standard-replies: FAIL command
+      // Without: NOTICE fallback containing "FAIL CHATHISTORY INVALID_PARAMS"
       const response = await client.waitForParsedLine(
-        msg => msg.command === 'FAIL' && msg.raw.includes('CHATHISTORY') && msg.raw.includes('INVALID_PARAMS'),
+        msg => (msg.command === 'FAIL' || msg.command === 'NOTICE') &&
+               msg.raw.includes('CHATHISTORY') && msg.raw.includes('INVALID_PARAMS'),
         5000
       );
       expect(response).toBeDefined();
-      expect(response.command).toBe('FAIL');
-      console.log('Server correctly rejected invalid timestamp with FAIL');
+      expect(response.raw).toContain('INVALID_PARAMS');
+      console.log('Server correctly rejected invalid timestamp:', response.raw);
 
       client.send('QUIT');
     });

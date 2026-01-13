@@ -654,6 +654,9 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
 
       await requireKeycloakUser(adminToken, uniqueUser, uniqueEmail, uniquePass);
 
+      // Settle delay for Keycloak to fully index the new user
+      await new Promise(r => setTimeout(r, 1000));
+
       try {
         // Get OAuth token for the new user
         const userToken = await requireKeycloakToken(uniqueUser, uniquePass);
@@ -679,8 +682,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
         // Use chunked sending for large OAuth tokens
         await sendSaslPayload(client, payload);
 
-        // Increased timeout to 15s - Keycloak token validation can be slow, especially for auto-create
-        const result = await client.waitForNumeric(['900', '903'], 15000);
+        // Increased timeout to 20s - Keycloak token validation + auto-create can take 15s+
+        const result = await client.waitForNumeric(['900', '903'], 20000);
 
         if (result.command === '903' || result.command === '900') {
           console.log('Auto-created account for:', uniqueUser);
@@ -1302,9 +1305,9 @@ describe.skipIf(!isKeycloakAvailable() || SKIP_KEYCLOAK_API_TESTS)('Keycloak Cha
 });
 
 /**
- * Helper to get channel group with access level attribute
+ * Helper to get channel group (for membership verification)
  */
-async function getChannelGroupWithAttribute(
+async function getChannelGroup(
   adminToken: string,
   channelName: string
 ): Promise<{ id: string; name: string; attributes?: Record<string, string[]> } | null> {
@@ -1511,7 +1514,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
   });
 
   describe('ADDUSER creates Keycloak groups', () => {
-    it('creates channel group with x3_access_level attribute when user added', async () => {
+    it('creates channel group and sets owner access level when channel registered', async () => {
 
       const channelName = uniqueChannel('bidisync');
       const groupName = channelName.replace('#', '');
@@ -1559,24 +1562,24 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
       await new Promise(r => setTimeout(r, 2000));
 
       // Check if group was created in Keycloak
-      const group = await getChannelGroupWithAttribute(adminToken, channelName);
+      const group = await getChannelGroup(adminToken, channelName);
 
       if (group) {
         console.log(`Channel group created: ${groupName}`);
-        console.log('Group attributes:', JSON.stringify(group.attributes, null, 2));
-
-        // Check for x3_access_level attribute
-        const accessLevel = group.attributes?.x3_access_level?.[0];
-        if (accessLevel) {
-          console.log(`x3_access_level: ${accessLevel}`);
-          // Owner should be 500
-          expect(parseInt(accessLevel)).toBe(500);
-        } else {
-          console.log('x3_access_level attribute not set - bidirectional sync may not be enabled');
-        }
       } else {
         console.log('Channel group not created - bidirectional sync may not be enabled');
         console.log('Enable with: keycloak_bidirectional_sync = true in x3.conf [chanserv] section');
+      }
+
+      // Check owner's access level via user attribute (x3.channel.#channelname)
+      // Access levels are stored on users, not on groups
+      const accessLevel = await getUserChannelAccess(adminToken, TEST_USER, channelName);
+      if (accessLevel !== null) {
+        console.log(`Owner ${TEST_USER} access level: ${accessLevel}`);
+        // Owner should be 500
+        expect(accessLevel).toBe(500);
+      } else {
+        console.log('Owner access level attribute not set - bidirectional sync may not be enabled');
       }
 
       // Cleanup - use proper unregister with confirmation code
@@ -1667,7 +1670,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         } else {
           console.log('User access level attribute not found - bidirectional sync may not be enabled');
           // Still verify the channel group exists for membership tracking
-          const group = await getChannelGroupWithAttribute(adminToken, channelName);
+          const group = await getChannelGroup(adminToken, channelName);
           if (group) {
             console.log(`Channel group exists: ${group.id}`);
           }
@@ -1856,7 +1859,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         expect(accessLevel).toBeNull();
 
         // The channel group should still exist (for other users)
-        const group = await getChannelGroupWithAttribute(adminToken, channelName);
+        const group = await getChannelGroup(adminToken, channelName);
         console.log('Channel group after DELUSER:', group ? 'exists' : 'deleted');
 
         // Cleanup - use proper unregister with confirmation code
@@ -1909,7 +1912,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
       await new Promise(r => setTimeout(r, 2000));
 
       // Verify group exists
-      let group = await getChannelGroupWithAttribute(adminToken, channelName);
+      let group = await getChannelGroup(adminToken, channelName);
       if (group) {
         console.log(`Group created: ${channelName.replace('#', '')} (id: ${group.id})`);
         expect(group.id).toBeDefined();
@@ -1925,7 +1928,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
       await new Promise(r => setTimeout(r, 2000));
 
       // Verify group was deleted
-      group = await getChannelGroupWithAttribute(adminToken, channelName);
+      group = await getChannelGroup(adminToken, channelName);
       if (group) {
         console.log('WARNING: Group still exists after UNREGISTER');
         console.log('This may indicate bidirectional sync UNREGISTER handling is not implemented');

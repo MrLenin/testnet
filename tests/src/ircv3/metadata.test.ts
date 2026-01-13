@@ -294,16 +294,22 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
 
       const caps = await client.capLs();
       const metaCap = caps.has('draft/metadata-2') ? 'draft/metadata-2' : 'draft/metadata';
-      await client.capReq([metaCap]);
+      // Request standard-replies for cleaner FAIL response
+      await client.capReq([metaCap, 'standard-replies']);
       client.capEnd();
       client.register('metaerr2');
       await client.waitForNumeric('001');
+
+      // Small settle delay to avoid message pollution from previous tests
+      await new Promise(r => setTimeout(r, 100));
+      client.clearRawBuffer();
 
       // Try to get metadata for non-existent channel (queries X3, gets NOTARGET error)
       client.send('METADATA GET #nonexistentchannel12345 avatar');
 
       // TARGET_INVALID expected for non-existent channel
-      // Server sends NOTICE fallback without standard-replies cap
+      // With standard-replies: FAIL command
+      // Without: NOTICE fallback containing "FAIL METADATA TARGET_INVALID"
       const response = await client.waitForParsedLine(
         msg => (msg.command === 'FAIL' || msg.command === 'NOTICE') &&
                msg.raw.includes('TARGET_INVALID'),
@@ -321,20 +327,23 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
 
       const caps = await client.capLs();
       const metaCap = caps.has('draft/metadata-2') ? 'draft/metadata-2' : 'draft/metadata';
-      await client.capReq([metaCap]);
+      // Request standard-replies for cleaner FAIL response
+      await client.capReq([metaCap, 'standard-replies']);
       client.capEnd();
       client.register('metaerr3');
       await client.waitForNumeric('001');
+
+      // Small settle delay to avoid message pollution from previous tests
+      await new Promise(r => setTimeout(r, 100));
+      client.clearRawBuffer();
 
       // Try to get metadata for non-existent account (queries X3, gets NOTARGET error)
       // This should return immediately with TARGET_INVALID, not timeout
       client.send('METADATA GET nonexistentaccount12345 avatar');
 
       // Should get TARGET_INVALID within 5 seconds (not 30 second timeout)
-      // Without standard-replies cap, server sends NOTICE fallback:
-      //   :server NOTICE nick :FAIL METADATA TARGET_INVALID target :description
-      // With standard-replies cap, server sends FAIL command:
-      //   FAIL METADATA TARGET_INVALID target :description
+      // With standard-replies: FAIL command
+      // Without: NOTICE fallback containing "FAIL METADATA TARGET_INVALID"
       const response = await client.waitForParsedLine(
         msg => (msg.command === 'FAIL' || msg.command === 'NOTICE') &&
                msg.raw.includes('TARGET_INVALID'),
