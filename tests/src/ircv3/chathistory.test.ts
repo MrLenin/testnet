@@ -385,7 +385,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Request only 3 messages
       client.send(`CHATHISTORY LATEST ${channelName} * 3`);
 
-      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await client.waitForBatchStart('chathistory', 5000);
       expect(batchStart).toBeDefined();
 
       const messages: string[] = [];
@@ -492,7 +492,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`CHATHISTORY BEFORE ${channelName} msgid=${msgid} 10`);
 
       // MUST receive batch
-      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await client.waitForBatchStart('chathistory', 5000);
       expect(batchStart).toBeDefined();
 
       const messages: string[] = [];
@@ -547,7 +547,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`CHATHISTORY AFTER ${channelName} msgid=${msgid} 10`);
 
       // MUST receive batch
-      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await client.waitForBatchStart('chathistory', 5000);
       expect(batchStart).toBeDefined();
 
       const messages: string[] = [];
@@ -608,7 +608,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client1.send(`CHATHISTORY LATEST pmnoopt2_${testId} * 10`);
 
       // MUST receive a batch - no try/catch, test fails if no response
-      const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await client1.waitForBatchStart('chathistory', 5000);
       expect(batchStart).toBeDefined();
 
       const messages: string[] = [];
@@ -667,7 +667,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client1.send(`CHATHISTORY LATEST pmboth2_${testId} * 10`);
 
       // MUST receive a batch - test fails if no response
-      const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await client1.waitForBatchStart('chathistory', 5000);
       expect(batchStart).toBeDefined();
 
       const messages: string[] = [];
@@ -719,7 +719,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client1.send(`CHATHISTORY LATEST pmsend2_${testId} * 10`);
 
       // MUST receive a batch - test fails if no response
-      const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await client1.waitForBatchStart('chathistory', 5000);
       expect(batchStart).toBeDefined();
 
       const messages: string[] = [];
@@ -771,7 +771,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client1.send(`CHATHISTORY LATEST pmrecv2_${testId} * 10`);
 
       // MUST receive a batch - test fails if no response
-      const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await client1.waitForBatchStart('chathistory', 5000);
       expect(batchStart).toBeDefined();
 
       const messages: string[] = [];
@@ -828,7 +828,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client1.send(`CHATHISTORY LATEST pmover2_${testId} * 10`);
 
       // MUST receive a batch - test fails if no response
-      const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await client1.waitForBatchStart('chathistory', 5000);
       expect(batchStart).toBeDefined();
 
       const messages: string[] = [];
@@ -895,7 +895,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client1.send(`CHATHISTORY LATEST pmchg2_${testId} * 10`);
 
       // MUST receive a batch - test fails if no response
-      const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await client1.waitForBatchStart('chathistory', 5000);
       expect(batchStart).toBeDefined();
 
       const messages: string[] = [];
@@ -1175,18 +1175,15 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`JOIN ${channelName}`);
       await client.waitForJoin(channelName);
 
-      client.clearRawBuffer();
+      // Wait for LMDB to be ready - use waitForChathistory with minMessages: 0
+      // This will poll until the server responds with a BATCH (even empty)
+      const messages = await waitForChathistory(client, channelName, {
+        minMessages: 0,
+        timeoutMs: 5000,
+      });
 
-      // Request history immediately (no messages yet)
-      client.send(`CHATHISTORY LATEST ${channelName} * 10`);
-
-      // Should receive empty batch (BATCH + and BATCH - with same ref)
-      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
-      expect(batchStart).toBeDefined();
-
-      // Wait for batch end
-      const batchEnd = await client.waitForLine(/BATCH -/i, 2000);
-      expect(batchEnd).toBeDefined();
+      // Should receive empty batch (no messages sent yet)
+      expect(messages).toHaveLength(0);
       console.log('Empty batch received correctly');
       client.send('QUIT');
     });
@@ -1228,10 +1225,14 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
 
     it('rejects invalid timestamp format', async () => {
+      // Per IRCv3 spec: "If the server receives a syntactically invalid CHATHISTORY command,
+      // e.g., an unknown subcommand, missing parameters, excess parameters, or parameters
+      // that cannot be parsed, the INVALID_PARAMS error code SHOULD be returned"
+      // Example: FAIL CHATHISTORY INVALID_PARAMS the_given_command :Invalid timestamp
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch']);
+      await client.capReq(['draft/chathistory', 'batch', 'labeled-response']);
       client.capEnd();
       client.register('histbadts1');
       await client.waitForNumeric('001');
@@ -1242,36 +1243,14 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       client.clearRawBuffer();
 
-      // Use invalid timestamp
+      // Use invalid timestamp - server should return FAIL INVALID_PARAMS
       client.send(`CHATHISTORY BEFORE ${channelName} timestamp=not-a-timestamp 10`);
 
-      // Server should either:
-      // 1. Return FAIL with error (proper rejection)
-      // 2. Return empty BATCH (treats invalid as "no matches")
-      // It should NOT return a BATCH with actual messages
-      const response = await client.waitForLine(/FAIL|BATCH/i, 5000);
+      // Expect FAIL CHATHISTORY INVALID_PARAMS per IRCv3 spec
+      const response = await client.waitForLine(/FAIL\s+CHATHISTORY\s+INVALID_PARAMS/i, 5000);
       expect(response).toBeDefined();
-      console.log('Invalid timestamp response:', response);
-
-      if (response.includes('BATCH +')) {
-        // If server returns a BATCH, wait for it to complete and verify it's empty
-        const batchIdMatch = response.match(/BATCH \+(\S+)/);
-        if (batchIdMatch) {
-          const batchId = batchIdMatch[1];
-          // Wait for batch end
-          const batchEnd = await client.waitForLine(new RegExp(`BATCH -${batchId}`), 3000);
-          expect(batchEnd).toBeDefined();
-
-          // Check that no PRIVMSG was received inside the batch
-          // (any PRIVMSG would indicate server accepted invalid timestamp)
-          const allLines = client.allLines;
-          const batchMessages = allLines.filter(l =>
-            l.includes(`batch=${batchId}`) && l.includes('PRIVMSG')
-          );
-          expect(batchMessages.length, 'Invalid timestamp should not return messages').toBe(0);
-        }
-      }
-      // If FAIL response, that's also acceptable (proper error handling)
+      expect(response).toMatch(/FAIL\s+CHATHISTORY\s+INVALID_PARAMS/i);
+      console.log('Server correctly rejected invalid timestamp with FAIL');
 
       client.send('QUIT');
     });
@@ -1302,7 +1281,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
       // MUST receive batch
-      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await client.waitForBatchStart('chathistory', 5000);
       expect(batchStart).toBeDefined();
 
       const messages: string[] = [];
@@ -1349,7 +1328,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
       // MUST receive batch
-      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await client.waitForBatchStart('chathistory', 5000);
       expect(batchStart).toBeDefined();
 
       const privmsgs: string[] = [];
@@ -1400,7 +1379,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
       // MUST receive batch
-      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await client.waitForBatchStart('chathistory', 5000);
       expect(batchStart).toBeDefined();
 
       const messages: string[] = [];
@@ -1452,7 +1431,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
       // MUST receive batch
-      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await client.waitForBatchStart('chathistory', 5000);
       expect(batchStart).toBeDefined();
 
       const messages: string[] = [];
@@ -1513,7 +1492,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client1.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
       // MUST receive batch
-      const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await client1.waitForBatchStart('chathistory', 5000);
       expect(batchStart).toBeDefined();
 
       const joins: string[] = [];
@@ -1568,7 +1547,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client1.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
       // MUST receive batch
-      const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await client1.waitForBatchStart('chathistory', 5000);
       expect(batchStart).toBeDefined();
 
       const parts: string[] = [];
@@ -1625,7 +1604,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       op.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
       // MUST receive batch
-      const batchStart = await op.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await op.waitForBatchStart('chathistory', 5000);
       expect(batchStart).toBeDefined();
 
       const kicks: string[] = [];
@@ -1682,7 +1661,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client1.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
       // MUST receive batch
-      const batchStart = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await client1.waitForBatchStart('chathistory', 5000);
       expect(batchStart).toBeDefined();
 
       const quits: string[] = [];
@@ -1807,7 +1786,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`CHATHISTORY LATEST ${channelName} * 3`);
 
       // MUST receive batch
-      const batch1 = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batch1 = await client.waitForBatchStart('chathistory', 5000);
       expect(batch1).toBeDefined();
 
       const page1: { content: string; msgid: string }[] = [];
@@ -1831,7 +1810,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`CHATHISTORY BEFORE ${channelName} msgid=${oldestMsgId} 3`);
 
       // MUST receive batch
-      const batch2 = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batch2 = await client.waitForBatchStart('chathistory', 5000);
       expect(batch2).toBeDefined();
 
       const page2: { content: string; msgid: string }[] = [];
@@ -1897,7 +1876,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`CHATHISTORY AFTER ${channelName} msgid=${firstMsgId} 10`);
 
       // MUST receive batch
-      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await client.waitForBatchStart('chathistory', 5000);
       expect(batchStart).toBeDefined();
 
       const afterFirst: string[] = [];
@@ -2008,7 +1987,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       sender.send(`PRIVMSG ${channelName} :Concurrent 2`);
 
       // MUST receive batch for initial query
-      const batch1 = await reader.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batch1 = await reader.waitForBatchStart('chathistory', 5000);
       expect(batch1).toBeDefined();
 
       const initialMsgs: string[] = [];
@@ -2026,7 +2005,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       reader.send(`CHATHISTORY LATEST ${channelName} * 10`);
 
       // MUST receive batch for follow-up query
-      const batch2 = await reader.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batch2 = await reader.waitForBatchStart('chathistory', 5000);
       expect(batch2).toBeDefined();
 
       const allMsgs: string[] = [];

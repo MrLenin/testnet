@@ -58,9 +58,9 @@ describe('Core IRC Commands', () => {
       // Now set +n mode (no external messages)
       client.send(`MODE ${channel} +n`);
 
-      const modeResponse = await client.waitForLine(/MODE.*\+n/i, 5000);
-      expect(modeResponse).toMatch(/MODE/i);
-      expect(modeResponse).toContain('+n');
+      const modeMsg = await client.waitForMode(channel, '+n', 5000);
+      expect(modeMsg.command).toBe('MODE');
+      expect(modeMsg.params[1]).toContain('+n');
 
       client.send('QUIT');
     });
@@ -81,8 +81,8 @@ describe('Core IRC Commands', () => {
 
       client.send(`MODE ${channel} +m`);
 
-      const modeResponse = await client.waitForLine(/MODE.*\+m/i, 5000);
-      expect(modeResponse).toContain('+m');
+      const modeMsg = await client.waitForMode(channel, '+m', 5000);
+      expect(modeMsg.params[1]).toContain('+m');
 
       client.send('QUIT');
     });
@@ -115,9 +115,8 @@ describe('Core IRC Commands', () => {
       // Op gives +o to user
       op.send(`MODE ${channel} +o newop1`);
 
-      const modeResponse = await op.waitForLine(/MODE.*\+o.*newop1/i, 5000);
-      const parsed = parseIRCMessage(modeResponse);
-      assertMode(parsed, { target: channel, modes: '+o', args: ['newop1'] });
+      const modeMsg = await op.waitForMode(channel, '+o', 5000);
+      assertMode(modeMsg, { target: channel, modes: '+o', args: ['newop1'] });
 
       op.send('QUIT');
       user.send('QUIT');
@@ -151,9 +150,8 @@ describe('Core IRC Commands', () => {
       user.send(`MODE ${channel} +m`);
 
       // Should get ERR_CHANOPRIVSNEEDED (482)
-      const errorResponse = await user.waitForLine(/482/i, 5000);
-      const parsed = parseIRCMessage(errorResponse);
-      assertNumeric(parsed, 482);
+      const errorMsg = await user.waitForNumeric('482', 5000);
+      assertNumeric(errorMsg, 482);
 
       op.send('QUIT');
       user.send('QUIT');
@@ -173,15 +171,18 @@ describe('Core IRC Commands', () => {
 
       // Set a mode first
       client.send(`MODE ${channel} +nt`);
-      await client.waitForLine(/MODE.*\+/i, 5000);
+      await client.waitForMode(channel, '+', 5000);
 
       client.clearRawBuffer();
 
       // Query modes
       client.send(`MODE ${channel}`);
 
-      // Should receive mode info (324 = RPL_CHANNELMODEIS)
-      const modeInfo = await client.waitForLine(/324|MODE/i, 5000);
+      // Should receive mode info (324 = RPL_CHANNELMODEIS) or MODE response
+      const modeInfo = await client.waitForParsedLine(
+        msg => msg.command === '324' || msg.command === 'MODE',
+        5000
+      );
       expect(modeInfo).toBeDefined();
 
       client.send('QUIT');
@@ -218,9 +219,8 @@ describe('Core IRC Commands', () => {
       op.send(`KICK ${channel} kicked1 :Test kick`);
 
       // Both should see the KICK
-      const kickResponse = await op.waitForLine(/KICK.*kicked1/i, 5000);
-      const parsed = parseIRCMessage(kickResponse);
-      assertKick(parsed, { channel, kicked: 'kicked1', reason: 'Test kick' });
+      const kickMsg = await op.waitForKick(channel, 'kicked1', 5000);
+      assertKick(kickMsg, { channel, kicked: 'kicked1', reason: 'Test kick' });
 
       op.send('QUIT');
       user.send('QUIT');
@@ -262,9 +262,8 @@ describe('Core IRC Commands', () => {
       user1.send(`KICK ${channel} target1 :Shouldn't work`);
 
       // Should get ERR_CHANOPRIVSNEEDED (482)
-      const errorResponse = await user1.waitForLine(/482/i, 5000);
-      const parsed = parseIRCMessage(errorResponse);
-      assertNumeric(parsed, 482);
+      const errorMsg = await user1.waitForNumeric('482', 5000);
+      assertNumeric(errorMsg, 482);
 
       op.send('QUIT');
       user1.send('QUIT');
@@ -307,9 +306,9 @@ describe('Core IRC Commands', () => {
       op.send(`KICK ${channel} kicked2 :Bye`);
 
       // Observer should see the kick
-      const kickMsg = await observer.waitForLine(/KICK.*kicked2/i, 5000);
-      expect(kickMsg).toContain('KICK');
-      expect(kickMsg).toContain('kicked2');
+      const kickMsg = await observer.waitForKick(channel, 'kicked2', 5000);
+      expect(kickMsg.command).toBe('KICK');
+      expect(kickMsg.params[1]?.toLowerCase()).toBe('kicked2');
 
       op.send('QUIT');
       user.send('QUIT');
@@ -337,11 +336,10 @@ describe('Core IRC Commands', () => {
       client.send(`TOPIC ${channel} :${topic}`);
 
       // Server broadcasts TOPIC command when topic is set
-      // Wait for TOPIC message containing both channel and the topic text
-      const topicResponse = await client.waitForLine(new RegExp(`TOPIC.*${channel}`, 'i'), 5000);
-      expect(topicResponse).toContain('TOPIC');
-      expect(topicResponse).toContain(channel);
-      expect(topicResponse).toContain('Test topic');
+      const topicMsg = await client.waitForTopic(channel, 5000);
+      expect(topicMsg.command).toBe('TOPIC');
+      expect(topicMsg.params[0]?.toLowerCase()).toBe(channel.toLowerCase());
+      expect(topicMsg.trailing).toContain('Test topic');
 
       client.send('QUIT');
     });
@@ -363,7 +361,7 @@ describe('Core IRC Commands', () => {
       const topic = `Query test topic ${uniqueId()}`;
       client.send(`TOPIC ${channel} :${topic}`);
       // Wait for the TOPIC broadcast (not 332)
-      await client.waitForLine(new RegExp(`TOPIC.*${channel}`, 'i'), 5000);
+      await client.waitForTopic(channel, 5000);
       await new Promise(r => setTimeout(r, 300));
 
       client.clearRawBuffer();
@@ -372,9 +370,9 @@ describe('Core IRC Commands', () => {
       client.send(`TOPIC ${channel}`);
 
       // Should get RPL_TOPIC (332) with the topic content
-      const topicInfo = await client.waitForLine(new RegExp(`332.*${channel}`, 'i'), 5000);
-      expect(topicInfo).toMatch(/332/);
-      expect(topicInfo).toContain('Query test topic');
+      const topicInfo = await client.waitForNumeric('332', 5000);
+      expect(topicInfo.command).toBe('332');
+      expect(topicInfo.trailing).toContain('Query test topic');
 
       client.send('QUIT');
     });
@@ -404,7 +402,7 @@ describe('Core IRC Commands', () => {
 
       // Set +t (topic lock)
       op.send(`MODE ${channel} +t`);
-      await op.waitForLine(/MODE.*\+t/i, 5000);
+      await op.waitForMode(channel, '+t', 5000);
 
       user.send(`JOIN ${channel}`);
       await user.waitForJoin(channel);
@@ -416,8 +414,8 @@ describe('Core IRC Commands', () => {
       user.send(`TOPIC ${channel} :Shouldn't work`);
 
       // Should get ERR_CHANOPRIVSNEEDED (482)
-      const errorResponse = await user.waitForLine(/482/i, 5000);
-      expect(errorResponse).toMatch(/482/);
+      const errorMsg = await user.waitForNumeric('482', 5000);
+      expect(errorMsg.command).toBe('482');
 
       op.send('QUIT');
       user.send('QUIT');
@@ -450,9 +448,9 @@ describe('Core IRC Commands', () => {
       inviter.send(`INVITE invitee1 ${channel}`);
 
       // Invitee should receive INVITE
-      const inviteMsg = await invitee.waitForLine(/INVITE.*invitee1/i, 5000);
-      expect(inviteMsg).toContain('INVITE');
-      expect(inviteMsg).toContain(channel);
+      const inviteMsg = await invitee.waitForInvite(channel, 'invitee1', 5000);
+      expect(inviteMsg.command).toBe('INVITE');
+      expect(inviteMsg.params[1]?.toLowerCase()).toBe(channel.toLowerCase());
 
       inviter.send('QUIT');
       invitee.send('QUIT');
@@ -478,13 +476,13 @@ describe('Core IRC Commands', () => {
 
       // Set +i (invite only)
       op.send(`MODE ${channel} +i`);
-      await op.waitForLine(/MODE.*\+i/i, 5000);
+      await op.waitForMode(channel, '+i', 5000);
 
       // Invite the user
       op.send(`INVITE invitejoin1 ${channel}`);
 
       // Wait for INVITE to be received by user
-      await user.waitForLine(/INVITE/i, 5000);
+      await user.waitForInvite(channel, undefined, 5000);
 
       // Give server time to process the invite
       await new Promise(r => setTimeout(r, 500));
@@ -493,17 +491,21 @@ describe('Core IRC Commands', () => {
 
       // User should be able to join
       user.send(`JOIN ${channel}`);
-      const joinMsg = await user.waitForLine(new RegExp(`JOIN.*${channel}|473`, 'i'), 5000);
+      const joinResult = await user.waitForParsedLine(
+        msg => (msg.command === 'JOIN' && msg.params[0]?.toLowerCase() === channel.toLowerCase()) ||
+               msg.command === '473',
+        5000
+      );
 
       // If we got 473 (invite only error), the invite didn't work - test server behavior
-      if (joinMsg.includes('473')) {
+      if (joinResult.command === '473') {
         // Some servers require the invited user to JOIN immediately
         // This is acceptable server behavior
         console.log('Note: Server requires immediate join after invite');
-        expect(joinMsg).toBeDefined();
+        expect(joinResult).toBeDefined();
       } else {
-        expect(joinMsg).toContain('JOIN');
-        expect(joinMsg).toContain(channel);
+        expect(joinResult.command).toBe('JOIN');
+        expect(joinResult.params[0]?.toLowerCase()).toBe(channel.toLowerCase());
       }
 
       op.send('QUIT');
@@ -703,9 +705,9 @@ describe('Core IRC Commands', () => {
 
       client.send(`PART ${channel} :Goodbye`);
 
-      const partMsg = await client.waitForLine(/PART/i, 5000);
-      expect(partMsg).toContain('PART');
-      expect(partMsg).toContain(channel);
+      const partMsg = await client.waitForPart(channel, undefined, 5000);
+      expect(partMsg.command).toBe('PART');
+      expect(partMsg.params[0]?.toLowerCase()).toBe(channel.toLowerCase());
 
       client.send('QUIT');
     });
@@ -736,8 +738,8 @@ describe('Core IRC Commands', () => {
       leaver.send(`PART ${channel} :See ya`);
 
       // Stayer should see the PART (format: :leaver1!user@host PART #channel :reason)
-      const partMsg = await stayer.waitForLine(/:leaver1.*PART|PART.*${channel}/i, 5000);
-      expect(partMsg).toContain('PART');
+      const partMsg = await stayer.waitForPart(channel, 'leaver1', 5000);
+      expect(partMsg.command).toBe('PART');
 
       leaver.send('QUIT');
       stayer.send('QUIT');
@@ -771,8 +773,8 @@ describe('Core IRC Commands', () => {
       quitter.send('QUIT :Leaving');
 
       // Observer should see the QUIT
-      const quitMsg = await observer.waitForLine(/QUIT.*quitter1|:quitter1.*QUIT/i, 5000);
-      expect(quitMsg).toContain('QUIT');
+      const quitMsg = await observer.waitForQuit('quitter1', 5000);
+      expect(quitMsg.command).toBe('QUIT');
 
       observer.send('QUIT');
     });

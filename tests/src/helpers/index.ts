@@ -94,6 +94,7 @@ export {
   parseIRCMessage,
   type ParsedMessage,
   type MessageSource,
+  type AssertableMessage,
   // Assertion helpers
   assertPrivmsg,
   assertNumeric,

@@ -74,12 +74,15 @@ describe('IRCv3 extended-join', () => {
 
       // Observer should see extended JOIN
       // Format: :nick!user@host JOIN #channel account :realname
-      const joinMsg = await observer.waitForLine(/JOIN.*#extjtest/i, 5000);
+      const joinMsg = await observer.waitForParsedLine(
+        msg => msg.command === 'JOIN' && msg.params[0]?.toLowerCase().includes('#extjtest'),
+        5000
+      );
 
       // Check extended format: should have account (* if not logged in) and realname
-      expect(joinMsg).toMatch(/JOIN\s+#\S+\s+\S+\s+:/);
+      expect(joinMsg.raw).toMatch(/JOIN\s+#\S+\s+\S+\s+:/);
       // Should contain the realname
-      expect(joinMsg).toContain('Test Joiner Realname');
+      expect(joinMsg.raw).toContain('Test Joiner Realname');
       observer.send('QUIT');
       joiner.send('QUIT');
     });
@@ -98,10 +101,13 @@ describe('IRCv3 extended-join', () => {
       const channel = uniqueChannel('extjself');
       client.send(`JOIN ${channel}`);
 
-      const joinMsg = await client.waitForLine(/JOIN.*#extjself/i, 5000);
+      const joinMsg = await client.waitForParsedLine(
+        msg => msg.command === 'JOIN' && msg.params[0]?.toLowerCase().includes('#extjself'),
+        5000
+      );
 
       // Own JOIN should also be extended format
-      expect(joinMsg).toMatch(/JOIN\s+#\S+\s+\S+\s+:/);
+      expect(joinMsg.raw).toMatch(/JOIN\s+#\S+\s+\S+\s+:/);
       client.send('QUIT');
     });
 
@@ -130,10 +136,13 @@ describe('IRCv3 extended-join', () => {
 
       joiner.send(`JOIN ${channel}`);
 
-      const joinMsg = await observer.waitForLine(/JOIN.*#extjunauth/i, 5000);
+      const joinMsg = await observer.waitForParsedLine(
+        msg => msg.command === 'JOIN' && msg.params[0]?.toLowerCase().includes('#extjunauth'),
+        5000
+      );
 
       // Account should be * for unauthenticated user
-      expect(joinMsg).toMatch(/JOIN\s+#\S+\s+\*\s+:/);
+      expect(joinMsg.raw).toMatch(/JOIN\s+#\S+\s+\*\s+:/);
       observer.send('QUIT');
       joiner.send('QUIT');
     });
@@ -165,11 +174,14 @@ describe('IRCv3 extended-join', () => {
 
       joiner.send(`JOIN ${channel}`);
 
-      const joinMsg = await observer.waitForLine(/JOIN.*#stdjoin/i, 5000);
+      const joinMsg = await observer.waitForParsedLine(
+        msg => msg.command === 'JOIN' && msg.params[0]?.toLowerCase().includes('#stdjoin'),
+        5000
+      );
 
       // Standard format: :nick!user@host JOIN #channel (or just :#channel)
       // Should NOT have account and realname
-      expect(joinMsg).not.toMatch(/JOIN\s+#\S+\s+\S+\s+:/);
+      expect(joinMsg.raw).not.toMatch(/JOIN\s+#\S+\s+\S+\s+:/);
       observer.send('QUIT');
       joiner.send('QUIT');
     });
@@ -234,10 +246,10 @@ describe('IRCv3 userhost-in-names', () => {
       client.send(`NAMES ${channel}`);
 
       // 353 is RPL_NAMREPLY
-      const namesReply = await client.waitForLine(/353.*#uhintest/i, 5000);
+      const namesReply = await client.waitForNumeric('353', 5000);
 
       // With userhost-in-names, format includes nick!user@host
-      expect(namesReply).toMatch(/uhintest1!testuser@\S+/);
+      expect(namesReply.raw).toMatch(/uhintest1!testuser@\S+/);
       client.send('QUIT');
     });
 
@@ -256,9 +268,9 @@ describe('IRCv3 userhost-in-names', () => {
       client.send(`JOIN ${channel}`);
 
       // 353 RPL_NAMREPLY is sent after JOIN
-      const namesReply = await client.waitForLine(/353.*#uhinjoin/i, 5000);
+      const namesReply = await client.waitForNumeric('353', 5000);
 
-      expect(namesReply).toMatch(/uhinjoin1!joinuser@\S+/);
+      expect(namesReply.raw).toMatch(/uhinjoin1!joinuser@\S+/);
       client.send('QUIT');
     });
 
@@ -288,11 +300,11 @@ describe('IRCv3 userhost-in-names', () => {
 
       client1.send(`NAMES ${channel}`);
 
-      const namesReply = await client1.waitForLine(/353.*#uhinmulti/i, 5000);
+      const namesReply = await client1.waitForNumeric('353', 5000);
 
       // Both users should have full hostmasks
-      expect(namesReply).toMatch(/uhinmulti1!user1@\S+/);
-      expect(namesReply).toMatch(/uhinmulti2!user2@\S+/);
+      expect(namesReply.raw).toMatch(/uhinmulti1!user1@\S+/);
+      expect(namesReply.raw).toMatch(/uhinmulti2!user2@\S+/);
       client1.send('QUIT');
       client2.send('QUIT');
     });
@@ -316,12 +328,12 @@ describe('IRCv3 userhost-in-names', () => {
 
       client.send(`NAMES ${channel}`);
 
-      const namesReply = await client.waitForLine(/353.*#nouhin/i, 5000);
+      const namesReply = await client.waitForNumeric('353', 5000);
 
       // Without userhost-in-names, should NOT have user@host
-      expect(namesReply).not.toMatch(/nouhin1!\S+@\S+/);
+      expect(namesReply.raw).not.toMatch(/nouhin1!\S+@\S+/);
       // Should just have the nick (possibly with prefix like @)
-      expect(namesReply).toMatch(/[@+]?nouhin1(\s|$)/);
+      expect(namesReply.raw).toMatch(/[@+]?nouhin1(\s|$)/);
       client.send('QUIT');
     });
   });
@@ -383,10 +395,10 @@ describe('IRCv3 multi-prefix', () => {
 
       client.send(`NAMES ${channel}`);
 
-      const namesReply = await client.waitForLine(/353.*#mpnames/i, 5000);
+      const namesReply = await client.waitForNumeric('353', 5000);
 
       // First user to join gets op (@)
-      expect(namesReply).toMatch(/@mpnames1/);
+      expect(namesReply.raw).toMatch(/@mpnames1/);
       client.send('QUIT');
     });
 
@@ -414,11 +426,11 @@ describe('IRCv3 multi-prefix', () => {
 
       client.send(`NAMES ${channel}`);
 
-      const namesReply = await client.waitForLine(/353.*#mpmulti/i, 5000);
+      const namesReply = await client.waitForNumeric('353', 5000);
 
       // With multi-prefix, should show @+ (op and voice)
       // Note: prefix order is defined by PREFIX= in 005
-      expect(namesReply).toMatch(/[@~&]?\+?mpmulti1|[@~&]+mpmulti1/);
+      expect(namesReply.raw).toMatch(/[@~&]?\+?mpmulti1|[@~&]+mpmulti1/);
       client.send('QUIT');
     });
   });
@@ -445,13 +457,13 @@ describe('IRCv3 multi-prefix', () => {
 
       client.send(`NAMES ${channel}`);
 
-      const namesReply = await client.waitForLine(/353.*#nomp/i, 5000);
+      const namesReply = await client.waitForNumeric('353', 5000);
 
       // Without multi-prefix, only highest prefix shown
       // @ (op) is higher than + (voice), so only @ should show
-      expect(namesReply).toMatch(/@nomp1/);
+      expect(namesReply.raw).toMatch(/@nomp1/);
       // Should NOT show @+ together
-      expect(namesReply).not.toMatch(/@\+nomp1/);
+      expect(namesReply.raw).not.toMatch(/@\+nomp1/);
       client.send('QUIT');
     });
   });
@@ -479,7 +491,7 @@ describe('IRCv3 multi-prefix', () => {
       client.send(`WHO ${channel}`);
 
       // 352 is RPL_WHOREPLY
-      const whoReply = await client.waitForLine(/352.*#mpwho/i, 5000);
+      const whoReply = await client.waitForNumeric('352', 5000);
 
       // WHO reply should include channel status with all prefixes
       expect(whoReply).toBeDefined();
@@ -543,7 +555,7 @@ describe('draft/no-implicit-names', () => {
 
       // Should NOT receive 353 (RPL_NAMREPLY) automatically
       try {
-        await client.waitForLine(/353.*#nimjoin/i, 2000);
+        await client.waitForNumeric('353', 2000);
         throw new Error('Should not receive NAMES with no-implicit-names');
       } catch (error) {
         if (error instanceof Error && error.message.includes('Should not')) {
@@ -580,8 +592,8 @@ describe('draft/no-implicit-names', () => {
       // Explicit NAMES request should still work
       client.send(`NAMES ${channel}`);
 
-      const namesReply = await client.waitForLine(/353.*#nimexpl/i, 5000);
-      expect(namesReply).toContain('nimexpl1');
+      const namesReply = await client.waitForNumeric('353', 5000);
+      expect(namesReply.raw).toContain('nimexpl1');
       client.send('QUIT');
     });
   });
