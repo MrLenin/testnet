@@ -169,27 +169,18 @@ describe('Core IRC Commands', () => {
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel);
 
-      // Clear buffer to avoid catching initial channel modes from JOIN
+      // Let any initial mode messages settle
+      await new Promise(r => setTimeout(r, 300));
       client.clearRawBuffer();
 
-      // Set a mode first
-      client.send(`MODE ${channel} +nt`);
-      await client.waitForMode(channel, '+nt', 5000);
-
-      // Small settle delay to let any additional mode-related messages arrive
-      await new Promise(r => setTimeout(r, 200));
-      client.clearRawBuffer();
-
-      // Query modes
+      // Query modes - just send query, no need to set first since channel has default modes
       client.send(`MODE ${channel}`);
 
       // Should receive 324 RPL_CHANNELMODEIS with channel and modes
-      const modeInfo = await client.waitForParsedLine(
-        msg => msg.command === '324' && msg.raw.includes(channel),
-        5000
-      );
+      const modeInfo = await client.waitForNumeric('324', 5000);
       expect(modeInfo).toBeDefined();
       expect(modeInfo.command).toBe('324');
+      expect(modeInfo.raw.toLowerCase()).toContain(channel.toLowerCase());
       console.log('MODE query response:', modeInfo.raw);
 
       client.send('QUIT');
