@@ -341,12 +341,9 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       expect(batchStartMsg.params[1]).toMatch(/multiline/i);
       console.log('Labeled multiline batch start:', batchStartMsg.raw);
 
-      // Check if label is echoed (server may or may not support labels on multiline batches)
-      if (batchStartMsg.raw.includes(label)) {
-        console.log('Label echoed in multiline batch');
-      } else {
-        console.log('Label not echoed - server may not support labels on multiline batches');
-      }
+      // Label should be echoed per IRCv3 labeled-response spec
+      expect(batchStartMsg.raw).toContain(`label=${label}`);
+      console.log('Label echoed in multiline batch start');
 
       // Extract server-assigned batch ID
       const serverBatchId = batchStartMsg.params[0].replace('+', '');
