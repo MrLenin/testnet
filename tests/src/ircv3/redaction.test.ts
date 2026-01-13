@@ -161,7 +161,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       await sender.waitForNumeric('001');
 
       await attacker.capLs();
-      await attacker.capReq(['draft/message-redaction']);
+      await attacker.capReq(['draft/message-redaction', 'standard-replies']);
       attacker.capEnd();
       attacker.register('redattack1');
       await attacker.waitForNumeric('001');
@@ -200,7 +200,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       const user = trackClient(await createRawSocketClient());
 
       await op.capLs();
-      await op.capReq(['draft/message-redaction']);
+      await op.capReq(['draft/message-redaction', 'echo-message']);
       op.capEnd();
       op.register('redop1');
       await op.waitForNumeric('001');
@@ -241,7 +241,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['draft/message-redaction']);
+      await client.capReq(['draft/message-redaction', 'standard-replies']);
       client.capEnd();
       client.register('redinv1');
       await client.waitForNumeric('001');
@@ -269,7 +269,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['draft/message-redaction', 'echo-message']);
+      await client.capReq(['draft/message-redaction', 'echo-message', 'standard-replies']);
       client.capEnd();
       client.register('redtwice1');
       await client.waitForNumeric('001');
