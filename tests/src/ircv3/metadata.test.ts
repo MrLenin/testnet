@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId, getTestAccount, releaseTestAccount } from '../helpers/index.js';
 
 /**
  * Metadata Tests (draft/metadata-2)
@@ -671,7 +671,20 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
   });
 
   describe('Metadata Persistence', () => {
+    const poolAccounts: string[] = [];
+
+    afterEach(async () => {
+      for (const account of poolAccounts) {
+        releaseTestAccount(account);
+      }
+      poolAccounts.length = 0;
+    });
+
     it('metadata persists across reconnection for authenticated users', async () => {
+      // Get a pool account for authentication
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
       // This test requires SASL authentication to verify persistence
       const client1 = trackClient(await createRawSocketClient());
 
@@ -683,12 +696,10 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
 
       await client1.capReq([metaCap, 'sasl']);
 
-      // Authenticate - Keycloak and testuser should always be available
+      // Authenticate with pool account
       client1.send('AUTHENTICATE PLAIN');
       await client1.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+');
-      const user = process.env.IRC_TEST_ACCOUNT ?? 'testuser';
-      const pass = process.env.IRC_TEST_PASSWORD ?? 'testpass';
-      const payload = Buffer.from(`${user}\0${user}\0${pass}`).toString('base64');
+      const payload = Buffer.from(`${account}\0${account}\0${password}`).toString('base64');
       client1.send(`AUTHENTICATE ${payload}`);
       await client1.waitForNumeric('903', 5000);
 
@@ -709,12 +720,10 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client2.capLs();
       await client2.capReq([metaCap, 'sasl']);
 
-      // Authenticate on reconnect
+      // Authenticate on reconnect with same account
       client2.send('AUTHENTICATE PLAIN');
       await client2.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+');
-      const user2 = process.env.IRC_TEST_ACCOUNT ?? 'testuser';
-      const pass2 = process.env.IRC_TEST_PASSWORD ?? 'testpass';
-      const payload2 = Buffer.from(`${user2}\0${user2}\0${pass2}`).toString('base64');
+      const payload2 = Buffer.from(`${account}\0${account}\0${password}`).toString('base64');
       client2.send(`AUTHENTICATE ${payload2}`);
       await client2.waitForNumeric('903', 5000);
 

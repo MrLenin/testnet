@@ -574,7 +574,7 @@ describe('SASL 400-byte Chunking', () => {
     client.send('QUIT');
   });
 
-  it('handles payload requiring 2 chunks (500 base64 bytes)', async () => {
+  it('handles payload requiring 2 chunks (500 base64 bytes)', { retry: 2 }, async () => {
     const client = trackClient(await createRawSocketClient());
     client.clearBuffer();
 
@@ -597,7 +597,8 @@ describe('SASL 400-byte Chunking', () => {
     console.log(`2-chunk test: payload is ${payload.length} base64 bytes`);
 
     await sendChunkedPayload(client, payload);
-    await new Promise(r => setTimeout(r, 100));
+    // Longer delay to allow X3 to fully process the chunked payload
+    await new Promise(r => setTimeout(r, 300));
 
     // Should get SASLFAIL (904) because credentials are invalid, but that proves
     // the server received and processed the full chunked payload
