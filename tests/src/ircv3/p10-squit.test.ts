@@ -94,9 +94,12 @@ describe.skipIf(!secondaryAvailable)('Server Topology', () => {
     const startTime = Date.now();
     while (Date.now() - startTime < 3000) {
       try {
-        const line = await client.waitForLine(/364|365/, 500);
-        linksLines.push(line);
-        if (line.includes('365')) break;
+        const msg = await client.waitForParsedLine(
+          m => m.command === '364' || m.command === '365',
+          500
+        );
+        linksLines.push(msg.raw);
+        if (msg.command === '365') break;
       } catch {
         break;
       }
@@ -117,7 +120,7 @@ describe.skipIf(!secondaryAvailable)('Server Topology', () => {
     client.send('MAP');
 
     // Wait for any response (command might not be available to users)
-    const response = await client.waitForLine(/.+/, 3000).catch(() => null);
+    const response = await client.waitForParsedLine(() => true, 3000).catch(() => null);
 
     // Just verify we got some response (might be permission denied)
     expect(response).toBeDefined();
@@ -137,9 +140,12 @@ describe.skipIf(!secondaryAvailable)('Server Topology', () => {
     const startTime = Date.now();
     while (Date.now() - startTime < 3000) {
       try {
-        const line = await client.waitForLine(/256|257|258|259/, 500);
-        adminLines.push(line);
-        if (line.includes('259')) break;
+        const msg = await client.waitForParsedLine(
+          m => ['256', '257', '258', '259'].includes(m.command),
+          500
+        );
+        adminLines.push(msg.raw);
+        if (msg.command === '259') break;
       } catch {
         break;
       }
@@ -168,9 +174,12 @@ describe.skipIf(!secondaryAvailable)('Cross-Server User Visibility', () => {
 
     // WHOIS the remote user from local
     local.send(`WHOIS ${remoteNick}`);
-    const whoisResponse = await local.waitForLine(new RegExp(`311.*${remoteNick}`, 'i'), 5000);
+    const whoisResponse = await local.waitForParsedLine(
+      msg => msg.command === '311' && msg.raw.toLowerCase().includes(remoteNick.toLowerCase()),
+      5000
+    );
 
-    expect(whoisResponse).toContain(remoteNick);
+    expect(whoisResponse.raw).toContain(remoteNick);
   });
 
   it('should show remote server in WHOIS server field', async () => {
@@ -192,16 +201,19 @@ describe.skipIf(!secondaryAvailable)('Cross-Server User Visibility', () => {
     const startTime = Date.now();
     while (Date.now() - startTime < 3000) {
       try {
-        const line = await local.waitForLine(/31[1-9]|318/, 500);
-        whoisLines.push(line);
-        if (line.includes('318')) break; // End of WHOIS
+        const msg = await local.waitForParsedLine(
+          m => /^31[1-9]$/.test(m.command) || m.command === '318',
+          500
+        );
+        whoisLines.push(msg.raw);
+        if (msg.command === '318') break; // End of WHOIS
       } catch {
         break;
       }
     }
 
     // 312 line should show the server name
-    const serverLine = whoisLines.find(l => l.includes('312'));
+    const serverLine = whoisLines.find(l => l.includes(' 312 '));
     expect(serverLine).toBeDefined();
     // Secondary server name should be in the response
     expect(serverLine).toMatch(/leaf|nefarious2|secondary/i);
@@ -232,7 +244,10 @@ describe.skipIf(!secondaryAvailable)('Disconnect Detection', () => {
 
     // Verify visibility
     local.send(`NAMES ${channel}`);
-    await local.waitForLine(new RegExp(`353.*${remoteNick}`, 'i'), 5000);
+    await local.waitForParsedLine(
+      msg => msg.command === '353' && msg.raw.toLowerCase().includes(remoteNick.toLowerCase()),
+      5000
+    );
 
     // Simulate disconnect by closing remote connection abruptly
     remote.close();
@@ -240,14 +255,17 @@ describe.skipIf(!secondaryAvailable)('Disconnect Detection', () => {
     if (idx > -1) activeClients.splice(idx, 1);
 
     // Local should eventually see QUIT
-    const quitMsg = await local.waitForLine(/QUIT/i, 10000);
+    const quitMsg = await local.waitForCommand('QUIT', 10000);
     expect(quitMsg).toBeDefined();
 
     // User should no longer be in channel
     await new Promise(r => setTimeout(r, 500));
     local.send(`NAMES ${channel}`);
-    const names = await local.waitForLine(/353|366/, 5000);
-    expect(names.toLowerCase()).not.toContain(remoteNick.toLowerCase());
+    const names = await local.waitForParsedLine(
+      msg => msg.command === '353' || msg.command === '366',
+      5000
+    );
+    expect(names.raw.toLowerCase()).not.toContain(remoteNick.toLowerCase());
   });
 
   it('should handle multiple users from same server disconnecting', async () => {
@@ -273,9 +291,9 @@ describe.skipIf(!secondaryAvailable)('Disconnect Detection', () => {
 
     // Verify all visible
     local.send(`NAMES ${channel}`);
-    const initialNames = await local.waitForLine(/353/, 5000);
+    const initialNames = await local.waitForNumeric('353', 5000);
     for (const nick of remoteNicks) {
-      expect(initialNames.toLowerCase()).toContain(nick.toLowerCase());
+      expect(initialNames.raw.toLowerCase()).toContain(nick.toLowerCase());
     }
 
     // Disconnect both remote clients
@@ -290,9 +308,12 @@ describe.skipIf(!secondaryAvailable)('Disconnect Detection', () => {
 
     // All remote users should be gone
     local.send(`NAMES ${channel}`);
-    const finalNames = await local.waitForLine(/353|366/, 5000);
+    const finalNames = await local.waitForParsedLine(
+      msg => msg.command === '353' || msg.command === '366',
+      5000
+    );
     for (const nick of remoteNicks) {
-      expect(finalNames.toLowerCase()).not.toContain(nick.toLowerCase());
+      expect(finalNames.raw.toLowerCase()).not.toContain(nick.toLowerCase());
     }
   });
 });
@@ -326,13 +347,16 @@ describe.skipIf(!secondaryAvailable)('State After Reconnection', () => {
 
     // Should need to rejoin (not automatically in channel)
     client.send(`NAMES ${channel}`);
-    const names = await client.waitForLine(/353|366/, 5000);
+    const names = await client.waitForParsedLine(
+      msg => msg.command === '353' || msg.command === '366',
+      5000
+    );
 
     // If 366 (end of names) without 353, or 353 doesn't contain our nick
     // then we're not in the channel (expected)
-    if (names.includes('353')) {
+    if (names.command === '353') {
       // Channel exists, check if we're in it
-      expect(names.toLowerCase()).not.toContain(`@${nick.toLowerCase()}`);
+      expect(names.raw.toLowerCase()).not.toContain(`@${nick.toLowerCase()}`);
     }
     // Either way, we'd need to rejoin
 
@@ -341,8 +365,8 @@ describe.skipIf(!secondaryAvailable)('State After Reconnection', () => {
     await client.waitForJoin(channel, undefined, 5000);
 
     client.send(`NAMES ${channel}`);
-    const rejoinNames = await client.waitForLine(/353/, 5000);
-    expect(rejoinNames.toLowerCase()).toContain(nick.toLowerCase());
+    const rejoinNames = await client.waitForNumeric('353', 5000);
+    expect(rejoinNames.raw.toLowerCase()).toContain(nick.toLowerCase());
   });
 
   it('should get channel modes from BURST on join', async () => {
@@ -358,7 +382,10 @@ describe.skipIf(!secondaryAvailable)('State After Reconnection', () => {
     await primary.waitForJoin(channel, undefined, 5000);
 
     primary.send(`MODE ${channel} +ms`);
-    await primary.waitForLine(/MODE.*\+[ms]/i, 3000).catch(() => null);
+    await primary.waitForParsedLine(
+      msg => msg.command === 'MODE' && /\+[ms]/i.test(msg.raw),
+      3000
+    ).catch(() => null);
 
     // Connect from secondary and join
     const secondary = trackClient(await createRegisteredClient(SECONDARY_SERVER, nick2));
@@ -368,10 +395,10 @@ describe.skipIf(!secondaryAvailable)('State After Reconnection', () => {
 
     // Check modes - should see modes from BURST
     secondary.send(`MODE ${channel}`);
-    const modeResponse = await secondary.waitForLine(/324/, 5000);
+    const modeResponse = await secondary.waitForNumeric('324', 5000);
 
     // Should have the modes we set
-    expect(modeResponse).toMatch(/[sm]/);
+    expect(modeResponse.raw).toMatch(/[sm]/);
   });
 });
 
@@ -393,8 +420,11 @@ describe.skipIf(!secondaryAvailable)('Network Statistics', () => {
     const startTime = Date.now();
     while (Date.now() - startTime < 3000) {
       try {
-        const line = await client.waitForLine(/25[0-9]|26[0-9]/, 500);
-        lusersLines.push(line);
+        const msg = await client.waitForParsedLine(
+          m => /^25[0-9]$/.test(m.command) || /^26[0-9]$/.test(m.command),
+          500
+        );
+        lusersLines.push(msg.raw);
       } catch {
         break;
       }
@@ -420,8 +450,8 @@ describe.skipIf(!secondaryAvailable)('Network Statistics', () => {
 
     // Get initial stats
     client1.send('LUSERS');
-    let userCountLine = await client1.waitForLine(/251/, 3000);
-    const initialMatch = userCountLine.match(/(\d+)\s+user/i);
+    let userCountMsg = await client1.waitForNumeric('251', 3000);
+    const initialMatch = userCountMsg.raw.match(/(\d+)\s+user/i);
     const initialUsers = initialMatch ? parseInt(initialMatch[1], 10) : 0;
 
     // Second user joins
@@ -432,8 +462,8 @@ describe.skipIf(!secondaryAvailable)('Network Statistics', () => {
 
     // Check stats again
     client1.send('LUSERS');
-    userCountLine = await client1.waitForLine(/251/, 3000);
-    const newMatch = userCountLine.match(/(\d+)\s+user/i);
+    userCountMsg = await client1.waitForNumeric('251', 3000);
+    const newMatch = userCountMsg.raw.match(/(\d+)\s+user/i);
     const newUsers = newMatch ? parseInt(newMatch[1], 10) : 0;
 
     // User count should have increased

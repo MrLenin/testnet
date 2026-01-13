@@ -66,9 +66,12 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.send('METADATA SET * avatar :https://example.com/avatar.png');
 
       // Should receive confirmation or error
-      const response = await client.waitForLine(/METADATA|761|762|764|765|766|767/, 3000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'METADATA' || ['761', '762', '764', '765', '766', '767'].includes(msg.command),
+        3000
+      );
       expect(response).toBeDefined();
-      console.log('METADATA SET response:', response);
+      console.log('METADATA SET response:', response.raw);
 
       client.send('QUIT');
     });
@@ -91,9 +94,12 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.send('METADATA GET * testkey');
 
       // 761 = RPL_KEYVALUE (metadata value response)
-      const response = await client.waitForLine(/761|METADATA.*testkey/, 3000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === '761' || (msg.command === 'METADATA' && msg.raw.includes('testkey')),
+        3000
+      );
       expect(response).toBeDefined();
-      console.log('METADATA GET response:', response);
+      console.log('METADATA GET response:', response.raw);
 
       client.send('QUIT');
     });
@@ -118,9 +124,12 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
         const startTime = Date.now();
         while (!done && Date.now() - startTime < 3000) {
           try {
-            const line = await client.waitForLine(/76[12]/, 500);
-            responses.push(line);
-            if (line.match(/762/)) {
+            const msg = await client.waitForParsedLine(
+              m => m.command === '761' || m.command === '762',
+              500
+            );
+            responses.push(msg.raw);
+            if (msg.command === '762') {
               done = true;
             }
           } catch {
@@ -152,7 +161,10 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.send('METADATA CLEAR * cleartest');
 
       // Server MUST respond with 761 (value cleared) or 766 (permission error)
-      const response = await client.waitForLine(/761|766|METADATA/, 3000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === '761' || msg.command === '766' || msg.command === 'METADATA',
+        3000
+      );
       expect(response).toBeDefined();
 
       client.send('QUIT');
@@ -179,7 +191,10 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.send(`METADATA SET ${channelName} url :https://example.com`);
 
       // Server MUST respond with 761 (success) or 764 (error)
-      const response = await client.waitForLine(/761|764|766|METADATA/, 3000);
+      const response = await client.waitForParsedLine(
+        msg => ['761', '764', '766', 'METADATA'].includes(msg.command),
+        3000
+      );
       expect(response).toBeDefined();
 
       client.send('QUIT');
@@ -205,7 +220,10 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.send(`METADATA GET ${channelName} testchankey`);
 
       // Server MUST respond with 761 (value) or error
-      const response = await client.waitForLine(/761|765|METADATA/, 3000);
+      const response = await client.waitForParsedLine(
+        msg => ['761', '765', 'METADATA'].includes(msg.command),
+        3000
+      );
       expect(response).toBeDefined();
 
       client.send('QUIT');
@@ -227,9 +245,12 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.send('METADATA * SUB avatar');
 
       try {
-        const response = await client.waitForLine(/769|770|METADATA/, 3000);
+        const response = await client.waitForParsedLine(
+          msg => ['769', '770', 'METADATA'].includes(msg.command),
+          3000
+        );
         expect(response).toBeDefined();
-        console.log('METADATA SUB response:', response);
+        console.log('METADATA SUB response:', response.raw);
       } catch {
         console.log('No METADATA SUB response - may not be supported');
       }
@@ -254,9 +275,12 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
 
       try {
         // 765 = ERR_KEYNOTSET, 766 = ERR_KEYNOPERM
-        const response = await client.waitForLine(/765|766|FAIL/, 3000);
+        const response = await client.waitForParsedLine(
+          msg => ['765', '766', 'FAIL'].includes(msg.command),
+          3000
+        );
         expect(response).toBeDefined();
-        console.log('METADATA error response:', response);
+        console.log('METADATA error response:', response.raw);
       } catch {
         // No error may mean key just doesn't exist (empty response)
         console.log('No METADATA error response');
@@ -280,9 +304,12 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
 
       try {
         // 401 = ERR_NOSUCHNICK, 764 = ERR_TARGETINVALID
-        const response = await client.waitForLine(/401|764|FAIL/, 3000);
+        const response = await client.waitForParsedLine(
+          msg => ['401', '764', 'FAIL'].includes(msg.command),
+          3000
+        );
         expect(response).toBeDefined();
-        console.log('METADATA target error response:', response);
+        console.log('METADATA target error response:', response.raw);
       } catch {
         console.log('No METADATA target error response');
       }
@@ -308,7 +335,10 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.send('METADATA GET * avatar');
 
       try {
-        const response = await client.waitForLine(/761.*avatar|METADATA.*avatar/, 3000);
+        const response = await client.waitForParsedLine(
+          msg => (msg.command === '761' || msg.command === 'METADATA') && msg.raw.includes('avatar'),
+          3000
+        );
         expect(response).toBeDefined();
       } catch {
         console.log('Avatar metadata not available');
@@ -333,7 +363,10 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.send('METADATA GET * pronouns');
 
       try {
-        const response = await client.waitForLine(/761.*pronouns|METADATA.*pronouns/, 3000);
+        const response = await client.waitForParsedLine(
+          msg => (msg.command === '761' || msg.command === 'METADATA') && msg.raw.includes('pronouns'),
+          3000
+        );
         expect(response).toBeDefined();
       } catch {
         console.log('Pronouns metadata not available');
@@ -358,7 +391,10 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.send('METADATA GET * bot');
 
       try {
-        const response = await client.waitForLine(/761.*bot|METADATA.*bot/, 3000);
+        const response = await client.waitForParsedLine(
+          msg => (msg.command === '761' || msg.command === 'METADATA') && msg.raw.includes('bot'),
+          3000
+        );
         expect(response).toBeDefined();
       } catch {
         console.log('Bot metadata not available');
@@ -385,8 +421,11 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
 
       try {
         // Should receive 766 ERR_KEYINVALID or FAIL
-        const response = await client.waitForLine(/766|FAIL|ERR/i, 5000);
-        console.log('Large value response:', response);
+        const response = await client.waitForParsedLine(
+          msg => msg.command === '766' || msg.command === 'FAIL' || msg.command.includes('ERR'),
+          5000
+        );
+        console.log('Large value response:', response.raw);
       } catch {
         console.log('No error for large metadata value');
       }
@@ -410,8 +449,11 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.send('METADATA GET * example.org/customkey');
 
       try {
-        const response = await client.waitForLine(/761|METADATA|766|FAIL/i, 3000);
-        console.log('Namespaced key response:', response);
+        const response = await client.waitForParsedLine(
+          msg => ['761', 'METADATA', '766', 'FAIL'].includes(msg.command),
+          3000
+        );
+        console.log('Namespaced key response:', response.raw);
       } catch {
         console.log('No response for namespaced key');
       }
@@ -433,8 +475,11 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.send('METADATA SET *  :value');
 
       try {
-        const response = await client.waitForLine(/766|FAIL|ERR|461/i, 3000);
-        console.log('Empty key response:', response);
+        const response = await client.waitForParsedLine(
+          msg => ['766', 'FAIL', '461'].includes(msg.command) || msg.command.includes('ERR'),
+          3000
+        );
+        console.log('Empty key response:', response.raw);
       } catch {
         console.log('No error for empty key');
       }
@@ -469,8 +514,11 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       other.send('METADATA GET metapriv1 privatekey');
 
       try {
-        const response = await other.waitForLine(/761|765|766|FAIL/i, 3000);
-        console.log('Private metadata access response:', response);
+        const response = await other.waitForParsedLine(
+          msg => ['761', '765', '766', 'FAIL'].includes(msg.command),
+          3000
+        );
+        console.log('Private metadata access response:', response.raw);
         // 765 = ERR_KEYNOTSET (key not visible), 766 = ERR_KEYNOPERM
       } catch {
         console.log('No response for private metadata access');
@@ -505,8 +553,11 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       getter.send('METADATA GET metapub1 avatar');
 
       try {
-        const response = await getter.waitForLine(/761.*avatar|765/i, 3000);
-        console.log('Public metadata access response:', response);
+        const response = await getter.waitForParsedLine(
+          msg => (msg.command === '761' && msg.raw.includes('avatar')) || msg.command === '765',
+          3000
+        );
+        console.log('Public metadata access response:', response.raw);
       } catch {
         console.log('No response for public metadata access');
       }
@@ -538,8 +589,11 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.send('METADATA * UNSUB avatar');
 
       try {
-        const response = await client.waitForLine(/769|770|METADATA/i, 3000);
-        console.log('Multiple SUB response:', response);
+        const response = await client.waitForParsedLine(
+          msg => ['769', '770', 'METADATA'].includes(msg.command),
+          3000
+        );
+        console.log('Multiple SUB response:', response.raw);
       } catch {
         console.log('No response for multiple subscriptions');
       }
@@ -561,8 +615,11 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.send('METADATA * UNSUB nonexistent');
 
       try {
-        const response = await client.waitForLine(/769|770|FAIL|METADATA/i, 3000);
-        console.log('UNSUB non-subscribed response:', response);
+        const response = await client.waitForParsedLine(
+          msg => ['769', '770', 'FAIL', 'METADATA'].includes(msg.command),
+          3000
+        );
+        console.log('UNSUB non-subscribed response:', response.raw);
       } catch {
         console.log('No response for UNSUB non-subscribed');
       }
@@ -625,8 +682,11 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
 
       // Get the metadata we set - should persist for authenticated users
       client2.send('METADATA GET * testpersist');
-      const response = await client2.waitForLine(/761.*testpersist/i, 3000);
-      expect(response).toContain(testValue);
+      const response = await client2.waitForParsedLine(
+        msg => msg.command === '761' && msg.raw.toLowerCase().includes('testpersist'),
+        3000
+      );
+      expect(response.raw).toContain(testValue);
 
       client2.send('QUIT');
     });
@@ -655,8 +715,11 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.send('METADATA LIST *');
 
       try {
-        const response = await client.waitForLine(/761|762|FAIL|METADATA/i, 5000);
-        console.log('Rate limit test response:', response);
+        const response = await client.waitForParsedLine(
+          msg => ['761', '762', 'FAIL', 'METADATA'].includes(msg.command),
+          5000
+        );
+        console.log('Rate limit test response:', response.raw);
       } catch {
         console.log('No response after rapid requests');
       }
