@@ -229,26 +229,43 @@ describe('IRCv3 SASL Authentication', () => {
       await client.capLs();
       await client.capReq(['sasl', 'extended-join', 'account-tag']);
 
+      console.log('Starting SASL authentication...');
       const success = await saslPlain(client, TEST_ACCOUNT, TEST_PASSWORD);
+      console.log(`SASL result: ${success}`);
       // This test REQUIRES SASL to work - fail if it doesn't
       expect(success).toBe(true);
 
       client.capEnd();
       client.register('accttest1');
-      await client.waitForNumeric('001');
+      console.log('Waiting for 001...');
+      await client.waitForNumeric('001', 15000);
+      console.log('Got 001, registered successfully');
 
       // Small delay to ensure registration is fully processed
       await new Promise(r => setTimeout(r, 200));
 
       // Join a channel and check for extended-join with account
-      client.send('JOIN #accttestchan');
+      const channel = `#accttest${uniqueId().slice(0, 6)}`;
+      console.log(`Joining ${channel}...`);
+      client.send(`JOIN ${channel}`);
 
-      const joinMsg = await client.waitForJoin('#accttestchan', undefined, 5000);
+      const joinMsg = await client.waitForJoin(channel, undefined, 10000);
+      console.log(`Got JOIN: ${joinMsg.raw}`);
       expect(joinMsg).toBeDefined();
 
-      // With extended-join, JOIN includes account name
+      // With extended-join, JOIN includes account name in params[1]
       // Format: :nick!user@host JOIN #channel accountname :realname
+      if (joinMsg.params.length >= 2) {
+        console.log(`Account in JOIN: ${joinMsg.params[1]}`);
+        expect(joinMsg.params[1]).toBe(TEST_ACCOUNT);
+      }
+
       // Or with account-tag: @account=name :nick!user@host JOIN #channel
+      if (joinMsg.tags.account) {
+        console.log(`Account tag: ${joinMsg.tags.account}`);
+        expect(joinMsg.tags.account).toBe(TEST_ACCOUNT);
+      }
+
       client.send('QUIT');
     });
   });
