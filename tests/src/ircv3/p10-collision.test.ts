@@ -289,9 +289,9 @@ describe.skipIf(!secondaryAvailable)('Nick Collision Handling', () => {
     await secondary.waitForJoin(channel, undefined, 5000);
 
     primary.send(`NAMES ${channel}`);
-    const names = await primary.waitForLine(/353/, 5000);
-    expect(names).toContain(nick1);
-    expect(names).toContain(nick2);
+    const names = await primary.waitForNumeric('353', 5000);
+    expect(names.raw).toContain(nick1);
+    expect(names.raw).toContain(nick2);
   });
 
   it('should handle rapid nick changes without collision', async () => {
@@ -303,13 +303,16 @@ describe.skipIf(!secondaryAvailable)('Nick Collision Handling', () => {
 
     // Change nick rapidly
     client.send(`NICK ${newNick}`);
-    const nickResponse = await client.waitForLine(/NICK/i, 5000);
-    expect(nickResponse.toLowerCase()).toContain(newNick.toLowerCase());
+    const nickResponse = await client.waitForCommand('NICK', 5000);
+    expect(nickResponse.raw.toLowerCase()).toContain(newNick.toLowerCase());
 
     // Verify new nick works
     client.send('WHOIS ' + newNick);
-    const whoisResponse = await client.waitForLine(/311|401/, 5000);
-    expect(whoisResponse).toContain(newNick);
+    const whoisResponse = await client.waitForParsedLine(
+      msg => msg.command === '311' || msg.command === '401',
+      5000
+    );
+    expect(whoisResponse.raw).toContain(newNick);
   });
 });
 
@@ -338,21 +341,30 @@ describe.skipIf(!secondaryAvailable)('Nick Change Propagation', () => {
 
     // Wait for visibility
     secondary.send(`NAMES ${channel}`);
-    await secondary.waitForLine(new RegExp(`353.*${nick1}`, 'i'), 5000);
+    await secondary.waitForParsedLine(
+      msg => msg.command === '353' && msg.raw.toLowerCase().includes(nick1.toLowerCase()),
+      5000
+    );
 
     // Primary changes nick
     primary.send(`NICK ${nick1New}`);
-    await primary.waitForLine(new RegExp(`NICK.*${nick1New}`, 'i'), 5000);
+    await primary.waitForParsedLine(
+      msg => msg.command === 'NICK' && msg.raw.toLowerCase().includes(nick1New.toLowerCase()),
+      5000
+    );
 
     // Secondary should see the nick change
-    const nickChange = await secondary.waitForLine(new RegExp(`NICK.*${nick1New}`, 'i'), 5000);
-    expect(nickChange.toLowerCase()).toContain(nick1New.toLowerCase());
+    const nickChange = await secondary.waitForParsedLine(
+      msg => msg.command === 'NICK' && msg.raw.toLowerCase().includes(nick1New.toLowerCase()),
+      5000
+    );
+    expect(nickChange.raw.toLowerCase()).toContain(nick1New.toLowerCase());
 
     // Verify in NAMES
     secondary.send(`NAMES ${channel}`);
-    const names = await secondary.waitForLine(/353/, 5000);
-    expect(names.toLowerCase()).toContain(nick1New.toLowerCase());
-    expect(names.toLowerCase()).not.toContain(nick1.toLowerCase());
+    const names = await secondary.waitForNumeric('353', 5000);
+    expect(names.raw.toLowerCase()).toContain(nick1New.toLowerCase());
+    expect(names.raw.toLowerCase()).not.toContain(nick1.toLowerCase());
   });
 
   it('should propagate QUIT to other server', async () => {
@@ -374,7 +386,10 @@ describe.skipIf(!secondaryAvailable)('Nick Change Propagation', () => {
 
     // Wait for visibility
     secondary.send(`NAMES ${channel}`);
-    await secondary.waitForLine(new RegExp(`353.*${nick1}`, 'i'), 5000);
+    await secondary.waitForParsedLine(
+      msg => msg.command === '353' && msg.raw.toLowerCase().includes(nick1.toLowerCase()),
+      5000
+    );
 
     // Primary quits
     primary.send('QUIT :Test quit');
@@ -384,13 +399,16 @@ describe.skipIf(!secondaryAvailable)('Nick Change Propagation', () => {
     if (idx > -1) activeClients.splice(idx, 1);
 
     // Secondary should see the QUIT
-    const quitMsg = await secondary.waitForLine(new RegExp(`QUIT.*${nick1}|:${nick1}.*QUIT`, 'i'), 5000);
+    const quitMsg = await secondary.waitForQuit(nick1, 5000);
     expect(quitMsg).toBeDefined();
 
     // User should no longer be in NAMES
     await new Promise(r => setTimeout(r, 200));
     secondary.send(`NAMES ${channel}`);
-    const names = await secondary.waitForLine(/353|366/, 5000);
-    expect(names.toLowerCase()).not.toContain(nick1.toLowerCase());
+    const names = await secondary.waitForParsedLine(
+      msg => msg.command === '353' || msg.command === '366',
+      5000
+    );
+    expect(names.raw.toLowerCase()).not.toContain(nick1.toLowerCase());
   });
 });

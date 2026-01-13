@@ -56,11 +56,11 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       await client.capReq(['draft/read-marker', 'server-time']);
       client.capEnd();
       client.register('rmset1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('rmset');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
 
       // Send a message to get a msgid
       client.send(`PRIVMSG ${channel} :Test message for read marker`);
@@ -74,9 +74,12 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
 
       // Should receive MARKREAD confirmation
       try {
-        const response = await client.waitForLine(/MARKREAD|730/i, 5000);
+        const response = await client.waitForParsedLine(
+          msg => msg.command === 'MARKREAD' || msg.command === '730',
+          5000
+        );
         expect(response).toBeDefined();
-        console.log('MARKREAD response:', response);
+        console.log('MARKREAD response:', response.raw);
       } catch {
         console.log('No MARKREAD response - may require authentication');
       }
@@ -91,11 +94,11 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       await client.capReq(['draft/read-marker']);
       client.capEnd();
       client.register('rmquery1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('rmquery');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
 
       client.clearRawBuffer();
 
@@ -104,9 +107,12 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
 
       try {
         // 730 = RPL_MARKREAD
-        const response = await client.waitForLine(/MARKREAD|730/i, 5000);
+        const response = await client.waitForParsedLine(
+          msg => msg.command === 'MARKREAD' || msg.command === '730',
+          5000
+        );
         expect(response).toBeDefined();
-        console.log('MARKREAD query response:', response);
+        console.log('MARKREAD query response:', response.raw);
       } catch {
         console.log('No MARKREAD query response');
       }
@@ -121,19 +127,22 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       await client.capReq(['draft/read-marker', 'echo-message']);
       client.capEnd();
       client.register('rmmsgid1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('rmmsgid');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
 
       // Send message and capture msgid from echo
       client.send(`PRIVMSG ${channel} :Message to mark as read`);
 
       let msgid: string | null = null;
       try {
-        const echo = await client.waitForLine(/PRIVMSG.*Message to mark/i, 3000);
-        const match = echo.match(/msgid=([^\s;]+)/);
+        const echo = await client.waitForParsedLine(
+          msg => msg.command === 'PRIVMSG' && msg.raw.includes('Message to mark'),
+          3000
+        );
+        const match = echo.raw.match(/msgid=([^\s;]+)/);
         if (match) {
           msgid = match[1];
         }
@@ -146,7 +155,10 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
         client.send(`MARKREAD ${channel} msgid=${msgid}`);
 
         try {
-          const response = await client.waitForLine(/MARKREAD|730/i, 5000);
+          const response = await client.waitForParsedLine(
+            msg => msg.command === 'MARKREAD' || msg.command === '730',
+            5000
+          );
           expect(response).toBeDefined();
         } catch {
           console.log('No MARKREAD response for msgid');
@@ -168,13 +180,13 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       await client1.capReq(['draft/read-marker']);
       client1.capEnd();
       client1.register('rmsync1');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       await client2.capLs();
       await client2.capReq(['draft/read-marker']);
       client2.capEnd();
       client2.register('rmsync2');
-      await client2.waitForLine(/001/);
+      await client2.waitForNumeric('001');
 
       // Both clients need to be on the same account for sync
       // This test verifies capability is properly set up
@@ -194,7 +206,7 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       await client.capReq(['draft/read-marker']);
       client.capEnd();
       client.register('rmerr1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -203,8 +215,12 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
 
       try {
         // Should receive error
-        const response = await client.waitForLine(/MARKREAD|FAIL|4\d\d|731/i, 3000);
-        console.log('MARKREAD error response:', response);
+        const response = await client.waitForParsedLine(
+          msg => msg.command === 'MARKREAD' || msg.command === 'FAIL' ||
+                 msg.command === '731' || /^4\d\d$/.test(msg.command),
+          3000
+        );
+        console.log('MARKREAD error response:', response.raw);
       } catch {
         console.log('No error response for invalid MARKREAD');
       }
@@ -219,11 +235,11 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       await client.capReq(['draft/read-marker']);
       client.capEnd();
       client.register('rmerr2');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('rmerr');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
 
       client.clearRawBuffer();
 
@@ -231,8 +247,12 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       client.send(`MARKREAD ${channel} timestamp=invalid`);
 
       try {
-        const response = await client.waitForLine(/MARKREAD|FAIL|4\d\d/i, 3000);
-        console.log('Invalid timestamp response:', response);
+        const response = await client.waitForParsedLine(
+          msg => msg.command === 'MARKREAD' || msg.command === 'FAIL' ||
+                 /^4\d\d$/.test(msg.command),
+          3000
+        );
+        console.log('Invalid timestamp response:', response.raw);
       } catch {
         console.log('No response for invalid timestamp');
       }
@@ -250,12 +270,12 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       await client1.capReq(['draft/read-marker']);
       client1.capEnd();
       client1.register('rmpm1');
-      await client1.waitForLine(/001/);
+      await client1.waitForNumeric('001');
 
       await client2.capLs();
       client2.capEnd();
       client2.register('rmpm2');
-      await client2.waitForLine(/001/);
+      await client2.waitForNumeric('001');
 
       // Client2 sends PM to client1
       client2.send('PRIVMSG rmpm1 :Private message');
@@ -268,8 +288,11 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       client1.send(`MARKREAD rmpm2 timestamp=${timestamp}`);
 
       try {
-        const response = await client1.waitForLine(/MARKREAD|730/i, 3000);
-        console.log('PM MARKREAD response:', response);
+        const response = await client1.waitForParsedLine(
+          msg => msg.command === 'MARKREAD' || msg.command === '730',
+          3000
+        );
+        console.log('PM MARKREAD response:', response.raw);
       } catch {
         console.log('No PM MARKREAD response - may not be supported');
       }
