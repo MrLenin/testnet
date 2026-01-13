@@ -249,8 +249,17 @@ describe('IRCv3 SASL Authentication', () => {
       console.log(`Joining ${channel}...`);
       client.send(`JOIN ${channel}`);
 
-      const joinMsg = await client.waitForJoin(channel, undefined, 10000);
-      console.log(`Got JOIN: ${joinMsg.raw}`);
+      let joinMsg;
+      try {
+        joinMsg = await client.waitForJoin(channel, undefined, 10000);
+        console.log(`Got JOIN: ${joinMsg.raw}`);
+      } catch (err) {
+        console.log('JOIN timed out. Dumping all received lines:');
+        for (const line of client.allLines) {
+          console.log(`  ${line}`);
+        }
+        throw err;
+      }
       expect(joinMsg).toBeDefined();
 
       // With extended-join, JOIN includes account name in params[1]
