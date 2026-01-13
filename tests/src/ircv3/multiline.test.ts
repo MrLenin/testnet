@@ -123,11 +123,15 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       expect(batchStartMsg.params[1]).toMatch(/multiline/i);
       console.log('Received multiline batch start:', batchStartMsg.raw);
 
-      // Collect all messages in the batch
+      // Extract server-assigned batch ID (strip leading '+')
+      const serverBatchId = batchStartMsg.params[0].replace('+', '');
+
+      // Collect all messages in the batch - ONLY those tagged with this batch ID
       const messages: string[] = [];
       while (true) {
         const msg = await client2.waitForParsedLine(
-          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          m => (m.command === 'PRIVMSG' && m.tags?.batch === serverBatchId) ||
+               (m.command === 'BATCH' && m.params[0] === `-${serverBatchId}`),
           2000
         );
         messages.push(msg.raw);
@@ -178,9 +182,13 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       expect(batchStartEchoMsg.params[1]).toMatch(/multiline/i);
       console.log('Multiline echo batch start:', batchStartEchoMsg.raw);
 
+      // Extract server-assigned batch ID
+      const serverBatchId = batchStartEchoMsg.params[0].replace('+', '');
+
       while (true) {
         const msg = await client.waitForParsedLine(
-          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          m => (m.command === 'PRIVMSG' && m.tags?.batch === serverBatchId) ||
+               (m.command === 'BATCH' && m.params[0] === `-${serverBatchId}`),
           2000
         );
         allLines.push(msg.raw);
@@ -253,7 +261,8 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
         maxLines = parseInt(match[1], 10);
       }
 
-      client.send('CAP REQ :draft/multiline batch');
+      // Must request standard-replies to receive FAIL (otherwise server sends NOTICE fallback)
+      client.send('CAP REQ :draft/multiline batch standard-replies');
       await client.waitForCap('ACK');
       client.send('CAP END');
       client.send('NICK mlover1');
@@ -264,7 +273,11 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client.send(`JOIN ${channelName}`);
       await client.waitForJoin(channelName);
 
-      // Send more lines than allowed
+      // Clear buffer before sending batch to avoid matching stale messages
+      await new Promise(r => setTimeout(r, 100));
+      client.clearRawBuffer();
+
+      // Send more lines than allowed (max-lines from CAP LS, default 24)
       const batchId = `over${uniqueId()}`;
       client.send(`BATCH +${batchId} draft/multiline ${channelName}`);
 
@@ -335,11 +348,15 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
         console.log('Label not echoed - server may not support labels on multiline batches');
       }
 
-      // Collect rest of batch to verify multiline works
+      // Extract server-assigned batch ID
+      const serverBatchId = batchStartMsg.params[0].replace('+', '');
+
+      // Collect rest of batch to verify multiline works - ONLY messages tagged with this batch ID
       const messages: string[] = [];
       while (true) {
         const msg = await client.waitForParsedLine(
-          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          m => (m.command === 'PRIVMSG' && m.tags?.batch === serverBatchId) ||
+               (m.command === 'BATCH' && m.params[0] === `-${serverBatchId}`),
           2000
         );
         messages.push(msg.raw);
@@ -403,11 +420,15 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       console.log('Multiline batch start:', batchStartMsg.raw);
       expect(batchStartMsg.params[1]).toMatch(/multiline/i);
 
-      // Collect messages until BATCH -
+      // Extract server-assigned batch ID
+      const serverBatchId = batchStartMsg.params[0].replace('+', '');
+
+      // Collect messages until BATCH - (only messages tagged with this batch ID)
       const messages: string[] = [];
       while (true) {
         const msg = await client2.waitForParsedLine(
-          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          m => (m.command === 'PRIVMSG' && m.tags?.batch === serverBatchId) ||
+               (m.command === 'BATCH' && m.params[0] === `-${serverBatchId}`),
           2000
         );
         messages.push(msg.raw);
@@ -1168,10 +1189,14 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
           console.log('Captured msgid from echo:', capturedMsgid);
         }
 
+        // Extract server-assigned batch ID for filtering
+        const echoBatchId = echoBatchMsg.params[0].replace('+', '');
+
         // Also check individual messages in the echo batch for msgid
         while (true) {
           const msg = await client1.waitForParsedLine(
-            m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+            m => (m.command === 'PRIVMSG' && m.tags?.batch === echoBatchId) ||
+                 (m.command === 'BATCH' && m.params[0] === `-${echoBatchId}`),
             1000
           );
           if (!capturedMsgid) {
@@ -1360,10 +1385,14 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
         const msgidMatch = echoBatchMsg.raw.match(/msgid=([^\s;]+)/);
         if (msgidMatch) capturedMsgid = msgidMatch[1];
 
+        // Extract server-assigned batch ID for filtering
+        const echoBatchId = echoBatchMsg.params[0].replace('+', '');
+
         // Also check individual messages for msgid
         while (true) {
           const msg = await client1.waitForParsedLine(
-            m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+            m => (m.command === 'PRIVMSG' && m.tags?.batch === echoBatchId) ||
+                 (m.command === 'BATCH' && m.params[0] === `-${echoBatchId}`),
             1000
           );
           if (!capturedMsgid) {
