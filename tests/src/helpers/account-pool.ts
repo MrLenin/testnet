@@ -132,12 +132,13 @@ class AccountPool {
       client = await createX3Client('poolchk');
 
       for (const [account, spec] of this.accounts) {
-        // Use short initial timeout (1s) - if X3 is responsive, this is plenty
-        let result = await client.auth(account, spec.password, 1000);
+        // Short initial timeout - serviceCmd now only consumes service NOTICEs
+        // so server notices won't waste our poll attempts
+        let result = await client.auth(account, spec.password, 2000);
 
-        // If timeout, retry once with slightly longer timeout
+        // Retry with longer timeout if first attempt fails
         if (!result.error && result.lines.length === 0) {
-          result = await client.auth(account, spec.password, 3000);
+          result = await client.auth(account, spec.password, 5000);
         }
 
         if (result.success) {

@@ -118,20 +118,16 @@ export class X3Client extends RawSocketClient {
     };
 
     // Wait for FIRST response with full timeout (server may be busy)
-    // Keep per-poll timeout short (2s) to maximize retry attempts within overall timeout
+    // IMPORTANT: Only match service NOTICEs - don't consume server notices which waste poll attempts
     while (Date.now() - startTime < timeout) {
       try {
         const msg = await this.waitForParsedLine(
-          m => m.command === 'NOTICE',
+          isFromTargetService,  // Only consume NOTICEs from the target service
           Math.min(2000, timeout - (Date.now() - startTime))
         );
 
-        if (isFromTargetService(msg)) {
-          lines.push(msg.raw);
-          break; // Got first response, switch to fast collection
-        }
-        // Non-service NOTICE (server notice, etc.) - keep waiting
-        console.log(`[serviceCmd] Skipping non-${service} NOTICE: ${msg.source?.nick || 'unknown'}`);
+        lines.push(msg.raw);
+        break; // Got first response, switch to fast collection
       } catch {
         // Timeout - no response yet, keep waiting until overall timeout
         console.log(`[serviceCmd] Poll timeout waiting for ${service} (${Date.now() - startTime}ms elapsed)`);
@@ -168,13 +164,11 @@ export class X3Client extends RawSocketClient {
     while (Date.now() - startTime < timeout) {
       try {
         const msg = await this.waitForParsedLine(
-          m => m.command === 'NOTICE',
+          isFromTargetService,  // Only consume NOTICEs from the target service
           interMessageTimeout
         );
 
-        if (isFromTargetService(msg)) {
-          lines.push(msg.raw);
-        }
+        lines.push(msg.raw);
       } catch {
         // Timeout with no response = service is done responding
         break;
