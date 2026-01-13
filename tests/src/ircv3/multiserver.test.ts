@@ -85,17 +85,17 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       let linksRestricted = false;
       try {
         for (let i = 0; i < 10; i++) {
-          const line = await client.waitForLine(/364|365|481/, 2000);
-          if (/481/.test(line)) {
+          const msg = await client.waitForNumeric(['364', '365', '481'], 2000);
+          if (msg.command === '481') {
             // ERR_NOPRIVILEGES - LINKS is oper-only
             linksRestricted = true;
             console.log('LINKS command is restricted to opers');
             break;
           }
-          if (/364/.test(line)) {
-            links.push(line);
+          if (msg.command === '364') {
+            links.push(msg.raw);
           }
-          if (/365/.test(line)) {
+          if (msg.command === '365') {
             break; // End of LINKS
           }
         }
@@ -150,8 +150,11 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client1.send(`PRIVMSG ${channel} :${testMessage}`);
 
       // Client 2 should receive it despite being on a different server
-      const received = await client2.waitForLine(new RegExp(testMessage), 5000);
-      expect(received).toContain(testMessage);
+      const received = await client2.waitForParsedLine(
+        msg => msg.command === 'PRIVMSG' && msg.trailing?.includes(testMessage) === true,
+        5000
+      );
+      expect(received.raw).toContain(testMessage);
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -186,8 +189,8 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client1.send('WHOIS whoisee1');
 
       // Should get WHOIS response
-      const whoisInfo = await client1.waitForLine(/311.*whoisee1/i, 5000);
-      expect(whoisInfo).toContain('whoisee1');
+      const whoisInfo = await client1.waitForNumeric('311', 5000);
+      expect(whoisInfo.raw.toLowerCase()).toContain('whoisee1');
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -223,8 +226,8 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client1.send('NICK nicknew1');
 
       // Client 2 should see the nick change
-      const nickChange = await client2.waitForLine(/NICK.*nicknew1/i, 5000);
-      expect(nickChange).toContain('nicknew1');
+      const nickChange = await client2.waitForCommand('NICK', 5000);
+      expect(nickChange.raw.toLowerCase()).toContain('nicknew1');
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -253,14 +256,14 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client.send('AUTHENTICATE PLAIN');
 
       try {
-        await client.waitForLine(/AUTHENTICATE \+/, 3000);
+        await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
         const payload = Buffer.from(`${testAccount}\0${testAccount}\0${testPassword}`).toString('base64');
         client.send(`AUTHENTICATE ${payload}`);
 
         // Wait for result (success or failure)
-        const result = await client.waitForLine(/90[0-9]/, 5000);
+        const result = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 5000);
         // If we get here, SASL interaction worked (success or failure is fine)
-        expect(result).toMatch(/90[0-9]/);
+        expect(result.command).toMatch(/90[0-9]/);
       } catch {
         // SASL not working - this is okay, it just means no account is configured
         console.log('SASL not configured with test account');
@@ -306,12 +309,18 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       const testValue = `testvalue-${uniqueId()}`;
       client1.send(`METADATA SET * ${testKey} :${testValue}`);
       // Wait for confirmation the metadata was set
-      await client1.waitForLine(/METADATA.*SET|761/i, 3000);
+      await client1.waitForParsedLine(
+        msg => (msg.command === 'METADATA' || msg.command === '761'),
+        3000
+      );
 
       // Query metadata from client 2 (on secondary server)
       client2.send(`METADATA GET metauser1 ${testKey}`);
       // Wait for metadata response
-      await client2.waitForLine(/METADATA|761/i, 3000);
+      await client2.waitForParsedLine(
+        msg => (msg.command === 'METADATA' || msg.command === '761'),
+        3000
+      );
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -349,8 +358,11 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client1.send(`MODE ${channel} +s`);
 
       // Client 2 should see the mode change
-      const modeChange = await client2.waitForLine(/MODE.*\+s/i, 5000);
-      expect(modeChange).toContain('+s');
+      const modeChange = await client2.waitForParsedLine(
+        msg => msg.command === 'MODE' && msg.raw.includes('+s'),
+        5000
+      );
+      expect(modeChange.raw).toContain('+s');
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -386,8 +398,8 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       op.send(`KICK ${channel} kickuser1 :Cross-server kick test`);
 
       // User should receive KICK
-      const kickMsg = await user.waitForLine(/KICK.*kickuser1/i, 5000);
-      expect(kickMsg).toContain('KICK');
+      const kickMsg = await user.waitForCommand('KICK', 5000);
+      expect(kickMsg.raw.toLowerCase()).toContain('kickuser1');
 
       op.send('QUIT');
       user.send('QUIT');
@@ -424,8 +436,8 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client1.send(`TOPIC ${channel} :${newTopic}`);
 
       // Client 2 should see TOPIC change
-      const topicChange = await client2.waitForLine(/TOPIC/i, 5000);
-      expect(topicChange).toContain('TOPIC');
+      const topicChange = await client2.waitForCommand('TOPIC', 5000);
+      expect(topicChange.command).toBe('TOPIC');
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -461,8 +473,11 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client1.send(`PART ${channel} :Leaving cross-server`);
 
       // Client 2 should see PART
-      const partMsg = await client2.waitForLine(/PART.*parter1/i, 5000);
-      expect(partMsg).toContain('PART');
+      const partMsg = await client2.waitForParsedLine(
+        msg => msg.command === 'PART' && msg.source?.nick === 'parter1',
+        5000
+      );
+      expect(partMsg.command).toBe('PART');
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -500,8 +515,11 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       sender.send(`PRIVMSG pmrecver1 :${testMsg}`);
 
       // Receiver should get the message
-      const pm = await receiver.waitForLine(new RegExp(testMsg), 5000);
-      expect(pm).toContain(testMsg);
+      const pm = await receiver.waitForParsedLine(
+        msg => msg.command === 'PRIVMSG' && msg.trailing?.includes(testMsg) === true,
+        5000
+      );
+      expect(pm.raw).toContain(testMsg);
 
       sender.send('QUIT');
       receiver.send('QUIT');
@@ -534,8 +552,11 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       const testNotice = `Notice test ${uniqueId()}`;
       sender.send(`NOTICE noticerecv1 :${testNotice}`);
 
-      const notice = await receiver.waitForLine(new RegExp(testNotice), 5000);
-      expect(notice).toContain(testNotice);
+      const notice = await receiver.waitForParsedLine(
+        msg => msg.command === 'NOTICE' && msg.trailing?.includes(testNotice) === true,
+        5000
+      );
+      expect(notice.raw).toContain(testNotice);
 
       sender.send('QUIT');
       receiver.send('QUIT');
@@ -572,8 +593,11 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       quitter.send('QUIT :Cross-server quit');
 
       // Observer should see QUIT
-      const quitMsg = await observer.waitForLine(/QUIT.*quitter1/i, 5000);
-      expect(quitMsg).toContain('QUIT');
+      const quitMsg = await observer.waitForParsedLine(
+        msg => msg.command === 'QUIT' && msg.source?.nick === 'quitter1',
+        5000
+      );
+      expect(quitMsg.command).toBe('QUIT');
 
       observer.send('QUIT');
     });
@@ -611,9 +635,12 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       // Client 1 sends message
       client1.send(`PRIVMSG ${channel} :Account tag test`);
 
-      const msg = await client2.waitForLine(/PRIVMSG.*Account tag test/i, 5000);
+      const msg = await client2.waitForParsedLine(
+        m => m.command === 'PRIVMSG' && m.trailing?.includes('Account tag test') === true,
+        5000
+      );
       // If authenticated, should have account= tag (checked by logging)
-      expect(msg).toContain('Account tag test');
+      expect(msg.raw).toContain('Account tag test');
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -644,8 +671,11 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client.send(`PRIVMSG ${channel} :${testMsg}`);
 
       // Should receive own message back
-      const echo = await client.waitForLine(new RegExp(testMsg), 3000);
-      expect(echo).toContain(testMsg);
+      const echo = await client.waitForParsedLine(
+        m => m.command === 'PRIVMSG' && m.trailing?.includes(testMsg) === true,
+        3000
+      );
+      expect(echo.raw).toContain(testMsg);
 
       client.send('QUIT');
     });
@@ -681,11 +711,14 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       // Send message from primary
       client1.send(`PRIVMSG ${channel} :Time tag test`);
 
-      const msg = await client2.waitForLine(/PRIVMSG.*Time tag test/i, 5000);
-      expect(msg).toContain('Time tag test');
+      const msg = await client2.waitForParsedLine(
+        m => m.command === 'PRIVMSG' && m.trailing?.includes('Time tag test') === true,
+        5000
+      );
+      expect(msg.raw).toContain('Time tag test');
       // If server-time is enabled, should have time= tag
-      if (msg.includes('time=')) {
-        expect(msg).toMatch(/time=\d{4}-\d{2}-\d{2}/);
+      if (msg.raw.includes('time=')) {
+        expect(msg.raw).toMatch(/time=\d{4}-\d{2}-\d{2}/);
       }
 
       client1.send('QUIT');
@@ -727,8 +760,8 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       // Rename from primary server
       op.send(`RENAME ${oldChannel} ${newChannel} :Cross-server rename`);
 
-      const rename = await observer.waitForLine(/RENAME/i, 5000);
-      expect(rename).toContain('RENAME');
+      const rename = await observer.waitForCommand('RENAME', 5000);
+      expect(rename.command).toBe('RENAME');
 
       op.send('QUIT');
       observer.send('QUIT');
@@ -765,8 +798,11 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       // Send message and capture msgid
       sender.send(`PRIVMSG ${channel} :Message to redact cross-server`);
 
-      const echo = await sender.waitForLine(/PRIVMSG.*Message to redact/i, 3000);
-      const match = echo.match(/msgid=([^\s;]+)/);
+      const echo = await sender.waitForParsedLine(
+        m => m.command === 'PRIVMSG' && m.trailing?.includes('Message to redact') === true,
+        3000
+      );
+      const match = echo.raw.match(/msgid=([^\s;]+)/);
       expect(match).not.toBeNull();
       const msgid = match![1];
 
@@ -775,8 +811,8 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       // Redact the message
       sender.send(`REDACT ${channel} ${msgid} :Cross-server redaction`);
 
-      const redact = await observer.waitForLine(/REDACT/i, 5000);
-      expect(redact).toContain('REDACT');
+      const redact = await observer.waitForCommand('REDACT', 5000);
+      expect(redact.command).toBe('REDACT');
 
       sender.send('QUIT');
       observer.send('QUIT');
@@ -817,8 +853,8 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client1.send('AWAY :Gone for lunch');
 
       // Client 2 should see AWAY message (with away-notify)
-      const awayMsg = await client2.waitForLine(/AWAY/i, 5000);
-      expect(awayMsg).toContain('AWAY');
+      const awayMsg = await client2.waitForCommand('AWAY', 5000);
+      expect(awayMsg.command).toBe('AWAY');
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -857,8 +893,8 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       querier.send('WHOIS awaywhois1');
 
       // 301 = RPL_AWAY
-      const awayLine = await querier.waitForLine(/301.*awaywhois1/i, 5000);
-      expect(awayLine).toContain('Testing WHOIS away');
+      const awayLine = await querier.waitForNumeric('301', 5000);
+      expect(awayLine.raw).toContain('Testing WHOIS away');
 
       awayclient.send('QUIT');
       querier.send('QUIT');
@@ -900,8 +936,8 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client1.send(`SETNAME :${newName}`);
 
       // Client 2 should see SETNAME
-      const setnameMsg = await client2.waitForLine(/SETNAME/i, 5000);
-      expect(setnameMsg).toContain('SETNAME');
+      const setnameMsg = await client2.waitForCommand('SETNAME', 5000);
+      expect(setnameMsg.command).toBe('SETNAME');
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -940,8 +976,8 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       // Send TAGMSG with reaction
       sender.send(`@+draft/react=:thumbsup: TAGMSG ${channel}`);
 
-      const tagmsg = await receiver.waitForLine(/TAGMSG/i, 5000);
-      expect(tagmsg).toContain('TAGMSG');
+      const tagmsg = await receiver.waitForCommand('TAGMSG', 5000);
+      expect(tagmsg.command).toBe('TAGMSG');
 
       sender.send('QUIT');
       receiver.send('QUIT');
@@ -970,7 +1006,10 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await op.waitForJoin(channel);
       op.send(`MODE ${channel} +i`);
       // Wait for MODE confirmation
-      await op.waitForLine(/MODE.*\+i/i, 5000);
+      await op.waitForParsedLine(
+        msg => msg.command === 'MODE' && msg.raw.includes('+i'),
+        5000
+      );
 
       invitee.clearRawBuffer();
 
@@ -978,8 +1017,11 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       op.send(`INVITE invitee1 ${channel}`);
 
       // Invitee should receive INVITE
-      const inviteMsg = await invitee.waitForLine(/INVITE.*invitee1/i, 5000);
-      expect(inviteMsg).toContain('INVITE');
+      const inviteMsg = await invitee.waitForParsedLine(
+        msg => msg.command === 'INVITE' && msg.raw.toLowerCase().includes('invitee1'),
+        5000
+      );
+      expect(inviteMsg.command).toBe('INVITE');
 
       op.send('QUIT');
       invitee.send('QUIT');
@@ -1026,10 +1068,16 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client2.send(`MARKREAD ${channel}`);
 
       // Verify commands work on both
-      const markread1 = await client1.waitForLine(/MARKREAD|730/i, 3000);
+      const markread1 = await client1.waitForParsedLine(
+        msg => msg.command === 'MARKREAD' || msg.command === '730',
+        3000
+      );
       expect(markread1).toBeDefined();
 
-      const markread2 = await client2.waitForLine(/MARKREAD|730/i, 3000);
+      const markread2 = await client2.waitForParsedLine(
+        msg => msg.command === 'MARKREAD' || msg.command === '730',
+        3000
+      );
       expect(markread2).toBeDefined();
 
       client1.send('QUIT');
@@ -1197,9 +1245,12 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       const received: string[] = [];
       try {
         for (let i = 0; i < 10; i++) {
-          const line = await receiver.waitForLine(new RegExp(`PRIVMSG|BATCH.*${channel}|${uniqueMarker}`), 2000);
-          received.push(line);
-          if (line.includes('line 3') || received.length >= 3) break;
+          const msg = await receiver.waitForParsedLine(
+            m => m.command === 'PRIVMSG' || m.command === 'BATCH' || m.raw.includes(uniqueMarker),
+            2000
+          );
+          received.push(msg.raw);
+          if (msg.raw.includes('line 3') || received.length >= 3) break;
         }
       } catch {
         // Timeout expected after collecting messages
@@ -1268,23 +1319,32 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       sender.send(`PRIVMSG ${channel} :${marker} message 2`);
 
       // Wait for messages to propagate - querier sees them
-      await querier.waitForLine(new RegExp(`message 2`), 5000);
+      await querier.waitForParsedLine(
+        m => m.command === 'PRIVMSG' && m.trailing?.includes('message 2') === true,
+        5000
+      );
 
       // Querier requests chathistory from secondary - should get BATCH response
       querier.clearRawBuffer();
       querier.send(`CHATHISTORY LATEST ${channel} * 10`);
 
       // Should get BATCH start
-      const batchStart = await querier.waitForLine(/BATCH \+/, 5000);
-      expect(batchStart).toMatch(/BATCH \+[^ ]+ chathistory/);
+      const batchStart = await querier.waitForParsedLine(
+        m => m.command === 'BATCH' && m.params[0]?.startsWith('+'),
+        5000
+      );
+      expect(batchStart.raw).toMatch(/BATCH \+[^ ]+ chathistory/);
 
       // Collect messages until BATCH end
       const messages: string[] = [];
       for (let i = 0; i < 15; i++) {
         try {
-          const line = await querier.waitForLine(/PRIVMSG|BATCH -/, 1000);
-          if (line.includes('BATCH -')) break;
-          if (line.includes('PRIVMSG')) messages.push(line);
+          const msg = await querier.waitForParsedLine(
+            m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+            1000
+          );
+          if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+          if (msg.command === 'PRIVMSG') messages.push(msg.raw);
         } catch {
           break; // Timeout collecting messages is expected
         }
@@ -1336,14 +1396,20 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       // Set metadata on primary server
       setter.send('METADATA SET * testkey :testvalue');
       // Wait for confirmation
-      await setter.waitForLine(/METADATA|761/i, 3000);
+      await setter.waitForParsedLine(
+        msg => msg.command === 'METADATA' || msg.command === '761',
+        3000
+      );
 
       querier.clearRawBuffer();
 
       // Query metadata from secondary server
       querier.send('METADATA GET metaset1 testkey');
 
-      const response = await querier.waitForLine(/METADATA.*testkey/i, 5000);
+      const response = await querier.waitForParsedLine(
+        msg => msg.command === 'METADATA' && msg.raw.toLowerCase().includes('testkey'),
+        5000
+      );
       expect(response).toBeDefined();
 
       setter.send('QUIT');
@@ -1386,7 +1452,10 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       // Subscriber subscribes to key
       subscriber.send('METADATA * SUB avatar');
       // Wait for subscription confirmation
-      await subscriber.waitForLine(/761|METADATA/i, 3000);
+      await subscriber.waitForParsedLine(
+        msg => msg.command === '761' || msg.command === 'METADATA',
+        3000
+      );
 
       subscriber.clearRawBuffer();
 
@@ -1394,7 +1463,10 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       setter.send('METADATA SET * avatar :https://example.com/avatar.png');
 
       // Subscriber should receive notification
-      const notification = await subscriber.waitForLine(/METADATA.*avatar/i, 5000);
+      const notification = await subscriber.waitForParsedLine(
+        msg => msg.command === 'METADATA' && msg.raw.toLowerCase().includes('avatar'),
+        5000
+      );
       expect(notification).toBeDefined();
 
       setter.send('QUIT');
@@ -1500,8 +1572,8 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       changer.send(`NICK ${newNick}`);
 
       // Observer should see NICK change
-      const nickMsg = await observer.waitForLine(/NICK/i, 5000);
-      expect(nickMsg).toContain('NICK');
+      const nickMsg = await observer.waitForCommand('NICK', 5000);
+      expect(nickMsg.command).toBe('NICK');
 
       changer.send('QUIT');
       observer.send('QUIT');
@@ -1537,8 +1609,8 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       querier.send('WHOIS whoistarget1');
 
       // 311 = RPL_WHOISUSER
-      const whoisLine = await querier.waitForLine(/311.*whoistarget1/i, 5000);
-      expect(whoisLine).toContain('whoistarget1');
+      const whoisLine = await querier.waitForNumeric('311', 5000);
+      expect(whoisLine.raw.toLowerCase()).toContain('whoistarget1');
 
       target.send('QUIT');
       querier.send('QUIT');
@@ -1578,9 +1650,9 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       const startTime = Date.now();
       while (Date.now() - startTime < 3000) {
         try {
-          const line = await client1.waitForLine(/352|315/i, 500);
-          if (line.includes('315')) break; // End of WHO
-          if (line.includes('352')) whoReplies.push(line);
+          const msg = await client1.waitForNumeric(['352', '315'], 500);
+          if (msg.command === '315') break; // End of WHO
+          if (msg.command === '352') whoReplies.push(msg.raw);
         } catch {
           break;
         }
@@ -1625,26 +1697,38 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       // Send messages from both servers
       sender1.send(`PRIVMSG ${channel} :Message from primary server`);
       // Wait for message to be stored
-      await sender1.waitForLine(/PRIVMSG.*primary server/i, 3000);
+      await sender1.waitForParsedLine(
+        m => m.command === 'PRIVMSG' && m.trailing?.includes('primary server') === true,
+        3000
+      );
       sender2.send(`PRIVMSG ${channel} :Message from secondary server`);
       // Wait for message to propagate
-      await sender1.waitForLine(/PRIVMSG.*secondary server/i, 3000);
+      await sender1.waitForParsedLine(
+        m => m.command === 'PRIVMSG' && m.trailing?.includes('secondary server') === true,
+        3000
+      );
 
       sender1.clearRawBuffer();
 
       // Request chathistory
       sender1.send(`CHATHISTORY LATEST ${channel} * 10`);
 
-      const batchStart = await sender1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await sender1.waitForParsedLine(
+        m => m.command === 'BATCH' && m.params[0]?.startsWith('+') && m.raw.includes('chathistory'),
+        5000
+      );
       expect(batchStart).toBeDefined();
 
       const messages: string[] = [];
       const startTime = Date.now();
       while (Date.now() - startTime < 3000) {
         try {
-          const line = await sender1.waitForLine(/PRIVMSG|BATCH -/, 500);
-          if (line.includes('BATCH -')) break;
-          if (line.includes('PRIVMSG')) messages.push(line);
+          const msg = await sender1.waitForParsedLine(
+            m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+            500
+          );
+          if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+          if (msg.command === 'PRIVMSG') messages.push(msg.raw);
         } catch {
           break; // Timeout collecting messages is expected
         }
@@ -1701,22 +1785,25 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
 
       // Both parties opt in - MUST get 761 response
       sender.send('METADATA SET * chathistory.pm * :1');
-      const senderMeta = await sender.waitForLine(/761.*chathistory\.pm/i, 3000);
-      expect(senderMeta).toMatch(/761/);
+      const senderMeta = await sender.waitForNumeric('761', 3000);
+      expect(senderMeta.command).toBe('761');
       receiver.send('METADATA SET * chathistory.pm * :1');
-      const receiverMeta = await receiver.waitForLine(/761.*chathistory\.pm/i, 3000);
-      expect(receiverMeta).toMatch(/761/);
+      const receiverMeta = await receiver.waitForNumeric('761', 3000);
+      expect(receiverMeta.command).toBe('761');
 
       // Verify metadata propagated by querying from other server
       sender.clearRawBuffer();
       sender.send(`METADATA GET ${receiverNick} chathistory.pm`);
-      await sender.waitForLine(/761.*chathistory\.pm/i, 5000);
+      await sender.waitForNumeric('761', 5000);
 
       // Send PM across servers
       const testMsg = `CrossServer PM ${testId}`;
       sender.send(`PRIVMSG ${receiverNick} :${testMsg}`);
       // Wait for PM to arrive at receiver
-      await receiver.waitForLine(new RegExp(`PRIVMSG.*${testMsg}`, 'i'), 5000);
+      await receiver.waitForParsedLine(
+        m => m.command === 'PRIVMSG' && m.trailing?.includes(testMsg) === true,
+        5000
+      );
 
       sender.clearRawBuffer();
 
@@ -1724,14 +1811,20 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       sender.send(`CHATHISTORY LATEST ${receiverNick} * 10`);
 
       // MUST receive batch
-      const batchStart = await sender.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await sender.waitForParsedLine(
+        m => m.command === 'BATCH' && m.params[0]?.startsWith('+') && m.raw.includes('chathistory'),
+        5000
+      );
       expect(batchStart).toBeDefined();
 
       const messages: string[] = [];
       while (true) {
-        const line = await sender.waitForLine(/PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('PRIVMSG')) messages.push(line);
+        const msg = await sender.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'PRIVMSG') messages.push(msg.raw);
       }
 
       // Cross-server PM must be stored with mutual consent
@@ -1771,14 +1864,17 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
 
       // Only sender opts in - remote receiver does NOT - MUST get 761 response
       sender.send('METADATA SET * chathistory.pm * :1');
-      const senderMeta = await sender.waitForLine(/761.*chathistory\.pm/i, 3000);
-      expect(senderMeta).toMatch(/761/);
+      const senderMeta = await sender.waitForNumeric('761', 3000);
+      expect(senderMeta.command).toBe('761');
 
       // Send PM across servers
       const testMsg = `CrossServer NoOpt ${testId}`;
       sender.send(`PRIVMSG ${receiverNick} :${testMsg}`);
       // Wait for PM to arrive at receiver
-      await receiver.waitForLine(new RegExp(`PRIVMSG.*${testMsg}`, 'i'), 5000);
+      await receiver.waitForParsedLine(
+        m => m.command === 'PRIVMSG' && m.trailing?.includes(testMsg) === true,
+        5000
+      );
 
       sender.clearRawBuffer();
 
@@ -1786,14 +1882,20 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       sender.send(`CHATHISTORY LATEST ${receiverNick} * 10`);
 
       // MUST receive batch
-      const batchStart = await sender.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await sender.waitForParsedLine(
+        m => m.command === 'BATCH' && m.params[0]?.startsWith('+') && m.raw.includes('chathistory'),
+        5000
+      );
       expect(batchStart).toBeDefined();
 
       const messages: string[] = [];
       while (true) {
-        const line = await sender.waitForLine(/PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('PRIVMSG')) messages.push(line);
+        const msg = await sender.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'PRIVMSG') messages.push(msg.raw);
       }
 
       // PM NOT stored without remote consent
@@ -1833,24 +1935,27 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
 
       // Setter on primary sets opt-in - MUST get 761 response
       setter.send('METADATA SET * chathistory.pm * :1');
-      const setterMeta = await setter.waitForLine(/761.*chathistory\.pm/i, 3000);
-      expect(setterMeta).toMatch(/761/);
+      const setterMeta = await setter.waitForNumeric('761', 3000);
+      expect(setterMeta.command).toBe('761');
 
       querier.clearRawBuffer();
 
       // Querier on secondary checks setter's metadata - poll until propagated
-      let response: string | null = null;
+      let response: { raw: string; command: string } | null = null;
       for (let attempt = 0; attempt < 5; attempt++) {
         querier.send(`METADATA GET ${setterNick} chathistory.pm`);
         try {
-          response = await querier.waitForLine(/761.*chathistory\.pm/i, 2000);
+          response = await querier.waitForParsedLine(
+            m => m.command === '761' && m.raw.toLowerCase().includes('chathistory.pm'),
+            2000
+          );
           if (response) break;
         } catch {
           // Retry after brief pause
           await new Promise(r => setTimeout(r, 200));
         }
       }
-      expect(response).toContain('chathistory.pm');
+      expect(response?.raw).toContain('chathistory.pm');
 
       setter.send('QUIT');
       querier.send('QUIT');
@@ -1886,22 +1991,28 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
 
       // Sender opts in, remote receiver explicitly opts out - MUST get 761 responses
       sender.send('METADATA SET * chathistory.pm * :1');
-      const senderMeta = await sender.waitForLine(/761.*chathistory\.pm/i, 3000);
-      expect(senderMeta).toMatch(/761/);
+      const senderMeta = await sender.waitForNumeric('761', 3000);
+      expect(senderMeta.command).toBe('761');
       receiver.send('METADATA SET * chathistory.pm * :0');
-      const receiverMeta = await receiver.waitForLine(/761.*chathistory\.pm/i, 3000);
-      expect(receiverMeta).toMatch(/761/);
+      const receiverMeta = await receiver.waitForNumeric('761', 3000);
+      expect(receiverMeta.command).toBe('761');
 
       // Verify opt-out metadata propagated
       sender.clearRawBuffer();
       sender.send(`METADATA GET ${receiverNick} chathistory.pm`);
-      await sender.waitForLine(/761.*chathistory\.pm.*:0/i, 5000);
+      await sender.waitForParsedLine(
+        m => m.command === '761' && m.raw.toLowerCase().includes('chathistory.pm') && m.raw.includes(':0'),
+        5000
+      );
 
       // Send PM across servers
       const testMsg = `CrossServer OptOut ${testId}`;
       sender.send(`PRIVMSG ${receiverNick} :${testMsg}`);
       // Wait for PM to arrive at receiver
-      await receiver.waitForLine(new RegExp(`PRIVMSG.*${testMsg}`, 'i'), 5000);
+      await receiver.waitForParsedLine(
+        m => m.command === 'PRIVMSG' && m.trailing?.includes(testMsg) === true,
+        5000
+      );
 
       sender.clearRawBuffer();
 
@@ -1909,14 +2020,20 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       sender.send(`CHATHISTORY LATEST ${receiverNick} * 10`);
 
       // MUST receive batch
-      const batchStart = await sender.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await sender.waitForParsedLine(
+        m => m.command === 'BATCH' && m.params[0]?.startsWith('+') && m.raw.includes('chathistory'),
+        5000
+      );
       expect(batchStart).toBeDefined();
 
       const messages: string[] = [];
       while (true) {
-        const line = await sender.waitForLine(/PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('PRIVMSG')) messages.push(line);
+        const msg = await sender.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'PRIVMSG') messages.push(msg.raw);
       }
 
       // Remote opt-out prevents PM storage
@@ -1956,51 +2073,69 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
 
       // Both opt in - MUST get 761 responses
       client1.send('METADATA SET * chathistory.pm * :1');
-      const meta1 = await client1.waitForLine(/761.*chathistory\.pm/i, 3000);
-      expect(meta1).toMatch(/761/);
+      const meta1 = await client1.waitForNumeric('761', 3000);
+      expect(meta1.command).toBe('761');
       client2.send('METADATA SET * chathistory.pm * :1');
-      const meta2 = await client2.waitForLine(/761.*chathistory\.pm/i, 3000);
-      expect(meta2).toMatch(/761/);
+      const meta2 = await client2.waitForNumeric('761', 3000);
+      expect(meta2.command).toBe('761');
 
       // Verify metadata propagated both ways
       client1.clearRawBuffer();
       client1.send(`METADATA GET ${nick2} chathistory.pm`);
-      await client1.waitForLine(/761.*chathistory\.pm/i, 5000);
+      await client1.waitForNumeric('761', 5000);
 
       // Exchange messages both directions
       client1.send(`PRIVMSG ${nick2} :From primary to secondary`);
       // Wait for PM to arrive at client2
-      await client2.waitForLine(/PRIVMSG.*From primary to secondary/i, 5000);
+      await client2.waitForParsedLine(
+        m => m.command === 'PRIVMSG' && m.trailing?.includes('From primary to secondary') === true,
+        5000
+      );
       client2.send(`PRIVMSG ${nick1} :From secondary to primary`);
       // Wait for PM to arrive at client1
-      await client1.waitForLine(/PRIVMSG.*From secondary to primary/i, 5000);
+      await client1.waitForParsedLine(
+        m => m.command === 'PRIVMSG' && m.trailing?.includes('From secondary to primary') === true,
+        5000
+      );
 
       // Check history from client1's perspective - MUST receive batch
       client1.clearRawBuffer();
       client1.send(`CHATHISTORY LATEST ${nick2} * 10`);
 
-      const batch1 = await client1.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batch1 = await client1.waitForParsedLine(
+        m => m.command === 'BATCH' && m.params[0]?.startsWith('+') && m.raw.includes('chathistory'),
+        5000
+      );
       expect(batch1).toBeDefined();
 
       const client1Messages: string[] = [];
       while (true) {
-        const line = await client1.waitForLine(/PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('PRIVMSG')) client1Messages.push(line);
+        const msg = await client1.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'PRIVMSG') client1Messages.push(msg.raw);
       }
 
       // Check history from client2's perspective - MUST receive batch
       client2.clearRawBuffer();
       client2.send(`CHATHISTORY LATEST ${nick1} * 10`);
 
-      const batch2 = await client2.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batch2 = await client2.waitForParsedLine(
+        m => m.command === 'BATCH' && m.params[0]?.startsWith('+') && m.raw.includes('chathistory'),
+        5000
+      );
       expect(batch2).toBeDefined();
 
       const client2Messages: string[] = [];
       while (true) {
-        const line = await client2.waitForLine(/PRIVMSG|BATCH -/, 3000);
-        if (line.includes('BATCH -')) break;
-        if (line.includes('PRIVMSG')) client2Messages.push(line);
+        const msg = await client2.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'PRIVMSG') client2Messages.push(msg.raw);
       }
 
       // Both should have history (bidirectional PM storage)
