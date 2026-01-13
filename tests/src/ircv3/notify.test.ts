@@ -78,9 +78,12 @@ describe('IRCv3 away-notify', () => {
       awayer.send('AWAY :Gone for lunch');
 
       // Observer should receive AWAY notification
-      const awayMsg = await observer.waitForLine(/AWAY.*awayuser1|:awayuser1.*AWAY/i, 5000);
-      expect(awayMsg).toMatch(/AWAY/i);
-      expect(awayMsg).toContain('Gone for lunch');
+      const awayMsg = await observer.waitForParsedLine(
+        msg => msg.command === 'AWAY' && msg.source?.nick?.toLowerCase() === 'awayuser1',
+        5000
+      );
+      expect(awayMsg.command).toBe('AWAY');
+      expect(awayMsg.raw).toContain('Gone for lunch');
       observer.send('QUIT');
       awayer.send('QUIT');
     });
@@ -109,7 +112,10 @@ describe('IRCv3 away-notify', () => {
 
       // Go away first
       awayer.send('AWAY :BRB');
-      await observer.waitForLine(/AWAY.*BRB/i, 3000);
+      await observer.waitForParsedLine(
+        msg => msg.command === 'AWAY' && msg.raw.includes('BRB'),
+        3000
+      );
 
       observer.clearRawBuffer();
 
@@ -117,10 +123,13 @@ describe('IRCv3 away-notify', () => {
       awayer.send('AWAY');
 
       // Observer should receive AWAY with no trailing message
-      const returnMsg = await observer.waitForLine(/AWAY.*awayuser2|:awayuser2.*AWAY/i, 5000);
-      expect(returnMsg).toMatch(/AWAY/i);
+      const returnMsg = await observer.waitForParsedLine(
+        msg => msg.command === 'AWAY' && msg.source?.nick?.toLowerCase() === 'awayuser2',
+        5000
+      );
+      expect(returnMsg.command).toBe('AWAY');
       // Return message should NOT have the away text
-      expect(returnMsg).not.toContain('BRB');
+      expect(returnMsg.raw).not.toContain('BRB');
       observer.send('QUIT');
       awayer.send('QUIT');
     });
@@ -154,7 +163,10 @@ describe('IRCv3 away-notify', () => {
 
       // Observer should NOT receive notification
       try {
-        await observer.waitForLine(/AWAY.*awayuser3/i, 2000);
+        await observer.waitForParsedLine(
+          msg => msg.command === 'AWAY' && msg.source?.nick?.toLowerCase() === 'awayuser3',
+          2000
+        );
         throw new Error('Should not have received AWAY for non-shared user');
       } catch (error) {
         if (error instanceof Error && error.message.includes('Should not')) {
@@ -194,7 +206,10 @@ describe('IRCv3 away-notify', () => {
       awayer.send('AWAY :Should not see this');
 
       try {
-        await observer.waitForLine(/AWAY.*awayuser4/i, 2000);
+        await observer.waitForParsedLine(
+          msg => msg.command === 'AWAY' && msg.source?.nick?.toLowerCase() === 'awayuser4',
+          2000
+        );
         throw new Error('Should not receive AWAY without capability');
       } catch (error) {
         if (error instanceof Error && error.message.includes('Should not')) {
@@ -244,13 +259,19 @@ describe('IRCv3 away-notify', () => {
 
       // Per IRCv3 spec, servers MUST send AWAY status for users who are away on JOIN
       // First we should see the JOIN
-      const joinMsg = await observer.waitForLine(/:awayuser5.*JOIN/i, 5000);
-      expect(joinMsg).toContain('JOIN');
+      const joinMsg = await observer.waitForParsedLine(
+        msg => msg.command === 'JOIN' && msg.source?.nick?.toLowerCase() === 'awayuser5',
+        5000
+      );
+      expect(joinMsg.command).toBe('JOIN');
 
       // Then we should see AWAY notification (spec says "will be sent")
-      const awayMsg = await observer.waitForLine(/:awayuser5.*AWAY/i, 3000);
-      expect(awayMsg).toContain('AWAY');
-      expect(awayMsg).toContain('Already away');
+      const awayMsg = await observer.waitForParsedLine(
+        msg => msg.command === 'AWAY' && msg.source?.nick?.toLowerCase() === 'awayuser5',
+        3000
+      );
+      expect(awayMsg.command).toBe('AWAY');
+      expect(awayMsg.raw).toContain('Already away');
 
       observer.send('QUIT');
       awayer.send('QUIT');
@@ -366,11 +387,16 @@ describe('IRCv3 account-notify', () => {
 
       // Client1 should see extended JOIN with account
       // Format: :extjoin2!user@host JOIN #channel account :realname
-      const joinMsg = await client1.waitForLine(new RegExp(`:extjoin2.*JOIN.*${channel}`, 'i'), 5000);
+      const joinMsg = await client1.waitForParsedLine(
+        msg => msg.command === 'JOIN' &&
+               msg.source?.nick?.toLowerCase() === 'extjoin2' &&
+               msg.raw.includes(channel),
+        5000
+      );
 
       // extended-join format: :nick!user@host JOIN #channel account :realname
       // If not authenticated, account is *
-      expect(joinMsg).toMatch(/JOIN.*#.*\s+(\*|\w+)\s+:/);
+      expect(joinMsg.raw).toMatch(/JOIN.*#.*\s+(\*|\w+)\s+:/);
       client1.send('QUIT');
       client2.send('QUIT');
     });
@@ -450,10 +476,10 @@ describe('IRCv3 invite-notify', () => {
 
       // Member should see the INVITE (with invite-notify capability enabled)
       // Per IRCv3 spec, channel members with invite-notify see invites
-      const inviteMsg = await member.waitForLine(/INVITE.*invitee1/i, 5000);
+      const inviteMsg = await member.waitForInvite(channel, 'invitee1', 5000);
       expect(inviteMsg).toBeDefined();
-      expect(inviteMsg).toContain('invitee1');
-      expect(inviteMsg).toContain(channel);
+      expect(inviteMsg.raw).toContain('invitee1');
+      expect(inviteMsg.raw).toContain(channel);
 
       op.send('QUIT');
       member.send('QUIT');
