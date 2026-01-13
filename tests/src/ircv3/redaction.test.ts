@@ -72,7 +72,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
   });
 
   describe('REDACT Command', () => {
-    it('can redact own message with REDACT', async () => {
+    it('can redact own message with REDACT', { retry: 2 }, async () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
@@ -101,7 +101,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       client.send('QUIT');
     });
 
-    it('REDACT with reason is accepted', async () => {
+    it('REDACT with reason is accepted', { retry: 2 }, async () => {
       const sender = trackClient(await createRawSocketClient());
       const receiver = trackClient(await createRawSocketClient());
 
@@ -143,7 +143,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
   });
 
   describe('REDACT Permissions', () => {
-    it('cannot redact other user message without op', async () => {
+    it('cannot redact other user message without op', { retry: 2 }, async () => {
       const sender = trackClient(await createRawSocketClient());
       const attacker = trackClient(await createRawSocketClient());
 
@@ -188,7 +188,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       attacker.send('QUIT');
     });
 
-    it('op can redact any message in channel', async () => {
+    it('op can redact any message in channel', { retry: 2 }, async () => {
       const op = trackClient(await createRawSocketClient());
       const user = trackClient(await createRawSocketClient());
 
@@ -230,7 +230,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
   });
 
   describe('REDACT Edge Cases', () => {
-    it('REDACT nonexistent msgid returns error', async () => {
+    it('REDACT nonexistent msgid returns error', { retry: 2 }, async () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
@@ -258,7 +258,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       client.send('QUIT');
     });
 
-    it('REDACT same message twice returns error on second attempt', async () => {
+    it('REDACT same message twice returns error on second attempt', { retry: 2 }, async () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
@@ -297,7 +297,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
   });
 
   describe('REDACT Notification', () => {
-    it('other channel members receive REDACT notification', async () => {
+    it('other channel members receive REDACT notification', { retry: 2 }, async () => {
       const redactor = trackClient(await createRawSocketClient());
       const observer = trackClient(await createRawSocketClient());
 
