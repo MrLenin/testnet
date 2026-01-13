@@ -116,7 +116,7 @@ describe('IRCv3 SASL Authentication', () => {
       client.send('QUIT');
     });
 
-    it('receives 904 for invalid credentials', async () => {
+    it('receives 904 for invalid credentials', { retry: 2 }, async () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();

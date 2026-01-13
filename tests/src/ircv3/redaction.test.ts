@@ -26,6 +26,29 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
     clients.length = 0;
   });
 
+  /**
+   * Helper to send a message and capture its msgid from echo-message.
+   * Throws if msgid cannot be captured (test should fail).
+   */
+  async function sendAndCaptureMsgid(
+    client: RawSocketClient,
+    channel: string,
+    message: string
+  ): Promise<string> {
+    client.send(`PRIVMSG ${channel} :${message}`);
+
+    const echo = await client.waitForParsedLine(
+      msg => msg.command === 'PRIVMSG' && msg.raw.includes(message),
+      5000
+    );
+
+    const match = echo.raw.match(/msgid=([^\s;]+)/);
+    if (!match) {
+      throw new Error(`No msgid in echo: ${echo.raw}`);
+    }
+    return match[1];
+  }
+
   describe('Capability', () => {
     it('server advertises draft/message-redaction', async () => {
       const client = trackClient(await createRawSocketClient());
@@ -62,45 +85,23 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel);
 
-      // Send a message and get its msgid
-      client.send(`PRIVMSG ${channel} :Message to be redacted`);
+      // Send message and capture msgid
+      const msgid = await sendAndCaptureMsgid(client, channel, 'Message to be redacted');
 
-      let msgid: string | null = null;
-      try {
-        const echo = await client.waitForParsedLine(
-          msg => msg.command === 'PRIVMSG' && msg.raw.includes('Message to be redacted'),
-          3000
-        );
-        const match = echo.raw.match(/msgid=([^\s;]+)/);
-        if (match) {
-          msgid = match[1];
-        }
-      } catch {
-        console.log('No echo with msgid');
-      }
+      client.clearRawBuffer();
 
-      if (msgid) {
-        client.clearRawBuffer();
+      // Redact the message
+      client.send(`REDACT ${channel} ${msgid}`);
 
-        // Redact the message
-        client.send(`REDACT ${channel} ${msgid}`);
-
-        try {
-          const response = await client.waitForParsedLine(
-            msg => msg.command === 'REDACT' || msg.command === 'FAIL',
-            5000
-          );
-          expect(response).toBeDefined();
-          console.log('REDACT response:', response.raw);
-        } catch {
-          console.log('No REDACT response');
-        }
-      }
+      // Should receive REDACT confirmation (echo back to self)
+      const response = await client.waitForCommand('REDACT', 5000);
+      expect(response.command).toBe('REDACT');
+      expect(response.raw).toContain(msgid);
 
       client.send('QUIT');
     });
 
-    it('REDACT with reason includes reason in notification', async () => {
+    it('REDACT with reason is accepted', async () => {
       const sender = trackClient(await createRawSocketClient());
       const receiver = trackClient(await createRawSocketClient());
 
@@ -124,37 +125,17 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       await new Promise(r => setTimeout(r, 300));
 
       // Send message
-      sender.send(`PRIVMSG ${channel} :This will be redacted`);
+      const msgid = await sendAndCaptureMsgid(sender, channel, 'This will be redacted');
 
-      let msgid: string | null = null;
-      try {
-        const echo = await sender.waitForParsedLine(
-          msg => msg.command === 'PRIVMSG' && msg.raw.includes('This will be redacted'),
-          3000
-        );
-        const match = echo.raw.match(/msgid=([^\s;]+)/);
-        if (match) {
-          msgid = match[1];
-        }
-      } catch {
-        console.log('No echo');
-      }
+      receiver.clearRawBuffer();
 
-      if (msgid) {
-        receiver.clearRawBuffer();
+      // Redact with reason
+      sender.send(`REDACT ${channel} ${msgid} :Posted by mistake`);
 
-        // Redact with reason
-        sender.send(`REDACT ${channel} ${msgid} :Posted by mistake`);
-
-        try {
-          const notification = await receiver.waitForCommand('REDACT', 5000);
-          expect(notification.raw).toContain(msgid);
-          // May contain reason
-          console.log('REDACT notification:', notification.raw);
-        } catch {
-          console.log('No REDACT notification received');
-        }
-      }
+      // Receiver should get REDACT notification
+      const notification = await receiver.waitForCommand('REDACT', 5000);
+      expect(notification.command).toBe('REDACT');
+      expect(notification.raw).toContain(msgid);
 
       sender.send('QUIT');
       receiver.send('QUIT');
@@ -188,40 +169,20 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       await new Promise(r => setTimeout(r, 300));
 
       // Sender sends message
-      sender.send(`PRIVMSG ${channel} :Protected message`);
+      const msgid = await sendAndCaptureMsgid(sender, channel, 'Protected message');
 
-      let msgid: string | null = null;
-      try {
-        const echo = await sender.waitForParsedLine(
-          msg => msg.command === 'PRIVMSG' && msg.raw.includes('Protected message'),
-          3000
-        );
-        const match = echo.raw.match(/msgid=([^\s;]+)/);
-        if (match) {
-          msgid = match[1];
-        }
-      } catch {
-        console.log('No echo');
-      }
+      attacker.clearRawBuffer();
 
-      if (msgid) {
-        attacker.clearRawBuffer();
+      // Attacker tries to redact sender's message - should fail
+      attacker.send(`REDACT ${channel} ${msgid}`);
 
-        // Attacker tries to redact sender's message
-        attacker.send(`REDACT ${channel} ${msgid}`);
-
-        try {
-          // Should receive error (FAIL or numeric)
-          const response = await attacker.waitForParsedLine(
-            msg => msg.command === 'REDACT' || msg.command === 'FAIL' || /^4\d\d$/.test(msg.command),
-            3000
-          );
-          // Either FAIL or error numeric expected
-          console.log('Unauthorized REDACT response:', response.raw);
-        } catch {
-          console.log('No response to unauthorized REDACT');
-        }
-      }
+      // Should receive FAIL or error numeric, NOT a successful REDACT
+      const response = await attacker.waitForParsedLine(
+        msg => msg.command === 'FAIL' || /^4\d\d$/.test(msg.command),
+        5000
+      );
+      // Verify it's an error response
+      expect(response.command === 'FAIL' || /^4\d\d$/.test(response.command)).toBe(true);
 
       sender.send('QUIT');
       attacker.send('QUIT');
@@ -252,36 +213,16 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       await new Promise(r => setTimeout(r, 300));
 
       // User sends message
-      user.send(`PRIVMSG ${channel} :User message`);
+      const msgid = await sendAndCaptureMsgid(user, channel, 'User message');
 
-      let msgid: string | null = null;
-      try {
-        const echo = await user.waitForParsedLine(
-          msg => msg.command === 'PRIVMSG' && msg.raw.includes('User message'),
-          3000
-        );
-        const match = echo.raw.match(/msgid=([^\s;]+)/);
-        if (match) {
-          msgid = match[1];
-        }
-      } catch {
-        console.log('No echo');
-      }
+      op.clearRawBuffer();
 
-      if (msgid) {
-        op.clearRawBuffer();
+      // Op redacts user's message - should succeed
+      op.send(`REDACT ${channel} ${msgid} :Moderation action`);
 
-        // Op redacts user's message
-        op.send(`REDACT ${channel} ${msgid} :Moderation action`);
-
-        try {
-          const response = await op.waitForCommand('REDACT', 5000);
-          expect(response).toBeDefined();
-          console.log('Op REDACT response:', response.raw);
-        } catch {
-          console.log('No op REDACT response');
-        }
-      }
+      const response = await op.waitForCommand('REDACT', 5000);
+      expect(response.command).toBe('REDACT');
+      expect(response.raw).toContain(msgid);
 
       op.send('QUIT');
       user.send('QUIT');
@@ -307,20 +248,17 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       // Try to redact nonexistent message
       client.send(`REDACT ${channel} nonexistent-msgid-12345`);
 
-      try {
-        const response = await client.waitForParsedLine(
-          msg => msg.command === 'REDACT' || msg.command === 'FAIL' || /^4\d\d$/.test(msg.command),
-          3000
-        );
-        console.log('Invalid msgid response:', response.raw);
-      } catch {
-        console.log('No response for invalid msgid');
-      }
+      // Should receive FAIL or error numeric
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'FAIL' || /^4\d\d$/.test(msg.command),
+        5000
+      );
+      expect(response.command === 'FAIL' || /^4\d\d$/.test(response.command)).toBe(true);
 
       client.send('QUIT');
     });
 
-    it('REDACT same message twice', async () => {
+    it('REDACT same message twice returns error on second attempt', async () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
@@ -333,42 +271,26 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel);
 
-      client.send(`PRIVMSG ${channel} :Double redact test`);
+      const msgid = await sendAndCaptureMsgid(client, channel, 'Double redact test');
 
-      let msgid: string | null = null;
-      try {
-        const echo = await client.waitForParsedLine(
-          msg => msg.command === 'PRIVMSG' && msg.raw.includes('Double redact'),
-          3000
-        );
-        const match = echo.raw.match(/msgid=([^\s;]+)/);
-        if (match) {
-          msgid = match[1];
-        }
-      } catch {
-        console.log('No echo');
-      }
+      // First redact - should succeed
+      client.clearRawBuffer();
+      client.send(`REDACT ${channel} ${msgid}`);
 
-      if (msgid) {
-        // First redact
-        client.send(`REDACT ${channel} ${msgid}`);
-        await new Promise(r => setTimeout(r, 500));
+      const firstResponse = await client.waitForCommand('REDACT', 5000);
+      expect(firstResponse.command).toBe('REDACT');
 
-        client.clearRawBuffer();
+      await new Promise(r => setTimeout(r, 300));
 
-        // Second redact of same message
-        client.send(`REDACT ${channel} ${msgid}`);
+      // Second redact of same message - should fail
+      client.clearRawBuffer();
+      client.send(`REDACT ${channel} ${msgid}`);
 
-        try {
-          const response = await client.waitForParsedLine(
-            msg => msg.command === 'REDACT' || msg.command === 'FAIL' || /^4\d\d$/.test(msg.command),
-            3000
-          );
-          console.log('Double REDACT response:', response.raw);
-        } catch {
-          console.log('No response for double REDACT');
-        }
-      }
+      const secondResponse = await client.waitForParsedLine(
+        msg => msg.command === 'FAIL' || /^4\d\d$/.test(msg.command),
+        5000
+      );
+      expect(secondResponse.command === 'FAIL' || /^4\d\d$/.test(secondResponse.command)).toBe(true);
 
       client.send('QUIT');
     });
@@ -398,36 +320,17 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       await observer.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
-      redactor.send(`PRIVMSG ${channel} :Message to be seen redacted`);
+      const msgid = await sendAndCaptureMsgid(redactor, channel, 'Message to be seen redacted');
 
-      let msgid: string | null = null;
-      try {
-        const echo = await redactor.waitForParsedLine(
-          msg => msg.command === 'PRIVMSG' && msg.raw.includes('Message to be seen'),
-          3000
-        );
-        const match = echo.raw.match(/msgid=([^\s;]+)/);
-        if (match) {
-          msgid = match[1];
-        }
-      } catch {
-        console.log('No echo');
-      }
+      observer.clearRawBuffer();
 
-      if (msgid) {
-        observer.clearRawBuffer();
+      redactor.send(`REDACT ${channel} ${msgid}`);
 
-        redactor.send(`REDACT ${channel} ${msgid}`);
-
-        try {
-          const notification = await observer.waitForCommand('REDACT', 5000);
-          expect(notification.command).toBe('REDACT');
-          expect(notification.raw).toContain(channel);
-          console.log('Observer REDACT notification:', notification.raw);
-        } catch {
-          console.log('Observer did not receive REDACT');
-        }
-      }
+      // Observer should receive REDACT notification
+      const notification = await observer.waitForCommand('REDACT', 5000);
+      expect(notification.command).toBe('REDACT');
+      expect(notification.raw).toContain(channel);
+      expect(notification.raw).toContain(msgid);
 
       redactor.send('QUIT');
       observer.send('QUIT');

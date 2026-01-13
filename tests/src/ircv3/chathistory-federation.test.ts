@@ -336,7 +336,7 @@ describe('IRCv3 Chathistory Federation', () => {
       for (let i = 1; i <= 5; i++) {
         client1.send(`PRIVMSG ${channelName} :Consistency test message ${i}`);
         const echo = await client1.waitForParsedLine(
-          msg => msg.command === 'PRIVMSG' && msg.trailing?.includes(`Consistency test message ${i}`),
+          msg => msg.command === 'PRIVMSG' && msg.trailing?.includes(`Consistency test message ${i}`) === true,
           3000
         );
         const match = echo.raw.match(/msgid=([^\s;]+)/);

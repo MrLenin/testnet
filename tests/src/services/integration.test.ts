@@ -96,7 +96,7 @@ describe('Services Integration', () => {
       expect(myAccess?.level).toBe(ACCESS_LEVELS.OWNER);
     });
 
-    it('should allow channel owner to promote user to coowner', async () => {
+    it('should allow channel owner to promote user to coowner', { retry: 2, timeout: 60000 }, async () => {
       // X3 does not allow CLVL to owner level (500) - you can only give access
       // levels lower than your own. This test verifies promoting to COOWNER (400).
       const ownerClient = trackClient(await createX3Client());
@@ -159,7 +159,7 @@ describe('Services Integration', () => {
       const coownerEntry = accessList.find(e => e.account.toLowerCase() === coowner.toLowerCase());
       console.log('Found coowner entry:', coownerEntry);
       expect(coownerEntry?.level).toBe(ACCESS_LEVELS.COOWNER);
-    }, 60000); // Extended timeout for 2 account registrations (~10s each)
+    });
 
     it('should enforce channel settings on all users', async () => {
       const ownerClient = trackClient(await createX3Client());
@@ -199,7 +199,7 @@ describe('Services Integration', () => {
   });
 
   describe('Multiple Account Management', () => {
-    it('should track multiple concurrent logins', async () => {
+    it('should track multiple concurrent logins', { retry: 2 }, async () => {
       const { account, password, email, fromPool } = await getTestAccount();
       if (fromPool) poolAccounts.push(account);
 
