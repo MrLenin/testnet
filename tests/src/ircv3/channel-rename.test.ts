@@ -67,14 +67,11 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       const newName = uniqueChannel('rennew');
       founder.send(`RENAME ${oldName} ${newName} :Rebranding`);
 
-      try {
-        // Should receive RENAME notification
-        const response = await founder.waitForCommand('RENAME', 5000);
-        expect(response.command).toBe('RENAME');
-        console.log('RENAME response:', response.raw);
-      } catch {
-        console.log('No RENAME response - may require services registration');
-      }
+      // Should receive RENAME notification
+      const response = await founder.waitForCommand('RENAME', 5000);
+      expect(response.command).toBe('RENAME');
+      expect(response.raw).toContain(oldName);
+      expect(response.raw).toContain(newName);
 
       founder.send('QUIT');
     });
@@ -98,15 +95,10 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       const reason = 'Channel reorganization';
       client.send(`RENAME ${oldName} ${newName} :${reason}`);
 
-      try {
-        const response = await client.waitForCommand('RENAME', 5000);
-        if (response.raw.includes(reason)) {
-          expect(response.raw).toContain(reason);
-        }
-        console.log('RENAME with reason:', response.raw);
-      } catch {
-        console.log('No RENAME response');
-      }
+      const response = await client.waitForCommand('RENAME', 5000);
+      expect(response.command).toBe('RENAME');
+      // Reason may or may not be echoed back depending on implementation
+      expect(response.raw).toContain(newName);
 
       client.send('QUIT');
     });
@@ -141,21 +133,16 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       const newName = uniqueChannel('rennewnote');
       op.send(`RENAME ${oldName} ${newName}`);
 
-      try {
-        const notification = await member.waitForCommand('RENAME', 5000);
-        expect(notification.command).toBe('RENAME');
-        expect(notification.raw).toContain(oldName);
-        expect(notification.raw).toContain(newName);
-        console.log('Member RENAME notification:', notification.raw);
-      } catch {
-        console.log('Member did not receive RENAME');
-      }
+      const notification = await member.waitForCommand('RENAME', 5000);
+      expect(notification.command).toBe('RENAME');
+      expect(notification.raw).toContain(oldName);
+      expect(notification.raw).toContain(newName);
 
       op.send('QUIT');
       member.send('QUIT');
     });
 
-    it('user without capability receives PART/JOIN instead', async () => {
+    it('user without capability receives PART/JOIN instead of RENAME', async () => {
       const op = trackClient(await createRawSocketClient());
       const nocap = trackClient(await createRawSocketClient());
 
@@ -184,23 +171,15 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       const newName = uniqueChannel('rennocapnew');
       op.send(`RENAME ${oldName} ${newName}`);
 
-      // nocap should see PART from old + JOIN to new instead of RENAME
-      try {
-        const response = await nocap.waitForParsedLine(
-          msg => ['PART', 'JOIN', 'RENAME'].includes(msg.command),
-          5000
-        );
-        console.log('No-cap client response:', response.raw);
-        // Should NOT be RENAME
-        if (response.command === 'RENAME') {
-          throw new Error('Should not receive RENAME without capability');
-        }
-      } catch (error) {
-        if (error instanceof Error && error.message.includes('Should not')) {
-          throw error;
-        }
-        console.log('No response for no-cap client');
-      }
+      // nocap should see PART or JOIN, NOT RENAME
+      const response = await nocap.waitForParsedLine(
+        msg => ['PART', 'JOIN', 'RENAME'].includes(msg.command),
+        5000
+      );
+
+      // Should NOT be RENAME - that would leak the capability
+      expect(response.command).not.toBe('RENAME');
+      expect(['PART', 'JOIN'].includes(response.command)).toBe(true);
 
       op.send('QUIT');
       nocap.send('QUIT');
@@ -234,20 +213,15 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
 
       user.clearRawBuffer();
 
-      // User (not op) tries to rename
+      // User (not op) tries to rename - should fail
       user.send(`RENAME ${channel} #renamed`);
 
-      try {
-        const response = await user.waitForParsedLine(
-          msg => msg.command === 'RENAME' || msg.command === 'FAIL' ||
-                 /^4\d\d$/.test(msg.command) || msg.command.includes('ERR'),
-          3000
-        );
-        console.log('Non-op RENAME response:', response.raw);
-        // Should be error, not success
-      } catch {
-        console.log('No response for non-op RENAME');
-      }
+      // Should receive error, NOT success RENAME
+      const response = await user.waitForParsedLine(
+        msg => msg.command === 'FAIL' || /^4\d\d$/.test(msg.command),
+        5000
+      );
+      expect(response.command === 'FAIL' || /^4\d\d$/.test(response.command)).toBe(true);
 
       op.send('QUIT');
       user.send('QUIT');
@@ -275,19 +249,14 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
 
       client.clearRawBuffer();
 
-      // Try to rename to existing channel
+      // Try to rename to existing channel - should fail
       client.send(`RENAME ${channel1} ${channel2}`);
 
-      try {
-        const response = await client.waitForParsedLine(
-          msg => msg.command === 'RENAME' || msg.command === 'FAIL' || /^4\d\d$/.test(msg.command),
-          3000
-        );
-        console.log('Existing name RENAME response:', response.raw);
-        // Should fail
-      } catch {
-        console.log('No response for existing name RENAME');
-      }
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'FAIL' || /^4\d\d$/.test(msg.command),
+        5000
+      );
+      expect(response.command === 'FAIL' || /^4\d\d$/.test(response.command)).toBe(true);
 
       client.send('QUIT');
     });
@@ -305,26 +274,26 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       client.send(`JOIN ${oldName}`);
       await client.waitForJoin(oldName);
 
-      // Set some modes
-      client.send(`MODE ${oldName} +nt`);
+      // Set a distinctive mode (+s = secret)
+      client.send(`MODE ${oldName} +s`);
       await new Promise(r => setTimeout(r, 300));
 
       const newName = uniqueChannel('renmodenew');
       client.send(`RENAME ${oldName} ${newName}`);
-      await new Promise(r => setTimeout(r, 500));
+
+      // Wait for rename to complete
+      await client.waitForCommand('RENAME', 5000);
+      await new Promise(r => setTimeout(r, 300));
 
       client.clearRawBuffer();
 
       // Check modes on new channel
       client.send(`MODE ${newName}`);
 
-      try {
-        const modeResponse = await client.waitForNumeric('324', 3000);
-        console.log('Renamed channel modes:', modeResponse.raw);
-        // Modes should be preserved
-      } catch {
-        console.log('Could not check renamed channel modes');
-      }
+      const modeResponse = await client.waitForNumeric('324', 5000);
+      expect(modeResponse.command).toBe('324');
+      // Mode +s should be preserved
+      expect(modeResponse.raw).toContain('s');
 
       client.send('QUIT');
     });

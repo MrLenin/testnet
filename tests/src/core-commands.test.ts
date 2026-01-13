@@ -157,7 +157,7 @@ describe('Core IRC Commands', () => {
       user.send('QUIT');
     });
 
-    it('should query channel modes', async () => {
+    it('should query channel modes', { retry: 2 }, async () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();

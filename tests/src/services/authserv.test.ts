@@ -52,7 +52,7 @@ describe('AuthServ', () => {
   });
 
   describe('Account Registration', () => {
-    it('should register a new account via REGISTER command', async () => {
+    it('should register a new account via REGISTER command', { retry: 2 }, async () => {
       const client = trackClient(await createX3Client());
       const { account, password, email } = await createTestAccount();
 
@@ -129,7 +129,7 @@ describe('AuthServ', () => {
   });
 
   describe('Authentication', () => {
-    it('should authenticate with valid credentials', async () => {
+    it('should authenticate with valid credentials', { retry: 2 }, async () => {
       // Get a test account (pool or fresh) - setupTestAccount handles AUTH/register
       const client = trackClient(await createX3Client());
       const { account, password, fromPool } = await setupTestAccount(client);

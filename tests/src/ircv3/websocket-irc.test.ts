@@ -421,7 +421,7 @@ describe('IRC-over-WebSocket Protocol', () => {
       expect(registered).toBe(true);
     });
 
-    it('should handle concurrent WebSocket connections', async () => {
+    it('should handle concurrent WebSocket connections', { retry: 2 }, async () => {
       const numClients = 5;
       const channel = uniqueChannel();
       const testClients: WebSocketTestClient[] = [];

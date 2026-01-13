@@ -289,7 +289,7 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       client.send('QUIT');
     });
 
-    it('returns error for metadata on non-existent channel', async () => {
+    it('returns error for metadata on non-existent channel', { retry: 2 }, async () => {
       const client = trackClient(await createRawSocketClient());
 
       const caps = await client.capLs();

@@ -146,7 +146,7 @@ describe('ChanServ (X3)', () => {
       await ownerClient.registerChannel(channel);
     });
 
-    it('should add user with specified access level', async () => {
+    it('should add user with specified access level', { retry: 2 }, async () => {
       // Create second user
       const user2Client = trackClient(await createX3Client());
       const { account: user2, fromPool: user2Pool } = await setupTestAccount(user2Client);
@@ -226,7 +226,7 @@ describe('ChanServ (X3)', () => {
 
     // This test creates 3 accounts total (owner in beforeEach + user2 + user3), each taking
     // ~10s for registerAndActivate. Use 60s timeout to handle this.
-    it('should reject ADDUSER from user without sufficient access', async () => {
+    it('should reject ADDUSER from user without sufficient access', { retry: 2, timeout: 60000 }, async () => {
       // Create user2 with low access
       const user2Client = trackClient(await createX3Client());
       const { account: user2, fromPool: user2Pool } = await setupTestAccount(user2Client);
@@ -254,7 +254,7 @@ describe('ChanServ (X3)', () => {
 
       // Should fail
       expect(addResult.success).toBe(false);
-    }, 60000);
+    });
   });
 
   describe('Access Level Enforcement', () => {

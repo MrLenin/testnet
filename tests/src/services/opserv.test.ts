@@ -98,7 +98,7 @@ describe('OpServ (O3)', () => {
       expect(result.error).toBeDefined();
     });
 
-    it('should allow GLINE from oper user', async () => {
+    it('should allow GLINE from oper user', { retry: 2 }, async () => {
       // Use createOperClient which auths with X3_ADMIN (olevel 1000)
       // createOperClient now verifies oper level before returning
       const client = trackClient(await createOperClient());

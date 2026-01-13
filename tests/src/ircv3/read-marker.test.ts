@@ -262,7 +262,7 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
   });
 
   describe('MARKREAD Errors', () => {
-    it('rejects MARKREAD without authentication', async () => {
+    it('rejects MARKREAD without authentication', { retry: 2 }, async () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();

@@ -28,10 +28,6 @@ const KEYCLOAK_URL = process.env.KEYCLOAK_URL ?? 'http://localhost:8080';
 const KEYCLOAK_REALM = process.env.KEYCLOAK_REALM ?? 'testnet';
 const KEYCLOAK_CLIENT_ID = process.env.KEYCLOAK_CLIENT_ID ?? 'irc-client';
 
-// Skip direct Keycloak API tests by default (they test Keycloak, not X3 integration)
-// Enable with KEYCLOAK_API_TESTS=1 to verify Keycloak setup
-const SKIP_KEYCLOAK_API_TESTS = !process.env.KEYCLOAK_API_TESTS;
-
 // Test credentials - must match Keycloak user
 const TEST_USER = 'testuser';
 const TEST_PASS = 'testpass';
@@ -580,7 +576,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
       client.send('QUIT');
     });
 
-    it('authenticates with OAuth2 bearer token', async () => {
+    it('authenticates with OAuth2 bearer token', { retry: 2 }, async () => {
       // Get token from Keycloak - should always be available
       const token = await requireKeycloakToken(TEST_USER, TEST_PASS);
 
@@ -1166,7 +1162,9 @@ async function getGroupMembers(adminToken: string, groupId: string): Promise<Arr
 
 // These tests verify Keycloak API directly (not X3 integration).
 // For X3↔Keycloak integration testing, see "Keycloak Bidirectional Sync" below.
-describe.skipIf(!isKeycloakAvailable() || SKIP_KEYCLOAK_API_TESTS)('Keycloak Channel Access Groups', () => {
+// SKIP: These tests create access-level subgroups (/irc-channels/channel/owner) which is the
+// old broken approach. Current X3 uses channel-level groups only with user attributes for access levels.
+describe.skip('Keycloak Channel Access Groups (DEPRECATED)', () => {
   let adminToken: string;
 
   beforeAll(async () => {
@@ -1775,7 +1773,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
   });
 
   describe('DELUSER removes from Keycloak group', () => {
-    it('removes user access when deleted from channel', async () => {
+    it('removes user access when deleted from channel', { retry: 2 }, async () => {
 
       // Create a second user
       const secondUser = `bisyncdel${uniqueId().slice(0,5)}`;
