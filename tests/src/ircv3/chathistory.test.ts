@@ -1245,11 +1245,34 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Use invalid timestamp
       client.send(`CHATHISTORY BEFORE ${channelName} timestamp=not-a-timestamp 10`);
 
-      // Should receive FAIL or error (or potentially empty BATCH if server ignores invalid format)
-      // Increased timeout from 3s to 5s for slower systems
-      const response = await client.waitForLine(/FAIL|BATCH|ERR/i, 5000);
+      // Server should either:
+      // 1. Return FAIL with error (proper rejection)
+      // 2. Return empty BATCH (treats invalid as "no matches")
+      // It should NOT return a BATCH with actual messages
+      const response = await client.waitForLine(/FAIL|BATCH/i, 5000);
       expect(response).toBeDefined();
       console.log('Invalid timestamp response:', response);
+
+      if (response.includes('BATCH +')) {
+        // If server returns a BATCH, wait for it to complete and verify it's empty
+        const batchIdMatch = response.match(/BATCH \+(\S+)/);
+        if (batchIdMatch) {
+          const batchId = batchIdMatch[1];
+          // Wait for batch end
+          const batchEnd = await client.waitForLine(new RegExp(`BATCH -${batchId}`), 3000);
+          expect(batchEnd).toBeDefined();
+
+          // Check that no PRIVMSG was received inside the batch
+          // (any PRIVMSG would indicate server accepted invalid timestamp)
+          const allLines = client.allLines;
+          const batchMessages = allLines.filter(l =>
+            l.includes(`batch=${batchId}`) && l.includes('PRIVMSG')
+          );
+          expect(batchMessages.length, 'Invalid timestamp should not return messages').toBe(0);
+        }
+      }
+      // If FAIL response, that's also acceptable (proper error handling)
+
       client.send('QUIT');
     });
   });
