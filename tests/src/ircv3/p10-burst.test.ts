@@ -277,9 +277,9 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
 
       // Verify both users see each other in NAMES
       secondary.send(`NAMES ${channel}`);
-      const namesResponse = await secondary.waitForLine(/353/, 5000);
-      expect(namesResponse).toContain(nick1);
-      expect(namesResponse).toContain(nick2);
+      const namesResponse = await secondary.waitForNumeric('353', 5000);
+      expect(namesResponse.raw).toContain(nick1);
+      expect(namesResponse.raw).toContain(nick2);
     });
 
     it('should propagate channel modes in BURST', async () => {
@@ -296,10 +296,16 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
 
       // Set modes on primary
       primary.send(`MODE ${channel} +nt`);
-      await primary.waitForLine(/MODE.*\+nt/i, 3000).catch(() => null); // May already be set
+      await primary.waitForParsedLine(
+        msg => msg.command === 'MODE' && msg.raw.includes('+nt'),
+        3000
+      ).catch(() => null); // May already be set
 
       primary.send(`MODE ${channel} +s`);
-      await primary.waitForLine(/MODE.*\+s/i, 3000);
+      await primary.waitForParsedLine(
+        msg => msg.command === 'MODE' && msg.raw.includes('+s'),
+        3000
+      );
 
       // Allow time for mode to propagate
       await new Promise(r => setTimeout(r, 200));
@@ -311,8 +317,8 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
       await secondary.waitForJoin(channel, undefined, 5000);
 
       secondary.send(`MODE ${channel}`);
-      const modeResponse = await secondary.waitForLine(/324.*\+/, 5000);
-      expect(modeResponse).toMatch(/s/); // Secret mode should be present
+      const modeResponse = await secondary.waitForNumeric('324', 5000);
+      expect(modeResponse.raw).toMatch(/s/); // Secret mode should be present
     });
 
     it('should propagate user channel modes (op/voice)', async () => {
@@ -336,7 +342,10 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
 
       // Give voice
       primary.send(`MODE ${channel} +v ${voiceNick}`);
-      await primary.waitForLine(new RegExp(`MODE.*\\+v.*${voiceNick}`, 'i'), 5000);
+      await primary.waitForParsedLine(
+        msg => msg.command === 'MODE' && msg.raw.includes('+v') && msg.raw.includes(voiceNick),
+        5000
+      );
 
       // Observer on secondary should see modes in NAMES
       const secondary = trackClient(await createRegisteredClient(SECONDARY_SERVER, observerNick));
@@ -345,11 +354,11 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
       await secondary.waitForJoin(channel, undefined, 5000);
 
       secondary.send(`NAMES ${channel}`);
-      const namesResponse = await secondary.waitForLine(/353/, 5000);
+      const namesResponse = await secondary.waitForNumeric('353', 5000);
 
       // @ prefix for op, + prefix for voice
-      expect(namesResponse).toMatch(new RegExp(`@${opNick}`));
-      expect(namesResponse).toMatch(new RegExp(`\\+${voiceNick}`));
+      expect(namesResponse.raw).toMatch(new RegExp(`@${opNick}`));
+      expect(namesResponse.raw).toMatch(new RegExp(`\\+${voiceNick}`));
     });
 
     it('should propagate ban list in BURST', async () => {
@@ -366,7 +375,10 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
       await primary.waitForJoin(channel, undefined, 5000);
 
       primary.send(`MODE ${channel} +b ${banMask}`);
-      await primary.waitForLine(/MODE.*\+b/i, 5000);
+      await primary.waitForParsedLine(
+        msg => msg.command === 'MODE' && msg.raw.includes('+b'),
+        5000
+      );
 
       // Check ban list from secondary server
       const secondary = trackClient(await createRegisteredClient(SECONDARY_SERVER, nick2));
@@ -377,8 +389,11 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
       secondary.send(`MODE ${channel} +b`);
 
       // Wait for ban list (367 = RPL_BANLIST, 368 = RPL_ENDOFBANLIST)
-      const banListResponse = await secondary.waitForLine(/367.*banned/i, 5000);
-      expect(banListResponse).toContain(banMask);
+      const banListResponse = await secondary.waitForParsedLine(
+        msg => msg.command === '367' && msg.raw.toLowerCase().includes('banned'),
+        5000
+      );
+      expect(banListResponse.raw).toContain(banMask);
     });
   });
 
@@ -409,12 +424,12 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
       primary.send(`MODE ${channel}`);
       secondary.send(`MODE ${channel}`);
 
-      const primaryModes = await primary.waitForLine(/324/, 5000);
-      const secondaryModes = await secondary.waitForLine(/324/, 5000);
+      const primaryModes = await primary.waitForNumeric('324', 5000);
+      const secondaryModes = await secondary.waitForNumeric('324', 5000);
 
       // Both should show same modes (channel wasn't reset)
-      expect(primaryModes).toMatch(/\+[a-z]+/);
-      expect(secondaryModes).toMatch(/\+[a-z]+/);
+      expect(primaryModes.raw).toMatch(/\+[a-z]+/);
+      expect(secondaryModes.raw).toMatch(/\+[a-z]+/);
     });
   });
 
@@ -445,19 +460,19 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
 
       // Check NAMES from primary server
       primaryClients[0].send(`NAMES ${channel}`);
-      const primaryNames = await primaryClients[0].waitForLine(/353/, 5000);
+      const primaryNames = await primaryClients[0].waitForNumeric('353', 5000);
 
       // All nicks should be visible
       for (const nick of [...primaryNicks, ...secondaryNicks]) {
-        expect(primaryNames.toLowerCase()).toContain(nick.toLowerCase());
+        expect(primaryNames.raw.toLowerCase()).toContain(nick.toLowerCase());
       }
 
       // Check NAMES from secondary server
       secondaryClients[0].send(`NAMES ${channel}`);
-      const secondaryNames = await secondaryClients[0].waitForLine(/353/, 5000);
+      const secondaryNames = await secondaryClients[0].waitForNumeric('353', 5000);
 
       for (const nick of [...primaryNicks, ...secondaryNicks]) {
-        expect(secondaryNames.toLowerCase()).toContain(nick.toLowerCase());
+        expect(secondaryNames.raw.toLowerCase()).toContain(nick.toLowerCase());
       }
     });
 
@@ -485,9 +500,12 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
       const startTime = Date.now();
       while (Date.now() - startTime < 3000) {
         try {
-          const line = await secondary.waitForLine(/352|315/, 500);
-          whoLines.push(line);
-          if (line.includes('315')) break; // End of WHO
+          const line = await secondary.waitForParsedLine(
+            msg => msg.command === '352' || msg.command === '315',
+            500
+          );
+          whoLines.push(line.raw);
+          if (line.command === '315') break; // End of WHO
         } catch {
           break;
         }

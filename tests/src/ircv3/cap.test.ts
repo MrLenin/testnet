@@ -31,17 +31,17 @@ describe('IRCv3 CAP Negotiation', () => {
       const capLines: string[] = [];
 
       // Wait for first CAP LS line (multiline starts with * after LS)
-      const firstLine = await client.waitForLine(/CAP \* LS/i);
-      console.log('First CAP LS line:', firstLine);
-      capLines.push(firstLine);
+      const firstLine = await client.waitForCap('LS');
+      console.log('First CAP LS line:', firstLine.raw);
+      capLines.push(firstLine.raw);
 
       // Check for multiline indicator - if present, wait for final line
-      const isMultiline = /CAP \* LS \*/.test(firstLine);
+      const isMultiline = /CAP \* LS \*/.test(firstLine.raw);
       if (isMultiline) {
         // Wait for the final line (no * after LS, pattern: "CAP * LS :" without *)
-        const lastLine = await client.waitForLine(/CAP \* LS :/i);
-        console.log('Last CAP LS line:', lastLine);
-        capLines.push(lastLine);
+        const lastLine = await client.waitForCap('LS');
+        console.log('Last CAP LS line:', lastLine.raw);
+        capLines.push(lastLine.raw);
       }
 
       // Parse capabilities from ALL CAP LS lines
@@ -91,17 +91,17 @@ describe('IRCv3 CAP Negotiation', () => {
     const lines: string[] = [];
 
     // Get first line
-    const firstLine = await client.waitForLine(/CAP \* LS/i);
-    lines.push(firstLine);
+    const firstLine = await client.waitForCap('LS');
+    lines.push(firstLine.raw);
 
     // Check if multiline (has * after LS before the colon)
     // Multiline format: "CAP * LS * :caps..." (asterisk before colon)
     // Final format:     "CAP * LS :caps..." (no asterisk, just space-colon)
-    if (/CAP \* LS \* :/.test(firstLine)) {
+    if (/CAP \* LS \* :/.test(firstLine.raw)) {
       // Wait for final line - it does NOT have asterisk after LS (just space-colon)
-      // Use negative lookahead to exclude lines with asterisk
-      const lastLine = await client.waitForLine(/CAP \* LS (?!\*)/i);
-      lines.push(lastLine);
+      // The second CAP LS will be the final one (without continuation marker)
+      const lastLine = await client.waitForCap('LS');
+      lines.push(lastLine.raw);
     }
 
     return lines;
