@@ -76,25 +76,32 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['draft/message-redaction', 'echo-message']);
+      const capResult = await client.capReq(['draft/message-redaction', 'echo-message']);
+      console.log('[REDACT DEBUG] CAP ACK:', capResult.ack);
       client.capEnd();
       client.register('redact1');
       await client.waitForNumeric('001');
+      console.log('[REDACT DEBUG] Registered');
 
       const channel = uniqueChannel('redact');
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel);
+      console.log('[REDACT DEBUG] Joined', channel);
 
       // Send message and capture msgid
+      console.log('[REDACT DEBUG] Sending PRIVMSG...');
       const msgid = await sendAndCaptureMsgid(client, channel, 'Message to be redacted');
+      console.log('[REDACT DEBUG] Got msgid:', msgid);
 
       client.clearRawBuffer();
 
       // Redact the message
+      console.log('[REDACT DEBUG] Sending REDACT...');
       client.send(`REDACT ${channel} ${msgid}`);
 
       // Should receive REDACT confirmation (echo back to self)
       const response = await client.waitForCommand('REDACT', 5000);
+      console.log('[REDACT DEBUG] Got response:', response.raw);
       expect(response.command).toBe('REDACT');
       expect(response.raw).toContain(msgid);
 
