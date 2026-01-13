@@ -74,10 +74,12 @@ describe('IRCv3 Echo Message', () => {
       client.send(`PRIVMSG ${channelName} :${testMsg}`);
 
       // Should receive our own message back
-      const echo = await client.waitForLine(new RegExp(`PRIVMSG.*${testMsg}`));
-      expect(echo).toContain(testMsg);
-      expect(echo).toContain(channelName);
-      console.log('Echo received:', echo);
+      const echo = await client.waitForParsedLine(
+        msg => msg.command === 'PRIVMSG' && msg.raw.includes(testMsg)
+      );
+      expect(echo.raw).toContain(testMsg);
+      expect(echo.raw).toContain(channelName);
+      console.log('Echo received:', echo.raw);
       client.send('QUIT');
     });
 
@@ -100,9 +102,11 @@ describe('IRCv3 Echo Message', () => {
       client1.send(`PRIVMSG echorecv1 :${testMsg}`);
 
       // Sender should receive echo
-      const echo = await client1.waitForLine(new RegExp(`PRIVMSG.*${testMsg}`));
-      expect(echo).toContain(testMsg);
-      console.log('Private echo received:', echo);
+      const echo = await client1.waitForParsedLine(
+        msg => msg.command === 'PRIVMSG' && msg.raw.includes(testMsg)
+      );
+      expect(echo.raw).toContain(testMsg);
+      console.log('Private echo received:', echo.raw);
       client1.send('QUIT');
       client2.send('QUIT');
     });
@@ -123,8 +127,10 @@ describe('IRCv3 Echo Message', () => {
 
       client.send(`PRIVMSG ${channelName} :Time tagged message`);
 
-      const echo = await client.waitForLine(/PRIVMSG.*Time tagged/);
-      const parsed = parseIRCMessage(echo);
+      const echoMsg = await client.waitForParsedLine(
+        msg => msg.command === 'PRIVMSG' && msg.raw.includes('Time tagged')
+      );
+      const parsed = parseIRCMessage(echoMsg.raw);
 
       // Validate using structured parser
       assertPrivmsg(parsed, { target: channelName, text: 'Time tagged' });
@@ -154,8 +160,10 @@ describe('IRCv3 Echo Message', () => {
 
       client.send(`PRIVMSG ${channelName} :Message ID test`);
 
-      const echo = await client.waitForLine(/PRIVMSG.*Message ID test/);
-      const parsed = parseIRCMessage(echo);
+      const echoMsg = await client.waitForParsedLine(
+        msg => msg.command === 'PRIVMSG' && msg.raw.includes('Message ID test')
+      );
+      const parsed = parseIRCMessage(echoMsg.raw);
 
       // Validate using structured parser
       assertPrivmsg(parsed, { target: channelName, text: 'Message ID test' });
@@ -188,9 +196,11 @@ describe('IRCv3 Echo Message', () => {
       const testNotice = `Notice test ${uniqueId()}`;
       client.send(`NOTICE ${channelName} :${testNotice}`);
 
-      const echo = await client.waitForLine(new RegExp(`NOTICE.*${testNotice}`));
-      expect(echo).toContain(testNotice);
-      console.log('Notice echo:', echo);
+      const echo = await client.waitForParsedLine(
+        msg => msg.command === 'NOTICE' && msg.raw.includes(testNotice)
+      );
+      expect(echo.raw).toContain(testNotice);
+      console.log('Notice echo:', echo.raw);
       client.send('QUIT');
     });
   });
@@ -215,7 +225,7 @@ describe('IRCv3 Echo Message', () => {
 
       // Should NOT receive echo - expect timeout
       const receivedUnexpectedEcho = await client
-        .waitForLine(new RegExp(`PRIVMSG.*${testMsg}`), 1000)
+        .waitForParsedLine(msg => msg.command === 'PRIVMSG' && msg.raw.includes(testMsg), 1000)
         .then(() => true)
         .catch(() => false);
 
@@ -242,11 +252,14 @@ describe('IRCv3 Echo Message', () => {
       const label = `lbl${uniqueId()}`;
       client.send(`@label=${label} PRIVMSG ${channelName} :Labeled message`);
 
-      const echo = await client.waitForLine(/PRIVMSG.*Labeled message/, 3000);
-      console.log('Labeled echo:', echo);
+      const echo = await client.waitForParsedLine(
+        msg => msg.command === 'PRIVMSG' && msg.raw.includes('Labeled message'),
+        3000
+      );
+      console.log('Labeled echo:', echo.raw);
 
       // Echo should include our label
-      expect(echo).toContain(label);
+      expect(echo.raw).toContain(label);
       client.send('QUIT');
     });
   });
@@ -304,7 +317,7 @@ describe('IRCv3 TAGMSG', () => {
     client2.send(`JOIN ${channelName}`);
     await client2.waitForJoin(channelName);
     // Verify client1 is in channel via NAMES (shows as @tagmsg1)
-    await client2.waitForLine(/366.*End of.*NAMES/i, 2000);
+    await client2.waitForNumeric('366', 2000);
 
     // Clear buffer before sending TAGMSG
     client2.clearRawBuffer();
@@ -312,9 +325,9 @@ describe('IRCv3 TAGMSG', () => {
     // Send TAGMSG with typing indicator
     client1.send(`@+typing=active TAGMSG ${channelName}`);
 
-    const received = await client2.waitForLine(/TAGMSG/i, 3000);
-    expect(received).toContain('TAGMSG');
-    console.log('TAGMSG received:', received);
+    const received = await client2.waitForCommand('TAGMSG', 3000);
+    expect(received.command).toBe('TAGMSG');
+    console.log('TAGMSG received:', received.raw);
     client1.send('QUIT');
     client2.send('QUIT');
   });
@@ -341,9 +354,12 @@ describe('IRCv3 TAGMSG', () => {
 
     client.send(`@+react=👍 TAGMSG ${channelName}`);
 
-    const echo = await client.waitForLine(/TAGMSG.*#tagecho/i, 3000);
-    expect(echo).toContain('TAGMSG');
-    console.log('TAGMSG echo:', echo);
+    const echo = await client.waitForParsedLine(
+      msg => msg.command === 'TAGMSG' && msg.params[0]?.includes('#tagecho'),
+      3000
+    );
+    expect(echo.command).toBe('TAGMSG');
+    console.log('TAGMSG echo:', echo.raw);
     client.send('QUIT');
   });
 });
@@ -387,9 +403,13 @@ describe('IRCv3 Labeled Response', () => {
     const label = `who${uniqueId()}`;
     client.send(`@label=${label} WHO labeltest2`);
 
-    const response = await client.waitForLine(new RegExp(`@.*label=${label}|BATCH.*${label}|352|315`), 3000);
+    const response = await client.waitForParsedLine(
+      msg => msg.raw.includes(`label=${label}`) || msg.command === 'BATCH' ||
+             msg.command === '352' || msg.command === '315',
+      3000
+    );
     expect(response).toBeDefined();
-    console.log('Labeled WHO response:', response);
+    console.log('Labeled WHO response:', response.raw);
     client.send('QUIT');
   });
 
@@ -407,9 +427,12 @@ describe('IRCv3 Labeled Response', () => {
     client.send(`@label=${label} MODE acktest1 +i`);
 
     // Should get ACK or labeled MODE response
-    const response = await client.waitForLine(new RegExp(`ACK|MODE|${label}`), 3000);
+    const response = await client.waitForParsedLine(
+      msg => msg.command === 'ACK' || msg.command === 'MODE' || msg.raw.includes(label),
+      3000
+    );
     expect(response).toBeDefined();
-    console.log('ACK/labeled response:', response);
+    console.log('ACK/labeled response:', response.raw);
     client.send('QUIT');
   });
 });

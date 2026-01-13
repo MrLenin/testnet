@@ -1108,6 +1108,195 @@ export class RawSocketClient {
     );
   }
 
+  /**
+   * Wait for a CAP response (LS, ACK, NAK, LIST).
+   * @param subcommand - 'LS', 'ACK', 'NAK', 'LIST' or array like ['ACK', 'NAK']
+   * @param capabilities - Optional specific capabilities to match in response
+   */
+  async waitForCap(
+    subcommand: 'LS' | 'ACK' | 'NAK' | 'LIST' | ('LS' | 'ACK' | 'NAK' | 'LIST')[],
+    capabilities?: string[],
+    timeout = 5000
+  ): Promise<IRCMessage> {
+    const validSubcmds = Array.isArray(subcommand)
+      ? subcommand.map(s => s.toUpperCase())
+      : [subcommand.toUpperCase()];
+    return this.waitForParsedLine(msg => {
+      if (msg.command !== 'CAP') return false;
+      // CAP format: CAP <target> <subcommand> [*] :<caps>
+      // params[0] is target (nick or *), params[1] is subcommand
+      const msgSubcmd = msg.params[1]?.toUpperCase();
+      if (!validSubcmds.includes(msgSubcmd)) return false;
+      if (capabilities && capabilities.length > 0) {
+        // Check if all required caps are in the response
+        const capsInResponse = (msg.trailing || '').toLowerCase();
+        return capabilities.every(cap => capsInResponse.includes(cap.toLowerCase()));
+      }
+      return true;
+    }, timeout);
+  }
+
+  /**
+   * Wait for a FAIL standard reply.
+   * @param command - The command that failed (e.g., 'BATCH', 'CHATHISTORY')
+   * @param code - Optional specific error code to match (e.g., 'MULTILINE_MAX_LINES')
+   */
+  async waitForFail(
+    command?: string,
+    code?: string,
+    timeout = 5000
+  ): Promise<IRCMessage> {
+    return this.waitForParsedLine(msg => {
+      if (msg.command !== 'FAIL') return false;
+      // FAIL format: FAIL <command> <code> [context...] :<description>
+      if (command && msg.params[0]?.toUpperCase() !== command.toUpperCase()) return false;
+      if (code && msg.params[1]?.toUpperCase() !== code.toUpperCase()) return false;
+      return true;
+    }, timeout);
+  }
+
+  /**
+   * Wait for a WARN standard reply.
+   * @param command - The command with warning (e.g., 'BATCH')
+   * @param code - Optional specific warning code to match
+   */
+  async waitForWarn(
+    command?: string,
+    code?: string,
+    timeout = 5000
+  ): Promise<IRCMessage> {
+    return this.waitForParsedLine(msg => {
+      if (msg.command !== 'WARN') return false;
+      // WARN format: WARN <command> <code> [context...] :<description>
+      if (command && msg.params[0]?.toUpperCase() !== command.toUpperCase()) return false;
+      if (code && msg.params[1]?.toUpperCase() !== code.toUpperCase()) return false;
+      return true;
+    }, timeout);
+  }
+
+  /**
+   * Wait for a BATCH start message.
+   * @param type - Optional batch type to match (e.g., 'multiline', 'chathistory')
+   */
+  async waitForBatchStart(type?: string, timeout = 5000): Promise<IRCMessage> {
+    return this.waitForParsedLine(msg => {
+      if (msg.command !== 'BATCH') return false;
+      // BATCH start format: BATCH +<id> <type> [params...]
+      if (!msg.params[0]?.startsWith('+')) return false;
+      if (type && msg.params[1]?.toLowerCase() !== type.toLowerCase()) return false;
+      return true;
+    }, timeout);
+  }
+
+  /**
+   * Wait for a BATCH end message.
+   * @param batchId - Optional specific batch ID to match
+   */
+  async waitForBatchEnd(batchId?: string, timeout = 5000): Promise<IRCMessage> {
+    return this.waitForParsedLine(msg => {
+      if (msg.command !== 'BATCH') return false;
+      // BATCH end format: BATCH -<id>
+      if (!msg.params[0]?.startsWith('-')) return false;
+      if (batchId && msg.params[0] !== `-${batchId}`) return false;
+      return true;
+    }, timeout);
+  }
+
+  /**
+   * Wait for a MODE change on a user or channel.
+   * @param target - Channel or nick
+   * @param modeChange - Optional mode string to match (e.g., '+M', '+o')
+   */
+  async waitForMode(target: string, modeChange?: string, timeout = 5000): Promise<IRCMessage> {
+    const targetLower = target.toLowerCase();
+    return this.waitForParsedLine(msg => {
+      if (msg.command !== 'MODE') return false;
+      if (msg.params[0]?.toLowerCase() !== targetLower) return false;
+      if (modeChange && !msg.params[1]?.includes(modeChange)) return false;
+      return true;
+    }, timeout);
+  }
+
+  /**
+   * Wait for a KICK message.
+   * @param channel - Channel where kick occurred
+   * @param kicked - Optional nick of user being kicked
+   */
+  async waitForKick(channel: string, kicked?: string, timeout = 5000): Promise<IRCMessage> {
+    const channelLower = channel.toLowerCase();
+    const kickedLower = kicked?.toLowerCase();
+    return this.waitForParsedLine(msg => {
+      if (msg.command !== 'KICK') return false;
+      if (msg.params[0]?.toLowerCase() !== channelLower) return false;
+      if (kickedLower && msg.params[1]?.toLowerCase() !== kickedLower) return false;
+      return true;
+    }, timeout);
+  }
+
+  /**
+   * Wait for a PART message.
+   * @param channel - Channel being parted
+   * @param nick - Optional nick of user parting
+   */
+  async waitForPart(channel: string, nick?: string, timeout = 5000): Promise<IRCMessage> {
+    const channelLower = channel.toLowerCase();
+    const nickLower = nick?.toLowerCase();
+    return this.waitForParsedLine(msg => {
+      if (msg.command !== 'PART') return false;
+      if (msg.params[0]?.toLowerCase() !== channelLower) return false;
+      if (nickLower && msg.source?.nick?.toLowerCase() !== nickLower) return false;
+      return true;
+    }, timeout);
+  }
+
+  /**
+   * Wait for a QUIT message.
+   * @param nick - Optional nick of user quitting
+   */
+  async waitForQuit(nick?: string, timeout = 5000): Promise<IRCMessage> {
+    const nickLower = nick?.toLowerCase();
+    return this.waitForParsedLine(msg => {
+      if (msg.command !== 'QUIT') return false;
+      if (nickLower && msg.source?.nick?.toLowerCase() !== nickLower) return false;
+      return true;
+    }, timeout);
+  }
+
+  /**
+   * Wait for a TOPIC message or 332 (RPL_TOPIC) numeric.
+   * @param channel - Channel for the topic
+   */
+  async waitForTopic(channel: string, timeout = 5000): Promise<IRCMessage> {
+    const channelLower = channel.toLowerCase();
+    return this.waitForParsedLine(msg => {
+      if (msg.command === 'TOPIC') {
+        return msg.params[0]?.toLowerCase() === channelLower;
+      }
+      if (msg.command === '332') {
+        // 332 format: 332 <nick> <channel> :<topic>
+        return msg.params[1]?.toLowerCase() === channelLower;
+      }
+      return false;
+    }, timeout);
+  }
+
+  /**
+   * Wait for an INVITE message.
+   * @param channel - Optional channel for the invite
+   * @param invitee - Optional nick being invited
+   */
+  async waitForInvite(channel?: string, invitee?: string, timeout = 5000): Promise<IRCMessage> {
+    const channelLower = channel?.toLowerCase();
+    const inviteeLower = invitee?.toLowerCase();
+    return this.waitForParsedLine(msg => {
+      if (msg.command !== 'INVITE') return false;
+      // INVITE format: INVITE <nick> <channel>
+      if (inviteeLower && msg.params[0]?.toLowerCase() !== inviteeLower) return false;
+      if (channelLower && msg.params[1]?.toLowerCase() !== channelLower) return false;
+      return true;
+    }, timeout);
+  }
+
   async collectLines(pattern: RegExp, stopPattern: RegExp, timeout = 5000): Promise<string[]> {
     const collected: string[] = [];
     const startTime = Date.now();

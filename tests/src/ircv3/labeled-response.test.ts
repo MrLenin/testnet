@@ -65,11 +65,11 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       client.send(`@label=${label} PING :test`);
 
       // Should receive PONG with same label
-      const response = await client.waitForLine(/PONG/i, 3000);
+      const response = await client.waitForCommand('PONG', 3000);
       expect(response).toBeDefined();
       // Server must respond to PING - label may or may not be echoed for PING specifically
-      expect(response).toContain('PONG');
-      console.log('Labeled response:', response);
+      expect(response.command).toBe('PONG');
+      console.log('Labeled response:', response.raw);
 
       client.send('QUIT');
     });
@@ -97,8 +97,11 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       const startTime = Date.now();
       while (Date.now() - startTime < 5000 && responses.length < 2) {
         try {
-          const line = await client.waitForLine(/PONG|label=/i, 1000);
-          responses.push(line);
+          const msg = await client.waitForParsedLine(
+            m => m.command === 'PONG' || m.raw.includes('label='),
+            1000
+          );
+          responses.push(msg.raw);
         } catch {
           // Continue collecting until timeout
         }
@@ -135,16 +138,23 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       client.send(`@label=${label} WHO ${channel}`);
 
       // Server MUST respond with BATCH or WHO replies (352/315)
-      const response = await client.waitForLine(/BATCH|352|315|label=/i, 5000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'BATCH' || msg.command === '352' ||
+               msg.command === '315' || msg.raw.includes('label='),
+        5000
+      );
       expect(response).toBeDefined();
 
       // Collect remaining WHO responses until end (315)
       const startTime = Date.now();
       while (Date.now() - startTime < 5000) {
         try {
-          const line = await client.waitForLine(/352|315|BATCH/i, 1000);
-          if (line.includes('315')) break; // End of WHO
-          if (line.includes('BATCH -')) break;
+          const msg = await client.waitForParsedLine(
+            m => m.command === '352' || m.command === '315' || m.command === 'BATCH',
+            1000
+          );
+          if (msg.command === '315') break; // End of WHO
+          if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
         } catch {
           break;
         }
@@ -175,14 +185,17 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       client.send(`@label=${label} PRIVMSG ${channel} :Labeled message`);
 
       // With echo-message, should receive our own message back with label
-      const response = await client.waitForLine(/PRIVMSG.*Labeled message/i, 3000);
-      expect(response).toContain('PRIVMSG');
-      expect(response).toContain('Labeled message');
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'PRIVMSG' && msg.raw.includes('Labeled message'),
+        3000
+      );
+      expect(response.command).toBe('PRIVMSG');
+      expect(response.raw).toContain('Labeled message');
       // If response includes label tag, verify it matches
-      if (response.includes('label=')) {
-        expect(response).toContain(`label=${label}`);
+      if (response.raw.includes('label=')) {
+        expect(response.raw).toContain(`label=${label}`);
       }
-      console.log('Echo with label:', response);
+      console.log('Echo with label:', response.raw);
 
       client.send('QUIT');
     });
@@ -204,7 +217,10 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       client.send('@label= PING :test');
 
       // Server MUST respond to PING (even with empty label)
-      const response = await client.waitForLine(/PONG|FAIL/i, 5000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'PONG' || msg.command === 'FAIL',
+        5000
+      );
       expect(response).toBeDefined();
 
       client.send('QUIT');
@@ -226,7 +242,10 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       client.send(`@label=${longLabel} PING :test`);
 
       // Server MUST respond to PING
-      const response = await client.waitForLine(/PONG|FAIL/i, 5000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'PONG' || msg.command === 'FAIL',
+        5000
+      );
       expect(response).toBeDefined();
 
       client.send('QUIT');
@@ -248,11 +267,14 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       client.send(`@label=${specialLabel} PING :test`);
 
       // Server MUST respond to PING
-      const response = await client.waitForLine(/PONG|label=/i, 5000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'PONG' || msg.raw.includes('label='),
+        5000
+      );
       expect(response).toBeDefined();
       // If response includes label, it should match
-      if (response.includes('label=')) {
-        expect(response).toContain(specialLabel);
+      if (response.raw.includes('label=')) {
+        expect(response.raw).toContain(specialLabel);
       }
 
       client.send('QUIT');
@@ -277,9 +299,9 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       client.send(`@label=${label} PING :test`);
 
       // Server MUST respond to PING
-      const response = await client.waitForLine(/PONG/i, 5000);
+      const response = await client.waitForCommand('PONG', 5000);
       // Response should NOT contain label when capability not enabled
-      expect(response).not.toContain('label=');
+      expect(response.raw).not.toContain('label=');
 
       client.send('QUIT');
     });
@@ -312,7 +334,12 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       client.send(`@label=${label} MODE ${channel} +m`);
 
       // Server MUST respond with ACK or MODE response with our label
-      const response = await client.waitForLine(/ACK|MODE.*\+m|label=/i, 5000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'ACK' ||
+               (msg.command === 'MODE' && msg.raw.includes('+m')) ||
+               msg.raw.includes('label='),
+        5000
+      );
       expect(response).toBeDefined();
 
       client.send('QUIT');
@@ -336,7 +363,10 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
       client.send(`@label=${label} JOIN invalidchannel`);
 
       // Server MUST respond with error or JOIN response
-      const response = await client.waitForLine(/4\d\d|JOIN|label=/i, 5000);
+      const response = await client.waitForParsedLine(
+        msg => /^4\d\d$/.test(msg.command) || msg.command === 'JOIN' || msg.raw.includes('label='),
+        5000
+      );
       expect(response).toBeDefined();
 
       client.send('QUIT');
@@ -419,11 +449,14 @@ describe('IRCv3 Message Tags (message-tags)', () => {
       sender.send(`@+draft/reply=${replyMsgid} PRIVMSG ${channel} :This is a reply`);
 
       try {
-        const response = await receiver.waitForLine(/PRIVMSG.*This is a reply/i, 3000);
-        console.log('Reply tag message:', response);
+        const response = await receiver.waitForParsedLine(
+          msg => msg.command === 'PRIVMSG' && msg.raw.includes('This is a reply'),
+          3000
+        );
+        console.log('Reply tag message:', response.raw);
         // Check if reply tag is preserved
-        if (response.includes('+draft/reply')) {
-          expect(response).toContain(replyMsgid);
+        if (response.raw.includes('+draft/reply')) {
+          expect(response.raw).toContain(replyMsgid);
         }
       } catch {
         console.log('Reply tag message not received');
@@ -462,8 +495,8 @@ describe('IRCv3 Message Tags (message-tags)', () => {
       sender.send(`@+draft/react=:thumbsup: TAGMSG ${channel}`);
 
       try {
-        const response = await receiver.waitForLine(/TAGMSG/i, 3000);
-        console.log('React TAGMSG:', response);
+        const response = await receiver.waitForCommand('TAGMSG', 3000);
+        console.log('React TAGMSG:', response.raw);
       } catch {
         console.log('React TAGMSG not received');
       }
@@ -503,9 +536,9 @@ describe('IRCv3 Message Tags (message-tags)', () => {
       sender.send(`@+example/tag=value TAGMSG ${channel}`);
 
       try {
-        const response = await receiver.waitForLine(/TAGMSG/i, 3000);
-        expect(response).toContain('TAGMSG');
-        console.log('TAGMSG received:', response);
+        const response = await receiver.waitForCommand('TAGMSG', 3000);
+        expect(response.command).toBe('TAGMSG');
+        console.log('TAGMSG received:', response.raw);
       } catch {
         console.log('TAGMSG not received');
       }
@@ -544,7 +577,7 @@ describe('IRCv3 Message Tags (message-tags)', () => {
 
       try {
         // Receiver without message-tags should NOT receive TAGMSG
-        await receiver.waitForLine(/TAGMSG/i, 2000);
+        await receiver.waitForCommand('TAGMSG', 2000);
         console.log('TAGMSG received unexpectedly');
       } catch {
         console.log('TAGMSG correctly not received (no capability)');

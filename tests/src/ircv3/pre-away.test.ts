@@ -66,8 +66,8 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
       client.capEnd();
       client.register('papre1');
 
-      const welcome = await client.waitForLine(/001/);
-      expect(welcome).toContain('papre1');
+      const welcome = await client.waitForNumeric('001');
+      expect(welcome.raw).toContain('papre1');
 
       // Verify we're marked as away
       client.clearRawBuffer();
@@ -75,8 +75,8 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
 
       try {
         // 301 is RPL_AWAY in WHOIS
-        const whoisAway = await client.waitForLine(/301.*papre1/i, 5000);
-        expect(whoisAway).toContain('Connecting...');
+        const whoisAway = await client.waitForNumeric('301', 5000);
+        expect(whoisAway.raw).toContain('Connecting...');
       } catch {
         // May need to check differently
         console.log('No away status in WHOIS');
@@ -99,7 +99,7 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
 
       client.capEnd();
       client.register('papersist1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -107,8 +107,8 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
       client.send('WHOIS papersist1');
 
       try {
-        const whoisReply = await client.waitForLine(/301.*papersist1/i, 5000);
-        expect(whoisReply).toContain(awayMessage);
+        const whoisReply = await client.waitForNumeric('301', 5000);
+        expect(whoisReply.raw).toContain(awayMessage);
       } catch {
         console.log('Away status may not persist or WHOIS format differs');
       }
@@ -127,30 +127,33 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
       await new Promise(r => setTimeout(r, 200));
       preaway.capEnd();
       preaway.register('pajoiner1');
-      await preaway.waitForLine(/001/);
+      await preaway.waitForNumeric('001');
 
       // Observer with away-notify
       await observer.capLs();
       await observer.capReq(['away-notify']);
       observer.capEnd();
       observer.register('paobs1');
-      await observer.waitForLine(/001/);
+      await observer.waitForNumeric('001');
 
       const channel = uniqueChannel('preaway');
       observer.send(`JOIN ${channel}`);
-      await observer.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await observer.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
       observer.clearRawBuffer();
 
       // Pre-away client joins
       preaway.send(`JOIN ${channel}`);
-      await preaway.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await preaway.waitForJoin(channel);
 
       // Observer may receive AWAY notification
       try {
-        const awayNotif = await observer.waitForLine(/AWAY.*pajoiner1/i, 3000);
-        expect(awayNotif).toContain('Pre-set away message');
+        const awayNotif = await observer.waitForParsedLine(
+          msg => msg.command === 'AWAY' && msg.source?.nick?.toLowerCase() === 'pajoiner1',
+          3000
+        );
+        expect(awayNotif.raw).toContain('Pre-set away message');
       } catch {
         // May not send AWAY on join, depends on implementation
         console.log('No AWAY notification on join');
@@ -176,8 +179,12 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
 
       try {
         // May receive error or be ignored
-        const response = await client.waitForLine(/AWAY|FAIL|4\d\d|451/i, 2000);
-        console.log('AWAY without pre-away response:', response);
+        const response = await client.waitForParsedLine(
+          msg => msg.command === 'AWAY' || msg.command === 'FAIL' ||
+                 /^4\d\d$/.test(msg.command) || msg.command === '451',
+          2000
+        );
+        console.log('AWAY without pre-away response:', response.raw);
         // 451 = ERR_NOTREGISTERED
       } catch {
         // May be silently ignored
@@ -187,7 +194,7 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
       // Complete registration
       client.capEnd();
       client.register('panopre1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.send('QUIT');
     });
@@ -210,7 +217,7 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
 
       client.capEnd();
       client.register('paclear1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -220,7 +227,7 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
       try {
         // Should NOT have 301 (away) in WHOIS
         // Wait for WHOIS end marker instead
-        await client.waitForLine(/318.*paclear1/i, 3000);
+        await client.waitForNumeric('318', 3000);
 
         // If we get here without error, check buffer for any 301
         // This is a simplified check - in production you'd collect all lines
@@ -248,16 +255,16 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
 
       client.capEnd();
       client.register('pamulti1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
       client.send('WHOIS pamulti1');
 
       try {
-        const whoisAway = await client.waitForLine(/301.*pamulti1/i, 5000);
+        const whoisAway = await client.waitForNumeric('301', 5000);
         // Should have final message
-        expect(whoisAway).toContain('Final message');
+        expect(whoisAway.raw).toContain('Final message');
       } catch {
         console.log('Could not verify final away message');
       }

@@ -35,6 +35,17 @@ export interface ParsedMessage {
 }
 
 /**
+ * Common message shape accepted by assert helpers.
+ * Works with both ParsedMessage and IRCMessage from ircv3-client.
+ */
+export type AssertableMessage = {
+  command: string;
+  params: string[];
+  source?: { nick?: string; user?: string | null; host?: string | null } | null;
+  raw?: string;
+};
+
+/**
  * Parse an IRC message line into structured components.
  *
  * Handles IRCv3 tags, source prefix, command, and parameters.
@@ -213,7 +224,7 @@ export function assertPrivmsg(
  * @throws Error if validation fails
  */
 export function assertNumeric(
-  msg: ParsedMessage,
+  msg: AssertableMessage,
   numeric: number | string,
   options?: {
     params?: (string | RegExp | null)[];
@@ -247,7 +258,7 @@ export function assertNumeric(
  * Assert that a message is a JOIN with expected properties.
  */
 export function assertJoin(
-  msg: ParsedMessage,
+  msg: AssertableMessage,
   options: {
     nick?: string;
     channel?: string;
@@ -276,7 +287,7 @@ export function assertJoin(
  * Assert that a message is a MODE with expected properties.
  */
 export function assertMode(
-  msg: ParsedMessage,
+  msg: AssertableMessage,
   options: {
     target?: string;
     modes?: string;
@@ -309,7 +320,7 @@ export function assertMode(
  * Assert that a message is a KICK with expected properties.
  */
 export function assertKick(
-  msg: ParsedMessage,
+  msg: AssertableMessage,
   options: {
     channel?: string;
     kicked?: string;

@@ -56,7 +56,7 @@ describe('IRCv3 Standard Replies', () => {
       await client.capReq(['standard-replies']);
       client.capEnd();
       client.register('srfail1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -67,12 +67,15 @@ describe('IRCv3 Standard Replies', () => {
       try {
         // With standard-replies, errors use FAIL format
         // FAIL <command> <code> [context...] :<description>
-        const response = await client.waitForLine(/FAIL|401/i, 3000);
-        console.log('Error response:', response);
+        const response = await client.waitForParsedLine(
+          msg => msg.command === 'FAIL' || msg.command === '401',
+          3000
+        );
+        console.log('Error response:', response.raw);
 
-        if (response.includes('FAIL')) {
+        if (response.command === 'FAIL') {
           // Verify FAIL format
-          expect(response).toMatch(/FAIL\s+\w+\s+\w+/);
+          expect(response.params.length).toBeGreaterThanOrEqual(2);
         }
       } catch {
         console.log('No FAIL response');
@@ -88,7 +91,7 @@ describe('IRCv3 Standard Replies', () => {
       await client.capReq(['standard-replies']);
       client.capEnd();
       client.register('srfail2');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -96,8 +99,11 @@ describe('IRCv3 Standard Replies', () => {
       client.send('JOIN'); // Missing channel
 
       try {
-        const response = await client.waitForLine(/FAIL|461/i, 3000);
-        console.log('Syntax error response:', response);
+        const response = await client.waitForParsedLine(
+          msg => msg.command === 'FAIL' || msg.command === '461',
+          3000
+        );
+        console.log('Syntax error response:', response.raw);
       } catch {
         console.log('No response for syntax error');
       }
@@ -114,7 +120,7 @@ describe('IRCv3 Standard Replies', () => {
       await client.capReq(['standard-replies']);
       client.capEnd();
       client.register('srwarn1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // WARN is less common, may not trigger easily
       // Format: WARN <command> <code> [context...] :<description>
@@ -133,7 +139,7 @@ describe('IRCv3 Standard Replies', () => {
       await client.capReq(['standard-replies']);
       client.capEnd();
       client.register('srnote1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // NOTE is informational
       // Format: NOTE <command> <code> [context...] :<description>
@@ -152,7 +158,7 @@ describe('IRCv3 Standard Replies', () => {
       await client.capReq(['standard-replies', 'draft/chathistory']);
       client.capEnd();
       client.register('srauth1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -160,8 +166,11 @@ describe('IRCv3 Standard Replies', () => {
       client.send('CHATHISTORY LATEST #somechannel * 10');
 
       try {
-        const response = await client.waitForLine(/FAIL|ACCOUNT_REQUIRED|4\d\d/i, 3000);
-        console.log('Auth required response:', response);
+        const response = await client.waitForParsedLine(
+          msg => msg.command === 'FAIL' || /^4\d\d$/.test(msg.command),
+          3000
+        );
+        console.log('Auth required response:', response.raw);
       } catch {
         console.log('No auth-required response');
       }
@@ -176,7 +185,7 @@ describe('IRCv3 Standard Replies', () => {
       await client.capReq(['standard-replies']);
       client.capEnd();
       client.register('srtarget1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -184,8 +193,11 @@ describe('IRCv3 Standard Replies', () => {
       client.send('JOIN invalid channel name with spaces');
 
       try {
-        const response = await client.waitForLine(/FAIL|INVALID|4\d\d/i, 3000);
-        console.log('Invalid target response:', response);
+        const response = await client.waitForParsedLine(
+          msg => msg.command === 'FAIL' || /^4\d\d$/.test(msg.command),
+          3000
+        );
+        console.log('Invalid target response:', response.raw);
       } catch {
         console.log('No invalid target response');
       }
@@ -200,11 +212,11 @@ describe('IRCv3 Standard Replies', () => {
       await client.capReq(['standard-replies']);
       client.capEnd();
       client.register('srlong1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('srlong');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
 
       client.clearRawBuffer();
 
@@ -213,8 +225,11 @@ describe('IRCv3 Standard Replies', () => {
       client.send(`PRIVMSG ${channel} :${longMsg}`);
 
       try {
-        const response = await client.waitForLine(/FAIL|MESSAGE_TOO_LONG|4\d\d/i, 3000);
-        console.log('Long message response:', response);
+        const response = await client.waitForParsedLine(
+          msg => msg.command === 'FAIL' || /^4\d\d$/.test(msg.command),
+          3000
+        );
+        console.log('Long message response:', response.raw);
       } catch {
         // Message may just be truncated instead of rejected
         console.log('No long message error');
@@ -233,7 +248,7 @@ describe('IRCv3 Standard Replies', () => {
       await client.capReq(['multi-prefix']);
       client.capEnd();
       client.register('srno1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -241,12 +256,15 @@ describe('IRCv3 Standard Replies', () => {
       client.send('PRIVMSG nonexistentxyz :test');
 
       try {
-        const response = await client.waitForLine(/FAIL|401|NOSUCHNICK/i, 3000);
+        const response = await client.waitForParsedLine(
+          msg => msg.command === 'FAIL' || msg.command === '401',
+          3000
+        );
         // Should be traditional numeric, not FAIL
-        if (response.includes('FAIL')) {
+        if (response.command === 'FAIL') {
           throw new Error('Should not receive FAIL without standard-replies');
         }
-        console.log('Traditional error response:', response);
+        console.log('Traditional error response:', response.raw);
       } catch (error) {
         if (error instanceof Error && error.message.includes('Should not')) {
           throw error;

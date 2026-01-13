@@ -40,8 +40,8 @@ describe('Error Conditions', () => {
       client.send('PRIVMSG');
 
       // Nefarious sends ERR_NORECIPIENT (411) for PRIVMSG with no target
-      const errorResponse = await client.waitForLine(/411/i, 5000);
-      expect(errorResponse).toMatch(/411/);
+      const errorResponse = await client.waitForNumeric('411', 5000);
+      expect(errorResponse.command).toBe('411');
 
       client.send('QUIT');
     });
@@ -59,8 +59,8 @@ describe('Error Conditions', () => {
       client.send('JOIN');
 
       // Should get ERR_NEEDMOREPARAMS (461)
-      const errorResponse = await client.waitForLine(/461/i, 5000);
-      expect(errorResponse).toMatch(/461/);
+      const errorResponse = await client.waitForNumeric('461', 5000);
+      expect(errorResponse.command).toBe('461');
 
       client.send('QUIT');
     });
@@ -78,8 +78,8 @@ describe('Error Conditions', () => {
       client.send('MODE');
 
       // Should get ERR_NEEDMOREPARAMS (461)
-      const errorResponse = await client.waitForLine(/461/i, 5000);
-      expect(errorResponse).toMatch(/461/);
+      const errorResponse = await client.waitForNumeric('461', 5000);
+      expect(errorResponse.command).toBe('461');
 
       client.send('QUIT');
     });
@@ -97,8 +97,8 @@ describe('Error Conditions', () => {
       client.send('KICK');
 
       // Should get ERR_NEEDMOREPARAMS (461)
-      const errorResponse = await client.waitForLine(/461/i, 5000);
-      expect(errorResponse).toMatch(/461/);
+      const errorResponse = await client.waitForNumeric('461', 5000);
+      expect(errorResponse.command).toBe('461');
 
       client.send('QUIT');
     });
@@ -116,8 +116,8 @@ describe('Error Conditions', () => {
       client.send('TOPIC');
 
       // Should get ERR_NEEDMOREPARAMS (461)
-      const errorResponse = await client.waitForLine(/461/i, 5000);
-      expect(errorResponse).toMatch(/461/);
+      const errorResponse = await client.waitForNumeric('461', 5000);
+      expect(errorResponse.command).toBe('461');
 
       client.send('QUIT');
     });
@@ -137,7 +137,7 @@ describe('Error Conditions', () => {
       client.send('MODE #nonexistent12345 +m');
 
       // Should get ERR_NOSUCHCHANNEL (403) or similar
-      const errorResponse = await client.waitForLine(/403|401|442/i, 5000);
+      const errorResponse = await client.waitForNumeric(['403', '401', '442'], 5000);
       // 403 = NOSUCHCHANNEL, 442 = NOTONCHANNEL
       expect(errorResponse).toBeDefined();
 
@@ -157,7 +157,7 @@ describe('Error Conditions', () => {
       client.send('TOPIC #nonexistent12345 :test');
 
       // Should get an error (403 or 442)
-      const errorResponse = await client.waitForLine(/403|442/i, 5000);
+      const errorResponse = await client.waitForNumeric(['403', '442'], 5000);
       expect(errorResponse).toBeDefined();
 
       client.send('QUIT');
@@ -177,7 +177,7 @@ describe('Error Conditions', () => {
       client.send('JOIN nochanprefix');
 
       // Should get ERR_NOSUCHCHANNEL (403) or ERR_BADCHANMASK (476)
-      const errorResponse = await client.waitForLine(/403|476/i, 5000);
+      const errorResponse = await client.waitForNumeric(['403', '476'], 5000);
       expect(errorResponse).toBeDefined();
 
       client.send('QUIT');
@@ -204,8 +204,8 @@ describe('Error Conditions', () => {
 
       // Should get ERR_NOTONCHANNEL (442) or ERR_NOSUCHCHANNEL (403)
       // depending on whether server tracks channels that exist vs user membership
-      const errorResponse = await client.waitForLine(/442|403/i, 5000);
-      expect(errorResponse).toMatch(/442|403/);
+      const errorResponse = await client.waitForNumeric(['442', '403'], 5000);
+      expect(['442', '403']).toContain(errorResponse.command);
 
       client.send('QUIT');
     });
@@ -235,7 +235,7 @@ describe('Error Conditions', () => {
       client.send(`KICK ${channel} kicktarget1 :Test`);
 
       // Should get ERR_NOTONCHANNEL (442) or ERR_CHANOPRIVSNEEDED (482)
-      const errorResponse = await client.waitForLine(/442|482/i, 5000);
+      const errorResponse = await client.waitForNumeric(['442', '482'], 5000);
       expect(errorResponse).toBeDefined();
 
       client.send('QUIT');
@@ -280,8 +280,8 @@ describe('Error Conditions', () => {
       user1.send(`MODE ${channel} +o target1`);
 
       // Should get ERR_CHANOPRIVSNEEDED (482)
-      const errorResponse = await user1.waitForLine(/482/i, 5000);
-      expect(errorResponse).toMatch(/482/);
+      const errorResponse = await user1.waitForNumeric('482', 5000);
+      expect(errorResponse.command).toBe('482');
 
       op.send('QUIT');
       user1.send('QUIT');
@@ -324,8 +324,8 @@ describe('Error Conditions', () => {
       user.send(`KICK ${channel} target2 :No`);
 
       // Should get ERR_CHANOPRIVSNEEDED (482)
-      const errorResponse = await user.waitForLine(/482/i, 5000);
-      expect(errorResponse).toMatch(/482/);
+      const errorResponse = await user.waitForNumeric('482', 5000);
+      expect(errorResponse.command).toBe('482');
 
       op.send('QUIT');
       user.send('QUIT');
@@ -360,8 +360,8 @@ describe('Error Conditions', () => {
       op.send(`KICK ${channel} outside1 :Not here`);
 
       // Should get ERR_USERNOTINCHANNEL (441)
-      const errorResponse = await op.waitForLine(/441/i, 5000);
-      expect(errorResponse).toMatch(/441/);
+      const errorResponse = await op.waitForNumeric('441', 5000);
+      expect(errorResponse.command).toBe('441');
 
       op.send('QUIT');
       outside.send('QUIT');
@@ -388,8 +388,8 @@ describe('Error Conditions', () => {
       client2.send('USER test 0 * :Test');
 
       // Should get ERR_NICKNAMEINUSE (433)
-      const errorResponse = await client2.waitForLine(/433/i, 5000);
-      expect(errorResponse).toMatch(/433/);
+      const errorResponse = await client2.waitForNumeric('433', 5000);
+      expect(errorResponse.command).toBe('433');
 
       client1.send('QUIT');
       client2.close();
@@ -410,8 +410,8 @@ describe('Error Conditions', () => {
       client.send('PRIVMSG nonexistentnick12345 :Hello');
 
       // Should get ERR_NOSUCHNICK (401)
-      const errorResponse = await client.waitForLine(/401/i, 5000);
-      expect(errorResponse).toMatch(/401/);
+      const errorResponse = await client.waitForNumeric('401', 5000);
+      expect(errorResponse.command).toBe('401');
 
       client.send('QUIT');
     });
@@ -429,7 +429,7 @@ describe('Error Conditions', () => {
       client.send('WHOIS nonexistentnick12345');
 
       // Should get ERR_NOSUCHNICK (401) or just end of WHOIS (318)
-      const errorResponse = await client.waitForLine(/401|318/i, 5000);
+      const errorResponse = await client.waitForNumeric(['401', '318'], 5000);
       expect(errorResponse).toBeDefined();
 
       client.send('QUIT');
@@ -457,7 +457,7 @@ describe('Error Conditions', () => {
 
       // Set +i (invite only)
       op.send(`MODE ${channel} +i`);
-      await op.waitForLine(/MODE.*\+i/i, 5000);
+      await op.waitForMode(channel, '+i', 5000);
 
       user.clearRawBuffer();
 
@@ -465,8 +465,8 @@ describe('Error Conditions', () => {
       user.send(`JOIN ${channel}`);
 
       // Should get ERR_INVITEONLYCHAN (473)
-      const errorResponse = await user.waitForLine(/473/i, 5000);
-      expect(errorResponse).toMatch(/473/);
+      const errorResponse = await user.waitForNumeric('473', 5000);
+      expect(errorResponse.command).toBe('473');
 
       op.send('QUIT');
       user.send('QUIT');
@@ -494,7 +494,7 @@ describe('Error Conditions', () => {
 
       // Set limit to 1
       op.send(`MODE ${channel} +l 1`);
-      await op.waitForLine(/MODE.*\+l/i, 5000);
+      await op.waitForMode(channel, '+l', 5000);
 
       user.clearRawBuffer();
 
@@ -502,8 +502,8 @@ describe('Error Conditions', () => {
       user.send(`JOIN ${channel}`);
 
       // Should get ERR_CHANNELISFULL (471)
-      const errorResponse = await user.waitForLine(/471/i, 5000);
-      expect(errorResponse).toMatch(/471/);
+      const errorResponse = await user.waitForNumeric('471', 5000);
+      expect(errorResponse.command).toBe('471');
 
       op.send('QUIT');
       user.send('QUIT');
@@ -531,7 +531,7 @@ describe('Error Conditions', () => {
 
       // Ban the user
       op.send(`MODE ${channel} +b banned1!*@*`);
-      await op.waitForLine(/MODE.*\+b/i, 5000);
+      await op.waitForMode(channel, '+b', 5000);
 
       user.clearRawBuffer();
 
@@ -539,8 +539,8 @@ describe('Error Conditions', () => {
       user.send(`JOIN ${channel}`);
 
       // Should get ERR_BANNEDFROMCHAN (474)
-      const errorResponse = await user.waitForLine(/474/i, 5000);
-      expect(errorResponse).toMatch(/474/);
+      const errorResponse = await user.waitForNumeric('474', 5000);
+      expect(errorResponse.command).toBe('474');
 
       op.send('QUIT');
       user.send('QUIT');
@@ -568,7 +568,7 @@ describe('Error Conditions', () => {
 
       // Set channel key
       op.send(`MODE ${channel} +k secretkey`);
-      await op.waitForLine(/MODE.*\+k/i, 5000);
+      await op.waitForMode(channel, '+k', 5000);
 
       user.clearRawBuffer();
 
@@ -576,8 +576,8 @@ describe('Error Conditions', () => {
       user.send(`JOIN ${channel} wrongkey`);
 
       // Should get ERR_BADCHANNELKEY (475)
-      const errorResponse = await user.waitForLine(/475/i, 5000);
-      expect(errorResponse).toMatch(/475/);
+      const errorResponse = await user.waitForNumeric('475', 5000);
+      expect(errorResponse.command).toBe('475');
 
       op.send('QUIT');
       user.send('QUIT');
@@ -605,7 +605,7 @@ describe('Error Conditions', () => {
 
       // Ensure +n is set (default usually)
       inside.send(`MODE ${channel} +n`);
-      await inside.waitForLine(/MODE.*\+n/i, 5000).catch(() => {});
+      await inside.waitForMode(channel, '+n', 5000).catch(() => {});
 
       outside.clearRawBuffer();
 
@@ -613,8 +613,8 @@ describe('Error Conditions', () => {
       outside.send(`PRIVMSG ${channel} :Hello from outside`);
 
       // Should get ERR_CANNOTSENDTOCHAN (404)
-      const errorResponse = await outside.waitForLine(/404/i, 5000);
-      expect(errorResponse).toMatch(/404/);
+      const errorResponse = await outside.waitForNumeric('404', 5000);
+      expect(errorResponse.command).toBe('404');
 
       inside.send('QUIT');
       outside.send('QUIT');

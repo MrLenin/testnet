@@ -80,7 +80,10 @@ describe('IRCv3 Account Registration (draft/account-registration)', () => {
       client.send(`REGISTER ${uniqueAccount} * testpassword123`);
 
       // Should get some response (success, failure, or verification needed)
-      const response = await client.waitForLine(/(REGISTER|FAIL|VERIFY)/i, 10000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'REGISTER' || msg.command === 'FAIL' || msg.command === 'VERIFY',
+        10000
+      );
       expect(response).toBeDefined();
       client.send('QUIT');
     });
@@ -95,8 +98,8 @@ describe('IRCv3 Account Registration (draft/account-registration)', () => {
       client.send('REGISTER');
 
       // Should get FAIL response
-      const response = await client.waitForLine(/FAIL.*REGISTER.*NEED_MORE_PARAMS/i, 5000);
-      expect(response).toMatch(/FAIL/i);
+      const response = await client.waitForFail('REGISTER', 'NEED_MORE_PARAMS', 5000);
+      expect(response.command).toBe('FAIL');
       client.send('QUIT');
     });
 
@@ -111,8 +114,8 @@ describe('IRCv3 Account Registration (draft/account-registration)', () => {
       client.send(`REGISTER ${longAccount} * testpassword123`);
 
       // Should get FAIL with BAD_ACCOUNT_NAME
-      const response = await client.waitForLine(/FAIL.*REGISTER.*BAD_ACCOUNT_NAME/i, 5000);
-      expect(response).toMatch(/BAD_ACCOUNT_NAME/i);
+      const response = await client.waitForFail('REGISTER', 'BAD_ACCOUNT_NAME', 5000);
+      expect(response.params[1]).toBe('BAD_ACCOUNT_NAME');
       client.send('QUIT');
     });
 
@@ -128,8 +131,8 @@ describe('IRCv3 Account Registration (draft/account-registration)', () => {
       client.send(`REGISTER ${uniqueAccount} * abc`);
 
       // Should get FAIL with WEAK_PASSWORD
-      const response = await client.waitForLine(/FAIL.*REGISTER.*WEAK_PASSWORD/i, 5000);
-      expect(response).toMatch(/WEAK_PASSWORD/i);
+      const response = await client.waitForFail('REGISTER', 'WEAK_PASSWORD', 5000);
+      expect(response.params[1]).toBe('WEAK_PASSWORD');
       client.send('QUIT');
     });
 
@@ -146,8 +149,8 @@ describe('IRCv3 Account Registration (draft/account-registration)', () => {
       client.send(`REGISTER ${uniqueAccount} * ${longPassword}`);
 
       // Should get FAIL with WEAK_PASSWORD
-      const response = await client.waitForLine(/FAIL.*REGISTER.*WEAK_PASSWORD/i, 5000);
-      expect(response).toMatch(/WEAK_PASSWORD/i);
+      const response = await client.waitForFail('REGISTER', 'WEAK_PASSWORD', 5000);
+      expect(response.params[1]).toBe('WEAK_PASSWORD');
       client.send('QUIT');
     });
 
@@ -161,7 +164,10 @@ describe('IRCv3 Account Registration (draft/account-registration)', () => {
       client.send(`REGISTER ${uniqueAccount} test@example.com testpassword123`);
 
       // Should get some response (REGISTER success/verify or FAIL)
-      const response = await client.waitForLine(/(REGISTER|FAIL|VERIFY)/i, 10000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'REGISTER' || msg.command === 'FAIL' || msg.command === 'VERIFY',
+        10000
+      );
       expect(response).toBeDefined();
       client.send('QUIT');
     });
@@ -176,7 +182,10 @@ describe('IRCv3 Account Registration (draft/account-registration)', () => {
       client.send(`REGISTER ${uniqueAccount} * testpassword123`);
 
       // Should get some response
-      const response = await client.waitForLine(/(REGISTER|FAIL|VERIFY)/i, 10000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'REGISTER' || msg.command === 'FAIL' || msg.command === 'VERIFY',
+        10000
+      );
       expect(response).toBeDefined();
       client.send('QUIT');
     });
@@ -193,7 +202,7 @@ describe('IRCv3 Account Registration (draft/account-registration)', () => {
       // If no test account, this will fail, but we can still test the error
       client.capEnd();
       client.register('regafter1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Try to REGISTER while already connected
       const uniqueAccount = `afterauth_${uniqueId()}`;
@@ -201,8 +210,8 @@ describe('IRCv3 Account Registration (draft/account-registration)', () => {
 
       // Should get FAIL ALREADY_AUTHENTICATED or similar
       try {
-        const response = await client.waitForLine(/FAIL.*REGISTER/i, 5000);
-        expect(response).toMatch(/FAIL.*REGISTER/i);
+        const response = await client.waitForFail('REGISTER', undefined, 5000);
+        expect(response.command).toBe('FAIL');
       } catch {
         // Some implementations may just ignore the command after registration
       }
@@ -221,8 +230,8 @@ describe('IRCv3 Account Registration (draft/account-registration)', () => {
       client.send('VERIFY');
 
       // Should get FAIL response
-      const response = await client.waitForLine(/FAIL.*VERIFY.*NEED_MORE_PARAMS/i, 5000);
-      expect(response).toMatch(/FAIL/i);
+      const response = await client.waitForFail('VERIFY', 'NEED_MORE_PARAMS', 5000);
+      expect(response.command).toBe('FAIL');
       client.send('QUIT');
     });
 
@@ -237,8 +246,11 @@ describe('IRCv3 Account Registration (draft/account-registration)', () => {
 
       // Should get FAIL response (no account or bad code)
       // Note: Server may return FAIL REGISTER or FAIL VERIFY depending on implementation
-      const response = await client.waitForLine(/FAIL.*(VERIFY|REGISTER)/i, 5000);
-      expect(response).toMatch(/FAIL/i);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'FAIL' && (msg.params[0] === 'VERIFY' || msg.params[0] === 'REGISTER'),
+        5000
+      );
+      expect(response.command).toBe('FAIL');
       client.send('QUIT');
     });
 
@@ -249,7 +261,7 @@ describe('IRCv3 Account Registration (draft/account-registration)', () => {
       await client.capReq(['draft/account-registration', 'standard-replies']);
       client.capEnd();
       client.register('verifyafter1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Try to VERIFY while already connected
       client.send('VERIFY testaccount SOMECODE');
@@ -257,8 +269,11 @@ describe('IRCv3 Account Registration (draft/account-registration)', () => {
       // Should get FAIL ALREADY_AUTHENTICATED
       // Note: Server may return FAIL REGISTER or FAIL VERIFY depending on implementation
       try {
-        const response = await client.waitForLine(/FAIL.*(VERIFY|REGISTER)/i, 5000);
-        expect(response).toMatch(/FAIL/i);
+        const response = await client.waitForParsedLine(
+          msg => msg.command === 'FAIL' && (msg.params[0] === 'VERIFY' || msg.params[0] === 'REGISTER'),
+          5000
+        );
+        expect(response.command).toBe('FAIL');
       } catch {
         // Some implementations may ignore
       }
@@ -284,17 +299,20 @@ describe('IRCv3 Account Registration (draft/account-registration)', () => {
 
       // First registration attempt
       client1.send(`REGISTER ${testAccount} * testpassword123`);
-      const response1 = await client1.waitForLine(/(REGISTER|FAIL)/i, 10000);
+      const response1 = await client1.waitForParsedLine(
+        msg => msg.command === 'REGISTER' || msg.command === 'FAIL',
+        10000
+      );
 
       // If first succeeded, second should fail with ACCOUNT_EXISTS
-      if (response1.includes('REGISTER') && !response1.includes('FAIL')) {
+      if (response1.command === 'REGISTER') {
         // Wait a moment for account to be created
         await new Promise(r => setTimeout(r, 500));
 
         // Second registration with same account
         client2.send(`REGISTER ${testAccount} * differentpassword`);
-        const response2 = await client2.waitForLine(/FAIL.*REGISTER.*ACCOUNT_EXISTS/i, 10000);
-        expect(response2).toMatch(/ACCOUNT_EXISTS/i);
+        const response2 = await client2.waitForFail('REGISTER', 'ACCOUNT_EXISTS', 10000);
+        expect(response2.params[1]).toBe('ACCOUNT_EXISTS');
       }
 
       client1.send('QUIT');
@@ -312,9 +330,10 @@ describe('IRCv3 Account Registration (draft/account-registration)', () => {
       // Trigger an error
       client.send('REGISTER');
 
-      const response = await client.waitForLine(/FAIL.*REGISTER/i, 5000);
+      const response = await client.waitForFail('REGISTER', undefined, 5000);
       // Standard reply format: FAIL REGISTER CODE [context] :message
-      expect(response).toMatch(/^FAIL REGISTER \w+/i);
+      expect(response.command).toBe('FAIL');
+      expect(response.params[0]).toBe('REGISTER');
       client.send('QUIT');
     });
   });

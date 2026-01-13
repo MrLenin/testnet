@@ -317,14 +317,14 @@ describe('IRCv3 CAP Negotiation', () => {
       client.register('timetest1');
 
       // Wait for registration (001 welcome)
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // Join a channel to trigger timestamped messages
       client.send('JOIN #timetest');
-      const joinLine = await client.waitForLine(/JOIN.*#timetest/i);
+      const joinMsg = await client.waitForJoin('#timetest');
 
       // Server-time should add @time= tags
-      expect(joinLine).toBeDefined();
+      expect(joinMsg).toBeDefined();
       // Note: actual time tag presence depends on server config
       client.send('QUIT');
     });
@@ -340,8 +340,8 @@ describe('IRCv3 CAP Negotiation', () => {
       client.register('endtest1');
 
       // Should receive welcome message
-      const welcome = await client.waitForLine(/001.*endtest1/);
-      expect(welcome).toContain('endtest1');
+      const welcomeMsg = await client.waitForNumeric('001');
+      expect(welcomeMsg.raw).toContain('endtest1');
       client.send('QUIT');
     });
   });
@@ -357,8 +357,8 @@ describe('IRCv3 CAP Negotiation', () => {
       client.register('autotest1');
 
       // Should receive welcome (001)
-      const welcome = await client.waitForLine(/001/);
-      expect(welcome).toContain('autotest1');
+      const welcomeMsg = await client.waitForNumeric('001');
+      expect(welcomeMsg.raw).toContain('autotest1');
       client.send('QUIT');
     });
   });
@@ -428,8 +428,9 @@ describe('CAP Edge Cases', () => {
       // Send CAP LS without version number (legacy)
       client.send('CAP LS');
 
-      const response = await client.waitForLine(/CAP \* LS/i);
-      expect(response).toMatch(/CAP \* LS/i);
+      const response = await client.waitForCap('LS');
+      expect(response.command).toBe('CAP');
+      expect(response.params[1]).toBe('LS');
       client.send('QUIT');
     });
 
@@ -438,8 +439,9 @@ describe('CAP Edge Cases', () => {
 
       client.send('CAP LS 301');
 
-      const response = await client.waitForLine(/CAP \* LS/i);
-      expect(response).toMatch(/CAP \* LS/i);
+      const response = await client.waitForCap('LS');
+      expect(response.command).toBe('CAP');
+      expect(response.params[1]).toBe('LS');
       // CAP 301 should not include values (no = in caps)
       client.send('QUIT');
     });
@@ -493,8 +495,9 @@ describe('CAP Edge Cases', () => {
       // Request without LS first - server should still respond
       client.send('CAP REQ :multi-prefix');
 
-      const response = await client.waitForLine(/CAP \* (ACK|NAK)/i);
-      expect(response).toMatch(/CAP \* (ACK|NAK)/i);
+      const response = await client.waitForCap(['ACK', 'NAK']);
+      expect(response.command).toBe('CAP');
+      expect(['ACK', 'NAK']).toContain(response.params[1]);
       client.send('QUIT');
     });
 
@@ -506,7 +509,7 @@ describe('CAP Edge Cases', () => {
 
       // Should get some response (ACK or NAK)
       try {
-        const response = await client.waitForLine(/CAP \* (ACK|NAK)/i, 3000);
+        const response = await client.waitForCap(['ACK', 'NAK'], undefined, 3000);
         expect(response).toBeDefined();
       } catch {
         // Some servers may ignore empty REQ
@@ -524,9 +527,9 @@ describe('CAP Edge Cases', () => {
 
       client.send('CAP LIST');
 
-      const response = await client.waitForLine(/CAP \* LIST/i);
-      expect(response).toMatch(/multi-prefix/);
-      expect(response).toMatch(/away-notify/);
+      const response = await client.waitForCap('LIST');
+      expect(response.trailing).toMatch(/multi-prefix/);
+      expect(response.trailing).toMatch(/away-notify/);
       client.send('QUIT');
     });
 
@@ -536,9 +539,10 @@ describe('CAP Edge Cases', () => {
       // Don't request any caps
       client.send('CAP LIST');
 
-      const response = await client.waitForLine(/CAP \* LIST/i);
+      const response = await client.waitForCap('LIST');
       // LIST response should exist but may have empty cap list
-      expect(response).toMatch(/CAP \* LIST/i);
+      expect(response.command).toBe('CAP');
+      expect(response.params[1]).toBe('LIST');
       client.send('QUIT');
     });
   });
@@ -568,7 +572,7 @@ describe('CAP Edge Cases', () => {
 
       // Should NOT receive 001 yet
       try {
-        await client.waitForLine(/001/, 1000);
+        await client.waitForNumeric('001', 1000);
         // If we get here, server didn't wait for CAP END
         throw new Error('Server should wait for CAP END');
       } catch (error) {
@@ -583,8 +587,8 @@ describe('CAP Edge Cases', () => {
       client.capEnd();
 
       // Should receive 001
-      const welcome = await client.waitForLine(/001/);
-      expect(welcome).toContain('cappause1');
+      const welcomeMsg = await client.waitForNumeric('001');
+      expect(welcomeMsg.raw).toContain('cappause1');
       client.send('QUIT');
     });
   });
@@ -654,7 +658,7 @@ describe('CAP Post-Registration', () => {
     await client.capReq(['multi-prefix']);
     client.capEnd();
     client.register('postreg1');
-    await client.waitForLine(/001/);
+    await client.waitForNumeric('001');
 
     // Now request additional capability
     const result = await client.capReq(['away-notify']);
@@ -669,7 +673,7 @@ describe('CAP Post-Registration', () => {
     await client.capReq(['multi-prefix', 'away-notify']);
     client.capEnd();
     client.register('postreg2');
-    await client.waitForLine(/001/);
+    await client.waitForNumeric('001');
 
     // Disable a capability
     const result = await client.capReq(['-away-notify']);
@@ -684,7 +688,7 @@ describe('CAP Post-Registration', () => {
     await client.capReq(['multi-prefix']);
     client.capEnd();
     client.register('postreg3');
-    await client.waitForLine(/001/);
+    await client.waitForNumeric('001');
 
     // CAP LS after registration
     const caps = await client.capLs(302);

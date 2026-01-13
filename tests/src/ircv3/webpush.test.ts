@@ -55,7 +55,7 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
       await client.capReq(['draft/webpush']);
       client.capEnd();
       client.register('wpreg1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -64,10 +64,14 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
       client.send('WEBPUSH REGISTER https://push.example.com/endpoint dummy-p256dh-key dummy-auth-key');
 
       // Server MUST respond to WEBPUSH command - either success or error
-      const response = await client.waitForLine(/WEBPUSH|FAIL|4\d\d|900|ACCOUNT/i, 5000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'WEBPUSH' || msg.command === 'FAIL' ||
+               /^[49]\d\d$/.test(msg.command) || msg.raw.includes('ACCOUNT'),
+        5000
+      );
       // Response should indicate success, failure, or authentication requirement
       expect(response).toBeDefined();
-      expect(response.length).toBeGreaterThan(0);
+      expect(response.command.length).toBeGreaterThan(0);
 
       client.send('QUIT');
     });
@@ -79,12 +83,16 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
       await client.capReq(['draft/webpush']);
       client.capEnd();
       client.register('wpunreg1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       // First register
       client.send('WEBPUSH REGISTER https://push.example.com/test dummy-key dummy-auth');
       // Wait for registration response
-      await client.waitForLine(/WEBPUSH|FAIL|4\d\d|ACCOUNT/i, 5000);
+      await client.waitForParsedLine(
+        msg => msg.command === 'WEBPUSH' || msg.command === 'FAIL' ||
+               /^4\d\d$/.test(msg.command) || msg.raw.includes('ACCOUNT'),
+        5000
+      );
 
       client.clearRawBuffer();
 
@@ -92,9 +100,13 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
       client.send('WEBPUSH UNREGISTER https://push.example.com/test');
 
       // Server MUST respond to UNREGISTER command
-      const response = await client.waitForLine(/WEBPUSH|FAIL|4\d\d|ACCOUNT/i, 5000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'WEBPUSH' || msg.command === 'FAIL' ||
+               /^4\d\d$/.test(msg.command) || msg.raw.includes('ACCOUNT'),
+        5000
+      );
       expect(response).toBeDefined();
-      expect(response.length).toBeGreaterThan(0);
+      expect(response.command.length).toBeGreaterThan(0);
 
       client.send('QUIT');
     });
@@ -106,16 +118,20 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
       await client.capReq(['draft/webpush']);
       client.capEnd();
       client.register('wplist1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
       client.send('WEBPUSH LIST');
 
       // Server MUST respond to LIST command
-      const response = await client.waitForLine(/WEBPUSH|FAIL|4\d\d|ACCOUNT/i, 5000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'WEBPUSH' || msg.command === 'FAIL' ||
+               /^4\d\d$/.test(msg.command) || msg.raw.includes('ACCOUNT'),
+        5000
+      );
       expect(response).toBeDefined();
-      expect(response.length).toBeGreaterThan(0);
+      expect(response.command.length).toBeGreaterThan(0);
 
       client.send('QUIT');
     });
@@ -129,7 +145,7 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
       await client.capReq(['draft/webpush']);
       client.capEnd();
       client.register('wpauth1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -137,9 +153,13 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
       client.send('WEBPUSH REGISTER https://push.example.com/unauth dummy dummy');
 
       // Server MUST respond - either success or error requiring authentication
-      const response = await client.waitForLine(/WEBPUSH|FAIL|ACCOUNT|4\d\d/i, 5000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'WEBPUSH' || msg.command === 'FAIL' ||
+               /^4\d\d$/.test(msg.command) || msg.raw.includes('ACCOUNT'),
+        5000
+      );
       expect(response).toBeDefined();
-      expect(response.length).toBeGreaterThan(0);
+      expect(response.command.length).toBeGreaterThan(0);
 
       client.send('QUIT');
     });
@@ -153,7 +173,7 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
       await client.capReq(['draft/webpush']);
       client.capEnd();
       client.register('wpinv1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -161,9 +181,13 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
       client.send('WEBPUSH REGISTER http://insecure.example.com/push dummy dummy');
 
       // Server MUST respond - either rejection or graceful handling
-      const response = await client.waitForLine(/WEBPUSH|FAIL|4\d\d|ACCOUNT/i, 5000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'WEBPUSH' || msg.command === 'FAIL' ||
+               /^4\d\d$/.test(msg.command) || msg.raw.includes('ACCOUNT'),
+        5000
+      );
       expect(response).toBeDefined();
-      expect(response.length).toBeGreaterThan(0);
+      expect(response.command.length).toBeGreaterThan(0);
 
       client.send('QUIT');
     });
@@ -175,7 +199,7 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
       await client.capReq(['draft/webpush']);
       client.capEnd();
       client.register('wpnoexist1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       client.clearRawBuffer();
 
@@ -183,9 +207,13 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
       client.send('WEBPUSH UNREGISTER https://nonexistent.example.com/push');
 
       // Server MUST respond - either error or graceful handling
-      const response = await client.waitForLine(/WEBPUSH|FAIL|4\d\d|ACCOUNT/i, 5000);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'WEBPUSH' || msg.command === 'FAIL' ||
+               /^4\d\d$/.test(msg.command) || msg.raw.includes('ACCOUNT'),
+        5000
+      );
       expect(response).toBeDefined();
-      expect(response.length).toBeGreaterThan(0);
+      expect(response.command.length).toBeGreaterThan(0);
 
       client.send('QUIT');
     });
@@ -244,11 +272,11 @@ describe('IRCv3 Event Playback (draft/event-playback)', () => {
       await client.capReq(['draft/event-playback', 'draft/chathistory', 'batch', 'server-time']);
       client.capEnd();
       client.register('ephistory1');
-      await client.waitForLine(/001/);
+      await client.waitForNumeric('001');
 
       const channel = uniqueChannel('ephistory');
       client.send(`JOIN ${channel}`);
-      await client.waitForLine(new RegExp(`JOIN.*${channel}`, 'i'));
+      await client.waitForJoin(channel);
 
       // Send some messages
       client.send(`PRIVMSG ${channel} :Event playback test 1`);
@@ -261,19 +289,26 @@ describe('IRCv3 Event Playback (draft/event-playback)', () => {
       client.send(`CHATHISTORY LATEST ${channel} * 20`);
 
       // Server MUST respond with batch start
-      const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 5000);
+      const batchStart = await client.waitForParsedLine(
+        msg => msg.command === 'BATCH' && msg.params[0]?.startsWith('+') && msg.params[1] === 'chathistory',
+        5000
+      );
       expect(batchStart).toBeDefined();
-      expect(batchStart).toMatch(/BATCH \+\S+ chathistory/i);
+      expect(batchStart.command).toBe('BATCH');
+      expect(batchStart.params[1]).toBe('chathistory');
 
       // Collect messages until BATCH end
       const messages: string[] = [];
       let done = false;
       const startTime = Date.now();
       while (!done && Date.now() - startTime < 3000) {
-        const line = await client.waitForLine(/PRIVMSG|JOIN|PART|MODE|BATCH/, 1000).catch(() => null);
-        if (!line) break;
-        messages.push(line);
-        if (line.match(/BATCH -/)) {
+        const msg = await client.waitForParsedLine(
+          m => ['PRIVMSG', 'JOIN', 'PART', 'MODE', 'BATCH'].includes(m.command),
+          1000
+        ).catch(() => null);
+        if (!msg) break;
+        messages.push(msg.raw);
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) {
           done = true;
         }
       }
