@@ -49,8 +49,10 @@ try {
   console.log('  Tests will create accounts on demand (slower)');
 }
 
-// Cleanup CookieObserver on process exit
-if (cookieObserverStarted) {
+// Cleanup CookieObserver on process exit (only register once)
+const cleanupRegisteredKey = '__cookieObserverCleanupRegistered';
+if (cookieObserverStarted && !(globalThis as Record<string, unknown>)[cleanupRegisteredKey]) {
+  (globalThis as Record<string, unknown>)[cleanupRegisteredKey] = true;
   process.on('beforeExit', async () => {
     try {
       await shutdownGlobalCookieObserver();
