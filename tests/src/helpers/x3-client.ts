@@ -245,7 +245,8 @@ export class X3Client extends RawSocketClient {
     const error = lines.find(l =>
       l.includes('invalid') ||
       l.includes('incorrect') ||
-      l.includes('expired')
+      l.includes('expired') ||
+      l.includes('logged in')  // Cannot use cookie when already authenticated
     );
     return { lines, success, error };
   }
@@ -1000,6 +1001,21 @@ export async function setupTestAccount(
     if (!authResult.success) {
       // Pool account failed auth - might be stale, fall back to fresh
       console.warn(`[setupTestAccount] Pool account ${account} failed auth: ${authResult.error}`);
+
+      // Check if client is actually authenticated despite reported failure
+      // This can happen if auth succeeded but response didn't match success patterns
+      const authCheck = await client.checkAuth();
+      if (authCheck.authenticated) {
+        console.log(`[setupTestAccount] Client already authenticated as ${authCheck.account} - using that`);
+        // If authenticated as the pool account we wanted, use it
+        if (authCheck.account?.toLowerCase() === account.toLowerCase()) {
+          return { account, password, email, fromPool: true };
+        }
+        // Authenticated to something else - can't registerAndActivate, so error
+        releaseTestAccount(account);
+        throw new Error(`Client already authenticated as ${authCheck.account}, cannot create fresh account`);
+      }
+
       releaseTestAccount(account);
       // Create fresh instead
       const fresh = await createTestAccount();

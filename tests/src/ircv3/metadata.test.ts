@@ -341,13 +341,14 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       // This should return immediately with TARGET_INVALID, not timeout
       client.send('METADATA GET nonexistentaccount12345 avatar');
 
-      // Should get TARGET_INVALID within 5 seconds (not 30 second timeout)
+      // Should get TARGET_INVALID - X3 async lookup can take time
       // With standard-replies: FAIL command
       // Without: NOTICE fallback containing "FAIL METADATA TARGET_INVALID"
+      // Use 10s timeout as X3 may need to query Keycloak for the account
       const response = await client.waitForParsedLine(
         msg => (msg.command === 'FAIL' || msg.command === 'NOTICE') &&
                msg.raw.includes('TARGET_INVALID'),
-        5000
+        10000
       );
       expect(response).toBeDefined();
       expect(response.raw).toContain('TARGET_INVALID');
