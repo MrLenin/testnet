@@ -81,11 +81,18 @@ describe('AuthServ', () => {
       const id = uniqueId().slice(0, 6);
 
       // Try to register with invalid email
-      const result = await client.registerAccount(
-        `test${id}`,
-        `pass${id}`,
-        'not-an-email'
-      );
+      // Use retry logic since X3 can be blocked on Keycloak sync operations
+      let result = { lines: [] as string[], success: false, error: undefined as string | undefined };
+      for (let attempt = 0; attempt < 3; attempt++) {
+        result = await client.registerAccount(
+          `test${id}`,
+          `pass${id}`,
+          'not-an-email'
+        );
+        if (result.lines.length > 0) break;
+        console.log(`[attempt ${attempt + 1}] No response, retrying...`);
+        await new Promise(r => setTimeout(r, 1000));
+      }
 
       expect(result.lines.length).toBeGreaterThan(0);
       console.log('Invalid email response:', result.lines);
