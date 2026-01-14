@@ -208,6 +208,10 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       client1.register(`sync1${account.slice(0, 4)}`);
       await client1.waitForNumeric('001');
 
+      // Allow time for positive auth cache to be populated before second auth
+      // This ensures client2 can use the cached credentials
+      await new Promise(r => setTimeout(r, 500));
+
       // Authenticate client2 to SAME account
       await client2.capLs();
       await client2.capReq(['draft/read-marker', 'sasl']);
@@ -215,8 +219,9 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       await client2.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
       const payload2 = Buffer.from(`${account}\0${account}\0${password}`).toString('base64');
       client2.send(`AUTHENTICATE ${payload2}`);
-      // Extended timeout (20s) for Keycloak validation
-      await client2.waitForNumeric('903', 20000);
+      // Extended timeout (25s) for Keycloak validation - second auth should use positive cache
+      // but we allow extra time in case cache isn't populated yet
+      await client2.waitForNumeric('903', 25000);
       client2.capEnd();
       client2.register(`sync2${account.slice(0, 4)}`);
       await client2.waitForNumeric('001');

@@ -264,7 +264,14 @@ describe('Services Integration', () => {
       // Wait for connection to settle before sending service commands
       await new Promise(r => setTimeout(r, 1000));
 
-      const authResult = await client2.auth(account, password);
+      // Retry auth since X3 may be blocked on Keycloak sync from first client
+      let authResult = { success: false, lines: [] as string[], error: undefined as string | undefined };
+      for (let attempt = 0; attempt < 3; attempt++) {
+        authResult = await client2.auth(account, password);
+        if (authResult.success || authResult.lines.length > 0) break;
+        console.log(`[Client2 auth attempt ${attempt + 1}] No response, retrying...`);
+        await new Promise(r => setTimeout(r, 1000));
+      }
       console.log('Client2 auth result:', authResult.success);
 
       client2.send(`JOIN ${channel}`);
