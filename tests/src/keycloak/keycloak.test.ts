@@ -1417,9 +1417,10 @@ async function unregisterChannel(client: RawSocketClient, channelName: string): 
 
   try {
     // Wait for the confirmation prompt - format: "use 'unregister #channel CODE'"
+    // Extended timeout to 10s to handle slow ChanServ responses
     const response = await client.waitForParsedLine(
       msg => msg.command === 'NOTICE' && /unregister.*\s[a-f0-9]{8}'/i.test(msg.raw),
-      5000
+      10000
     );
     // Extract the 8-character hex confirmation code at the end before the quote
     const match = response.raw.match(/unregister\s+\S+\s+([a-f0-9]{8})'/i);
@@ -1428,9 +1429,10 @@ async function unregisterChannel(client: RawSocketClient, channelName: string): 
       console.log(`Confirming unregister of ${channelName} with code ${confirmCode}`);
       client.send(`PRIVMSG ChanServ :UNREGISTER ${channelName} ${confirmCode}`);
       // Wait for success confirmation - X3 says "has been unregistered"
+      // Extended timeout - Keycloak group deletion can take time
       await client.waitForParsedLine(
         msg => msg.command === 'NOTICE' && /has been unregistered|unregistered|removed/i.test(msg.trailing || ''),
-        5000
+        10000
       );
       console.log(`Successfully unregistered ${channelName}`);
     } else {
@@ -1438,6 +1440,8 @@ async function unregisterChannel(client: RawSocketClient, channelName: string): 
     }
   } catch (e) {
     console.log(`Could not unregister ${channelName} - ${(e as Error).message}`);
+    // Re-throw to let the test know UNREGISTER failed
+    throw e;
   }
 }
 

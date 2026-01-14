@@ -303,18 +303,21 @@ describe('ChanServ (X3)', () => {
       expect(addResult.success, `ADDUSER failed: ${addResult.error}`).toBe(true);
       console.log(`[auto-op] ADDUSER response: ${addResult.lines.join(' | ')}`);
 
-      // Wait for user access to be visible before joining
-      await waitForUserAccess(client, channel, user2, ACCESS_LEVELS.OP);
+      // Wait for user access to be visible and stable (handles Keycloak sync races)
+      // Use extended timeout and poll verification instead of fixed sleep
+      const accessVerified = await waitForUserAccess(client, channel, user2, ACCESS_LEVELS.OP, 10000);
+      expect(accessVerified, `User ${user2} should have OP (200) access after ADDUSER`).toBe(true);
 
-      // Allow Keycloak async operations to settle - bidirectional sync can race with ADDUSER
-      // and briefly overwrite the level with 0 from a previous test's cleanup
-      await new Promise(r => setTimeout(r, 2000));
-
-      // Verify access list shows user2 with OP level (after settling)
-      const accessList = await client.getAccess(channel);
-      const user2Access = accessList.find(e => e.account.toLowerCase() === user2.toLowerCase());
-      console.log(`[auto-op] User2 access in ${channel}: level=${user2Access?.level}`);
-      expect(user2Access?.level, `Access level should be ${ACCESS_LEVELS.OP} after settling`).toBe(ACCESS_LEVELS.OP);
+      // Double-check with fresh query - use retry to handle transient service timeouts
+      let user2Access: { account: string; level: number } | undefined;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const accessList = await client.getAccess(channel);
+        user2Access = accessList.find(e => e.account.toLowerCase() === user2.toLowerCase());
+        console.log(`[auto-op] User2 access in ${channel}: level=${user2Access?.level} (attempt ${attempt + 1})`);
+        if (user2Access?.level === ACCESS_LEVELS.OP) break;
+        await new Promise(r => setTimeout(r, 500));
+      }
+      expect(user2Access?.level, `Access level should be ${ACCESS_LEVELS.OP} after verification`).toBe(ACCESS_LEVELS.OP);
 
       // User2 joins - should get opped
       user2Client.send(`JOIN ${channel}`);
