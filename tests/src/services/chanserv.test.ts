@@ -417,11 +417,14 @@ describe('ChanServ (X3)', () => {
       await new Promise(r => setTimeout(r, 500));
       await client.registerChannel(channel);
 
-      // Set DEFAULTMODES
-      const setResult = await client.set(channel, 'DEFAULTMODES', '+nt');
-      console.log('SET DEFAULTMODES response:', setResult.lines);
+      // Set MODES (not DEFAULTMODES - that's not a valid option)
+      // Valid options: modes, defaulttopic, topicmask, greeting, usergreeting, etc.
+      const setResult = await client.set(channel, 'MODES', '+nt');
+      console.log('SET MODES response:', setResult.lines);
 
-      expect(setResult.lines.length).toBeGreaterThan(0);
+      // Should succeed, not return "is not a valid SET option"
+      expect(setResult.success).toBe(true);
+      expect(setResult.lines.some(l => l.toLowerCase().includes('not a valid'))).toBe(false);
     });
   });
 
