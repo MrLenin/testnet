@@ -518,8 +518,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
       client.send(`AUTHENTICATE ${payload}`);
 
       // Wait for SASL result - should succeed with proper Keycloak user
-      // Increased timeout for slow Keycloak responses
-      const result = await client.waitForNumeric(['900', '903'], 15000);
+      // Extended timeout (25s) for slow Keycloak responses under load
+      const result = await client.waitForNumeric(['900', '903'], 25000);
       expect(result.command).toMatch(/90[03]/);
       console.log('SASL PLAIN auth result:', result.raw);
 
