@@ -202,7 +202,8 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       await client1.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
       const payload1 = Buffer.from(`${account}\0${account}\0${password}`).toString('base64');
       client1.send(`AUTHENTICATE ${payload1}`);
-      await client1.waitForNumeric('903', 10000);
+      // Extended timeout (20s) for Keycloak validation
+      await client1.waitForNumeric('903', 20000);
       client1.capEnd();
       client1.register(`sync1${account.slice(0, 4)}`);
       await client1.waitForNumeric('001');
@@ -214,7 +215,8 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       await client2.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
       const payload2 = Buffer.from(`${account}\0${account}\0${password}`).toString('base64');
       client2.send(`AUTHENTICATE ${payload2}`);
-      await client2.waitForNumeric('903', 10000);
+      // Extended timeout (20s) for Keycloak validation
+      await client2.waitForNumeric('903', 20000);
       client2.capEnd();
       client2.register(`sync2${account.slice(0, 4)}`);
       await client2.waitForNumeric('001');
