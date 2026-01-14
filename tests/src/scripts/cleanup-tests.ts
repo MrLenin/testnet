@@ -386,20 +386,68 @@ async function cleanup(): Promise<void> {
       await new Promise(r => setTimeout(r, 1000)); // Anti-flood delay
     }
 
+    // Also search for channels owned by pool accounts (if not --include-pool)
+    // Pool accounts accumulate channel ownership from test runs - clean those up
+    // even when keeping the accounts for reuse
+    if (!INCLUDE_POOL) {
+      console.log('Searching for channels owned by pool accounts...');
+      for (let i = 0; i < 10; i++) {
+        const poolAccount = `pool${i.toString().padStart(2, '0')}`;
+        if (DEBUG) console.log(`DEBUG: Searching for channels owned by ${poolAccount}`);
+        send(`PRIVMSG O3 :CSEARCH PRINT owner *${poolAccount} limit 500`);
+        await waitForSearchComplete(30000);
+        await new Promise(r => setTimeout(r, 500)); // Anti-flood delay
+      }
+    }
+
+    // Wipe pool accounts' channel access (they accumulate ADDUSER entries)
+    // This removes them from all channels without deleting the accounts
+    if (!INCLUDE_POOL) {
+      console.log('\nWiping pool account channel access...');
+      // Enable GOD mode first if not already
+      send('PRIVMSG O3 :GOD ON');
+      await new Promise(r => setTimeout(r, 500));
+
+      for (let i = 0; i < 10; i++) {
+        const poolAccount = `pool${i.toString().padStart(2, '0')}`;
+        if (DEBUG) console.log(`DEBUG: Wiping channel access for ${poolAccount}`);
+        // WIPEUSER removes user from all channels
+        send(`PRIVMSG ChanServ :WIPEUSER *${poolAccount}`);
+        await new Promise(r => setTimeout(r, 1000)); // Anti-flood delay
+        process.stdout.write('.');
+      }
+      console.log(' Done');
+    }
+
     // Parse channel list - extract channel names from search results
     // Only look at lines since channel search started to avoid picking up
     // channel names from earlier OUNREGISTER responses
     const parseChannels = (startIndex: number = 0) => {
       for (let i = startIndex; i < lines.length; i++) {
         const line = lines[i];
-        // Match any channel name starting with # followed by test patterns
+        // From CSEARCH results, match channel names in various formats:
+        // - "Match: #channel" format
+        // - Or any #channel in the line from test patterns
+
+        // First try Match: format (from CSEARCH PRINT)
+        const matchFormat = line.match(/Match:\s*(#[^\s,]+)/i);
+        if (matchFormat) {
+          const channel = matchFormat[1].toLowerCase();
+          if (!stats.channelsFound.includes(channel)) {
+            stats.channelsFound.push(channel);
+            if (DEBUG) console.log(`DEBUG: Found channel (Match:) ${channel}`);
+          }
+          continue;
+        }
+
+        // Also match test patterns directly (for any other output format)
         // Patterns: #test-*, #bisync*, #bidisync*, #optest*, #multi-*
         const channelMatches = line.matchAll(/(#(?:test-|bisync|bidisync|optest|multi-)[^\s,]+)/gi);
         for (const match of channelMatches) {
           const channel = match[1].toLowerCase();
           if (!stats.channelsFound.includes(channel)) {
             stats.channelsFound.push(channel);
-            if (DEBUG) console.log(`DEBUG: Found channel ${channel}`);
+            if (DEBUG) console.log(`DEBUG: Found channel (pattern) ${channel}`);
           }
         }
       }
