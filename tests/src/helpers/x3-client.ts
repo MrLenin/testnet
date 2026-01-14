@@ -733,12 +733,17 @@ export class X3Client extends RawSocketClient {
   async set(channel: string, setting: string, value?: string): Promise<ServiceResponse> {
     const cmd = value ? `SET ${channel} ${setting} ${value}` : `SET ${channel} ${setting}`;
     const lines = await this.serviceCmd('ChanServ', cmd);
-    const success = lines.some(l =>
-      l.includes('set') ||
-      l.includes('changed') ||
-      l.includes('enabled') ||
-      l.includes('disabled')
-    );
+    // X3 responds to successful SET by echoing the setting name and value
+    // e.g., "Modes       +tn" - so we also check if the setting name appears
+    const settingLower = setting.toLowerCase();
+    const success = lines.some(l => {
+      const lower = l.toLowerCase();
+      return lower.includes('set') ||
+             lower.includes('changed') ||
+             lower.includes('enabled') ||
+             lower.includes('disabled') ||
+             lower.includes(settingLower);  // X3 echoes setting name on success
+    });
     return { lines, success };
   }
 
