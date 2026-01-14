@@ -100,8 +100,25 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       client.send(`REDACT ${channel} ${msgid}`);
 
       // Should receive REDACT confirmation (echo back to self)
-      const response = await client.waitForCommand('REDACT', 5000);
-      console.log('[REDACT DEBUG] Got response:', response.raw);
+      let response;
+      try {
+        response = await client.waitForCommand('REDACT', 5000);
+        console.log('[REDACT DEBUG] Got response:', response.raw);
+      } catch (err) {
+        // Dump all received lines on timeout
+        console.log('[REDACT DEBUG] TIMEOUT - dumping all lines:');
+        const allLines = client.getUnconsumedLines?.() || [];
+        console.log('[REDACT DEBUG] Unconsumed lines:', allLines.length);
+        allLines.forEach((line: string, i: number) => console.log(`[REDACT DEBUG] Line ${i}:`, line));
+        // Also check raw buffer
+        const rawLines = (client as any).lines || [];
+        console.log('[REDACT DEBUG] Total raw lines:', rawLines.length);
+        rawLines.slice(-10).forEach((line: any, i: number) => {
+          const text = typeof line === 'string' ? line : line?.raw || JSON.stringify(line);
+          console.log(`[REDACT DEBUG] Raw ${i}:`, text);
+        });
+        throw err;
+      }
       expect(response.command).toBe('REDACT');
       expect(response.raw).toContain(msgid);
 
