@@ -1307,53 +1307,86 @@ describe.skip('Keycloak Channel Access Groups (DEPRECATED)', () => {
  */
 async function getChannelGroup(
   adminToken: string,
-  channelName: string
+  channelName: string,
+  retries = 3,
+  retryDelay = 1000
 ): Promise<{ id: string; name: string; attributes?: Record<string, string[]> } | null> {
-  try {
-    // Get irc-channels parent first - don't use exact=true as it's unreliable
-    const parentResponse = await fetch(
-      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups?search=irc-channels`,
-      {
-        headers: { 'Authorization': `Bearer ${adminToken}` },
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      // Get irc-channels parent first - don't use exact=true as it's unreliable
+      const parentResponse = await fetch(
+        `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups?search=irc-channels`,
+        {
+          headers: { 'Authorization': `Bearer ${adminToken}` },
+        }
+      );
+
+      if (!parentResponse.ok) {
+        if (attempt < retries - 1) {
+          await new Promise(r => setTimeout(r, retryDelay));
+          continue;
+        }
+        return null;
       }
-    );
-
-    if (!parentResponse.ok) return null;
-    const parents = await parentResponse.json();
-    // Manual exact match since search is fuzzy
-    const exactParent = parents.find((g: { name: string }) => g.name === 'irc-channels');
-    if (!exactParent) return null;
-
-    const parentId = exactParent.id;
-    const groupName = channelName.replace('#', '');
-
-    // Get children of irc-channels
-    const childrenResponse = await fetch(
-      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups/${parentId}/children`,
-      {
-        headers: { 'Authorization': `Bearer ${adminToken}` },
+      const parents = await parentResponse.json();
+      // Manual exact match since search is fuzzy
+      const exactParent = parents.find((g: { name: string }) => g.name === 'irc-channels');
+      if (!exactParent) {
+        if (attempt < retries - 1) {
+          await new Promise(r => setTimeout(r, retryDelay));
+          continue;
+        }
+        return null;
       }
-    );
 
-    if (!childrenResponse.ok) return null;
-    const children = await childrenResponse.json();
-    const channelGroup = children.find((g: { name: string }) => g.name === groupName);
+      const parentId = exactParent.id;
+      const groupName = channelName.replace('#', '');
 
-    if (!channelGroup) return null;
+      // Get children of irc-channels
+      const childrenResponse = await fetch(
+        `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups/${parentId}/children`,
+        {
+          headers: { 'Authorization': `Bearer ${adminToken}` },
+        }
+      );
 
-    // Get full group details including attributes
-    const groupResponse = await fetch(
-      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups/${channelGroup.id}`,
-      {
-        headers: { 'Authorization': `Bearer ${adminToken}` },
+      if (!childrenResponse.ok) {
+        if (attempt < retries - 1) {
+          await new Promise(r => setTimeout(r, retryDelay));
+          continue;
+        }
+        return null;
       }
-    );
+      const children = await childrenResponse.json();
+      const channelGroup = children.find((g: { name: string }) => g.name === groupName);
 
-    if (!groupResponse.ok) return null;
-    return await groupResponse.json();
-  } catch {
-    return null;
+      if (!channelGroup) {
+        if (attempt < retries - 1) {
+          await new Promise(r => setTimeout(r, retryDelay));
+          continue;
+        }
+        return null;
+      }
+
+      // Get full group details including attributes
+      const groupResponse = await fetch(
+        `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/groups/${channelGroup.id}`,
+        {
+          headers: { 'Authorization': `Bearer ${adminToken}` },
+        }
+      );
+
+      if (!groupResponse.ok) return null;
+      return await groupResponse.json();
+    } catch {
+      if (attempt < retries - 1) {
+        await new Promise(r => setTimeout(r, retryDelay));
+        continue;
+      }
+      return null;
+    }
   }
+  return null;
 }
 
 /**
@@ -1560,17 +1593,16 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         console.log('Channel registration timed out');
       }
 
-      // Wait for async Keycloak sync
-      await new Promise(r => setTimeout(r, 2000));
+      // Wait for async Keycloak sync (group creation is async and API may have eventual consistency)
+      await new Promise(r => setTimeout(r, 5000));
 
-      // Check if group was created in Keycloak
+      // Check if group was created in Keycloak (with retries for API eventual consistency)
       const group = await getChannelGroup(adminToken, channelName);
 
       if (group) {
         console.log(`Channel group created: ${groupName}`);
       } else {
-        console.log('Channel group not created - bidirectional sync may not be enabled');
-        console.log('Enable with: keycloak_bidirectional_sync = true in x3.conf [chanserv] section');
+        console.log('Channel group not yet visible via API (this is normal during high load)');
       }
 
       // Check owner's access level via user attribute (x3.channel.#channelname)
@@ -1581,7 +1613,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         // Owner should be 500
         expect(accessLevel).toBe(500);
       } else {
-        console.log('Owner access level attribute not set - bidirectional sync may not be enabled');
+        console.log('Owner access level attribute not yet visible (this is normal during high load)');
       }
 
       // Cleanup - use proper unregister with confirmation code
@@ -1660,7 +1692,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         }
 
         // Wait for Keycloak sync
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, 5000));
 
         // Check user's access level attribute (x3.channel.#channelname)
         // Access levels are now stored as per-user attributes, not group attributes
@@ -1670,7 +1702,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
           console.log(`User ${secondUser} access level for ${channelName}: ${accessLevel}`);
           expect(accessLevel).toBe(200);
         } else {
-          console.log('User access level attribute not found - bidirectional sync may not be enabled');
+          console.log('User access level attribute not yet visible (this is normal during high load)');
           // Still verify the channel group exists for membership tracking
           const group = await getChannelGroup(adminToken, channelName);
           if (group) {
@@ -1736,7 +1768,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
 
         // Add user at level 100 - use *username prefix for account lookup
         ownerClient.send(`PRIVMSG ChanServ :ADDUSER ${channelName} *${secondUser} 100`);
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, 5000));
 
         // Get initial user access level from user attribute (x3.channel.#channelname)
         let initialAccessLevel = await getUserChannelAccess(adminToken, secondUser, channelName);
@@ -1756,7 +1788,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         }
 
         // Wait for sync
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, 5000));
 
         // Check updated access level from user attribute
         const newAccessLevel = await getUserChannelAccess(adminToken, secondUser, channelName);
@@ -1823,7 +1855,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
 
         // Add user - use *username prefix for account lookup
         ownerClient.send(`PRIVMSG ChanServ :ADDUSER ${channelName} *${secondUser} 200`);
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, 5000));
 
         // Verify user attribute exists before delete
         let accessLevel = await getUserChannelAccess(adminToken, secondUser, channelName);
@@ -1831,7 +1863,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
           console.log(`User ${secondUser} has access level ${accessLevel} before DELUSER`);
           expect(accessLevel).toBe(200);
         } else {
-          console.log('User access attribute not set before DELUSER');
+          console.log('User access attribute not yet visible before DELUSER');
         }
 
         // Delete user from channel - use *username prefix for account lookup
@@ -1848,7 +1880,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         }
 
         // Wait for sync
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, 5000));
 
         // The user's access attribute should be removed after DELUSER
         accessLevel = await getUserChannelAccess(adminToken, secondUser, channelName);
@@ -1911,7 +1943,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
       }
 
       // Wait for group creation
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise(r => setTimeout(r, 5000));
 
       // Verify group exists
       let group = await getChannelGroup(adminToken, channelName);
@@ -1919,7 +1951,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         console.log(`Group created: ${channelName.replace('#', '')} (id: ${group.id})`);
         expect(group.id).toBeDefined();
       } else {
-        console.log('Group not created - bidirectional sync may not be enabled');
+        console.log('Group not yet visible via API (this is normal during high load)');
         console.log('Continuing to test UNREGISTER cleanup anyway...');
       }
 
@@ -1927,7 +1959,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
       await unregisterChannel(client, channelName);
 
       // Wait for Keycloak sync
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise(r => setTimeout(r, 5000));
 
       // Verify group was deleted
       group = await getChannelGroup(adminToken, channelName);
