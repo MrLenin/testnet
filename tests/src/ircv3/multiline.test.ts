@@ -1106,18 +1106,28 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
 
         const histServLines: string[] = [];
         const fetchStart = Date.now();
-        while (Date.now() - fetchStart < 3000) {
+        // HistServ FETCH is async: it queries IRCd chathistory, then sends responses.
+        // The initial query can take 500ms-2s, so we must NOT break on first timeout.
+        // Keep looping until outer timeout OR we got at least one line and then timed out.
+        let gotAtLeastOne = false;
+        while (Date.now() - fetchStart < 5000) {
           try {
             // Match NOTICEs from HistServ or PRIVMSGs
             const msg = await client2.waitForParsedLine(
               m => (m.command === 'NOTICE' && m.source?.nick?.toLowerCase() === 'histserv') ||
                    m.command === 'PRIVMSG',
-              500
+              1000  // Increased from 500ms - async query can take time
             );
             histServLines.push(msg.raw);
+            gotAtLeastOne = true;
             console.log('HistServ FETCH response:', msg.raw);
           } catch {
-            break;
+            // Only break if we already got at least one response and then timed out
+            // (meaning no more messages coming). Otherwise keep waiting for first response.
+            if (gotAtLeastOne) {
+              break;
+            }
+            // Still waiting for first response - continue looping until outer timeout
           }
         }
 
