@@ -275,40 +275,26 @@ describe('IRCv3 chghost', () => {
   });
 
   describe('CHGHOST Notification', () => {
-    it('receives CHGHOST when own host changes', async () => {
-      // Note: Actually changing host requires oper privileges or SASL
-      // This tests that the capability is properly negotiated
+    // NOTE: Triggering CHGHOST requires host changes which happen via:
+    // - SASL authentication (changes to account-based vhost)
+    // - Oper privileges (CHGHOST command)
+    // - User mode +x (hidden host)
+    // The capability test verifies negotiation; actual CHGHOST testing
+    // requires authenticated users in shared channels.
 
+    it('can negotiate chghost capability', async () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      await client.capReq(['chghost']);
+      const result = await client.capReq(['chghost']);
+      expect(result.ack).toContain('chghost');
+
       client.capEnd();
-      client.register('chown1');
+      client.register('chgtest1');
       await client.waitForNumeric('001');
 
-      // chghost capability is enabled - actual host changes require special setup
       expect(client.hasCapEnabled('chghost')).toBe(true);
-
       client.send('QUIT');
-    });
-
-    it('CHGHOST includes new user and host', async () => {
-      // CHGHOST format: :nick!olduser@oldhost CHGHOST newuser newhost
-
-      const observer = trackClient(await createRawSocketClient());
-
-      await observer.capLs();
-      await observer.capReq(['chghost']);
-      observer.capEnd();
-      observer.register('chobs1');
-      await observer.waitForNumeric('001');
-
-      // Can't easily trigger CHGHOST without oper/services
-      // This verifies capability setup
-      expect(observer.hasCapEnabled('chghost')).toBe(true);
-
-      observer.send('QUIT');
     });
   });
 

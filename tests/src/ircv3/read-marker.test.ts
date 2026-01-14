@@ -125,7 +125,10 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       client.send('QUIT');
     }, 30000);
 
-    it('MARKREAD with msgid sets position', async () => {
+    // NOTE: The IRCv3 read-marker spec does NOT support msgid parameter.
+    // Only timestamp= is specified. This test is skipped until/unless
+    // msgid support is added as a non-standard extension.
+    it.skip('MARKREAD with msgid sets position (not in spec)', async () => {
       const client = trackClient(await createRawSocketClient());
 
       // Get test account and authenticate via SASL
@@ -332,15 +335,14 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       // Invalid timestamp format
       client.send(`MARKREAD ${channel} timestamp=invalid`);
 
-      // Should receive error response
+      // Server should reject with FAIL INVALID_PARAMS
       const response = await client.waitForParsedLine(
-        msg => msg.command === 'FAIL' ||
-               /^4\d\d$/.test(msg.command) ||
-               msg.command === 'MARKREAD',
+        msg => msg.command === 'FAIL' || /^4\d\d$/.test(msg.command),
         5000
       );
-      expect(response).toBeDefined();
-      console.log('Invalid timestamp response:', response.raw);
+      expect(response.command).toBe('FAIL');
+      expect(response.params[0]).toBe('MARKREAD');
+      expect(response.params[1]).toBe('INVALID_PARAMS');
 
       client.send('QUIT');
     }, 30000);

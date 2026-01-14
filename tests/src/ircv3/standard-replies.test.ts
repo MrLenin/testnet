@@ -112,43 +112,9 @@ describe('IRCv3 Standard Replies', () => {
     });
   });
 
-  describe('WARN Reply Format', () => {
-    it('WARN for non-fatal issues', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['standard-replies']);
-      client.capEnd();
-      client.register('srwarn1');
-      await client.waitForNumeric('001');
-
-      // WARN is less common, may not trigger easily
-      // Format: WARN <command> <code> [context...] :<description>
-
-      expect(client.hasCapEnabled('standard-replies')).toBe(true);
-
-      client.send('QUIT');
-    });
-  });
-
-  describe('NOTE Reply Format', () => {
-    it('NOTE for informational messages', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['standard-replies']);
-      client.capEnd();
-      client.register('srnote1');
-      await client.waitForNumeric('001');
-
-      // NOTE is informational
-      // Format: NOTE <command> <code> [context...] :<description>
-
-      expect(client.hasCapEnabled('standard-replies')).toBe(true);
-
-      client.send('QUIT');
-    });
-  });
+  // NOTE: WARN and NOTE reply tests removed - no reliable way to trigger
+  // these message types. WARN is for non-fatal issues, NOTE for informational
+  // messages. Neither has a standard operation that guarantees their emission.
 
   describe('Standard Reply Codes', () => {
     it('ACCOUNT_REQUIRED for operations needing authentication', async () => {
