@@ -364,7 +364,8 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       await client1.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
       const payload = Buffer.from(`${account}\0${account}\0${password}`).toString('base64');
       client1.send(`AUTHENTICATE ${payload}`);
-      await client1.waitForNumeric('903', 10000);
+      // Extended timeout (20s) for Keycloak validation which can be slow
+      await client1.waitForNumeric('903', 20000);
       client1.capEnd();
 
       const nick1 = `pmrm1${account.slice(0, 4)}`;

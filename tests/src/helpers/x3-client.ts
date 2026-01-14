@@ -423,9 +423,10 @@ export class X3Client extends RawSocketClient {
 
   /**
    * Check if we're currently authenticated.
+   * @param timeout - Optional timeout for the ACCOUNTINFO command (default 10s)
    */
-  async checkAuth(): Promise<{ authenticated: boolean; account?: string }> {
-    const lines = await this.serviceCmd('AuthServ', 'ACCOUNTINFO');
+  async checkAuth(timeout?: number): Promise<{ authenticated: boolean; account?: string }> {
+    const lines = await this.serviceCmd('AuthServ', 'ACCOUNTINFO', timeout);
 
     // Check for explicit "not authenticated" or similar messages
     const notAuthLine = lines.find(l =>
@@ -997,14 +998,17 @@ export async function setupTestAccount(
 
   if (fromPool) {
     // Pool account - just AUTH (already registered/activated)
-    const authResult = await client.auth(account, password);
+    // Use longer timeout (20s) for pool accounts since Keycloak validation can be slow,
+    // especially on first auth after startup or when Keycloak is warming up
+    const authResult = await client.auth(account, password, 20000);
     if (!authResult.success) {
       // Pool account failed auth - might be stale, fall back to fresh
       console.warn(`[setupTestAccount] Pool account ${account} failed auth: ${authResult.error}`);
 
       // Check if client is actually authenticated despite reported failure
       // This can happen if auth succeeded but response didn't match success patterns
-      const authCheck = await client.checkAuth();
+      // Use extended timeout (15s) since Keycloak can be slow
+      const authCheck = await client.checkAuth(15000);
       if (authCheck.authenticated) {
         console.log(`[setupTestAccount] Client already authenticated as ${authCheck.account} - using that`);
         // If authenticated as the pool account we wanted, use it
