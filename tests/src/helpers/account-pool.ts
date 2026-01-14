@@ -117,6 +117,10 @@ class AccountPool {
    * - working: AUTH succeeds with expected password
    * - broken: Account exists but password doesn't match
    * - missing: Account doesn't exist
+   *
+   * NOTE: We must reconnect for each account because X3 rejects AUTH
+   * when already authenticated (returns "already authed" without checking
+   * credentials). A single connection can only verify one account.
    */
   private async checkExistingAccounts(): Promise<{
     working: Set<string>;
@@ -126,14 +130,14 @@ class AccountPool {
     const working = new Set<string>();
     const broken = new Set<string>();
     const missing = new Set<string>();
-    let client: X3Client | null = null;
 
-    try {
-      client = await createX3Client('poolchk');
+    for (const [account, spec] of this.accounts) {
+      let client: X3Client | null = null;
+      try {
+        // Fresh connection for each account - X3 won't re-auth an already-authed user
+        client = await createX3Client(`chk${account.slice(-2)}`);
 
-      for (const [account, spec] of this.accounts) {
         // Short initial timeout - serviceCmd now only consumes service NOTICEs
-        // so server notices won't waste our poll attempts
         let result = await client.auth(account, spec.password, 2000);
 
         // Retry with longer timeout if first attempt fails
@@ -164,16 +168,18 @@ class AccountPool {
             broken.add(account);
           }
         }
+      } catch (error) {
+        console.warn(`[AccountPool] Error checking ${account}:`, error);
+        broken.add(account);
+      } finally {
+        if (client) {
+          client.send('QUIT');
+          client.close();
+        }
+      }
 
-        // Delay between checks to avoid overloading X3/Keycloak
-        // Each AUTH triggers Keycloak validation which can queue up
-        await new Promise(r => setTimeout(r, 200));
-      }
-    } finally {
-      if (client) {
-        client.send('QUIT');
-        client.close();
-      }
+      // Small delay between connections to avoid overwhelming the server
+      await new Promise(r => setTimeout(r, 100));
     }
 
     return { working, broken, missing };
