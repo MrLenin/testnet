@@ -60,7 +60,7 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
   });
 
   describe('MARKREAD Command (Authenticated)', () => {
-    it('can set and query read marker with MARKREAD', async () => {
+    it('can set and query read marker with MARKREAD', { retry: 2 }, async () => {
       const client = trackClient(await createRawSocketClient());
 
       // Get test account and authenticate via SASL
@@ -72,12 +72,12 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
 
       // SASL PLAIN auth
       client.send('AUTHENTICATE PLAIN');
-      await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
+      await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 10000);
       const payload = Buffer.from(`${account}\0${account}\0${password}`).toString('base64');
       client.send(`AUTHENTICATE ${payload}`);
 
-      // Wait for successful auth
-      await client.waitForNumeric('903', 10000);
+      // Wait for successful auth (Keycloak can be slow)
+      await client.waitForNumeric('903', 20000);
 
       client.capEnd();
       client.register(`rm${account.slice(0, 6)}`);
