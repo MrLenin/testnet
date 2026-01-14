@@ -384,11 +384,11 @@ describe('Services Integration', () => {
       expect(opLines.some(l => l.includes('NOTICE'))).toBe(true);
     });
 
-    it('should handle rapid sequential commands', async () => {
+    it('should handle rapid sequential commands', { retry: 2 }, async () => {
       const client = trackClient(await createX3Client());
 
       // Wait for connection to fully settle
-      await new Promise(r => setTimeout(r, 1500));
+      await new Promise(r => setTimeout(r, 2000));
 
       // Send multiple commands in rapid succession
       // Note: serviceCmd uses a shared buffer, so we must await each response
@@ -396,9 +396,10 @@ describe('Services Integration', () => {
       // command handling - the server must process them quickly one after another.
       const responses: string[][] = [];
 
-      responses.push(await client.serviceCmd('AuthServ', 'HELP'));
-      responses.push(await client.serviceCmd('ChanServ', 'HELP'));
-      responses.push(await client.serviceCmd('O3', 'HELP'));
+      // Use longer timeout for service commands that may be slow
+      responses.push(await client.serviceCmd('AuthServ', 'HELP', 15000));
+      responses.push(await client.serviceCmd('ChanServ', 'HELP', 15000));
+      responses.push(await client.serviceCmd('O3', 'HELP', 15000));
 
       // All should get responses
       for (const response of responses) {

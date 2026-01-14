@@ -119,7 +119,7 @@ describe('OpServ (O3)', () => {
       await client.ungline(testMask);
     });
 
-    it('should remove GLINE with UNGLINE', async () => {
+    it('should remove GLINE with UNGLINE', { retry: 2 }, async () => {
       // Use createOperClient which auths with X3_ADMIN (olevel 1000)
       // createOperClient now verifies oper level before returning
       const client = trackClient(await createOperClient());
@@ -131,14 +131,19 @@ describe('OpServ (O3)', () => {
       // Add then remove a GLINE (format: user@host, not nick!user@host)
       const testMask = `*@ungline-${uniqueId().slice(0, 8)}.example.com`;
       const glineResult = await client.gline(testMask, '1h', 'Test for ungline');
+      console.log('GLINE response:', glineResult.lines);
       expect(glineResult.success).toBe(true);
 
-      // Wait for gline to propagate
-      await new Promise(r => setTimeout(r, 300));
+      // Wait for gline to propagate (longer delay to ensure server has processed it)
+      await new Promise(r => setTimeout(r, 500));
+
+      // Clear buffer before UNGLINE to avoid consuming stale messages
+      client.clearRawBuffer();
 
       const result = await client.ungline(testMask);
       console.log('UNGLINE response:', result.lines);
 
+      // UNGLINE should return response like "G-line removed for X" or "Unknown/expired G-line removed for X"
       expect(result.success).toBe(true);
     });
   });

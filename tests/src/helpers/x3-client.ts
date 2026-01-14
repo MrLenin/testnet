@@ -998,36 +998,33 @@ export async function setupTestAccount(
 
   if (fromPool) {
     // Pool account - just AUTH (already registered/activated)
-    // Use longer timeout (20s) for pool accounts since Keycloak validation can be slow,
+    // Use longer timeout (30s) for pool accounts since Keycloak validation can be slow,
     // especially on first auth after startup or when Keycloak is warming up
-    const authResult = await client.auth(account, password, 20000);
+    const authResult = await client.auth(account, password, 30000);
     if (!authResult.success) {
-      // Pool account failed auth - might be stale, fall back to fresh
+      // Pool account failed auth
       console.warn(`[setupTestAccount] Pool account ${account} failed auth: ${authResult.error}`);
 
       // Check if client is actually authenticated despite reported failure
       // This can happen if auth succeeded but response didn't match success patterns
-      // Use extended timeout (15s) since Keycloak can be slow
-      const authCheck = await client.checkAuth(15000);
+      // Use extended timeout (20s) since Keycloak can be slow
+      const authCheck = await client.checkAuth(20000);
       if (authCheck.authenticated) {
         console.log(`[setupTestAccount] Client already authenticated as ${authCheck.account} - using that`);
         // If authenticated as the pool account we wanted, use it
         if (authCheck.account?.toLowerCase() === account.toLowerCase()) {
           return { account, password, email, fromPool: true };
         }
-        // Authenticated to something else - can't registerAndActivate, so error
+        // Authenticated to something else - unexpected state
         releaseTestAccount(account);
-        throw new Error(`Client already authenticated as ${authCheck.account}, cannot create fresh account`);
+        throw new Error(`Client already authenticated as ${authCheck.account}, expected ${account}`);
       }
 
+      // Pool account should always work - if it doesn't, fail fast instead of
+      // trying to create a fresh account (which would fail anyway if client is
+      // secretly authenticated due to slow Keycloak response)
       releaseTestAccount(account);
-      // Create fresh instead
-      const fresh = await createTestAccount();
-      const regResult = await client.registerAndActivate(fresh.account, fresh.password, fresh.email);
-      if (!regResult.success) {
-        throw new Error(`Failed to register fresh account: ${regResult.error}`);
-      }
-      return { ...fresh, fromPool: false };
+      throw new Error(`Pool account ${account} auth failed: ${authResult.error || 'timeout'} - Keycloak may be slow`);
     }
   } else {
     // Fresh account - full registration flow

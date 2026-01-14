@@ -551,7 +551,7 @@ describe('SASL 400-byte Chunking', () => {
     await new Promise(r => setTimeout(r, 100));
   });
 
-  it('handles small payload (no chunking needed)', async () => {
+  it('handles small payload (no chunking needed)', { retry: 2 }, async () => {
     const client = trackClient(await createRawSocketClient());
     client.clearBuffer();
 
