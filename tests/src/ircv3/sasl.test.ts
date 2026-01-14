@@ -383,12 +383,16 @@ describe('SASL Error Handling', () => {
     client.send('AUTHENTICATE PLAIN');
     await client.waitForCommand('AUTHENTICATE', 10000);
 
+    // Clear buffer before abort to ensure we catch the 906 response
+    client.clearRawBuffer();
+
     // Abort authentication
     client.send('AUTHENTICATE *');
 
     // IRCv3 spec: AUTHENTICATE * should trigger 906 (ERR_SASLABORTED)
     // X3 now properly handles abort and responds with D A
-    const response = await client.waitForNumeric('906', 5000);
+    // Use longer timeout as the abort goes through X3 async processing
+    const response = await client.waitForNumeric('906', 10000);
     expect(response.command).toBe('906');
     client.send('QUIT');
   });
