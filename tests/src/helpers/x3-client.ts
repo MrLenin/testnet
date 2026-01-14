@@ -141,6 +141,8 @@ export class X3Client extends RawSocketClient {
       const allLines = this.allLines;
       const unconsumed = this.getUnconsumedLines();
       console.log(`[serviceCmd] Buffer: ${allLines.length} total lines, ${unconsumed.length} unconsumed`);
+      // Additional accumulation diagnostics
+      console.log(`[serviceCmd] Consumed indices: ${(this as any).consumedIndices?.size || 'N/A'}, Listeners: ${(this as any).lineListeners?.length || 'N/A'}, Socket closed: ${(this as any).socketClosed}`);
       if (unconsumed.length > 0) {
         console.log(`[serviceCmd] Recent unconsumed:`);
         unconsumed.slice(-5).forEach((line, i) => {
@@ -154,6 +156,11 @@ export class X3Client extends RawSocketClient {
       if (serviceLines.length > 0) {
         console.log(`[serviceCmd] Found ${serviceLines.length} ${service} NOTICE lines in buffer (were they consumed?):`);
         serviceLines.slice(-3).forEach(l => console.log(`  ${l.substring(0, 100)}`));
+      }
+      // Show last few lines that arrived (any type) to see what's coming through
+      if (allLines.length > 0) {
+        console.log(`[serviceCmd] Last 3 lines received (any type):`);
+        allLines.slice(-3).forEach((l, i) => console.log(`  [${allLines.length - 3 + i}] ${l.substring(0, 120)}`));
       }
       return lines;
     }
