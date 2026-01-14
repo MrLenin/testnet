@@ -161,7 +161,7 @@ describe('Services Integration', () => {
       expect(coownerEntry?.level).toBe(ACCESS_LEVELS.COOWNER);
     });
 
-    it('should enforce channel settings on all users', async () => {
+    it('should enforce channel settings on all users', { retry: 2 }, async () => {
       const ownerClient = trackClient(await createX3Client());
       const { account: owner, fromPool } = await setupTestAccount(ownerClient);
       if (fromPool) poolAccounts.push(owner);

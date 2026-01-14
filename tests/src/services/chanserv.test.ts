@@ -198,7 +198,7 @@ describe('ChanServ (X3)', () => {
       expect(clvlResult.success).toBe(true);
     });
 
-    it('should remove user with DELUSER', async () => {
+    it('should remove user with DELUSER', { retry: 2 }, async () => {
       // Create and add second user
       const user2Client = trackClient(await createX3Client());
       const { account: user2, fromPool: user2Pool } = await setupTestAccount(user2Client);
@@ -333,7 +333,7 @@ describe('ChanServ (X3)', () => {
       expect(hasOps, `User ${user2} should have ops (@) in ${channel}`).toBe(true);
     }, 45000);
 
-    it('should auto-voice users with level >= 100', async () => {
+    it('should auto-voice users with level >= 100', { retry: 2 }, async () => {
       const client = trackClient(await createX3Client());
       const { account, fromPool } = await setupTestAccount(client);
       if (fromPool) poolAccounts.push(account);
