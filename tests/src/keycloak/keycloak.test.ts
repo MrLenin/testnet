@@ -1048,7 +1048,8 @@ async function createChannelGroup(
     }
 
     // Create channel subgroup under irc-channels
-    const channelGroupName = channelName.replace('#', '');
+    // X3 creates groups with the full channel name including '#'
+    const channelGroupName = channelName;
 
     // Check if channel group exists
     const channelResponse = await fetch(
@@ -1340,7 +1341,8 @@ async function getChannelGroup(
       }
 
       const parentId = exactParent.id;
-      const groupName = channelName.replace('#', '');
+      // X3 creates groups with the full channel name including '#'
+      const groupName = channelName;
 
       // Get children of irc-channels
       const childrenResponse = await fetch(
@@ -1409,7 +1411,8 @@ async function deleteChannelGroup(adminToken: string, channelName: string): Prom
     if (!exactParent) return false;
 
     const parentId = exactParent.id;
-    const groupName = channelName.replace('#', '');
+    // X3 creates groups with the full channel name including '#'
+    const groupName = channelName;
 
     // Get children of irc-channels
     const childrenResponse = await fetch(
@@ -1561,7 +1564,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
     it('creates channel group and sets owner access level when channel registered', async () => {
 
       const channelName = uniqueChannel('bidisync');
-      const groupName = channelName.replace('#', '');
+      // X3 creates groups with the full channel name including '#'
+      const groupName = channelName;
 
       // Cleanup any existing group first
       await deleteChannelGroup(adminToken, channelName);
@@ -1777,10 +1781,28 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
 
         // Add user at level 100 - use *username prefix for account lookup
         ownerClient.send(`PRIVMSG ChanServ :ADDUSER ${channelName} *${secondUser} 100`);
-        await new Promise(r => setTimeout(r, 5000));
 
-        // Get initial user access level from user attribute (x3.channel.#channelname)
-        let initialAccessLevel = await getUserChannelAccess(adminToken, secondUser, channelName);
+        // Wait for ADDUSER confirmation from ChanServ
+        try {
+          await ownerClient.waitForParsedLine(
+            msg => msg.command === 'NOTICE' && /added|access.*100|level.*100/i.test(msg.trailing || ''),
+            5000
+          );
+          console.log(`ADDUSER succeeded for ${secondUser}`);
+        } catch {
+          console.log('ADDUSER result not received');
+        }
+
+        // Poll for initial user access level (async Keycloak sync)
+        let initialAccessLevel: number | null = null;
+        const addStartTime = Date.now();
+        while (Date.now() - addStartTime < 10000) {
+          initialAccessLevel = await getUserChannelAccess(adminToken, secondUser, channelName);
+          if (initialAccessLevel === 100) {
+            break;
+          }
+          await new Promise(r => setTimeout(r, 500));
+        }
         console.log(`Initial user access level: ${initialAccessLevel ?? 'not set'}`);
 
         // Change access level to 300 - use *username prefix for account lookup
@@ -1796,17 +1818,23 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
           console.log('CLVL result not received');
         }
 
-        // Wait for sync
-        await new Promise(r => setTimeout(r, 5000));
-
-        // Check updated access level from user attribute
-        const newAccessLevel = await getUserChannelAccess(adminToken, secondUser, channelName);
-        if (newAccessLevel !== null) {
-          console.log(`Updated user access level: ${newAccessLevel}`);
-          expect(newAccessLevel).toBe(300);
-        } else {
-          console.log('Access level attribute not found after CLVL');
+        // Poll for the updated access level (async Keycloak sync takes time)
+        let newAccessLevel: number | null = null;
+        const startTime = Date.now();
+        const timeout = 10000;
+        while (Date.now() - startTime < timeout) {
+          newAccessLevel = await getUserChannelAccess(adminToken, secondUser, channelName);
+          if (newAccessLevel === 300) {
+            console.log(`Updated user access level: ${newAccessLevel}`);
+            break;
+          }
+          await new Promise(r => setTimeout(r, 500));
         }
+
+        if (newAccessLevel !== 300) {
+          console.log(`Access level after polling: ${newAccessLevel ?? 'not set'} (expected 300)`);
+        }
+        expect(newAccessLevel).toBe(300);
 
         // Cleanup - use proper unregister with confirmation code
         await unregisterChannel(ownerClient, channelName);
@@ -1957,7 +1985,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
       // Verify group exists
       let group = await getChannelGroup(adminToken, channelName);
       if (group) {
-        console.log(`Group created: ${channelName.replace('#', '')} (id: ${group.id})`);
+        console.log(`Group created: ${channelName} (id: ${group.id})`);
         expect(group.id).toBeDefined();
       } else {
         console.log('Group not yet visible via API (this is normal during high load)');
