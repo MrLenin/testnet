@@ -82,7 +82,11 @@ class AccountPool {
 
     // Check which accounts already exist and verify passwords
     const { working, broken, missing } = await this.checkExistingAccounts();
-    console.log(`[AccountPool] Found ${working.size} working, ${broken.size} broken, ${missing.size} missing accounts`);
+    if (working.size === this.POOL_SIZE) {
+      console.log(`[AccountPool] All ${working.size} accounts ready`);
+    } else {
+      console.log(`[AccountPool] Status: ${working.size} ready, ${missing.size} to create, ${broken.size} unusable`);
+    }
 
     // Mark working accounts as verified
     for (const account of working) {
@@ -102,8 +106,8 @@ class AccountPool {
     // Handle broken accounts (exist but wrong password) - skip them for now
     // They'll be excluded from checkout since verified=false
     if (broken.size > 0) {
-      console.log(`[AccountPool] ${broken.size} accounts have wrong passwords and will be skipped`);
-      console.log(`[AccountPool] To fix, run: npm run cleanup -- --include-pool`);
+      console.log(`[AccountPool] Warning: ${broken.size} accounts unusable (wrong password or other issue)`);
+      console.log(`[AccountPool] To recreate them: npm run cleanup -- --include-pool`);
     }
 
     const elapsed = Date.now() - startTime;
@@ -137,29 +141,36 @@ class AccountPool {
         // Fresh connection for each account - X3 won't re-auth an already-authed user
         client = await createX3Client(`chk${account.slice(-2)}`);
 
-        // Short initial timeout - serviceCmd now only consumes service NOTICEs
-        let result = await client.auth(account, spec.password, 2000);
+        // Use longer timeout - Keycloak async auth can take 2-3s even for non-existent users
+        let result = await client.auth(account, spec.password, 5000);
 
-        // Retry with longer timeout if first attempt fails
+        // Retry with even longer timeout if first attempt fails (no response)
         if (!result.error && result.lines.length === 0) {
-          result = await client.auth(account, spec.password, 5000);
+          result = await client.auth(account, spec.password, 8000);
         }
 
         if (result.success) {
           // AUTH succeeded - account exists with correct password
           working.add(account);
         } else if (result.lines.length === 0) {
-          // True timeout - no response at all after retry
-          console.warn(`[AccountPool] AUTH timeout for ${account}, marking broken`);
-          broken.add(account);
+          // No response after retry - likely account doesn't exist and X3 response was lost
+          // due to client disconnecting during Keycloak async. Treat as missing.
+          console.log(`[AccountPool] ${account}: No AUTH response (will recreate)`);
+          missing.add(account);
         } else {
           // Got a response - check if account doesn't exist
           const responseText = result.lines.join(' ').toLowerCase();
+          // Check for messages indicating account doesn't exist
+          // X3 sends "Could not find your account" when KC_FORBIDDEN and handle not in local DB
+          // Also check for Keycloak errors about non-existent users
           const accountMissing = responseText.includes('not registered') ||
                                  responseText.includes('no such account') ||
                                  responseText.includes("don't recognize") ||
                                  responseText.includes('does not exist') ||
-                                 responseText.includes('could not find');
+                                 responseText.includes('could not find') ||
+                                 responseText.includes('user not found') ||
+                                 // Keycloak auth failure for non-existent user looks like credentials error
+                                 (responseText.includes('keycloak') && responseText.includes('invalid credentials'));
           if (accountMissing) {
             missing.add(account);
           } else {
