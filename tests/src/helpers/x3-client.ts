@@ -736,47 +736,41 @@ export class X3Client extends RawSocketClient {
 
   /**
    * Set a channel mode/setting.
+   * Note: SET MODES may not return a NOTICE - X3 just applies the mode.
+   * For MODES, we check the buffer for MODE changes after serviceCmd returns.
    */
   async set(channel: string, setting: string, value?: string): Promise<ServiceResponse> {
     const cmd = value ? `SET ${channel} ${setting} ${value}` : `SET ${channel} ${setting}`;
-
-    // For MODES setting, X3's NOTICE response can arrive so fast it's missed by serviceCmd
-    // As a fallback, we also watch for the MODE change that X3 applies to the channel
     const settingLower = setting.toLowerCase();
     const isModesSetting = settingLower === 'modes';
 
-    // If setting MODES, set up a parallel listener for the MODE change before sending
-    let modeChangeReceived = false;
-    let modeListener: ((msg: any) => void) | null = null;
-
-    if (isModesSetting && value) {
-      modeListener = (msg: any) => {
-        if (msg.command === 'MODE' &&
-            msg.params?.[0]?.toLowerCase() === channel.toLowerCase() &&
-            msg.source?.nick?.toLowerCase() === 'chanserv') {
-          modeChangeReceived = true;
-        }
-      };
-      this.on('line', modeListener);
-    }
-
     const lines = await this.serviceCmd('ChanServ', cmd);
-
-    // Clean up listener
-    if (modeListener) {
-      this.off('line', modeListener);
-    }
 
     // X3 responds to successful SET by echoing the setting name and value
     // e.g., "Modes       +tn" - so we also check if the setting name appears
-    const success = lines.some(l => {
+    let success = lines.some(l => {
       const lower = l.toLowerCase();
       return lower.includes('set') ||
              lower.includes('changed') ||
              lower.includes('enabled') ||
              lower.includes('disabled') ||
              lower.includes(settingLower);  // X3 echoes setting name on success
-    }) || (isModesSetting && modeChangeReceived);  // Fallback: MODE change was applied
+    });
+
+    // For MODES, X3 may apply the mode without sending a NOTICE.
+    // Check the raw buffer for a MODE change from ChanServ as fallback.
+    if (!success && isModesSetting) {
+      const channelLower = channel.toLowerCase();
+      const modeInBuffer = this.allLines.some(line => {
+        const lower = line.toLowerCase();
+        return lower.includes('mode') &&
+               lower.includes(channelLower) &&
+               lower.includes('chanserv');
+      });
+      if (modeInBuffer) {
+        success = true;
+      }
+    }
 
     return { lines, success };
   }
