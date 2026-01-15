@@ -248,12 +248,15 @@ async function cleanup(): Promise<void> {
       l.includes('0 matches')
     ).length;
 
-    const waitForSearchComplete = async (timeout = 60000, minWait = 2000): Promise<void> => {
+    const waitForSearchComplete = async (timeout = 60000, minWait = 3000): Promise<void> => {
       const startMarkers = countSearchMarkers();
       const start = Date.now();
 
-      // Minimum wait before checking - gives X3/Keycloak time to process
-      // This prevents premature timeout when Keycloak auth delays are involved
+      // X3 responds instantly (verified via docker logs), but Nefarious may buffer
+      // output to clients. Send a PING to help trigger buffer flush, then wait.
+      send('PING :flush');
+
+      // Minimum wait before checking - gives time for Nefarious to flush buffers
       await new Promise(r => setTimeout(r, minWait));
 
       while (Date.now() - start < timeout) {
@@ -262,6 +265,10 @@ async function cleanup(): Promise<void> {
           // New completion marker found - give time for any trailing messages
           await new Promise(r => setTimeout(r, 500));
           return;
+        }
+        // Send periodic PING to help flush any buffered data
+        if ((Date.now() - start) % 5000 < 200) {
+          send('PING :flush');
         }
         await new Promise(r => setTimeout(r, 200));
       }
