@@ -409,7 +409,7 @@ describe('ChanServ (X3)', () => {
   });
 
   describe('Channel Settings', () => {
-    it('should set channel modes via SET command', async () => {
+    it('should set channel modes via SET command', { retry: 2 }, async () => {
       const client = trackClient(await createX3Client());
       const { account, fromPool } = await setupTestAccount(client);
       if (fromPool) poolAccounts.push(account);

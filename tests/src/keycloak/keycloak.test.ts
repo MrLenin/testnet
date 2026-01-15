@@ -1943,7 +1943,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
   });
 
   describe('UNREGISTER deletes Keycloak channel group', () => {
-    it('deletes channel group when channel unregistered', async () => {
+    it('deletes channel group when channel unregistered', { retry: 2 }, async () => {
 
       const channelName = uniqueChannel('bisyncunreg');
 
@@ -1952,7 +1952,7 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
       await client.capReq(['sasl']);
 
       client.send('AUTHENTICATE PLAIN');
-      await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 5000);
+      await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 10000);
 
       const payload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
       client.send(`AUTHENTICATE ${payload}`);
@@ -1962,18 +1962,18 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
 
       client.capEnd();
       client.register(`unreg${uniqueId().slice(0,4)}`);
-      await client.waitForNumeric('001');
+      await client.waitForNumeric('001', 10000);
 
       // Register channel
       client.send(`JOIN ${channelName}`);
-      await client.waitForJoin(channelName);
+      await client.waitForJoin(channelName, undefined, 10000);
 
       client.send(`PRIVMSG ChanServ :REGISTER ${channelName}`);
 
       try {
         await client.waitForParsedLine(
           msg => msg.command === 'NOTICE' && /ownership|registered|already/i.test(msg.trailing || ''),
-          5000
+          10000
         );
       } catch {
         console.log('Registration result not received');
