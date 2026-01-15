@@ -152,6 +152,11 @@ async function cleanup(): Promise<void> {
   console.log(`Connecting to ${IRC_HOST}:${IRC_PORT}...`);
 
   const socket = net.createConnection({ host: IRC_HOST, port: IRC_PORT });
+
+  // Disable Nagle's algorithm to prevent TCP buffering small messages
+  // This ensures IRC responses arrive immediately without batching delay
+  socket.setNoDelay(true);
+
   const rl = readline.createInterface({ input: socket });
 
   const lines: string[] = [];
