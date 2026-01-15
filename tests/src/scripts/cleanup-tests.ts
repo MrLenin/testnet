@@ -374,6 +374,9 @@ async function cleanup(): Promise<void> {
       '#bidisync*',  // bidisync channels
       '#optest*',    // opserv tests
       '#multi-*',    // edge-cases tests
+      '#testchan*',  // keycloak tests (no dash after prefix)
+      '#accesstest*', // keycloak access tests
+      '#ws*',        // websocket tests
     ];
 
     console.log('\nSearching for orphaned test channels...');
@@ -400,25 +403,6 @@ async function cleanup(): Promise<void> {
       }
     }
 
-    // Wipe pool accounts' channel access (they accumulate ADDUSER entries)
-    // This removes them from all channels without deleting the accounts
-    if (!INCLUDE_POOL) {
-      console.log('\nWiping pool account channel access...');
-      // Enable GOD mode first if not already
-      send('PRIVMSG O3 :GOD ON');
-      await new Promise(r => setTimeout(r, 500));
-
-      for (let i = 0; i < 10; i++) {
-        const poolAccount = `pool${i.toString().padStart(2, '0')}`;
-        if (DEBUG) console.log(`DEBUG: Wiping channel access for ${poolAccount}`);
-        // WIPEUSER removes user from all channels
-        send(`PRIVMSG ChanServ :WIPEUSER *${poolAccount}`);
-        await new Promise(r => setTimeout(r, 1000)); // Anti-flood delay
-        process.stdout.write('.');
-      }
-      console.log(' Done');
-    }
-
     // Parse channel list - extract channel names from search results
     // Only look at lines since channel search started to avoid picking up
     // channel names from earlier OUNREGISTER responses
@@ -441,8 +425,8 @@ async function cleanup(): Promise<void> {
         }
 
         // Also match test patterns directly (for any other output format)
-        // Patterns: #test-*, #bisync*, #bidisync*, #optest*, #multi-*
-        const channelMatches = line.matchAll(/(#(?:test-|bisync|bidisync|optest|multi-)[^\s,]+)/gi);
+        // Patterns: #test-*, #bisync*, #bidisync*, #optest*, #multi-*, #testchan*, #accesstest*, #ws*
+        const channelMatches = line.matchAll(/(#(?:test-|bisync|bidisync|optest|multi-|testchan|accesstest|ws)[^\s,]+)/gi);
         for (const match of channelMatches) {
           const channel = match[1].toLowerCase();
           if (!stats.channelsFound.includes(channel)) {
