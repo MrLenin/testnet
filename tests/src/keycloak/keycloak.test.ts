@@ -1952,13 +1952,13 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
       await client.capReq(['sasl']);
 
       client.send('AUTHENTICATE PLAIN');
-      await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
+      await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 5000);
 
       const payload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
       client.send(`AUTHENTICATE ${payload}`);
 
-      // SASL auth should always succeed with Keycloak
-      await client.waitForNumeric('903', 5000);
+      // SASL auth should always succeed with Keycloak (extended timeout for Keycloak latency)
+      await client.waitForNumeric('903', 15000);
 
       client.capEnd();
       client.register(`unreg${uniqueId().slice(0,4)}`);
@@ -1995,16 +1995,29 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
       // Unregister channel - use proper confirmation code
       await unregisterChannel(client, channelName);
 
-      // Wait for Keycloak sync
-      await new Promise(r => setTimeout(r, 5000));
+      // Wait for Keycloak sync with polling (group deletion is async and Keycloak API has eventual consistency)
+      let deleted = false;
+      const startTime = Date.now();
+      const maxWait = 15000;
+      while (Date.now() - startTime < maxWait) {
+        group = await getChannelGroup(adminToken, channelName);
+        if (!group) {
+          console.log('SUCCESS: Group deleted after UNREGISTER');
+          deleted = true;
+          break;
+        }
+        await new Promise(r => setTimeout(r, 1000));
+      }
 
       // Verify group was deleted
-      group = await getChannelGroup(adminToken, channelName);
-      if (group) {
-        console.log('WARNING: Group still exists after UNREGISTER');
-        console.log('This may indicate bidirectional sync UNREGISTER handling is not implemented');
-      } else {
-        console.log('SUCCESS: Group deleted after UNREGISTER');
+      if (!deleted) {
+        group = await getChannelGroup(adminToken, channelName);
+        if (group) {
+          console.log('WARNING: Group still exists after UNREGISTER (timeout)');
+          console.log('This may indicate Keycloak API eventual consistency delay');
+        } else {
+          console.log('SUCCESS: Group deleted after UNREGISTER (final check)');
+        }
       }
 
       // Explicitly check the group is gone

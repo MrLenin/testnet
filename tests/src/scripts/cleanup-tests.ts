@@ -265,6 +265,28 @@ async function cleanup(): Promise<void> {
       if (DEBUG) console.log('DEBUG: Search timeout - continuing');
     };
 
+    // Helper to wait for ACCOUNTINFO completion (looks for "End of Account Info" line)
+    const countAccountInfoMarkers = () => lines.filter(l =>
+      l.includes('End of Account Info')
+    ).length;
+
+    const waitForAccountInfo = async (timeout = 3000): Promise<void> => {
+      const startMarkers = countAccountInfoMarkers();
+      const start = Date.now();
+
+      while (Date.now() - start < timeout) {
+        const currentMarkers = countAccountInfoMarkers();
+        if (currentMarkers > startMarkers) {
+          // ACCOUNTINFO response complete
+          await new Promise(r => setTimeout(r, 100));
+          return;
+        }
+        await new Promise(r => setTimeout(r, 50));
+      }
+      // Timeout - continue anyway
+      if (DEBUG) console.log('DEBUG: ACCOUNTINFO timeout - continuing');
+    };
+
     // Search for test accounts using AuthServ
     // AuthServ SEARCH supports: handlemask, accountmask, account (all synonyms)
     // Use limit 500 to get more results (default may be capped)
@@ -398,14 +420,15 @@ async function cleanup(): Promise<void> {
     // Also search for channels owned by pool accounts (if not --include-pool)
     // Pool accounts accumulate channel ownership from test runs - clean those up
     // even when keeping the accounts for reuse
+    // NOTE: CSEARCH doesn't support owner-based search, use ACCOUNTINFO instead
     if (!INCLUDE_POOL) {
       console.log('Searching for channels owned by pool accounts...');
       for (let i = 0; i < 10; i++) {
         const poolAccount = `pool${i.toString().padStart(2, '0')}`;
-        if (DEBUG) console.log(`DEBUG: Searching for channels owned by ${poolAccount}`);
-        send(`PRIVMSG O3 :CSEARCH PRINT owner *${poolAccount} limit 500`);
-        await waitForSearchComplete();
-        await new Promise(r => setTimeout(r, 500)); // Anti-flood delay
+        if (DEBUG) console.log(`DEBUG: Querying channels for ${poolAccount}`);
+        // Use AuthServ ACCOUNTINFO which lists channel access for an account
+        send(`PRIVMSG AuthServ :ACCOUNTINFO *${poolAccount}`);
+        await waitForAccountInfo(); // Wait for "End of Account Info" marker
       }
     }
 
@@ -426,6 +449,27 @@ async function cleanup(): Promise<void> {
           if (!stats.channelsFound.includes(channel)) {
             stats.channelsFound.push(channel);
             if (DEBUG) console.log(`DEBUG: Found channel (Match:) ${channel}`);
+          }
+          continue;
+        }
+
+        // Parse ACCOUNTINFO Channel(s) output format: "owner:#channel coowner:#channel2 ..."
+        // Format is: level:#channelname (level is owner, coowner, manager, op, halfop, voice, peon)
+        if (line.includes('Channel(s):')) {
+          const channelPart = line.split('Channel(s):')[1];
+          if (channelPart) {
+            // Match level:#channel patterns
+            const accountChannels = channelPart.matchAll(/(?:owner|coowner|manager|op|halfop|voice|peon):(#[^\s]+)/gi);
+            for (const match of accountChannels) {
+              const channel = match[1].toLowerCase();
+              // Only add test channels matching our patterns
+              if (/^#(?:test-|bisync|bidisync|optest|multi-|testchan|accesstest|ws)/.test(channel)) {
+                if (!stats.channelsFound.includes(channel)) {
+                  stats.channelsFound.push(channel);
+                  if (DEBUG) console.log(`DEBUG: Found channel (ACCOUNTINFO) ${channel}`);
+                }
+              }
+            }
           }
           continue;
         }

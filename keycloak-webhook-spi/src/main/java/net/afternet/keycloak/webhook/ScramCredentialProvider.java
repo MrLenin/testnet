@@ -6,6 +6,7 @@ import org.keycloak.credential.CredentialInputUpdater;
 import org.keycloak.credential.CredentialProvider;
 import org.keycloak.credential.CredentialTypeMetadata;
 import org.keycloak.credential.CredentialTypeMetadataContext;
+import org.keycloak.credential.CredentialModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
@@ -41,7 +42,7 @@ import java.util.stream.Stream;
  * <p>These attributes are NOT visible to users (configured as internal)
  * but can be read by the webhook listener.</p>
  */
-public class ScramCredentialProvider implements CredentialProvider<PasswordCredentialModel>, CredentialInputUpdater {
+public class ScramCredentialProvider implements CredentialProvider<CredentialModel>, CredentialInputUpdater {
 
     private static final Logger LOG = Logger.getLogger(ScramCredentialProvider.class);
 
@@ -66,8 +67,11 @@ public class ScramCredentialProvider implements CredentialProvider<PasswordCrede
 
     @Override
     public String getType() {
-        // We don't manage our own credential type - we just listen for password updates
-        return PasswordCredentialModel.TYPE;
+        // Return our own type ID - NOT "password"!
+        // By returning "password" we were interfering with credential imports via Admin API.
+        // We only want to intercept password CHANGES via CredentialInputUpdater,
+        // not manage password credentials directly.
+        return ScramCredentialProviderFactory.PROVIDER_ID;  // "x3-scram-sha256"
     }
 
     @Override
@@ -138,15 +142,17 @@ public class ScramCredentialProvider implements CredentialProvider<PasswordCrede
     }
 
     // ========== CredentialProvider interface (minimal implementation) ==========
+    // These methods are required by the interface but we don't manage credentials directly.
+    // Our type is "x3-scram-sha256" so these won't be called for password operations.
 
     @Override
-    public PasswordCredentialModel getCredentialFromModel(org.keycloak.credential.CredentialModel model) {
+    public CredentialModel getCredentialFromModel(CredentialModel model) {
         return null;  // We don't manage credentials directly
     }
 
     @Override
-    public org.keycloak.credential.CredentialModel createCredential(RealmModel realm, UserModel user, PasswordCredentialModel credential) {
-        return null;  // We don't create credentials directly
+    public CredentialModel createCredential(RealmModel realm, UserModel user, CredentialModel credential) {
+        return null;  // We don't create credentials directly - x3-scram-sha256 type is never imported
     }
 
     @Override
