@@ -90,6 +90,8 @@
                             <goal>shade</goal>
                         </goals>
                         <configuration>
+                            <!-- Don't keep original- prefixed backup JAR -->
+                            <shadedArtifactAttached>false</shadedArtifactAttached>
                             <artifactSet>
                                 <includes>
                                     <include>com.google.code.gson:gson</include>
