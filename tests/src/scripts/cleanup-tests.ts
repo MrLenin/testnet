@@ -243,9 +243,14 @@ async function cleanup(): Promise<void> {
       l.includes('0 matches')
     ).length;
 
-    const waitForSearchComplete = async (timeout = 30000): Promise<void> => {
+    const waitForSearchComplete = async (timeout = 60000, minWait = 2000): Promise<void> => {
       const startMarkers = countSearchMarkers();
       const start = Date.now();
+
+      // Minimum wait before checking - gives X3/Keycloak time to process
+      // This prevents premature timeout when Keycloak auth delays are involved
+      await new Promise(r => setTimeout(r, minWait));
+
       while (Date.now() - start < timeout) {
         const currentMarkers = countSearchMarkers();
         if (currentMarkers > startMarkers) {
@@ -257,6 +262,7 @@ async function cleanup(): Promise<void> {
       }
       // Timeout - continue anyway
       if (DEBUG) console.log('DEBUG: Search timeout - continuing');
+      if (DEBUG) console.log(`DEBUG: lines array has ${lines.length} entries`);
     };
 
     // Search for test accounts using AuthServ
@@ -287,7 +293,7 @@ async function cleanup(): Promise<void> {
     for (const pattern of ACCOUNT_SEARCH_PATTERNS) {
       if (DEBUG) console.log(`DEBUG: Searching for ${pattern}`);
       send(`PRIVMSG AuthServ :SEARCH PRINT handlemask ${pattern} limit 500`);
-      await waitForSearchComplete(30000);
+      await waitForSearchComplete();
       await new Promise(r => setTimeout(r, 1000)); // Anti-flood delay
     }
 
@@ -385,7 +391,7 @@ async function cleanup(): Promise<void> {
     for (const pattern of CHANNEL_SEARCH_PATTERNS) {
       if (DEBUG) console.log(`DEBUG: Searching for channels ${pattern}`);
       send(`PRIVMSG O3 :CSEARCH PRINT name ${pattern} limit 500`);
-      await waitForSearchComplete(30000);
+      await waitForSearchComplete();
       await new Promise(r => setTimeout(r, 1000)); // Anti-flood delay
     }
 
@@ -398,7 +404,7 @@ async function cleanup(): Promise<void> {
         const poolAccount = `pool${i.toString().padStart(2, '0')}`;
         if (DEBUG) console.log(`DEBUG: Searching for channels owned by ${poolAccount}`);
         send(`PRIVMSG O3 :CSEARCH PRINT owner *${poolAccount} limit 500`);
-        await waitForSearchComplete(30000);
+        await waitForSearchComplete();
         await new Promise(r => setTimeout(r, 500)); // Anti-flood delay
       }
     }
