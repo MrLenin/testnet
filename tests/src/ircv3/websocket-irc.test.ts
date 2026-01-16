@@ -521,8 +521,8 @@ describe('IRC-over-WebSocket Protocol', () => {
       const utf8Message = 'Hello 世界 🌍 émoji';
       client1.send(`PRIVMSG ${channel} :${utf8Message}`);
 
-      // Should receive intact
-      const received = await client2.waitForText('世界', 5000);
+      // Should receive intact (10s timeout for valgrind)
+      const received = await client2.waitForText('世界', 10000);
       expect(received).toContain('世界');
     });
 
@@ -538,8 +538,8 @@ describe('IRC-over-WebSocket Protocol', () => {
 
       client1.send(`JOIN ${channel}`);
       client2.send(`JOIN ${channel}`);
-      await client1.waitForText('366', 5000);
-      await client2.waitForText('366', 5000);
+      await client1.waitForText('366', 10000);
+      await client2.waitForText('366', 10000);
 
       // Clear frames and settle delay to avoid consuming stale frames
       client2.clearFrames();
@@ -550,8 +550,8 @@ describe('IRC-over-WebSocket Protocol', () => {
       const formattedMessage = '\x02Bold\x02 and \x0304Red\x03';
       client1.send(`PRIVMSG ${channel} :${formattedMessage}`);
 
-      // Should receive with formatting intact
-      const received = await client2.waitForText('Bold', 5000);
+      // Should receive with formatting intact (10s timeout for valgrind)
+      const received = await client2.waitForText('Bold', 10000);
       expect(received).toContain('Bold');
     });
   });
