@@ -35,9 +35,6 @@ services:
         additional_contexts:
           - data=./data
     user: "1234:1234"  # nefarious user
-    # Valgrind needs more memory (2-3x normal)
-    mem_limit: 2g
-    memswap_limit: 2g
     # Enable core dumps for crash debugging
     ulimits:
       core:
@@ -51,7 +48,6 @@ services:
         ipv4_address: 172.29.0.2
         aliases:
           - testnet.fractalrealities.net
-    command: ["valgrind", "--leak-check=full", "--show-leak-kinds=all", "--track-origins=yes", "--log-file=/home/nefarious/ircd/cores/valgrind.log", "/home/nefarious/bin/ircd", "-n", "-x", "8", "-f", "ircd.conf"]
     volumes:
      - ./data/ircd.conf:/home/nefarious/ircd/local.conf
      - ./data/saslusers:/home/nefarious/ircd/saslusers
@@ -59,7 +55,7 @@ services:
      - metadata_data:/home/nefarious/ircd/metadata
      - gitsync_data:/home/nefarious/ircd/gitsync
      - ssl_data:/home/nefarious/ircd/ssl
-     - ./nefcores:/home/nefarious/ircd/cores  # Valgrind log directory
+     - ./nefcores:/home/nefarious/ircd/cores  # Core dump directory
     ports:
       - 0.0.0.0:6667:6667
       - 0.0.0.0:6697:6697
@@ -311,9 +307,6 @@ services:
       additional_contexts:
         - data=./data
     user: "1234:1234"  # x3 user
-    # ASAN needs more memory (2-3x normal)
-    mem_limit: 2g
-    memswap_limit: 2g
     # Enable core dumps for crash debugging
     ulimits:
       core:
@@ -455,7 +448,7 @@ services:
     environment:
       - KC_BOOTSTRAP_ADMIN_USERNAME=admin
       - KC_BOOTSTRAP_ADMIN_PASSWORD=admin
-      - KC_HOSTNAME=localhost
+      - KC_HOSTNAME=${KC_HOSTNAME:-localhost}
       - KC_HOSTNAME_PORT=8080
       - KC_HOSTNAME_STRICT=false
       # PostgreSQL database (uses Consul DNS for HA failover)
