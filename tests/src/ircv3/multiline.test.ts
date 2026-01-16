@@ -1489,55 +1489,51 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
           console.log('Using HistServ FETCH');
           client2.send(`PRIVMSG HistServ :FETCH ${channelName} ${capturedMsgid}`);
 
+          // Collect until we see "=== End of message ===" or timeout
           const collectStart = Date.now();
-          while (Date.now() - collectStart < 3000) {
+          let gotEndMarker = false;
+          while (Date.now() - collectStart < 5000 && !gotEndMarker) {
             try {
               const msg = await client2.waitForParsedLine(
                 m => m.command === 'NOTICE' || m.command === 'PRIVMSG',
                 500
               );
-              // HistServ returns content via NOTICE from HistServ with format: <nick> content
+              // HistServ returns content via NOTICE
               if (msg.command === 'NOTICE' && msg.trailing) {
-                let content = msg.trailing;
-                // Strip <nick> prefix from HistServ formatted output
+                console.log('HistServ response:', msg.trailing);
+                const content = msg.trailing;
+
+                // Check for end marker
+                if (content.includes('=== End of message ===')) {
+                  gotEndMarker = true;
+                  break;
+                }
+
+                // Extract actual message content (format: <nick> content)
                 const nickPrefixMatch = content.match(/^<[^>]+> (.+)$/);
                 if (nickPrefixMatch) {
-                  content = nickPrefixMatch[1];
-                }
-                if (expectedContent.some(exp => content.includes(exp.substring(0, 10)))) {
-                  fullContent.push(content);
+                  fullContent.push(nickPrefixMatch[1]);
                 }
               }
             } catch {
               break;
             }
           }
+          console.log('Got end marker:', gotEndMarker);
         }
       }
 
-      if (fullContent.length > 0) {
-        console.log('Full content retrieved:', fullContent.length, 'lines');
-        console.log('Expected content:', expectedContent.length, 'lines');
+      console.log('Full content retrieved:', fullContent.length, 'lines');
+      console.log('Expected content:', expectedContent.length, 'lines');
 
-        // With HistServ multiline fix, all retrieval methods now return proper line-by-line content
-        // Verify content matches (order may vary slightly between retrieval methods)
-        for (let i = 0; i < Math.min(fullContent.length, expectedContent.length); i++) {
-          console.log(`Line ${i + 1}: expected "${expectedContent[i]}", got "${fullContent[i]}"`);
-          expect(fullContent[i]).toBe(expectedContent[i]);
-        }
+      // Retrieval MUST work - this test verifies content matches
+      expect(fullContent.length).toBeGreaterThan(0);
+      expect(fullContent.length).toBeGreaterThanOrEqual(expectedContent.length);
 
-        // Retrieved content should have at least as many lines as expected
-        expect(fullContent.length).toBeGreaterThanOrEqual(expectedContent.length);
-      } else {
-        // If retrieval failed, at least verify truncated content is correct
-        console.log('Retrieval not available, verifying truncated content');
-        expect(truncatedContent.length).toBeGreaterThan(0);
-        // First lines should match
-        for (let i = 0; i < truncatedContent.length; i++) {
-          if (i < expectedContent.length) {
-            expect(truncatedContent[i]).toBe(expectedContent[i]);
-          }
-        }
+      // Verify content matches
+      for (let i = 0; i < expectedContent.length; i++) {
+        console.log(`Line ${i + 1}: expected "${expectedContent[i]}", got "${fullContent[i]}"`);
+        expect(fullContent[i]).toBe(expectedContent[i]);
       }
 
       client1.send('QUIT');
