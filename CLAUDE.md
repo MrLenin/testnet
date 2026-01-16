@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Guiding Principle
+
+**Simpler isn't always better. Think it through. Aim for correct.**
+
+Don't reach for quick fixes (adding timeouts, delays, retries) when the real problem is architectural. If a plan exists, finish implementing it properly rather than patching symptoms. Ask clarifying questions instead of making assumptions.
+
+Delegate for large/complex/difficult tasks: use agents
+
+Whenever you learn something particularly relevant or useful for the project, add it to an appropriate skill file, or create one
+
 ## Project Overview
 
 Afternet Testnet is a Docker-based IRC test environment running:
@@ -266,6 +276,37 @@ See `FEATURE_FLAGS_CONFIG.md` for comprehensive feature flag and configuration r
 ### IRC_HOST
 - Tests use `IRC_HOST=localhost` to connect to exposed port
 - Docker containers use `IRC_HOST=nefarious` (container name)
+
+### Keycloak Performance
+**Keycloak is NOT slow** - test timeouts are usually due to test infrastructure, not Keycloak latency.
+
+Typical Keycloak HTTP stats from X3 (`/msg O3 KEYCLOAK`):
+- **Average latency**: 45ms
+- **Min/Max**: 2ms - 1092ms (max is the outlier causing test flakiness)
+- **User cache hit rate**: ~91% (900 hits / 87 misses)
+- **Error rate**: <0.5% (5 errors / 1431 requests)
+
+When debugging test timeouts:
+1. Check if the test timeout is generous enough (10s+ for SASL flows)
+2. The 1-second max latency outlier can cause failures with tight timeouts
+3. Use `retry: 2` for Keycloak-dependent tests
+4. Cache is effective - repeated lookups are fast
+
+### Keycloak REST API Gotchas
+
+**PUT requires full user representation**: Keycloak's `PUT /admin/realms/{realm}/users/{id}` officially requires the FULL user representation. Any fields omitted in the request payload may be cleared or deleted. This means:
+- Always GET the user first, then merge your changes, then PUT the full object
+- X3 maintains a user representation cache (`kc_user_repr_cache`) to avoid repeated GETs
+- Cache must be updated AFTER merging changes (not before) to keep it current
+
+**Credentials in PUT adds, doesn't replace**: Including a `credentials` array in the user PUT body ADDS new credentials rather than replacing existing ones. This can cause duplicate passwords. Always strip `credentials` from cached user representations to prevent stale credentials being re-sent in subsequent PUTs.
+
+**Async race conditions**: When multiple async operations update the same user (e.g., email update + attribute update), the order matters:
+1. First operation GETs user, caches it
+2. Second operation uses stale cache (missing first operation's changes)
+3. Second operation's PUT overwrites first operation's changes
+
+Solution: Update the cache immediately after merging your changes, before the PUT completes.
 
 ## Project Status
 
