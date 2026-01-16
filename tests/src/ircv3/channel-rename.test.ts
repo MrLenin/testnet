@@ -167,6 +167,8 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       await new Promise(r => setTimeout(r, 300));
 
       nocap.clearRawBuffer();
+      // Small sync delay to ensure buffer is ready for new messages
+      await new Promise(r => setTimeout(r, 50));
 
       const newName = uniqueChannel('rennocapnew');
       op.send(`RENAME ${oldName} ${newName}`);
