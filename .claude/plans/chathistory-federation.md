@@ -6,9 +6,10 @@
 
 | Phase | Status | Notes |
 |-------|--------|-------|
+| Phase 0 - Storage/CAP Decoupling | ✅ Complete | Added FEAT_CHATHISTORY_STORE, updated all storage paths |
 | Phase 1 - Infrastructure | ✅ Complete | Data structures, CH A parser, helper functions |
-| Phase 2 - Advertisement Sending | ✅ Complete | CH A S at BURST in m_endburst.c |
-| Phase 3 - Advertisement-Based Routing | 🔲 Not Started | |
+| Phase 2 - Advertisement Sending | ✅ Complete | CH A S now checks STORE flag correctly |
+| Phase 3 - Advertisement-Based Routing | ✅ Complete | Query routing filters by CH A S |
 | Phase 4 - Write Forwarding (CH W) | 🔲 Not Started | |
 | Phase 5 - Registered Channel Storage | 🔲 Not Started | |
 | Phase 6 - Storage Management | 🔲 Not Started | |
@@ -20,6 +21,69 @@
   - First hop generates msgid (local user origin)
   - Subsequent hops preserve via `cli_s2s_msgid()` buffer
   - Deduplication strategy confirmed viable
+
+---
+
+## Critical Architectural Insight: Storage vs. CAP Decoupling
+
+**Problem:** The current implementation conflates three separate concerns under `FEAT_CAP_draft_chathistory`:
+1. CAP advertisement to clients (`draft/chathistory`)
+2. Local storage of messages to LMDB
+3. Query handling (CHATHISTORY command)
+
+This means a server cannot advertise chathistory capability to clients while forwarding queries to storage servers elsewhere on the network.
+
+### Required Decoupling
+
+**Two independent feature flags:**
+
+| Feature | Purpose | Default |
+|---------|---------|---------|
+| `FEAT_CAP_draft_chathistory` | Advertise CAP, handle CHATHISTORY commands | Existing |
+| `FEAT_CHATHISTORY_STORE` | Actually write messages to local LMDB | **NEW** |
+
+**Server roles enabled by decoupling:**
+
+| Server Type | CAP | STORE | Behavior |
+|-------------|-----|-------|----------|
+| **Storage Server** | ✅ | ✅ | Stores locally, answers queries, sends CH A S |
+| **Relay Server** | ✅ | ❌ | Forwards writes (CH W), forwards queries to STORE servers, no CH A S |
+| **Legacy Server** | ❌ | ❌ | No chathistory participation |
+
+**Key behaviors:**
+- **Relay servers** can still advertise `draft/chathistory` CAP to clients
+- Client CHATHISTORY queries are forwarded to STORE servers via federation
+- CH W writes are forwarded to STORE servers for persistence
+- CH A S is ONLY sent by servers with `FEAT_CHATHISTORY_STORE` enabled
+
+### X3 Role in Federation
+
+X3 participates in chathistory federation via **HistServ**, a bot interface for legacy clients:
+
+| Aspect | X3 Behavior |
+|--------|-------------|
+| **Storage** | ❌ Does NOT store messages |
+| **CH A S** | ❌ Does NOT send (no storage capability) |
+| **CH A parsing** | ✅ Understands for routing awareness |
+| **HistServ** | ✅ Bot interface for clients without `draft/chathistory` CAP |
+| **CH W (channels)** | ❌ Does NOT send (IRCd handles forwarding) |
+| **CH W (PMs)** | N/A - Service bots don't consent to PM history |
+
+**HistServ function:** X3 provides a services bot (HistServ) that users can message to request channel history. X3 natively speaks the P10 chathistory protocol - it sends `CH Q` queries and receives `CH R` responses, then formats results as NOTICE/PRIVMSG replies in a bot-like manner.
+
+This is NOT relaying - X3 is a P10 chathistory client that presents results through a bot interface.
+
+**Service Bot PM History:** PMs to/from service bots (AuthServ, ChanServ, HistServ, etc.) are excluded from chathistory storage via the consent system. Service bots do not consent to PM history, so:
+- No storage of user commands (which may contain passwords)
+- No storage of service responses
+- No CH W forwarding needed for service bot PMs
+- Nefarious handles all CH W logic; X3 never needs to send CH W
+
+**No code changes needed in X3** for Phase 0-2. X3 already:
+- Doesn't store chathistory locally
+- Speaks P10 chathistory protocol natively (CH Q/CH R)
+- Service bots have no PM history consent (by design)
+- Could benefit from CH A awareness for smarter query routing (future)
 
 ---
 
@@ -882,6 +946,104 @@ static struct ChathistoryAd *server_ads[4096];  /* MAXSERVERS */
 
 ## Implementation Plan
 
+### Phase 0: Storage/CAP Decoupling (Required First)
+
+**Goal:** Separate the "storage" concern from the "CAP advertisement" concern.
+
+#### Step 1: Add new feature flag (`ircd_features.def`)
+
+```c
+/* Chathistory storage - separate from CAP advertisement */
+F_B(CHATHISTORY_STORE, 0, 1),  /* TRUE = store messages locally, FALSE = relay-only */
+```
+
+**Default:** TRUE for backward compatibility with existing deployments.
+
+#### Step 2: Update storage write path (`chathistory.c`)
+
+Change storage writes to check `FEAT_CHATHISTORY_STORE`:
+
+```c
+/* Before: */
+if (!feature_bool(FEAT_CAP_draft_chathistory))
+  return;
+
+/* After: */
+if (!feature_bool(FEAT_CHATHISTORY_STORE))
+  return;
+```
+
+Locations to update:
+- `chathistory_privmsg()` - PRIVMSG storage
+- `chathistory_notice()` - NOTICE storage
+- `chathistory_tagmsg()` - TAGMSG storage
+- `chathistory_join()` - JOIN event storage
+- `chathistory_part()` - PART event storage
+- `chathistory_quit()` - QUIT event storage
+- `chathistory_nick()` - NICK event storage
+- `chathistory_kick()` - KICK event storage
+- `chathistory_topic()` - TOPIC event storage
+- `chathistory_mode()` - MODE event storage
+
+#### Step 3: Update query handling (`m_chathistory.c`)
+
+Query handling should check `FEAT_CAP_draft_chathistory` (CAP), not STORE:
+
+```c
+/* Client queries: CAP must be enabled */
+if (!feature_bool(FEAT_CAP_draft_chathistory))
+  return send_reply(sptr, ERR_UNKNOWNCOMMAND, "CHATHISTORY");
+```
+
+Local queries (from connected clients) should:
+1. Check local storage if `FEAT_CHATHISTORY_STORE` is enabled
+2. Forward to federation regardless (unless local results are complete)
+
+#### Step 4: Update CH A S sending (`m_endburst.c`)
+
+Change from checking CAP to checking STORE:
+
+```c
+/* Before: */
+if (feature_bool(FEAT_CAP_draft_chathistory)) {
+  int retention = feature_int(FEAT_CHATHISTORY_RETENTION);
+  sendcmdto_one(&me, CMD_CHATHISTORY, sptr, "A S %d", retention);
+}
+
+/* After: */
+if (feature_bool(FEAT_CHATHISTORY_STORE)) {
+  int retention = feature_int(FEAT_CHATHISTORY_RETENTION);
+  sendcmdto_one(&me, CMD_CHATHISTORY, sptr, "A S %d", retention);
+}
+```
+
+**Only STORE servers should advertise storage capability.**
+
+#### Step 5: Update documentation
+
+- `FEATURE_FLAGS_CONFIG.md` - document new flag
+- `data/ircd.conf` templates - show both flags
+
+#### Verification
+
+Test matrix:
+
+| CAP | STORE | Expected Behavior |
+|-----|-------|-------------------|
+| ✅ | ✅ | Full chathistory (current default) |
+| ✅ | ❌ | CAP advertised, queries forwarded, no local storage, no CH A S |
+| ❌ | ✅ | Invalid config - warn at startup, treat as ❌/❌ |
+| ❌ | ❌ | No chathistory participation |
+
+**Test commands:**
+```bash
+# Server with STORE disabled should NOT store messages
+# Server with STORE disabled should NOT send CH A S at BURST
+# Server with CAP enabled but STORE disabled should still respond to CHATHISTORY queries
+```
+
+---
+
 ### Phase 1: Infrastructure (No Behavior Change) ✅ COMPLETE
 
 1. Add `struct ChathistoryAd` data structures
@@ -908,17 +1070,38 @@ static struct ChathistoryAd *server_ads[4096];  /* MAXSERVERS */
 
 **Implementation Notes:**
 - `m_endburst.c:ms_end_of_burst()` - added CH A S sending after END_OF_BURST_ACK
-- Sends `CH A S <retention>` only if `FEAT_CAP_draft_chathistory` is enabled
+- ✅ Now correctly checks `FEAT_CHATHISTORY_STORE` (updated in Phase 0)
 - Added `ircd_features.h` include for `feature_bool()` and `feature_int()`
 - CH A R on REHASH deferred as refinement (REHASH is rare, BURST provides correct value)
 
 **Verification:** Servers send CH A messages. Monitor with P10 logging.
 
-### Phase 3: Advertisement-Based Routing
+### Phase 3: Advertisement-Based Routing ✅ COMPLETE
 
 1. Modify query routing to check advertisements
 2. Only query servers that have storage + relevant channels
 3. Skip servers that explicitly don't advertise the target
+
+**Implementation Notes:**
+- Added `server_retention_covers(server, query_time)` helper function
+- Added `count_storage_servers(query_time)` to count only CH A S servers
+- Modified `start_fed_query()` to:
+  - Parse timestamp from reference for retention filtering
+  - Only count/query servers with `has_chathistory_advertisement()`
+  - Apply retention window filtering via `server_retention_covers()`
+- Modified `ms_chathistory()` CH Q propagation to:
+  - Extract timestamp from S2S reference format (T<timestamp>)
+  - Filter propagation to storage servers only
+  - Apply same advertisement + retention checks
+- No backward compatibility needed (new feature, no legacy servers)
+
+**Filtering Logic:**
+- Server has CH A S → query/propagate
+- Server has no CH A S → skip (doesn't store history)
+- Server retention doesn't cover query timestamp → skip
+
+**Declaration added to `handlers.h`:**
+- `extern int server_retention_covers(struct Client*, time_t);`
 
 **Verification:** Federation queries only go to relevant servers.
 
@@ -966,6 +1149,25 @@ static struct ChathistoryAd *server_ads[4096];  /* MAXSERVERS */
 ---
 
 ## Configuration Reference
+
+### Core Feature Flags (Phase 0 Decoupling)
+
+```
+/* CAP advertisement - enables CHATHISTORY command handling */
+"CAP_draft_chathistory" = "TRUE";    /* Advertise draft/chathistory to clients */
+
+/* Storage - separate from CAP (NEW in Phase 0) */
+"CHATHISTORY_STORE" = "TRUE";        /* Actually store messages locally */
+                                     /* FALSE = relay-only server */
+```
+
+**Server Role Matrix:**
+
+| CAP_draft_chathistory | CHATHISTORY_STORE | Role |
+|-----------------------|-------------------|------|
+| TRUE | TRUE | Storage server (default) |
+| TRUE | FALSE | Relay server (forwards to STORE) |
+| FALSE | * | No chathistory participation |
 
 ### Existing Feature Flags
 
