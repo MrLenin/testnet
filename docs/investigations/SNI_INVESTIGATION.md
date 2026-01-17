@@ -1,14 +1,52 @@
 # SNI (Server Name Indication) Investigation
 
-## Status: NOT IMPLEMENTED
+## Status: IMPLEMENTED ✅
 
 **Documentation**: https://ircv3.net/docs/sni
 
 **Protocol**: TLS extension (RFC 6066)
 
-**Effort**: Low-Medium (8-16 hours)
+**Implementation Date**: 2026-01-17
 
 **Priority**: Medium - Important for multi-certificate deployments
+
+---
+
+## Implementation Summary
+
+SNI support was implemented via feature flags to allow up to 2 additional hostname/certificate pairs.
+
+### Configuration
+
+```
+features {
+    /* SNI certificate 1 */
+    "SNI_HOSTNAME1" = "irc.example.net";
+    "SNI_CERTFILE1" = "/path/to/irc.example.net.crt";
+    "SNI_KEYFILE1" = "/path/to/irc.example.net.key";
+
+    /* SNI certificate 2 */
+    "SNI_HOSTNAME2" = "server.example.net";
+    "SNI_CERTFILE2" = "/path/to/server.example.net.crt";
+    "SNI_KEYFILE2" = "/path/to/server.example.net.key";
+};
+```
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `include/ircd_features.h` | Added FEAT_SNI_HOSTNAME1/2, FEAT_SNI_CERTFILE1/2, FEAT_SNI_KEYFILE1/2 |
+| `ircd/ircd_features.c` | Registered SNI feature flags |
+| `ircd/ssl.c` | Added SNI callback, certificate loading, integration with ssl_init/ssl_reinit |
+
+### How It Works
+
+1. On startup, `sni_init_certs()` loads configured hostname/cert pairs
+2. SNI callback registered via `SSL_CTX_set_tlsext_servername_callback()`
+3. During TLS handshake, `sni_callback()` checks client's SNI hostname
+4. If match found, `SSL_set_SSL_CTX()` switches to the matching certificate
+5. On SIGUSR1, certificates are reloaded automatically
 
 ---
 
@@ -60,10 +98,11 @@ Server ◄───────────────────────�
 
 ## Current Implementation
 
-**Nefarious**: No SNI support in `ircd/ssl.c`
-- Uses single `ssl_server_ctx` for all connections
-- No `SSL_CTX_set_tlsext_servername_callback()` call
-- No certificate selection based on client SNI
+**Nefarious**: Full SNI support in `ircd/ssl.c`
+- Default `ssl_server_ctx` used when no SNI match
+- `SSL_CTX_set_tlsext_servername_callback()` registered for hostname matching
+- Up to 2 additional certificates selectable via SNI hostname
+- Automatic reload on SIGUSR1
 
 ---
 

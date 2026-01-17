@@ -32,8 +32,11 @@
 | chghost | `chghost` | ✅ Full |
 | SASL | `sasl` | ✅ Full (PLAIN, EXTERNAL, SCRAM-*, OAUTHBEARER) |
 | TLS | `tls` | ✅ Full |
+| STS | `sts` | ✅ Full (port/duration/preload) |
 | WHOX | ISUPPORT | ✅ Full |
 | Bot mode | ISUPPORT BOT=B | ✅ Full |
+| TARGMAX | ISUPPORT | ✅ Full |
+| Client tags relay | +typing/+reply/+react/+channel-context | ✅ Full |
 
 ### Fully Implemented (Draft Specs)
 
@@ -56,27 +59,6 @@
 
 ## Gaps and Partial Implementations
 
-### PARTIAL: Client Tags on PRIVMSG/NOTICE
-
-**Issue**: Client-only tags (prefixed with `+`) are only relayed on TAGMSG, not PRIVMSG/NOTICE.
-
-**Affected tags**:
-- `+typing` - Typing indicators
-- `+reply` - Reply to specific message
-- `+react` - Emoji reactions
-- `+channel-context` - Channel context for PMs
-
-**Current behavior**:
-- TAGMSG: ✅ Relays `cli_client_tags()` to recipients
-- PRIVMSG: ❌ Does NOT relay client tags
-- NOTICE: ❌ Does NOT relay client tags
-
-**Fix needed**: Modify `ircd_relay.c` to use `sendcmdto_channel_client_tags()` for recipients with message-tags capability.
-
-**Effort**: 4-8 hours
-
-**Investigation**: [CHANNEL_CONTEXT_INVESTIGATION.md](CHANNEL_CONTEXT_INVESTIGATION.md)
-
 ---
 
 ### NOT IMPLEMENTED: MONITOR
@@ -94,22 +76,6 @@
 **Effort**: 24-40 hours
 
 **Investigation**: [MONITOR_INVESTIGATION.md](MONITOR_INVESTIGATION.md)
-
----
-
-### NOT IMPLEMENTED: STS (Strict Transport Security)
-
-**Spec**: https://ircv3.net/specs/extensions/sts
-
-**Issue**: No STS capability to enforce TLS connections.
-
-**Priority**: Medium-High (security benefit)
-
-**Effort**: 32-48 hours
-
-**Note**: STARTTLS intentionally not implemented (broken concept).
-
-**Investigation**: [STS_INVESTIGATION.md](STS_INVESTIGATION.md)
 
 ---
 
@@ -141,37 +107,20 @@
 
 ---
 
-### MISSING ISUPPORT: TARGMAX
-
-**Spec**: https://modern.ircdocs.horse/#targmax-parameter
-
-**Issue**: TARGMAX token not advertised, which tells clients the max targets per command.
-
-**Expected format**:
-```
-TARGMAX=PRIVMSG:4,NOTICE:4,KICK:4,JOIN:,PART:
-```
-
-**Priority**: Low (informational)
-
-**Effort**: 1-2 hours
-
 ---
 
-### NOT IMPLEMENTED: SNI (Server Name Indication)
+### IMPLEMENTED: SNI (Server Name Indication) ✅
 
 **Doc**: https://ircv3.net/docs/sni
 
-**Issue**: No SNI support for multi-certificate TLS deployments.
+**Implementation Date**: 2026-01-17
 
-**Why it matters**:
-- Server can host multiple certificates for different hostnames
-- Required by modern TLS best practices
-- Needed for reverse proxy routing
+**Features**:
+- Up to 2 additional hostname/certificate pairs via feature flags
+- SNI callback for hostname-based certificate selection
+- Automatic reload on SIGUSR1
 
-**Priority**: Medium
-
-**Effort**: 12-17 hours
+**Configuration**: `SNI_HOSTNAME1/2`, `SNI_CERTFILE1/2`, `SNI_KEYFILE1/2`
 
 **Investigation**: [SNI_INVESTIGATION.md](SNI_INVESTIGATION.md)
 
@@ -189,10 +138,10 @@ TARGMAX=PRIVMSG:4,NOTICE:4,KICK:4,JOIN:,PART:
 
 | Tag | TAGMSG | PRIVMSG | NOTICE |
 |-----|--------|---------|--------|
-| `+typing` | ✅ | ❌ | ❌ |
-| `+reply` | ✅ | ❌ | ❌ |
-| `+react` | ✅ | ❌ | ❌ |
-| `+channel-context` | ✅ | ❌ | ❌ |
+| `+typing` | ✅ | ✅ | ✅ |
+| `+reply` | ✅ | ✅ | ✅ |
+| `+react` | ✅ | ✅ | ✅ |
+| `+channel-context` | ✅ | ✅ | ✅ |
 
 ---
 
@@ -222,20 +171,22 @@ TARGMAX=PRIVMSG:4,NOTICE:4,KICK:4,JOIN:,PART:
 
 ---
 
+## Recently Implemented
+
+- ✅ **SNI (Server Name Indication)** - Multi-certificate TLS via feature flags
+- ✅ **STS (Strict Transport Security)** - Enforces TLS with port/duration/preload options
+- ✅ **Client tags on PRIVMSG/NOTICE** - Now relays +typing, +reply, +react, +channel-context
+- ✅ **TARGMAX ISUPPORT** - Added `TARGMAX=PRIVMSG:20,NOTICE:20,JOIN:,PART:`
+
 ## Recommendations
 
-### High Priority
-1. **STS** - Security improvement for enforcing TLS
-
 ### Medium Priority
-2. **Client tags on PRIVMSG/NOTICE** - Easy fix, improves client compatibility
-3. **TARGMAX ISUPPORT** - Quick addition
-4. **ECDSA-NIST256P-CHALLENGE** - Passwordless SASL mechanism
+1. **ECDSA-NIST256P-CHALLENGE** - Passwordless SASL mechanism
 
 ### Low Priority
-5. MONITOR (WATCH alternative exists)
-6. UTF8ONLY
-7. network-icon
+2. MONITOR (WATCH alternative exists)
+3. UTF8ONLY
+4. network-icon
 
 ---
 
