@@ -122,7 +122,20 @@
 6. **Misc** - 3 tests, various causes
 7. **SASL failures** - 4 tests, save for last (may be complex/annoying)
 
-## Latest 4x Test Run Results (2026-01-07, Post Keycloak Groups Skip)
+## Latest 4x Test Run Results (2026-01-08, Post Epoll Fix)
+
+| Run | Failures | Notes |
+|-----|----------|-------|
+| seq1 | 8 | Metadata, ChanServ (5), OpServ GLINE, WebPush |
+| seq2 | 7 | AuthServ USET, Chathistory NOTICE, ChanServ (2), Keycloak OAuth, Metadata, OpServ GLINE |
+| seq3 | 7 | AuthServ USET, ChanServ (3), SASL ACCOUNT, Keycloak OAuth, WebPush |
+| seq4 | 8 | ChanServ (4), IRCv3 (2), Keycloak OAuth, WebPush |
+
+**Consistent failures (all runs):**
+- ChanServ auto-op/auto-voice timing issues
+- WebPush/Keycloak OAuth intermittent
+
+**Previous 4x Test Run Results (2026-01-07, Post Keycloak Groups Skip)**
 
 | Run | Failures | Notes |
 |-----|----------|-------|
@@ -171,9 +184,83 @@
 2. ✅ Fix O3 HELP timing in serviceCmd()
    - Added 100ms delay after sending command before collecting responses
    - Increased individual line timeout from 2s to 3s
-3. Fix ChanServ registration (wait for MODE before register)
+3. ✅ Fix ChanServ auto-op/auto-voice timing (2026-01-08)
+   - Added `waitForChannelMode()` helper that polls NAMES with retries
+   - Updated auto-op test to use robust mode waiting
+   - Updated auto-voice test to use robust mode waiting
+   - Added waitForUserAccess after ADDUSER in "reject unauthorized ADDUSER" test
+   - Added waitForUserAccess after CLVL in integration "promote to coowner" test
+4. ✅ Fix redundant auth() calls after registerAndActivate() (2026-01-08)
+   - registerAndActivate() already authenticates via COOKIE activation
+   - Calling auth() again returns "already authed" message which caused failures
+   - Removed redundant auth() calls from:
+     - chanserv.test.ts: auto-op, auto-voice, reject ADDUSER tests
+     - integration.test.ts: reconnect, promote coowner, channel settings, concurrent logins, share access tests
 
 ## Known Test Flakiness Issues
+
+### ChanServ Auto-Op/Voice Timing (FIXED)
+
+**Problem**: Tests checking auto-op or auto-voice after a user joins were failing intermittently because:
+1. ChanServ may not process the JOIN immediately
+2. The MODE message might arrive before/after the test starts waiting
+3. Clearing the raw buffer before NAMES discarded any MODE messages already received
+
+**Solution**: Added `waitForChannelMode()` helper that:
+- Polls NAMES every 300ms with retries
+- Doesn't clear buffer (preserves MODE messages)
+- Returns true when user has expected prefix (@, +, %)
+- Handles multiple prefixes (e.g., @+nick)
+
+**Usage**:
+```typescript
+// After user joins channel
+await user2Client.waitForLine(/JOIN/i, 5000);
+const hasOps = await waitForChannelMode(user2Client, channel, user2, '@', 5000);
+expect(hasOps).toBe(true);
+```
+
+**Files modified**:
+- `tests/src/helpers/x3-client.ts` - Added waitForChannelMode
+- `tests/src/helpers/index.ts` - Export waitForChannelMode
+- `tests/src/services/chanserv.test.ts` - Updated auto-op/auto-voice tests
+- `tests/src/services/integration.test.ts` - Added wait after CLVL
+
+---
+
+### Metadata Persistence Behavior (CRITICAL)
+
+**Key insight**: Metadata persistence depends on user authentication and channel registration state:
+
+1. **Unauthed user metadata** - Dies when the user disconnects
+2. **Unregistered channel metadata** - Dies when the last user leaves the channel
+
+**Implications for tests:**
+- Tests must keep users online until all metadata verification completes
+- Tests must keep at least one user in unregistered channels during verification
+- Race conditions can occur if a test client disconnects too early
+- Metadata tests should NOT assume persistence across connections for unauthed users
+
+**This does NOT mean tests must:**
+- Register users before setting metadata (just keep them connected)
+- Register channels before setting metadata (just keep channel populated)
+
+**Correct test pattern:**
+```typescript
+// Set metadata while client is connected
+await client.setMetadata('key', 'value');
+// Verify immediately, before disconnecting
+const result = await client.getMetadata('key');
+expect(result).toBe('value');
+// THEN disconnect
+```
+
+**Incorrect test pattern (will fail intermittently):**
+```typescript
+await client1.setMetadata('key', 'value');
+client1.disconnect();  // Metadata may be lost!
+// client2 may not see the metadata
+```
 
 ### Registration Cookie Flow Race Condition
 **Symptom**: Test client sometimes quits immediately after receiving the "check your email for cookie" message, without proceeding to send the COOKIE command.
@@ -269,6 +356,40 @@ Afternet has used cookie auth for years without issues, so command table corrupt
 2. **Valgrind**: Run X3 under Valgrind to detect memory errors
 3. **Git bisect**: Find when crashes started by testing older commits
 4. **Add defensive NULL checks**: To modcmd_register and sar_fd_readable
+
+---
+
+## Runtime Fixes Applied
+
+### Epoll/Curl Socket Race Condition Fix (2026-01-08) ✅ FIXED
+
+**Symptom**: "Unable to modify fd X for epoll: No such file or directory" errors occurring ~40 times during test runs.
+
+**Root cause**: Race condition in curl multi-socket interface:
+1. Curl closes a socket and calls `CURL_POLL_REMOVE` callback
+2. Before X3's deferred cleanup runs, curl opens a new connection
+3. OS reuses the same fd number for the new socket
+4. Curl calls socket callback to register the "new" fd
+5. X3 tries to add fd to epoll, but old entry still exists (EEXIST)
+6. OR: X3 tries to modify fd, but deferred cleanup already removed it (ENOENT)
+
+**Files modified:**
+1. `x3/src/keycloak.c` (lines 1585-1656) - Socket callback
+   - Call `ioset_close()` immediately on `CURL_POLL_REMOVE` instead of deferring
+   - Added diagnostic logging for socket lifecycle
+   - Check `curl_multi_assign()` return values
+
+2. `x3/src/ioset-epoll.c` (lines 54-111) - Epoll operations
+   - `ioset_epoll_add()`: If ADD fails with EEXIST, try MOD instead
+   - `ioset_epoll_update()`: If MOD fails with ENOENT, try ADD instead
+   - `ioset_epoll_remove()`: Suppress warnings for ENOENT/EBADF (already gone)
+
+**Result**: Clean socket lifecycle, no epoll errors in test runs.
+
+**Note**: Epoll errors only appear in X3 debug logs, not in test output. To verify fix:
+```bash
+docker compose logs x3 2>&1 | grep -i epoll
+```
 
 ---
 

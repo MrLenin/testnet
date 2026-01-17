@@ -677,3 +677,370 @@ For accounts, Keycloak is effectively the "source of truth" for authentication (
 2. **Added cache TTL** - LMDB entries include timestamps for staleness detection
 3. **Correct authority model** - X3 is authoritative; LMDB only imports users not in X3
 4. **Sync conflict logging** - Logs when Keycloak sync overwrites existing LMDB values
+
+---
+
+## Phase 7: Positive Auth Caching (NEW)
+
+### Status: IMPLEMENTED ✅ (2026-01-12)
+
+### Problem Statement
+
+Every AUTH command and SASL PLAIN triggers a Keycloak token endpoint call, even for recently-validated credentials. With the webhook infrastructure already in place, we can safely cache successful authentications.
+
+### Current State (What We Have)
+
+| Component | Status |
+|-----------|--------|
+| Password change detection in SPI | ✅ Fires UPDATE_CREDENTIAL/RESET_PASSWORD |
+| Webhook delivery to X3 | ✅ Async with retry |
+| Cache invalidation on webhook | ✅ `x3_lmdb_scram_revoke_all()` called |
+| Negative auth cache | ✅ `authfail:` prefix, 60s TTL |
+| **Positive auth cache** | ❌ Missing |
+
+### Design
+
+Since password changes trigger webhooks that invalidate caches, we can safely cache successful auth results with longer TTLs.
+
+#### 7.1 Auth Success Cache Structure
+
+```c
+// LMDB storage: authsuccess:<account_lower> → timestamp:password_hash
+// password_hash = MD5(password) - for cache key matching, not security
+
+#define AUTH_SUCCESS_CACHE_TTL 3600  // 1 hour (safe with webhook invalidation)
+#define AUTH_SUCCESS_PREFIX "authsuccess:"
+
+struct auth_success_entry {
+    time_t timestamp;
+    char password_hash[33];  // MD5 hex string
+};
+```
+
+#### 7.2 Cache Lookup Flow
+
+```c
+int kc_check_auth_cached(const char *account, const char *password) {
+    char key[256];
+    char password_hash[33];
+
+    // Compute MD5 of password for cache key matching
+    compute_md5(password, password_hash);
+
+    // Check success cache first
+    snprintf(key, sizeof(key), AUTH_SUCCESS_PREFIX "%s", account);
+    char *cached = x3_lmdb_get(key);
+
+    if (cached) {
+        time_t cached_time;
+        char cached_hash[33];
+        if (sscanf(cached, "%ld:%32s", &cached_time, cached_hash) == 2) {
+            // Check TTL
+            if (now - cached_time < AUTH_SUCCESS_CACHE_TTL) {
+                // Check password hash matches
+                if (strcmp(password_hash, cached_hash) == 0) {
+                    free(cached);
+                    return KC_SUCCESS;  // Cache hit!
+                }
+            }
+        }
+        free(cached);
+    }
+
+    return KC_CACHE_MISS;  // Not in cache, call Keycloak
+}
+```
+
+#### 7.3 Cache Population (on successful auth)
+
+```c
+void kc_cache_auth_success(const char *account, const char *password) {
+    char key[256];
+    char value[256];
+    char password_hash[33];
+
+    compute_md5(password, password_hash);
+    snprintf(key, sizeof(key), AUTH_SUCCESS_PREFIX "%s", account);
+    snprintf(value, sizeof(value), "%ld:%s", (long)now, password_hash);
+
+    x3_lmdb_set(key, value);
+}
+```
+
+#### 7.4 Cache Invalidation (on password change webhook)
+
+```c
+// In keycloak_webhook.c, when CREDENTIAL/UPDATE with type=password:
+void invalidate_auth_caches(const char *username) {
+    char key[256];
+
+    // Invalidate success cache
+    snprintf(key, sizeof(key), AUTH_SUCCESS_PREFIX "%s", username);
+    x3_lmdb_delete(key);
+
+    // Existing: invalidate SCRAM caches
+    x3_lmdb_scram_revoke_all(username);
+    x3_lmdb_scram_acct_delete_all(username);
+
+    // Existing: invalidate session tokens
+    // (already handled by session versioning)
+}
+```
+
+### Integration Points
+
+| File | Changes |
+|------|---------|
+| `x3/src/keycloak.c` | Add `kc_check_auth_cached()`, `kc_cache_auth_success()` |
+| `x3/src/keycloak_webhook.c` | Call `invalidate_auth_caches()` on CREDENTIAL/UPDATE |
+| `x3/src/nickserv.c` | Check cache in `loc_auth()` before Keycloak call |
+
+### Expected Impact
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| Repeat auth (same password) | ~100-500ms (Keycloak) | <1ms (LMDB) |
+| Auth after password change | ~100-500ms | ~100-500ms (cache miss) |
+| Test suite pool accounts | 15-20s first auth | <1ms subsequent |
+
+### Security Considerations
+
+1. **Password not stored** - Only MD5 hash stored (for matching), not recoverable password
+2. **Webhook invalidation** - Password changes immediately invalidate cache
+3. **TTL safety net** - Even if webhook fails, cache expires in 1 hour
+4. **Per-account granularity** - Cache key includes account name
+
+### Implementation Notes (2026-01-12)
+
+**Files modified:**
+- `x3/src/x3_lmdb.h` - Added `LMDB_PREFIX_AUTHSUCCESS` constant
+- `x3/src/nickserv.h` - Added `invalidate_authsuccess_cache()` declaration
+- `x3/src/nickserv.c`:
+  - Added `AUTHSUCCESS_CACHE_TTL` (3600 seconds = 1 hour)
+  - Added `check_authsuccess_cache()` - checks cache and validates password hash
+  - Added `cache_authsuccess()` - stores timestamp:password_hash by username
+  - Added `invalidate_authsuccess_cache()` - deletes cache entry by username
+  - Integrated cache check in SASL PLAIN handler (after negative cache, before Keycloak)
+  - Integrated cache population in async callback (on successful non-impersonating auth)
+- `x3/src/keycloak_webhook.c` - Added `invalidate_authsuccess_cache()` call on password change
+
+**Key design decisions:**
+- Cache key: `authsuccess:<username_lower>` (enables O(1) invalidation by username)
+- Cache value: `<timestamp>:<password_hash>` (MD5 hash for cache matching)
+- Password hash computed as MD5(username:password) - same as negative cache
+- Only non-impersonating users populate cache (impersonation auth not cached)
+- Cache hit fast-tracks to success without Keycloak call
+
+---
+
+## Phase 8: SCRAM Generation in Keycloak SPI (NEW)
+
+### Status: PLANNED
+
+### Problem Statement
+
+When a password changes in Keycloak, the webhook notifies X3 which invalidates SCRAM caches. However, X3 must then regenerate SCRAM credentials on-demand during the next SASL auth, adding latency.
+
+**Current flow (suboptimal):**
+```
+Password change → Webhook → X3 invalidates SCRAM → User auths →
+X3 calls Keycloak → Regenerate SCRAM → Cache
+```
+
+**Desired flow:**
+```
+Password change → SPI generates SCRAM → Webhook delivers SCRAM →
+X3 pre-populates cache → User auths → Instant SCRAM validation
+```
+
+### The Challenge
+
+Keycloak's Admin Events don't include the plaintext password - they only notify that a password changed. SCRAM generation requires the plaintext to compute:
+- Salt (random)
+- StoredKey = H(ClientKey)
+- ServerKey = HMAC(SaltedPassword, "Server Key")
+
+### Solution: CredentialInputUpdater SPI
+
+Keycloak's `CredentialInputUpdater` interface lets us intercept credential updates BEFORE Keycloak hashes the password. We can generate SCRAM at that point and store it in user attributes.
+
+#### 8.1 New Java Class: ScramCredentialGenerator
+
+```java
+// keycloak-webhook-spi/src/main/java/.../ScramCredentialGenerator.java
+package net.afternet.keycloak.webhook;
+
+import org.keycloak.credential.CredentialInputUpdater;
+import org.keycloak.credential.CredentialInput;
+import org.keycloak.credential.CredentialModel;
+import org.keycloak.models.RealmModel;
+import org.keycloak.models.UserModel;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
+import java.util.Base64;
+
+public class ScramCredentialGenerator implements CredentialInputUpdater {
+
+    private static final int SCRAM_ITERATIONS = 4096;
+    private static final int SALT_LENGTH = 16;
+
+    @Override
+    public boolean supportsCredentialType(String credentialType) {
+        return CredentialModel.PASSWORD.equals(credentialType);
+    }
+
+    @Override
+    public boolean updateCredential(RealmModel realm, UserModel user,
+                                    CredentialInput input) {
+        if (!CredentialModel.PASSWORD.equals(input.getType())) {
+            return false;  // Not a password, don't consume
+        }
+
+        String plaintext = input.getChallengeResponse();
+        if (plaintext == null || plaintext.isEmpty()) {
+            return false;
+        }
+
+        try {
+            // Generate SCRAM-SHA-256 credentials
+            byte[] salt = new byte[SALT_LENGTH];
+            new SecureRandom().nextBytes(salt);
+
+            byte[] saltedPassword = pbkdf2("SHA-256", plaintext.getBytes("UTF-8"),
+                                           salt, SCRAM_ITERATIONS, 32);
+
+            byte[] clientKey = hmac("HmacSHA256", saltedPassword, "Client Key".getBytes());
+            byte[] storedKey = sha256(clientKey);
+            byte[] serverKey = hmac("HmacSHA256", saltedPassword, "Server Key".getBytes());
+
+            // Store in user attributes (webhook will pick these up)
+            String saltB64 = Base64.getEncoder().encodeToString(salt);
+            String storedKeyB64 = Base64.getEncoder().encodeToString(storedKey);
+            String serverKeyB64 = Base64.getEncoder().encodeToString(serverKey);
+
+            user.setSingleAttribute("x3_scram_salt", saltB64);
+            user.setSingleAttribute("x3_scram_iterations", String.valueOf(SCRAM_ITERATIONS));
+            user.setSingleAttribute("x3_scram_stored_key", storedKeyB64);
+            user.setSingleAttribute("x3_scram_server_key", serverKeyB64);
+
+            return false;  // Don't consume - let default handler also process
+
+        } catch (Exception e) {
+            // Log error but don't block password change
+            return false;
+        }
+    }
+
+    // ... PBKDF2, HMAC, SHA256 helper methods ...
+}
+```
+
+#### 8.2 Register SPI Provider
+
+```
+// META-INF/services/org.keycloak.credential.CredentialInputUpdater
+net.afternet.keycloak.webhook.ScramCredentialGenerator
+```
+
+#### 8.3 Webhook Enhancement
+
+When the webhook fires for CREDENTIAL/UPDATE, include the SCRAM attributes if present:
+
+```java
+// In WebhookEventListenerProvider.java
+private String getUserRepresentation(UserModel user) {
+    JsonObject repr = new JsonObject();
+    repr.addProperty("username", user.getUsername());
+    repr.addProperty("email", user.getEmail());
+
+    // Include SCRAM credentials if present
+    String scramSalt = user.getFirstAttribute("x3_scram_salt");
+    if (scramSalt != null) {
+        repr.addProperty("x3_scram_salt", scramSalt);
+        repr.addProperty("x3_scram_iterations",
+            user.getFirstAttribute("x3_scram_iterations"));
+        repr.addProperty("x3_scram_stored_key",
+            user.getFirstAttribute("x3_scram_stored_key"));
+        repr.addProperty("x3_scram_server_key",
+            user.getFirstAttribute("x3_scram_server_key"));
+    }
+
+    return repr.toString();
+}
+```
+
+#### 8.4 X3 Webhook Handler Enhancement
+
+```c
+// In keycloak_webhook.c, handle_credential_update():
+void handle_credential_update(json_t *event) {
+    const char *username = get_username_from_event(event);
+    json_t *repr = json_object_get(event, "representation");
+
+    // Check for SCRAM credentials in representation
+    const char *scram_salt = json_string_value(json_object_get(repr, "x3_scram_salt"));
+    const char *scram_iterations = json_string_value(json_object_get(repr, "x3_scram_iterations"));
+    const char *scram_stored_key = json_string_value(json_object_get(repr, "x3_scram_stored_key"));
+    const char *scram_server_key = json_string_value(json_object_get(repr, "x3_scram_server_key"));
+
+    if (scram_salt && scram_iterations && scram_stored_key && scram_server_key) {
+        // Pre-populate SCRAM cache
+        x3_lmdb_scram_set(username,
+                          atoi(scram_iterations),
+                          scram_salt,
+                          scram_stored_key,
+                          scram_server_key);
+        log_module(MAIN_LOG, LOG_INFO,
+                   "Pre-populated SCRAM cache for %s via webhook", username);
+    } else {
+        // No SCRAM in webhook, invalidate and let regenerate on-demand
+        x3_lmdb_scram_revoke_all(username);
+        x3_lmdb_scram_acct_delete_all(username);
+    }
+}
+```
+
+### Files to Modify
+
+| File | Changes |
+|------|---------|
+| `keycloak-webhook-spi/src/.../ScramCredentialGenerator.java` | **NEW** - Generate SCRAM on password change |
+| `keycloak-webhook-spi/src/.../WebhookEventListenerProvider.java` | Include SCRAM attrs in representation |
+| `keycloak-webhook-spi/META-INF/services/...CredentialInputUpdater` | **NEW** - Register SPI |
+| `x3/src/keycloak_webhook.c` | Parse SCRAM from webhook, pre-populate cache |
+
+### Implementation Order
+
+1. Implement ScramCredentialGenerator in SPI
+2. Test SCRAM attribute generation on password change
+3. Update webhook to include SCRAM in representation
+4. Update X3 webhook handler to pre-populate cache
+5. Verify SCRAM auth works immediately after password change
+
+### Security Considerations
+
+1. **SCRAM verifiers, not password** - Only StoredKey/ServerKey stored (cannot recover password)
+2. **Attributes are read-only to users** - Only admins can see x3_scram_* attributes
+3. **Webhook authentication** - SCRAM delivered over authenticated webhook channel
+4. **No plaintext in logs** - SCRAM values are cryptographic, not sensitive
+
+### Expected Impact
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| First SCRAM auth after password change | ~200-500ms (regenerate) | <1ms (pre-cached) |
+| SCRAM auth flow | X3 generates on-demand | SPI pre-generates |
+
+---
+
+## Implementation Priority
+
+| Phase | Task | Effort | Impact | Dependencies |
+|-------|------|--------|--------|--------------|
+| 7 | Auth success cache | Low | High | Webhook infrastructure (done) |
+| 8 | SCRAM generation in SPI | Medium | Medium | Phase 7 (for testing) |
+
+Phase 7 should be implemented first as it provides immediate benefit for the test suite and production auth load. Phase 8 is an enhancement for SCRAM-specific optimization.
