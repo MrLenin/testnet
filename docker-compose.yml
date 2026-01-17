@@ -451,12 +451,14 @@ services:
       - KC_HOSTNAME=${KC_HOSTNAME:-localhost}
       - KC_HOSTNAME_PORT=8080
       - KC_HOSTNAME_STRICT=false
-      # PostgreSQL database (uses Consul DNS for HA failover)
-      - KC_DB=${KC_DB:-postgres}
-      - KC_DB_URL=${KC_DB_URL}
-      - KC_DB_USERNAME=${KC_DB_USERNAME}
-      - KC_DB_PASSWORD=${KC_DB_PASSWORD}
-      # Connection pool sizing for test workload
+      # Database configuration
+      # Default: dev-file (built-in H2) - no external database required
+      # For PostgreSQL: set KC_DB=postgres and KC_DB_URL/USERNAME/PASSWORD in .env.local
+      - KC_DB=${KC_DB:-dev-file}
+      - KC_DB_URL=${KC_DB_URL:-}
+      - KC_DB_USERNAME=${KC_DB_USERNAME:-}
+      - KC_DB_PASSWORD=${KC_DB_PASSWORD:-}
+      # Connection pool sizing (only used with PostgreSQL)
       - KC_DB_POOL_INITIAL_SIZE=5
       - KC_DB_POOL_MIN_SIZE=5
       - KC_DB_POOL_MAX_SIZE=20
