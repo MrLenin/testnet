@@ -592,6 +592,18 @@ The S2S format is optimized for efficiency (single-char subcmd, compact referenc
 [SERVER] CH R <reqid> <msgid> <timestamp> <type> <sender> <account> :<content>
 ```
 
+**Compressed Response** - Zstd-compressed content for bandwidth savings:
+```
+[SERVER] CH Z <reqid> <msgid> <timestamp> <type> <sender> <account> :<base64_zstd>
+```
+
+**Base64 Response** - For large/multiline content requiring chunking:
+```
+First/full:  [SERVER] CH B <reqid> <msgid> <ts> <type> <sender> <account> [+] :<b64>
+Continue:    [SERVER] CH B <reqid> <msgid> [+] :<b64>
+Final:       [SERVER] CH B <reqid> <msgid> :<b64>
+```
+
 **End** - Signal end of response:
 ```
 [SERVER] CH E <reqid> <count>
@@ -1802,6 +1814,7 @@ In a network with mixed old/new servers:
 | 1.12 | December 2024 | Removed T/M prefixes from CHATHISTORY refs - timestamps start with digit, msgids start with server numeric |
 | 1.13 | December 2024 | Added IP Address Encoding section documenting P10 base64 IPv4/IPv6 encoding with compression marker |
 | 1.14 | January 2025 | Added GITSYNC (GS) token for remote git-based config distribution; added CH A/W/WB subcommands for chathistory federation Phase 4 |
+| 1.15 | January 2025 | Added CH Z (compressed passthrough) and CH B (base64 chunked) response formats for federation |
 
 ---
 
