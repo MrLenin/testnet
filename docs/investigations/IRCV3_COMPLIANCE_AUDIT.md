@@ -177,6 +177,32 @@ TARGMAX=PRIVMSG:4,NOTICE:4,KICK:4,JOIN:,PART:
 
 ---
 
+## Potential Enhancements
+
+### SASL: ECDSA-NIST256P-CHALLENGE
+
+**Issue**: Passwordless SASL using ECDSA public key authentication.
+
+**How it works**:
+1. User registers public key: `/msg NickServ SET PUBKEY <base64-key>`
+2. Client signs 32-byte challenge with private key
+3. Server verifies signature against stored public key
+
+**Benefits**:
+- No password transmitted (stronger than PLAIN)
+- SSH-style public key authentication
+- Good for bots and power users
+
+**Client support**: WeeChat, KICL, Irssi, Textual
+
+**Priority**: Medium
+
+**Effort**: 24-40 hours
+
+**Investigation**: [ECDSA_SASL_INVESTIGATION.md](ECDSA_SASL_INVESTIGATION.md)
+
+---
+
 ## Recommendations
 
 ### High Priority
@@ -185,11 +211,12 @@ TARGMAX=PRIVMSG:4,NOTICE:4,KICK:4,JOIN:,PART:
 ### Medium Priority
 2. **Client tags on PRIVMSG/NOTICE** - Easy fix, improves client compatibility
 3. **TARGMAX ISUPPORT** - Quick addition
+4. **ECDSA-NIST256P-CHALLENGE** - Passwordless SASL mechanism
 
 ### Low Priority
-4. MONITOR (WATCH alternative exists)
-5. UTF8ONLY
-6. network-icon
+5. MONITOR (WATCH alternative exists)
+6. UTF8ONLY
+7. network-icon
 
 ---
 
