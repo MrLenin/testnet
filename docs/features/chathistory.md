@@ -122,9 +122,16 @@ CHATHISTORY LATEST #channel * 50
 
 | Subcmd | Format | Purpose |
 |--------|--------|---------|
-| `Q` | `CH Q <id> <subtype> <target> <limit> [params]` | Query request |
-| `R` | `CH R <id> <count> :<msgid,ts,sender,acct,type,text>` | Query response |
-| `E` | `CH E <id> <code> :<message>` | Error response |
+| `Q` | `CH Q <target> <subcmd> <ref> <limit> <reqid>` | Query request |
+| `R` | `CH R <reqid> <msgid> <ts> <type> <sender> <acct> :<text>` | Response (plain text) |
+| `Z` | `CH Z <reqid> <msgid> <ts> <type> <sender> <acct> :<b64_zstd>` | Response (compressed) |
+| `B` | `CH B <reqid> <msgid> <ts> <type> <sender> <acct> [+] :<b64>` | Response (chunked) |
+| `E` | `CH E <reqid> <count>` | End of response |
+
+**Response Types**:
+- `CH R`: Plain text content, used when message fits in single P10 line
+- `CH Z`: Zstd-compressed content (base64 encoded) for bandwidth savings
+- `CH B`: Base64-encoded content with chunking for large/multiline messages
 
 ### Write Forward Subcommands (Phase 4)
 
