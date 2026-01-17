@@ -44,7 +44,7 @@ ChanServ can synchronize channel access from Keycloak groups, enabling centraliz
 |---------|---------|-------------|
 | `keycloak_access_sync` | 0 | Enable group sync |
 | `keycloak_hierarchical_groups` | 0 | Use hierarchical paths |
-| `keycloak_use_group_attributes` | 0 | Use x3_access_level attribute |
+| `keycloak_use_group_attributes` | 0 | Enable user attribute mode (recommended) |
 | `keycloak_bidirectional_sync` | 0 | Push changes to Keycloak |
 | `keycloak_group_prefix` | (auto) | Group name/path prefix |
 | `keycloak_access_level_attr` | x3_access_level | Attribute name |
@@ -72,20 +72,22 @@ irc-channel-#help-peon      → 1
 /irc-channels/#help/op      → 200
 ```
 
-### Attribute Mode (keycloak_use_group_attributes=1)
+### User Attribute Mode (keycloak_use_group_attributes=1)
 
-Groups use `x3_access_level` attribute for any numeric level:
+Access levels stored as **user attributes** (not group attributes, despite the config name):
 
-**Flat mode**:
+**User Attribute Format**: `x3.channel.<channel>` = `<level>`
+
 ```
-irc-channel-#help-seniors   (x3_access_level=350) → 350
-irc-channel-#help-juniors   (x3_access_level=250) → 250
+User "alice":
+  x3.channel.#help = 200
+  x3.channel.#support = 500
+
+User "bob":
+  x3.channel.#help = 100
 ```
 
-**Hierarchical mode**:
-```
-/irc-channels/#help         (x3_access_level=200) → 200
-```
+This mode is recommended - it provides per-user, per-channel granularity and enables async ADDUSER.
 
 ## Access Levels
 

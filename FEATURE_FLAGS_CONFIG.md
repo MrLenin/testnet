@@ -578,7 +578,7 @@ ChanServ can synchronize channel access from Keycloak groups, using LMDB as the 
 |---------|---------|-------------|
 | `keycloak_access_sync` | 0 | Enable Keycloak group sync for channel access |
 | `keycloak_hierarchical_groups` | 0 | Use hierarchical group paths instead of flat names |
-| `keycloak_use_group_attributes` | 0 | Use `x3_access_level` group attribute for flexible access levels |
+| `keycloak_use_group_attributes` | 0 | Enable user attribute mode (stores `x3.channel.<chan>` on users) |
 | `keycloak_bidirectional_sync` | 0 | Enable bidirectional sync (X3 changes pushed to Keycloak) |
 | `keycloak_group_prefix` | (auto) | Group name/path prefix (defaults based on mode) |
 | `keycloak_access_level_attr` | x3_access_level | Attribute name for numeric access level |
@@ -609,47 +609,35 @@ Groups are named with a suffix indicating the access level:
 | `halfop` | UL_HALFOP | 150 |
 | `peon` | UL_PEON | 1 |
 
-#### Attribute-Based Mode (Recommended)
+#### User Attribute Mode (Recommended)
 
-When `keycloak_use_group_attributes = 1`, groups use the `x3_access_level` attribute to specify any numeric access level (1-500). This provides full flexibility for custom access levels.
+When `keycloak_use_group_attributes = 1`, access levels are stored as **user attributes** on Keycloak users (not group attributes, despite the config name).
 
-- **Flat mode**: Groups named `<prefix><channel>` with `x3_access_level` attribute
-  - Example: `irc-channel-#help` with attribute `x3_access_level = 350`
+**User Attribute Format**: `x3.channel.<channel>` = `<access_level>`
 
-- **Hierarchical mode**: Groups at path `/<prefix>/<channel>` with attribute
-  - Example: `/irc-channels/#help` with attribute `x3_access_level = 350`
-
-**Keycloak Group Attribute Setup**:
-
-In Keycloak Admin Console:
-1. Navigate to Groups
-2. Create or select a group (e.g., `irc-channel-#help`)
-3. Go to the "Attributes" tab
-4. Add attribute: `x3_access_level` = `350`
-
-Or via Keycloak Admin API:
-```json
-POST /admin/realms/{realm}/groups
-{
-  "name": "irc-channel-#help",
-  "attributes": {
-    "x3_access_level": ["350"]
-  }
-}
+```
+x3.channel.#help = 200
+x3.channel.#support = 500
+x3.channel.#general = 100
 ```
 
-**Example Keycloak Group Hierarchies**:
+This provides per-user, per-channel granularity and enables the async ADDUSER flow.
+
+**Note**: Despite the config name `keycloak_use_group_attributes`, this mode stores access levels on **user objects**, not group objects. The name is historical.
+
+**Example Comparison**:
 
 ```
 Legacy Suffix Mode (keycloak_use_group_attributes = 0):
-  irc-channel-#help-owner      → members get access level 500
-  irc-channel-#help-op         → members get access level 200
-  irc-channel-#support-halfop  → members get access level 150
+  Groups: irc-channel-#help-owner, irc-channel-#help-op, etc.
+  Members get access based on group suffix
 
-Attribute Mode (keycloak_use_group_attributes = 1):
-  irc-channel-#help-seniors    (x3_access_level=350) → level 350
-  irc-channel-#help-juniors    (x3_access_level=250) → level 250
-  irc-channel-#support         (x3_access_level=200) → level 200
+User Attribute Mode (keycloak_use_group_attributes = 1):
+  User "alice" has attributes:
+    x3.channel.#help = 200
+    x3.channel.#support = 500
+  User "bob" has attributes:
+    x3.channel.#help = 100
 ```
 
 **Example x3.conf Section**:
@@ -662,7 +650,7 @@ Attribute Mode (keycloak_use_group_attributes = 1):
     // Use hierarchical groups (optional, default is flat)
     "keycloak_hierarchical_groups" = "1";
 
-    // Use attribute-based access levels (recommended for flexibility)
+    // Use user attribute mode (stores x3.channel.<chan> on users)
     "keycloak_use_group_attributes" = "1";
 
     // Custom prefix (optional, has smart defaults)
