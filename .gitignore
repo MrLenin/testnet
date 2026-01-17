@@ -9,4 +9,12 @@ x3_data/
 
 # Node modules
 node_modules/
+
+# Core dumps
 nefcores/
+x3cores/
+*.core
+
+# Performance profiling
+perf.data*
+perf-*.txt
