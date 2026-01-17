@@ -7,7 +7,7 @@
 | Phase | Status | Notes |
 |-------|--------|-------|
 | Phase 1 - Infrastructure | ✅ Complete | Data structures, CH A parser, helper functions |
-| Phase 2 - Advertisement Sending | 🔲 Not Started | |
+| Phase 2 - Advertisement Sending | ✅ Complete | CH A S at BURST in m_endburst.c |
 | Phase 3 - Advertisement-Based Routing | 🔲 Not Started | |
 | Phase 4 - Write Forwarding (CH W) | 🔲 Not Started | |
 | Phase 5 - Registered Channel Storage | 🔲 Not Started | |
@@ -900,11 +900,17 @@ static struct ChathistoryAd *server_ads[4096];  /* MAXSERVERS */
 
 **Verification:** Servers parse CH A messages without behavior change.
 
-### Phase 2: Advertisement Sending
+### Phase 2: Advertisement Sending ✅ COMPLETE
 
 1. On server link (BURST complete): Send `CH A S <retention>`
-2. On BURST: Send `CH A F` with all channels in history DB
-3. On new history write: Send `CH A +` if channel wasn't advertised
+2. On BURST: Send `CH A F` with all channels in history DB (deferred to Layer 1)
+3. On new history write: Send `CH A +` if channel wasn't advertised (deferred to Layer 1)
+
+**Implementation Notes:**
+- `m_endburst.c:ms_end_of_burst()` - added CH A S sending after END_OF_BURST_ACK
+- Sends `CH A S <retention>` only if `FEAT_CAP_draft_chathistory` is enabled
+- Added `ircd_features.h` include for `feature_bool()` and `feature_int()`
+- CH A R on REHASH deferred as refinement (REHASH is rare, BURST provides correct value)
 
 **Verification:** Servers send CH A messages. Monitor with P10 logging.
 
