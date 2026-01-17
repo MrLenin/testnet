@@ -10,8 +10,8 @@
 | Phase 1 - Infrastructure | ✅ Complete | Data structures, CH A parser, helper functions |
 | Phase 2 - Advertisement Sending | ✅ Complete | CH A S now checks STORE flag correctly |
 | Phase 3 - Advertisement-Based Routing | ✅ Complete | Query routing filters by CH A S |
-| Phase 4 - Write Forwarding (CH W) | 🔲 Not Started | |
-| Phase 5 - Registered Channel Storage | 🔲 Not Started | |
+| Phase 4 - Write Forwarding (CH W) | ✅ Complete | CH W/WB with chunking, deduplication, forwarding hook |
+| Phase 5 - Registered Channel Storage | ✅ Complete | Included in Phase 4 process_write_forward() |
 | Phase 6 - Storage Management | 🔲 Not Started | |
 | Phase 7 - Refinements | 🔲 Future | |
 
@@ -622,24 +622,39 @@ au1 → hub-au → hub-asia → asia1: CH W #au-only <msgid> <ts> <sender> :hell
 asia1: stores the message
 ```
 
-### Protocol: CH W (Write Forward)
+### Protocol: CH W / CH WB (Write Forward)
 
+P10 line limit is 512 bytes. After headers (~100 bytes), ~400 bytes safe for content.
+Multiline messages can be up to 4096 bytes, requiring chunked base64 encoding.
+
+**CH W - Plain text (content ≤ 400 bytes, no newlines):**
 ```
 <server> CH W <target> <msgid> <timestamp> <sender> <account|*> <type> :<text>
 ```
 
+**CH WB - Base64 encoded (for large/multiline content):**
+```
+First/full:  <server> CH WB <target> <msgid> <ts> <sender> <account> <type> [+] :<b64>
+Continue:    <server> CH WB <target> <msgid> [+] :<b64>
+Final:       <server> CH WB <target> <msgid> :<b64>
+```
+The `+` marker indicates more chunks are coming.
+
 **Parameters:**
 - `<target>` - Channel name or nick (for DMs)
 - `<msgid>` - Message ID (for deduplication)
-- `<timestamp>` - Unix epoch timestamp
+- `<timestamp>` - Unix epoch timestamp with milliseconds (e.g., 1736856000.123)
 - `<sender>` - Full sender mask (nick!user@host)
 - `<account|*>` - Sender's account or `*` if not logged in
 - `<type>` - Message type: `P` (PRIVMSG), `N` (NOTICE), `T` (TAGMSG)
-- `<text>` - Message content
+- `<text>` - Message content (plain or base64 encoded)
 
-**Example:**
+**Examples:**
 ```
-B4 CH W #au-only yH5kM9x2 1736856000 alice!alice@au.example.net alice P :Hello from Australia!
+B4 CH W #channel yH5kM9x2 1736856000.123 alice!alice@host alice P :Hello!
+B4 CH WB #channel abc123 1736856000.123 alice!alice@host alice P + :SGVsbG8gV29y...
+B4 CH WB #channel abc123 + :bGQgdGhpcyBp...
+B4 CH WB #channel abc123 :cyBtdWx0aWxpbmU=
 ```
 
 ### Routing
@@ -1109,22 +1124,83 @@ Test matrix:
 
 **Prerequisites:** Decide between Approach A and B. This phase implements Approach B.
 
-1. Define `CH W` message format
-2. Add parser and `ms_chathistory_write()` handler
-3. Non-STORE servers forward ALL messages via CH W (don't filter by registration)
-4. STORE servers receive CH W and decide what to store:
+**Protocol Design (accounting for multiline/batching):**
+
+P10 line limit is 512 bytes. After headers (~100 bytes), ~400 bytes are safe for content.
+Multiline messages can be up to 4096 bytes (FEAT_MULTILINE_MAX_BYTES).
+Solution: Use chunked base64 encoding (same pattern as CH B responses).
+
+```
+CH W - Plain text write forward (content ≤ 400 bytes, no newlines)
+  <server> CH W <target> <msgid> <ts> <sender> <account> <type> :<content>
+  Example: AX CH W #channel abc123 1736856000.123 alice!a@host alice P :Hello!
+
+CH WB - Base64 encoded write forward (for large/multiline content)
+  First/full (parc=9 or 10):
+    <server> CH WB <target> <msgid> <ts> <sender> <account> <type> [+] :<b64>
+  Continuation (parc=5 or 6):
+    <server> CH WB <target> <msgid> [+] :<b64>
+  + marker means more chunks coming; no + means final chunk
+
+Parameters:
+  <target>  - Channel name (e.g., #channel)
+  <msgid>   - Message ID for deduplication
+  <ts>      - Unix timestamp with milliseconds (e.g., 1736856000.123)
+  <sender>  - Full sender mask (nick!user@host)
+  <account> - Sender's account name, or * if not logged in
+  <type>    - Message type: P=PRIVMSG, N=NOTICE, T=TAGMSG
+```
+
+**Implementation steps:**
+
+1. Add `FEAT_CHATHISTORY_WRITE_FORWARD` feature flag
+2. Add `history_has_msgid()` function for deduplication
+3. Add `CH W` and `CH WB` parsers in `ms_chathistory()`
+4. Add `send_ch_write()` function (mirrors `send_ch_response()` chunking logic)
+5. Add `forward_history_write()` function to find nearest storage server
+6. Modify `store_channel_history()` to call `forward_history_write()` when STORE is disabled
+7. STORE servers receive CH W/WB and decide what to store:
    - Registered channels (+r): Always store
    - Unregistered with local users: Store
    - Unregistered without local users: Ignore
-5. Implement msgid-based deduplication
+8. Implement msgid-based deduplication at STORE server
 
 **Verification:** Messages to channels in storage gaps are forwarded and stored.
 
+**Implementation Notes (Complete):**
+
+Files modified:
+- `include/ircd_features.h` - Added `FEAT_CHATHISTORY_WRITE_FORWARD`, `FEAT_CHATHISTORY_STORE_REGISTERED`
+- `ircd/ircd_features.c` - Added feature flag definitions (both default TRUE)
+- `include/history.h` - Added `history_has_msgid()` declaration
+- `ircd/history.c` - Added `history_has_msgid()` implementation (checks msgid index in LMDB)
+- `include/handlers.h` - Added `forward_history_write()` declaration
+- `ircd/m_chathistory.c`:
+  - Added `WriteChunkEntry` structure and chunk management functions
+  - Added `process_write_forward()` - decides whether to store based on channel registration and local users
+  - Added `send_ch_write()` - sends CH W or CH WB with chunking (mirrors `send_ch_response()`)
+  - Added `forward_history_write()` - finds nearest storage server and forwards
+  - Added `CH W` handler in `ms_chathistory()` for plain text writes
+  - Added `CH WB` handler in `ms_chathistory()` for base64 chunked writes
+- `ircd/ircd_relay.c`:
+  - Added `#include "handlers.h"`
+  - Modified `store_channel_history()` to call `forward_history_write()` when STORE disabled
+
+Key implementation details:
+- Chunking uses same `CH_CHUNK_B64_SIZE` (400 bytes) as CH B responses
+- Deduplication via `history_has_msgid()` before storing
+- Storage decision: registered (+r) OR has local users → store; otherwise ignore
+- Write forwarding finds first storage server in `cli_serv(&me)->down` list
+
 ### Phase 5: Registered Channel Storage Policy
 
-1. Modify `history_store_message()` to check `IsRegisteredChannel(chptr)`
-2. STORE servers store messages for +r channels regardless of local user presence
-3. Add feature flag `FEAT_CHATHISTORY_STORE_REGISTERED` (default TRUE)
+**Status:** ✅ Implemented as part of Phase 4
+
+The registered channel storage logic was implemented directly in `process_write_forward()`:
+- Added `FEAT_CHATHISTORY_STORE_REGISTERED` feature flag (default TRUE)
+- CH W/WB handler checks `(chptr->mode.mode & MODE_REGISTERED)`
+- Registered channels (+r) are always stored regardless of local user presence
+- Unregistered channels only stored if they have local users
 
 **Note:** This phase only enables storage on STORE servers that *receive* messages. Phase 4 (CH W) is required to ensure messages reach STORE servers in the first place.
 
