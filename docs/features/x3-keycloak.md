@@ -39,7 +39,7 @@ X3 integrates with Keycloak to provide centralized user management, OAuth2 authe
 |---------|-------------|
 | `keycloak_access_sync` | Enable group-based channel access |
 | `keycloak_hierarchical_groups` | Use hierarchical group paths |
-| `keycloak_use_group_attributes` | Use x3_access_level attribute |
+| `keycloak_use_group_attributes` | Enable user attribute mode (recommended) |
 | `keycloak_bidirectional_sync` | Push changes to Keycloak |
 | `keycloak_sync_frequency` | Sync interval (seconds) |
 
