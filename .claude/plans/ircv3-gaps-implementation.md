@@ -4,16 +4,17 @@
 
 Comprehensive plan to address all identified IRCv3 compliance gaps in Nefarious and X3.
 
-**Total Effort Estimate**: 100-160 hours
+**Total Effort Estimate**: 115-180 hours
 
 **Priority Order**:
 1. TARGMAX ISUPPORT (quick win)
 2. Client tags on PRIVMSG/NOTICE (easy, high impact)
 3. STS - Strict Transport Security (security critical)
-4. ECDSA-NIST256P-CHALLENGE SASL (new capability)
-5. MONITOR (alternative to WATCH)
-6. network-icon (nice to have)
-7. UTF8ONLY (lowest priority)
+4. SNI - Server Name Indication (TLS multi-cert)
+5. ECDSA-NIST256P-CHALLENGE SASL (new capability)
+6. MONITOR (alternative to WATCH)
+7. network-icon (nice to have)
+8. UTF8ONLY (lowest priority)
 
 ---
 
@@ -230,16 +231,117 @@ features {
 
 ---
 
-## Phase 4: ECDSA-NIST256P-CHALLENGE SASL (24-40 hours)
+## Phase 4: SNI - Server Name Indication (12-17 hours)
 
-### 4.1 Overview
+### 5.1 Overview
+
+SNI allows server to host multiple TLS certificates and select based on client-requested hostname.
+
+**Component**: Nefarious
+**Effort**: 12-17 hours
+**Documentation**: https://ircv3.net/docs/sni
+
+### 4.2 Why It Matters
+
+- Server can have different certs for `irc.example.net` vs `server.example.net`
+- Required for reverse proxy routing decisions
+- Modern TLS best practice
+
+### 4.3 Implementation Steps
+
+#### Step 1: Certificate Storage Structure (3-4 hours)
+
+**File**: `include/ssl.h`, `ircd/ssl.c`
+
+```c
+struct ssl_cert {
+    char *hostname;        /* NULL for default */
+    SSL_CTX *ctx;          /* Context with this cert loaded */
+    char *cert_file;
+    char *key_file;
+    struct ssl_cert *next;
+};
+
+static struct ssl_cert *ssl_certs = NULL;
+```
+
+#### Step 2: SNI Callback (2-3 hours)
+
+```c
+static int sni_callback(SSL *ssl, int *al, void *arg)
+{
+    const char *hostname = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+    struct ssl_cert *cert;
+
+    if (!hostname)
+        return SSL_TLSEXT_ERR_NOACK;
+
+    /* Find matching certificate */
+    for (cert = ssl_certs; cert; cert = cert->next) {
+        if (cert->hostname && !strcasecmp(cert->hostname, hostname)) {
+            SSL_set_SSL_CTX(ssl, cert->ctx);
+            return SSL_TLSEXT_ERR_OK;
+        }
+    }
+
+    /* No match - use default */
+    return SSL_TLSEXT_ERR_NOACK;
+}
+```
+
+#### Step 3: Register Callback (2-3 hours)
+
+```c
+SSL_CTX *ssl_init_server_ctx(void)
+{
+    SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
+    /* ... existing setup ... */
+    SSL_CTX_set_tlsext_servername_callback(ctx, sni_callback);
+    return ctx;
+}
+```
+
+#### Step 4: Configuration Parsing (3-4 hours)
+
+**File**: `ircd/ircd_parser.y`, `ircd/s_conf.c`
+
+Add grammar for multi-cert SSL blocks:
+
+```
+SSL {
+    default {
+        certificate = "certs/default.crt";
+        key = "certs/default.key";
+    };
+    "irc.example.net" {
+        certificate = "certs/irc.example.net.crt";
+        key = "certs/irc.example.net.key";
+    };
+};
+```
+
+### 4.4 Testing
+
+```bash
+# Test with specific hostname
+openssl s_client -connect irc.example.net:6697 -servername irc.example.net
+
+# Test default (no SNI)
+openssl s_client -connect irc.example.net:6697 -noservername
+```
+
+---
+
+## Phase 5: ECDSA-NIST256P-CHALLENGE SASL (24-40 hours)
+
+### 5.1 Overview
 
 Passwordless SASL using ECDSA public key signatures.
 
 **Component**: X3
 **Effort**: 24-40 hours
 
-### 4.2 Implementation Steps
+### 5.2 Implementation Steps
 
 #### Step 1: Database Schema (2-3 hours)
 
@@ -370,7 +472,7 @@ Store pubkey as user attribute in Keycloak:
 x3.ecdsa_pubkey = <base64-key>
 ```
 
-### 4.3 Testing
+### 5.3 Testing
 
 1. Generate keypair with ecdsatool
 2. Register pubkey: `/msg NickServ SET PUBKEY <key>`
@@ -501,10 +603,11 @@ if (feature_bool(FEAT_UTF8ONLY)) {
 - [ ] TARGMAX ISUPPORT (1-2 hours)
 - [ ] Client tags on PRIVMSG/NOTICE (4-8 hours)
 
-### Sprint 2: Security (Weeks 2-3)
+### Sprint 2: Security & TLS (Weeks 2-4)
 - [ ] STS - Strict Transport Security (32-48 hours)
+- [ ] SNI - Server Name Indication (12-17 hours)
 
-### Sprint 3: SASL Enhancement (Weeks 4-5)
+### Sprint 3: SASL Enhancement (Weeks 5-6)
 - [ ] ECDSA-NIST256P-CHALLENGE (24-40 hours)
 
 ### Sprint 4: Low Priority (As time permits)
@@ -520,6 +623,7 @@ if (feature_bool(FEAT_UTF8ONLY)) {
 TARGMAX ─────────────────────────────────────────────► (none)
 Client Tags ─────────────────────────────────────────► (none)
 STS ─────────────────────────────────────────────────► TLS working
+SNI ─────────────────────────────────────────────────► TLS working, OpenSSL 1.0+
 ECDSA SASL ──────────────────────────────────────────► OpenSSL EC APIs
 MONITOR ─────────────────────────────────────────────► (none, can reuse WATCH)
 network-icon ────────────────────────────────────────► (none)
@@ -537,6 +641,7 @@ UTF8ONLY ───────────────────────�
 
 ### Integration Tests
 - STS upgrade flow with real client
+- SNI certificate selection with openssl s_client
 - ECDSA SASL with WeeChat
 - Client tag relay between servers
 - MONITOR command with compatible client
@@ -546,6 +651,7 @@ UTF8ONLY ───────────────────────�
 - **The Lounge**: STS, client tags
 - **Irssi**: ECDSA (with cap_sasl.pl)
 - **catgirl**: MONITOR
+- **openssl s_client**: SNI testing
 
 ---
 
@@ -565,7 +671,8 @@ UTF8ONLY ───────────────────────�
 1. **TARGMAX**: ISUPPORT shows correct limits
 2. **Client tags**: +typing/+reply work on PRIVMSG
 3. **STS**: Clients auto-upgrade to TLS
-4. **ECDSA**: Passwordless SASL working with WeeChat
-5. **MONITOR**: Basic presence monitoring with MONITOR command
-6. **network-icon**: Icon URL in ISUPPORT
-7. **UTF8ONLY**: Token in ISUPPORT (enforcement optional)
+4. **SNI**: Correct certificate selected based on hostname
+5. **ECDSA**: Passwordless SASL working with WeeChat
+6. **MONITOR**: Basic presence monitoring with MONITOR command
+7. **network-icon**: Icon URL in ISUPPORT
+8. **UTF8ONLY**: Token in ISUPPORT (enforcement optional)

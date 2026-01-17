@@ -158,6 +158,25 @@ TARGMAX=PRIVMSG:4,NOTICE:4,KICK:4,JOIN:,PART:
 
 ---
 
+### NOT IMPLEMENTED: SNI (Server Name Indication)
+
+**Doc**: https://ircv3.net/docs/sni
+
+**Issue**: No SNI support for multi-certificate TLS deployments.
+
+**Why it matters**:
+- Server can host multiple certificates for different hostnames
+- Required by modern TLS best practices
+- Needed for reverse proxy routing
+
+**Priority**: Medium
+
+**Effort**: 12-17 hours
+
+**Investigation**: [SNI_INVESTIGATION.md](SNI_INVESTIGATION.md)
+
+---
+
 ## Intentionally Not Implemented
 
 | Spec | Reason |
