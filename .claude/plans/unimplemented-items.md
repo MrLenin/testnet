@@ -2,12 +2,21 @@
 
 This document comprehensively compiles ALL unimplemented, deferred, optional, and future work items from every plan and investigation file in the project.
 
-**Last Updated**: 2026-01-05
+**Last Updated**: 2026-01-17
 **Sources Reviewed**:
 - `.claude/plans/` (9 files)
 - `docs/plans/` (8 files)
 - `docs/investigations/` (15 files)
 - `IRCV3_PROJECT_STATUS.md`
+- `docs/features/` (16 files - new per-feature documentation)
+
+**Recent Progress (2026-01-17)**:
+- Chathistory federation (all phases) - COMPLETE, plan archived
+- SAXDB-optional branch - In progress (x3_lmdb.c fully functional)
+- Keycloak webhook listener - IMPLEMENTED (keycloak_webhook.c)
+- Certificate auto-registration - IMPLEMENTED (cert_autoregister config)
+- Native GitSync (nefarious) - IMPLEMENTED in feature/native-dnsbl-gitsync branch
+- Native DNSBL (nefarious) - IMPLEMENTED in feature/native-dnsbl-gitsync branch
 
 ---
 
@@ -85,39 +94,49 @@ Recommend treating this as a separate project with dedicated planning.
 
 ## P1: High Value Items
 
-### 3. Keycloak Webhook for Real-time Cache Invalidation
+### 3. ~~Keycloak Webhook for Real-time Cache Invalidation~~ - IMPLEMENTED
 
 **Source**: `.claude/plans/x3-keycloak-optimization.md`
-**Status**: Not implemented
+**Status**: ✅ IMPLEMENTED (2026-01-17)
 **Effort**: 16-24 hours
 
-Currently cache invalidation relies on TTL (30-second delay). Webhook would provide:
-- Immediate fingerprint revocation on password change
-- Instant account suspension effect
-- Real-time group membership changes
+The webhook listener is now implemented in `keycloak_webhook.c`:
+- [x] HTTP endpoint in X3 to receive webhooks (configurable port via `keycloak_webhook_port`)
+- [x] LMDB cache invalidation logic
+- [x] Security (shared secret via `keycloak_webhook_secret`)
+- [x] Bind address configuration (`keycloak_webhook_bind`)
 
-**Implementation Tasks**:
-- [ ] Keycloak Admin Event Listener configuration
-- [ ] HTTP endpoint in X3 to receive webhooks
-- [ ] LMDB cache invalidation logic
-- [ ] Security (webhook authentication)
+**Configuration**:
+```
+"nickserv" {
+    "keycloak_webhook_port" = "8088";
+    "keycloak_webhook_secret" = "your-shared-secret";
+};
+```
+
+**Remaining** (Keycloak side):
+- [ ] Keycloak Admin Event Listener configuration (user responsibility)
 
 ---
 
-### 4. X3-issued Session Tokens for SASL PLAIN Optimization
+### 4. ~~X3-issued Session Tokens for SASL PLAIN Optimization~~ - IMPLEMENTED
 
 **Source**: `.claude/plans/x3-keycloak-optimization.md`
-**Status**: Not implemented
+**Status**: ✅ IMPLEMENTED
 **Effort**: 16-24 hours
 
-After successful PLAIN auth, issue session token to client:
-- Token format: `x3tok:base64_encoded_data`
-- X3 validates locally, no Keycloak call needed
-- LMDB storage: `session:<token_id>` → `username|expiry`
+After successful AUTH, X3 issues a session token to the client:
+- [x] Token generation on successful AUTH command
+- [x] LMDB storage: `session:<account>` → `token_hash:created:lastused`
+- [x] SASL PLAIN accepts session tokens as password
+- [x] Session tokens work with SCRAM mechanisms
 
-**Benefits**:
-- Reduces Keycloak load significantly for reconnecting clients
-- Lower latency for repeat authentications
+**Implementation**:
+- Token format: 32 random bytes → base64 (~44 characters)
+- Response: `NOTICE nick :Your session cookie is: <token>`
+- Client can use token instead of password for subsequent SASL
+
+See: `docs/features/x3-sessions.md` for full documentation
 
 ---
 
