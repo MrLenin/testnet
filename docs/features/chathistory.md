@@ -115,8 +115,8 @@ CHATHISTORY LATEST #channel * 50
 | `A S` | `CH A S <retention>` | Storage capability |
 | `A R` | `CH A R <retention>` | Retention update |
 | `A F` | `CH A F :<channels>` | Full channel list |
-| `A +` | `CH A + :<channel>` | Add channel |
-| `A -` | `CH A - :<channel>` | Remove channel |
+| `A +` | `CH A + :<channels>` | Add channel(s) |
+| `A -` | `CH A - :<channels>` | Remove channel(s) |
 
 ### Query Subcommands
 

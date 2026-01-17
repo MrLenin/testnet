@@ -711,10 +711,10 @@ Servers advertise their storage capabilities and channel coverage to enable inte
 [SERVER] CH A F :<channel1> <channel2> <channel3> ...
 ```
 
-**Channel Add/Remove** (incremental updates):
+**Channel Add/Remove** (incremental updates, supports batching):
 ```
-[SERVER] CH A + :<channel>    # First message stored for channel
-[SERVER] CH A - :<channel>    # Channel's last message evicted
+[SERVER] CH A + :<channel> [channel2] ...    # First message stored for channel(s)
+[SERVER] CH A - :<channel> [channel2] ...    # Channel(s) last message evicted
 ```
 
 | Subcmd | Description |
@@ -722,8 +722,8 @@ Servers advertise their storage capabilities and channel coverage to enable inte
 | `S` | Storage capability with retention days |
 | `R` | Retention update (days changed) |
 | `F` | Full channel list sync |
-| `+` | Add channel to advertisement set |
-| `-` | Remove channel from advertisement set |
+| `+` | Add channel(s) to advertisement set |
+| `-` | Remove channel(s) from advertisement set |
 
 **Examples**:
 ```
@@ -736,8 +736,11 @@ AX CH A F :#general #support #dev
 # New channel gets first message stored
 AX CH A + :#newchannel
 
-# Channel's history fully evicted
+# Single channel's history fully evicted
 AX CH A - :#oldchannel
+
+# Batch eviction - multiple channels emptied at once
+AX CH A - :#oldchan1 #oldchan2 #oldchan3
 ```
 
 **Routing Logic**: Servers only query peers that have sent `CH A S`. The retention value helps filter queries for old messages.
@@ -1815,6 +1818,7 @@ In a network with mixed old/new servers:
 | 1.13 | December 2024 | Added IP Address Encoding section documenting P10 base64 IPv4/IPv6 encoding with compression marker |
 | 1.14 | January 2025 | Added GITSYNC (GS) token for remote git-based config distribution; added CH A/W/WB subcommands for chathistory federation Phase 4 |
 | 1.15 | January 2025 | Added CH Z (compressed passthrough) and CH B (base64 chunked) response formats for federation |
+| 1.16 | January 2025 | CH A +/- now support multiple space-separated channels for batch add/remove |
 
 ---
 
