@@ -680,6 +680,98 @@ EF CH E AB1735300000 0
 6. Merge all messages, deduplicate by msgid, sort by timestamp
 7. Send final result batch to client
 
+#### S2S Advertisement (CH A) - Storage Presence
+
+Servers advertise their storage capabilities and channel coverage to enable intelligent query routing.
+
+**Storage Advertisement** (sent at BURST):
+```
+[SERVER] CH A S <retention_days>
+```
+
+**Retention Update** (sent on REHASH if retention changed):
+```
+[SERVER] CH A R <retention_days>
+```
+
+**Channel List** (sent after CH A S, chunked if >512 bytes):
+```
+[SERVER] CH A F :<channel1> <channel2> <channel3> ...
+```
+
+**Channel Add/Remove** (incremental updates):
+```
+[SERVER] CH A + :<channel>    # First message stored for channel
+[SERVER] CH A - :<channel>    # Channel's last message evicted
+```
+
+| Subcmd | Description |
+|--------|-------------|
+| `S` | Storage capability with retention days |
+| `R` | Retention update (days changed) |
+| `F` | Full channel list sync |
+| `+` | Add channel to advertisement set |
+| `-` | Remove channel from advertisement set |
+
+**Examples**:
+```
+# Server AX stores 7 days of history
+AX CH A S 7
+
+# Server AX advertises channels with history
+AX CH A F :#general #support #dev
+
+# New channel gets first message stored
+AX CH A + :#newchannel
+
+# Channel's history fully evicted
+AX CH A - :#oldchannel
+```
+
+**Routing Logic**: Servers only query peers that have sent `CH A S`. The retention value helps filter queries for old messages.
+
+#### S2S Write Forwarding (CH W / CH WB)
+
+Non-storing servers forward messages to storage servers for persistence.
+
+**CH W** - Plain text (content ≤ 400 bytes, no newlines):
+```
+[SERVER] CH W <target> <msgid> <timestamp> <sender> <account|*> <type> :<text>
+```
+
+**CH WB** - Base64 encoded (for large/multiline content):
+```
+First/full:  [SERVER] CH WB <target> <msgid> <ts> <sender> <account> <type> [+] :<b64>
+Continue:    [SERVER] CH WB <target> <msgid> [+] :<b64>
+Final:       [SERVER] CH WB <target> <msgid> :<b64>
+```
+
+| Field | Description |
+|-------|-------------|
+| target | Channel name or nick (for DMs) |
+| msgid | Original message ID (must be preserved) |
+| timestamp | Unix timestamp with milliseconds |
+| sender | nick!user@host of message sender |
+| account | Account name or `*` if not logged in |
+| type | Message type (same as CH R: 0=PRIVMSG, etc.) |
+| `+` | Continuation marker (more chunks follow) |
+| b64 | Base64-encoded message content |
+
+**Examples**:
+```
+# Plain text write forward
+B4 CH W #channel yH5kM9x2 1736856000.123 alice!alice@host alice 0 :Hello!
+
+# Base64 chunked write forward (multiline message)
+B4 CH WB #channel abc123 1736856000.123 alice!a@host alice 0 + :SGVsbG8gV29y...
+B4 CH WB #channel abc123 + :bGQgdGhpcyBp...
+B4 CH WB #channel abc123 :cyBtdWx0aWxpbmU=
+```
+
+**Deduplication**: STORE servers deduplicate by msgid. CH W uses the original msgid, never generates a new one.
+
+**Storage Decision**: STORE server stores if channel is registered (+r mode) OR has local users.
+
 #### Configuration
 
 | Feature | Default | Description |
@@ -690,6 +782,11 @@ EF CH E AB1735300000 0
 | `FEAT_CHATHISTORY_PRIVATE` | FALSE | Enable private message history |
 | `FEAT_CHATHISTORY_FEDERATION` | TRUE | Enable S2S chathistory queries |
 | `FEAT_CHATHISTORY_TIMEOUT` | 5 | Seconds to wait for S2S responses |
+| `FEAT_CHATHISTORY_STORE` | TRUE | Store messages locally to LMDB |
+| `FEAT_CHATHISTORY_WRITE_FORWARD` | TRUE | Forward writes to storage servers |
+| `FEAT_CHATHISTORY_STORE_REGISTERED` | TRUE | Store for registered channels (+r) |
+| `FEAT_CHATHISTORY_HIGH_WATERMARK` | 90 | Storage usage % to trigger eviction |
+| `FEAT_CHATHISTORY_LOW_WATERMARK` | 70 | Storage usage % target after eviction |
 
 ---
 
@@ -1285,6 +1382,98 @@ ABAAB ML -ABAAB1735308001 BBAAC :
 
 ---
 
+### GITSYNC (GS) - Native Git Configuration Distribution
+
+**Purpose**: Centralized distribution of network configuration (K-lines, G-lines, quarantines) via git, with optional TLS certificate synchronization.
+
+**Branch**: `feature/native-dnsbl-gitsync` (not yet merged to main)
+
+#### P10 Format
+
+```
+[SERVER] GS <target> <subcommand> [params...]
+```
+
+#### Subcommands
+
+| Subcommand | Parameters | Description |
+|------------|------------|-------------|
+| `force` | - | Trigger immediate sync |
+| `status` | - | Report sync status |
+| `pubkey` | [pem] | Display SSH public key (optionally from PEM cert) |
+| `hostkey` | [reset] | Show/reset SSH host fingerprint |
+
+#### Server-to-Server Routing
+
+The GS command can target specific servers or broadcast:
+
+```
+# Trigger sync on local server
+AB GS AB force
+
+# Trigger sync on remote server CD
+AB GS CD force
+
+# Trigger sync on all servers
+AB GS * force
+```
+
+#### Examples
+
+```
+# Request immediate sync
+AB GS AB force
+
+# Get sync status
+AB GS AB status
+
+# Display SSH public key
+AB GS AB pubkey
+
+# Extract public key from SSL certificate
+AB GS AB pubkey pem
+
+# Show SSH host fingerprint (TOFU)
+AB GS AB hostkey
+
+# Clear stored host fingerprint
+AB GS AB hostkey reset
+```
+
+#### Configuration
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `FEAT_GITSYNC_ENABLE` | FALSE | Enable GitSync |
+| `FEAT_GITSYNC_INTERVAL` | 300 | Sync interval in seconds |
+| `FEAT_GITSYNC_REPOSITORY` | "" | Git repository URL (SSH) |
+| `FEAT_GITSYNC_BRANCH` | "origin/master" | Git branch to track |
+| `FEAT_GITSYNC_SSH_KEY` | "" | Path to SSH private key |
+| `FEAT_GITSYNC_LOCAL_PATH` | "" | Local path for git clone |
+| `FEAT_GITSYNC_CONF_FILE` | "gitsync.conf" | Output config file |
+| `FEAT_GITSYNC_CERT_TAG` | "" | Git tag containing TLS certificate |
+| `FEAT_GITSYNC_CERT_FILE` | (SSL_CERTFILE) | Path to write certificate |
+| `FEAT_GITSYNC_HOST_FINGERPRINT` | "" | SSH host fingerprint (TOFU) |
+
+#### Certificate Distribution via Git Tags
+
+Certificates can be stored as git tags and automatically synchronized:
+
+1. Create cert tag: `git tag -f servername-cert $(cat cert.pem | git hash-object -w --stdin)`
+2. Push tag: `git push origin servername-cert`
+3. Configure: `GITSYNC_CERT_TAG = "servername-cert"`
+4. On sync: Certificate extracted and written to `GITSYNC_CERT_FILE` (defaults to `SSL_CERTFILE`)
+5. If changed: Server triggers SSL reload via `ssl_reinit()`
+
+#### Security Features
+
+- SSH key auto-generation with atomic file creation (TOCTOU protection)
+- TOFU (Trust On First Use) for SSH host verification
+- Path validation to prevent directory traversal
+- Secure fork/exec pattern (no shell injection)
+
+---
+
 ## SASL Protocol
 
 ### Overview
@@ -1508,6 +1697,7 @@ In a network with mixed old/new servers:
 | `MDQ` | `[SOURCE] MDQ [target] [key\|*]` | Metadata query to X3 |
 | `WP` | `[SOURCE] WP [subcmd] [params...]` | Web push |
 | `ML` | `[NUMERIC] ML [+\|-\|c]batchid target :[text]` | S2S multiline batch |
+| `GS` | `[SOURCE] GS [subcmd] [params...]` | GitSync remote control |
 
 ### New SASL Subcmds
 
@@ -1524,6 +1714,17 @@ In a network with mixed old/new servers:
 | `U` | `[SERVER] WP U [user] [endpoint]` | Unregister |
 | `P` | `[SERVER] WP P [account] :[message]` | Push request |
 | `E` | `[X3] WP E [user] [code] :[message]` | Error |
+
+### GITSYNC Subcmds
+
+| Subcmd | Format | Purpose |
+|--------|--------|---------|
+| `F` | `[OPER] GS F` | Force immediate sync |
+| `S` | `[OPER] GS S` | Status check (current hash, last sync, interval) |
+| `P` | `[OPER] GS P` | Display public key for access configuration |
+| `H` | `[OPER] GS H` | Display known host fingerprint |
+| `A` | `[OPER] GS A :[fingerprint]` | Accept host key (TOFU) |
+| `R` | Result callback | Internal: reports sync result to requesting oper |
 
 ### Tag Propagation
 
@@ -1559,7 +1760,12 @@ In a network with mixed old/new servers:
 | `ircd/m_webpush.c` | WEBPUSH command handler |
 | `ircd/parse.c` | Tag parsing, command registration |
 | `ircd/send.c` | Tag-aware send functions |
+| `ircd/gitsync.c` | GitSync implementation (libgit2) |
+| `ircd/m_gitsync.c` | GITSYNC command handler |
+| `ircd/dnsbl.c` | Native DNSBL implementation |
 | `include/msg.h` | Token definitions |
+| `include/gitsync.h` | GitSync declarations |
+| `include/dnsbl.h` | DNSBL declarations |
 | `include/capab.h` | Capability flags |
 | `include/client.h` | Client tag storage |
 | `include/ircd.h` | VAPID key storage |
@@ -1595,6 +1801,7 @@ In a network with mixed old/new servers:
 | 1.11 | December 2024 | Optimized CHATHISTORY S2S format: single-char subcmds (L/B/A/R/W/T), compact refs |
 | 1.12 | December 2024 | Removed T/M prefixes from CHATHISTORY refs - timestamps start with digit, msgids start with server numeric |
 | 1.13 | December 2024 | Added IP Address Encoding section documenting P10 base64 IPv4/IPv6 encoding with compression marker |
+| 1.14 | January 2025 | Added GITSYNC (GS) token for remote git-based config distribution; added CH A/W/WB subcommands for chathistory federation Phase 4 |
 
 ---
 

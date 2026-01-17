@@ -38,6 +38,7 @@ Feature flags are configured in the `features {}` block of the IRCd config file.
 | `FEAT_CAP_account_tag` | TRUE | Enable `account-tag` capability |
 | `FEAT_CAP_chghost` | TRUE | Enable `chghost` capability |
 | `FEAT_CAP_invite_notify` | TRUE | Enable `invite-notify` capability |
+| `FEAT_CAP_tls` | TRUE | Enable `tls` capability (advertises TLS connection info) |
 
 ### Draft Extension Features
 
@@ -78,6 +79,14 @@ The multiline batch system includes comprehensive flood protection to prevent ab
 | `FEAT_MULTILINE_RECIPIENT_DISCOUNT` | TRUE | If all recipients support draft/multiline (no fallback needed), halve the discount percentage |
 | `FEAT_BATCH_RATE_LIMIT` | 10 | Maximum batches per minute per client (0 = disabled) |
 | `FEAT_CLIENT_BATCH_TIMEOUT` | 30 | Seconds before incomplete batch is auto-cleared |
+| `FEAT_MULTILINE_ECHO_PROTECT` | TRUE | Prevent echo-message amplification attacks |
+| `FEAT_MULTILINE_ECHO_MAX_FACTOR` | 2 | Max ratio of output-to-input bytes for echo-message |
+| `FEAT_MULTILINE_LEGACY_THRESHOLD` | 3 | Line count to trigger legacy fallback preview |
+| `FEAT_MULTILINE_LEGACY_MAX_LINES` | 5 | Max preview lines for legacy clients |
+| `FEAT_MULTILINE_FALLBACK_NOTIFY` | TRUE | Send NOTICE explaining truncation to legacy recipients |
+| `FEAT_MULTILINE_STORAGE_ENABLED` | FALSE | Enable S2S multiline batch storage for replay |
+| `FEAT_MULTILINE_STORAGE_TTL` | 3600 | Seconds to keep multiline batches in memory |
+| `FEAT_MULTILINE_STORAGE_MAX` | 10000 | Maximum stored multiline batches |
 
 **Discount Values**:
 - `100` = Full lag (no benefit to multiline, like regular messages)
@@ -86,6 +95,15 @@ The multiline batch system includes comprehensive flood protection to prevent ab
 - `0` = No lag (dangerous - allows unlimited flooding)
 
 **Recipient-Aware Discounting**: When `MULTILINE_RECIPIENT_DISCOUNT` is enabled and ALL recipients support draft/multiline (no fallback to individual PRIVMSGs was needed), the lag discount is halved. This rewards clients for sending multiline to recipients who can properly receive it as a batch.
+
+**Echo-Message Protection**: When `MULTILINE_ECHO_PROTECT` is enabled, the server limits echo-message output to prevent amplification attacks where a malicious client sends a small batch that expands into a large echo. The max output is `input_bytes * ECHO_MAX_FACTOR`.
+
+**Legacy Fallback**: For recipients without draft/multiline support, the server creates a truncated preview:
+- `LEGACY_THRESHOLD`: Line count to trigger preview mode (default: 3 lines)
+- `LEGACY_MAX_LINES`: Max preview lines sent to legacy clients (default: 5)
+- `FALLBACK_NOTIFY`: If enabled, sends a NOTICE explaining the truncation
+
+**Multiline Storage**: When `MULTILINE_STORAGE_ENABLED` is true, the server stores multiline batches in memory for replay to other servers. This enables late-joining servers to receive complete multiline messages via the ML token.
 
 ### WebSocket Configuration
 
@@ -149,10 +167,27 @@ AB MK <numeric> SSLCLIEXP :<timestamp>
 | `FEAT_CHATHISTORY_PM_NOTICE` | FALSE | Send policy notice on connect |
 | `FEAT_CHATHISTORY_FEDERATION` | TRUE | Enable S2S chathistory queries to other servers |
 | `FEAT_CHATHISTORY_TIMEOUT` | 5 | Seconds to wait for S2S federation responses |
+| `FEAT_CHATHISTORY_STORE` | TRUE | Actually store messages locally to LMDB |
+| `FEAT_CHATHISTORY_WRITE_FORWARD` | TRUE | Forward writes to storage servers (Phase 4 federation) |
+| `FEAT_CHATHISTORY_STORE_REGISTERED` | TRUE | Store history for registered channels even on non-storage servers |
+| `FEAT_CHATHISTORY_STRICT_TIMESTAMPS` | FALSE | Reject messages with timestamps older than retention period |
+| `FEAT_CHATHISTORY_HIGH_WATERMARK` | 85 | Storage usage % to trigger eviction |
+| `FEAT_CHATHISTORY_LOW_WATERMARK` | 75 | Storage usage % target after eviction |
+| `FEAT_CHATHISTORY_MAINTENANCE_INTERVAL` | 300 | Seconds between maintenance cycles |
+| `FEAT_CHATHISTORY_EVICT_BATCH_SIZE` | 1000 | Max entries to evict per maintenance cycle |
+
+**Storage vs CAP Decoupling**: `FEAT_CAP_draft_chathistory` controls whether the server advertises and handles the `draft/chathistory` capability for clients. `FEAT_CHATHISTORY_STORE` controls whether the server actually stores messages locally. Setting `STORE=FALSE` with `CAP=TRUE` creates a "relay server" that can handle chathistory queries by forwarding them to storage servers via federation, without storing messages itself. This is useful for leaf servers that want to offer chathistory to clients without the storage overhead.
 
 **Retention Purge**: Messages older than `CHATHISTORY_RETENTION` days are automatically deleted via an hourly timer (`history_purge_callback`). Set to 0 to disable automatic purging.
 
 **Federation**: When enabled, if local LMDB results are incomplete (fewer messages than requested or gaps detected), the server will query all other servers for additional messages. Results are merged and deduplicated by msgid before returning to the client. This allows clients to access history even if their connected server was down when messages were sent.
+
+**Write Forwarding (Phase 4)**: When `CHATHISTORY_WRITE_FORWARD` is enabled and `CHATHISTORY_STORE` is disabled, non-storage servers forward incoming messages to storage servers via CH W/WB tokens. This creates a hub-and-spoke architecture where leaf servers relay to hub storage servers.
+
+**Storage Watermarks**: The watermark system prevents unbounded storage growth:
+- When storage exceeds `HIGH_WATERMARK` (85%), eviction starts
+- Oldest entries are evicted until usage drops to `LOW_WATERMARK` (75%)
+- `EVICT_BATCH_SIZE` limits entries evicted per maintenance cycle to prevent blocking
 
 **PM Consent Modes** (CHATHISTORY_PRIVATE_CONSENT):
 - **0 = Global**: All PMs stored unless either party explicitly opts out via `METADATA * SET chathistory.pm * :0`
@@ -184,6 +219,8 @@ draft/chathistory=limit=100,pm=global
 | `FEAT_METADATA_QUEUE_SIZE` | 1000 | Maximum pending writes when X3 is unavailable |
 | `FEAT_METADATA_BURST` | TRUE | Send metadata during netburst to linking servers |
 | `FEAT_METADATA_DB` | "metadata" | LMDB database directory path for metadata storage |
+| `FEAT_METADATA_CACHE_TTL` | 14400 | Seconds before cached metadata expires (4 hours) |
+| `FEAT_METADATA_PURGE_FREQUENCY` | 3600 | Seconds between cache purge runs (1 hour) |
 
 **Cache-Aware Metadata**: When enabled, Nefarious maintains an LMDB-backed cache for metadata:
 - **X3 Detection**: Automatically detects X3 availability via heartbeat on METADATA updates
@@ -231,6 +268,58 @@ This eliminates unnecessary decompress/recompress cycles between services.
 
 **LMDB Persistence**: The `last_present` timestamp for each account is persisted via the METADATA LMDB backend using the reserved key `$last_present`.
 
+### P10 Protocol Features
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `FEAT_P10_MESSAGE_TAGS` | FALSE | Enable message tags in P10 S2S protocol |
+
+**P10 Message Tags**: When enabled, Nefarious includes IRCv3 message tags (msgid, time, etc.) in P10 server-to-server messages. This allows services like X3 to receive and process message metadata. Disabled by default for compatibility with older P10 implementations.
+
+### GitSync Configuration (native-dnsbl-gitsync branch)
+
+Native git-based configuration distribution using libgit2, replacing the shell-based `gitsync.sh` script.
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `FEAT_GITSYNC_ENABLE` | FALSE | Enable native GitSync functionality |
+| `FEAT_GITSYNC_INTERVAL` | 3600 | Sync interval in seconds |
+| `FEAT_GITSYNC_REPOSITORY` | "" | Git repository URL (SSH format) |
+| `FEAT_GITSYNC_BRANCH` | "master" | Git branch to track |
+| `FEAT_GITSYNC_SSH_KEY` | "" | Path to SSH private key for authentication |
+| `FEAT_GITSYNC_LOCAL_PATH` | "linesync" | Local directory for git repository |
+| `FEAT_GITSYNC_CONF_FILE` | "linesync.data" | Config file name in repository |
+| `FEAT_GITSYNC_CERT_TAG` | "" | Git tag containing SSL certificate |
+| `FEAT_GITSYNC_CERT_FILE` | "" | Override for certificate output path (defaults to SSL_CERTFILE) |
+| `FEAT_GITSYNC_HOST_FINGERPRINT` | "" | Known host key fingerprint (TOFU) |
+
+**GitSync Architecture**:
+- Uses libgit2 for native git operations without spawning processes
+- Supports SSH key authentication (from ircd.pem or separate key file)
+- TOFU (Trust On First Use) for host key verification
+- Cert tags allow distributing SSL certificates via git
+- Remote control via GITSYNC oper command (force sync, status, pubkey, hostkey)
+
+**P10 Token**: The `GS` token enables remote GitSync control between servers.
+
+### Native DNSBL Configuration (native-dnsbl-gitsync branch)
+
+Built-in DNS-based blocklist checking without external scripts.
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `FEAT_NATIVE_DNSBL` | FALSE | Enable native DNSBL lookups |
+| `FEAT_DNSBL_TIMEOUT` | 5 | DNS query timeout in seconds |
+| `FEAT_DNSBL_CACHETIME` | 3600 | Seconds to cache DNSBL results |
+| `FEAT_DNSBL_BLOCKMSG` | "Your IP is listed in a DNS blocklist" | Message sent to blocked users |
+
+**DNSBL Architecture**:
+- Asynchronous DNS lookups during connection registration
+- Result caching to reduce DNS load
+- Configurable blocklist zones via DNSBL blocks in ircd.conf
+- Actions: kill, gline, mark (apply user modes)
+- No P10 tokens (DNSBL is local to each server)
+
 **Virtual METADATA Keys**:
 - `$presence` - Returns current effective presence ("present", "away:message", or "away-star")
 - `$last_present` - Returns Unix timestamp of when account was last present
@@ -268,6 +357,7 @@ features {
     "CHATHISTORY_PRIVATE" = "FALSE";
     "CHATHISTORY_FEDERATION" = "TRUE"; # Enable S2S chathistory queries
     "CHATHISTORY_TIMEOUT" = "5";       # Seconds to wait for S2S responses
+    "CHATHISTORY_STORE" = "TRUE";      # Store messages locally (FALSE = relay-only)
 
     # Metadata caching
     "METADATA_DB" = "metadata";        # LMDB database directory
@@ -633,6 +723,35 @@ Bidirectional sync uses hierarchical paths:
 
 **Note**: Bidirectional sync requires Keycloak client credentials with admin API access to create groups and manage memberships
 
+### Keycloak Webhook
+
+Real-time cache invalidation when users change passwords or attributes in Keycloak.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `keycloak_webhook_port` | 0 | HTTP listener port (0 = disabled) |
+| `keycloak_webhook_secret` | "" | Shared secret for request authentication |
+| `keycloak_webhook_bind` | "" | Bind address (empty = all interfaces) |
+
+**Webhook Architecture**:
+- Keycloak sends POST requests when user attributes change
+- X3 validates the shared secret header
+- Cache entries are invalidated immediately
+- Eliminates polling delay for password/attribute changes
+
+**Keycloak Event Listener Configuration**:
+Configure a webhook event listener in Keycloak to POST to `http://x3-host:port/webhook`:
+- Event types: UPDATE_PASSWORD, UPDATE_PROFILE, UPDATE_EMAIL
+- Include shared secret in `X-Webhook-Secret` header
+
+### Certificate Auto-Registration
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `cert_autoregister` | 0 | Auto-register client certificates on SASL PLAIN auth |
+
+**Auto-Registration**: When enabled, if a user authenticates via SASL PLAIN while connected with a TLS client certificate, that certificate's fingerprint is automatically registered to their account. This simplifies the workflow for users who want to use SASL EXTERNAL after initial password authentication.
+
 ---
 
 ## Keycloak Integration
@@ -677,6 +796,9 @@ readmarker.$nick = "1703334500.654321"
 | `--enable-websocket` | Enable WebSocket support |
 | `--with-ssl` | Enable SSL/TLS support |
 | `--with-geoip` | Enable GeoIP support |
+| `--with-zstd` | Enable zstd compression (requires libzstd) |
+| `--with-gitsync` | Enable native GitSync (requires libgit2, libssh2) |
+| `--with-dnsbl` | Enable native DNSBL (requires c-ares) |
 
 ### X3 Configure Options
 
@@ -686,14 +808,28 @@ readmarker.$nick = "1703334500.654321"
 | `--with-lmdb` | Enable LMDB metadata cache (requires liblmdb) |
 | `--with-ssl` | Enable SSL/TLS support |
 | `--with-ldap` | Enable LDAP support |
+| `--with-zstd` | Enable zstd compression for metadata (requires libzstd) |
 
 ### X3 LMDB Configuration
 
 When LMDB is enabled, X3 uses it as a cache layer for metadata:
 
-| Setting | Description |
-|---------|-------------|
-| `services/x3/lmdb_path` | Path to LMDB database directory (default: `x3data/lmdb`) |
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `services/x3/lmdb_path` | "x3data/lmdb" | Path to LMDB database directory |
+| `services/x3/lmdb_nosync` | 0 | Enable nosync mode (faster, less durable) |
+| `services/x3/lmdb_sync_interval` | 10 | Seconds between syncs when nosync enabled |
+| `services/x3/lmdb_purge_interval` | 3600 | Seconds between TTL purge runs |
+| `services/x3/lmdb_snapshot_path` | "x3data/backups" | Directory for automatic snapshots |
+| `services/x3/lmdb_snapshot_interval` | 0 | Seconds between snapshots (0 = disabled) |
+| `services/x3/lmdb_snapshot_retention` | 7 | Number of snapshots to keep |
+| `services/x3/async_logging` | 0 | Enable ring buffer background logging |
+
+**LMDB NoSync Mode**: When `lmdb_nosync=1`, LMDB skips fsync on every transaction, improving write performance significantly but risking data loss on crash. The `lmdb_sync_interval` controls how often explicit syncs occur.
+
+**Automatic Snapshots**: When `lmdb_snapshot_interval > 0`, X3 creates periodic LMDB snapshots to the configured path with automatic rotation.
+
+**Async Logging**: When enabled, log writes go to a ring buffer and a background thread flushes them to disk, reducing latency for high-volume logging.
 
 LMDB provides:
 - **Read-through caching**: Check LMDB first, query Keycloak on cache miss
@@ -1043,6 +1179,13 @@ In networks with multiple servers between client and X3, each intermediate serve
 | 2.1 | January 2025 | Added SASL Authentication Architecture documentation (session tokens, SCRAM, registration flows) |
 | 2.2 | January 2025 | Added Certificate Expiry Tracking (FEAT_CERT_EXPIRY_TRACKING, P10 SSLCLIEXP) |
 | 2.3 | January 2025 | Added WebSocket Origin Validation (FEAT_WEBSOCKET_ORIGIN) |
+| 2.4 | January 2025 | Added FEAT_CHATHISTORY_STORE for storage/CAP decoupling (chathistory federation Phase 0) |
+| 2.5 | January 2025 | Added chathistory Phase 4 flags (WRITE_FORWARD, STORE_REGISTERED, watermarks, maintenance) |
+| 2.6 | January 2025 | Added multiline extensions (echo protection, legacy fallback, storage) |
+| 2.7 | January 2025 | Added metadata cache TTL, P10_MESSAGE_TAGS, CAP_tls |
+| 2.8 | January 2025 | Added GitSync and Native DNSBL configuration (native-dnsbl-gitsync branch) |
+| 2.9 | January 2025 | Added X3 LMDB extensions (nosync, snapshots, purge, async logging) |
+| 3.0 | January 2025 | Added Keycloak webhook and cert_autoregister options |
 
 ---
 
