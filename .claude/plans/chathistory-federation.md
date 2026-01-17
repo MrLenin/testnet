@@ -12,7 +12,7 @@
 | Phase 3 - Advertisement-Based Routing | ✅ Complete | Query routing filters by CH A S |
 | Phase 4 - Write Forwarding (CH W) | ✅ Complete | CH W/WB with chunking, deduplication, forwarding hook |
 | Phase 5 - Registered Channel Storage | ✅ Complete | Included in Phase 4 process_write_forward() |
-| Phase 6 - Storage Management | 🔲 Not Started | |
+| Phase 6 - Storage Management | ✅ Complete | Watermarks, eviction, graceful degradation |
 | Phase 7 - Refinements | 🔲 Future | |
 
 ### Pre-Implementation Investigation
@@ -1206,12 +1206,42 @@ The registered channel storage logic was implemented directly in `process_write_
 
 **Verification:** Registered channels are stored on STORE servers that receive the messages.
 
-### Phase 6: Storage Management
+### Phase 6: Storage Management ✅ COMPLETE
 
 1. Add `history_db_utilization()` function
 2. Implement background eviction with watermarks
 3. Add storage state machine (NORMAL → WARNING → CRITICAL → SUSPENDED)
 4. Add eviction to STATS output
+
+**Implementation Notes:**
+
+Files modified:
+- `include/ircd_features.h` - Added feature flags:
+  - `FEAT_CHATHISTORY_HIGH_WATERMARK` (default 85)
+  - `FEAT_CHATHISTORY_LOW_WATERMARK` (default 75)
+  - `FEAT_CHATHISTORY_MAINTENANCE_INTERVAL` (default 300 seconds)
+  - `FEAT_CHATHISTORY_EVICT_BATCH_SIZE` (default 1000)
+- `ircd/ircd_features.c` - Added feature flag definitions
+- `include/history.h`:
+  - Added `enum HistoryStorageState` (NORMAL, WARNING, CRITICAL, SUSPENDED)
+  - Added declarations: `history_db_utilization()`, `history_storage_state()`,
+    `history_evict_to_target()`, `history_maintenance_tick()`, `history_last_eviction()`
+- `ircd/history.c`:
+  - Added `#include "ircd_features.h"` for feature flag access
+  - Added static tracking: `last_eviction_count`, `last_eviction_time`, `last_maintenance_time`
+  - Implemented `history_db_utilization()` using LMDB `mdb_env_info()` and `mdb_env_stat()`
+  - Implemented `history_storage_state()` with thresholds: 85%=WARNING, 95%=CRITICAL, 99%=SUSPENDED
+  - Implemented `history_evict_to_target()` - evicts oldest messages in batches
+  - Implemented `history_maintenance_tick()` - checks interval and triggers eviction
+  - Updated `history_report_stats()` to show storage size, utilization, state, watermarks, last eviction
+  - Added stub implementations for non-LMDB builds
+- `ircd/ircd.c` - Added `history_maintenance_tick()` call to `history_purge_callback()`
+
+Key implementation details:
+- Utilization calculated as: `(last_pgno + 1) * page_size / mapsize * 100`
+- Eviction processes messages in batches (default 1000) to avoid long transactions
+- Maintenance self-throttles via `last_maintenance_time` check
+- STATS H now shows: size, utilization%, state, retention, watermarks, last eviction
 
 **Verification:** Storage stays within limits, graceful degradation works.
 
