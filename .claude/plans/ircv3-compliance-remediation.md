@@ -19,11 +19,11 @@ Based on the audit in [ircv3-spec-compliance-audit.md](./ircv3-spec-compliance-a
 | Issue | Severity | Category | Effort | Status |
 |-------|----------|----------|--------|--------|
 | SASL AUTHENTICATE * abort | Medium | FIX | Medium (IAuth protocol extension) | ✅ Done |
-| Labeled Response ACK missing | Medium | FIX | Medium | Pending |
+| Labeled Response ACK missing | Medium | FIX | Medium | ✅ Done |
 | Multiline blank lines in fallback | Low | FIX | Low | ✅ Done |
 | Account-tag sends `*` for unauth | Low | FIX | Low | ✅ Done |
 | Setname truncates vs FAIL | Low | CONFIG-GATE | Low | ✅ Done |
-| CAP NEW/DEL not implemented | Low | FIX | Medium | Pending |
+| CAP NEW/DEL not implemented | Low | FIX | Medium | ✅ Done |
 | SASL ERR_NICKLOCKED not defined | Low | FIX | Trivial | ✅ Done |
 | Multiline concat+blank validation | Low | FIX | Low | ✅ Done |
 | SASL ERR_SASLALREADY for non-OAUTHBEARER | Low | FIX | Medium | ✅ Done |
