@@ -30,7 +30,7 @@ Based on the audit in [ircv3-spec-compliance-audit.md](./ircv3-spec-compliance-a
 | Metadata colon in keys | Very Low | FIX | Trivial | ✅ Done |
 | Message Tags escaping pass-through | Very Low | DOCUMENT | N/A | - |
 | Message Tags length limits | Low | FIX | Low | ✅ Done |
-| Message Tags CLIENTTAGDENY | Low | FUTURE | Medium | Pending |
+| Message Tags CLIENTTAGDENY | Low | FUTURE | Medium | ✅ Done |
 
 ---
 
@@ -506,10 +506,10 @@ Recommendation: Option 2 (truncate) with logging, since spec doesn't mandate rej
 
 ---
 
-## FUTURE: CLIENTTAGDENY Tag Blocking
+## FUTURE: CLIENTTAGDENY Tag Blocking ✅ IMPLEMENTED
 
 **Severity**: Low (feature request, not compliance issue)
-**Status**: Desirable feature for operators
+**Status**: ✅ Implemented
 
 ### Use Cases
 
@@ -526,27 +526,23 @@ Recommendation: Option 2 (truncate) with logging, since spec doesn't mandate rej
    "CLIENTTAGDENY" = "+draft/react,+typing,+custom/*";
    ```
 
-2. **Tag filtering** during relay:
-   ```c
-   /* In tag relay code */
-   if (is_client_tag(tag) && is_tag_denied(tag))
-     continue;  /* Skip this tag */
-   ```
+2. **Tag filtering** in parse.c (line 1407-1425):
+   - `is_client_tag_denied()` checks tag against comma-separated patterns
+   - Supports exact match and wildcard prefix (`+prefix/*`)
+   - Denied tags silently dropped before copying to client_tags buffer
 
-3. **ISUPPORT advertisement**:
+3. **ISUPPORT advertisement** (s_user.c):
    ```
    CLIENTTAGDENY=+draft/react,+typing,+custom/*
    ```
 
-**Complexity**: Medium - requires config parsing, ISUPPORT generation, and tag filtering
-
-**Files to modify**:
-- `include/ircd_features.h` - Add FEAT_CLIENTTAGDENY (string list)
-- `ircd/ircd_features.c` - Parse comma-separated list
-- `ircd/parse.c` or `ircd/send.c` - Filter denied tags
-- `ircd/s_user.c` - Add to ISUPPORT output
-
-**Priority**: Phase 4 (after core compliance fixes)
+**Files modified**:
+- `include/ircd_features.h` - Added FEAT_CLIENTTAGDENY enum
+- `ircd/ircd_features.c` - Added F_S(CLIENTTAGDENY, ...) string feature
+- `include/ircd.h` - Declared is_client_tag_denied()
+- `ircd/ircd.c` - Implemented is_client_tag_denied() with pattern matching
+- `ircd/parse.c` - Added filtering check in client tag accumulation
+- `ircd/s_user.c` - Added ISUPPORT advertisement
 
 ---
 
@@ -575,7 +571,7 @@ Recommendation: Option 2 (truncate) with logging, since spec doesn't mandate rej
 
 ### Phase 4: New Features
 
-13. **CLIENTTAGDENY tag blocking** - Config, filtering, ISUPPORT
+13. ✅ **CLIENTTAGDENY tag blocking** - Config, filtering, ISUPPORT
 
 ### X3 / IAuth Coordination Required
 
