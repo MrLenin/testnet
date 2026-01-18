@@ -158,8 +158,8 @@ describe('IRC-over-WebSocket Protocol', () => {
       await client.register(nick);
       client.send(`JOIN ${channel}`);
 
-      // Should receive JOIN echo
-      const join = await client.waitForText(`JOIN`, 5000);
+      // Should receive JOIN echo - use specific pattern to avoid matching TARGMAX in 005
+      const join = await client.waitForText(` JOIN ${channel}`, 5000);
       expect(join).toContain(channel);
     });
 
@@ -200,8 +200,8 @@ describe('IRC-over-WebSocket Protocol', () => {
 
       client.send(`PART ${channel} :Goodbye`);
 
-      // Should receive PART echo
-      const part = await client.waitForText('PART', 5000);
+      // Should receive PART echo - use specific pattern to avoid matching TARGMAX in 005
+      const part = await client.waitForText(` PART ${channel}`, 5000);
       expect(part).toContain(channel);
     });
 
