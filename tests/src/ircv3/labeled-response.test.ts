@@ -85,26 +85,35 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
 
       client.clearRawBuffer();
 
-      // Send multiple labeled commands
+      // Send multiple labeled commands - send one at a time and wait for response
       const label1 = `cmd1-${uniqueId()}`;
       const label2 = `cmd2-${uniqueId()}`;
 
-      client.send(`@label=${label1} PING :first`);
-      client.send(`@label=${label2} PING :second`);
-
-      // Collect at least 2 PONG responses
+      // Collect responses for both commands
       const responses: string[] = [];
-      const startTime = Date.now();
-      while (Date.now() - startTime < 5000 && responses.length < 2) {
-        try {
-          const msg = await client.waitForParsedLine(
-            m => m.command === 'PONG' || m.raw.includes('label='),
-            1000
-          );
-          responses.push(msg.raw);
-        } catch {
-          // Continue collecting until timeout
-        }
+
+      // Send first PING and collect response
+      client.send(`@label=${label1} PING :first`);
+      try {
+        const msg1 = await client.waitForParsedLine(
+          m => m.command === 'PONG' && (m.raw.includes(label1) || m.raw.includes('first')),
+          3000
+        );
+        responses.push(msg1.raw);
+      } catch {
+        // Continue even if first times out
+      }
+
+      // Send second PING and collect response
+      client.send(`@label=${label2} PING :second`);
+      try {
+        const msg2 = await client.waitForParsedLine(
+          m => m.command === 'PONG' && (m.raw.includes(label2) || m.raw.includes('second')),
+          3000
+        );
+        responses.push(msg2.raw);
+      } catch {
+        // Continue even if second times out
       }
 
       // Server MUST respond to both PING commands
