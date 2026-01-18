@@ -1,14 +1,43 @@
 # ECDSA-NIST256P-CHALLENGE SASL Mechanism Investigation
 
-## Status: NOT IMPLEMENTED
+## Status: IMPLEMENTED ✅
 
 **Mechanism**: `ECDSA-NIST256P-CHALLENGE`
 
 **Reference**: [Atheme implementation](https://github.com/atheme/atheme/blob/master/modules/saslserv/ecdsa-nist256p-challenge.c)
 
-**Effort**: Medium (24-40 hours)
+**Implementation Date**: 2026-01-17
 
 **Priority**: Medium - Passwordless auth, good security
+
+---
+
+## Implementation Summary
+
+ECDSA-NIST256P-CHALLENGE has been implemented in X3 services:
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `src/nickserv.h` | Added `ecdsa_pubkey` field to `struct handle_info` |
+| `src/nickserv.c` | Added SET PUBKEY command, SASL handler, SAXDB persistence |
+
+### Usage
+
+```
+/msg NickServ SET PUBKEY <base64-compressed-pubkey>
+/msg NickServ SET PUBKEY *   (remove key)
+```
+
+### SASL Flow
+
+1. Client: `AUTHENTICATE ECDSA-NIST256P-CHALLENGE`
+2. Server: `AUTHENTICATE +`
+3. Client: `AUTHENTICATE <base64(accountname\0accountname)>`
+4. Server: `AUTHENTICATE <base64(32-byte-challenge)>`
+5. Client: `AUTHENTICATE <base64(ECDSA-signature)>`
+6. Server: `903 * :SASL authentication successful`
 
 ---
 

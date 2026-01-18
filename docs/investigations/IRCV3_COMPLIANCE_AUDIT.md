@@ -147,9 +147,9 @@
 
 ## Potential Enhancements
 
-### SASL: ECDSA-NIST256P-CHALLENGE
+### IMPLEMENTED: SASL ECDSA-NIST256P-CHALLENGE ✅
 
-**Issue**: Passwordless SASL using ECDSA public key authentication.
+**Implementation Date**: 2026-01-17
 
 **How it works**:
 1. User registers public key: `/msg NickServ SET PUBKEY <base64-key>`
@@ -163,16 +163,13 @@
 
 **Client support**: WeeChat, KICL, Irssi, Textual
 
-**Priority**: Medium
-
-**Effort**: 24-40 hours
-
 **Investigation**: [ECDSA_SASL_INVESTIGATION.md](ECDSA_SASL_INVESTIGATION.md)
 
 ---
 
 ## Recently Implemented
 
+- ✅ **ECDSA-NIST256P-CHALLENGE** - Passwordless SASL via public key authentication
 - ✅ **SNI (Server Name Indication)** - Multi-certificate TLS via feature flags
 - ✅ **STS (Strict Transport Security)** - Enforces TLS with port/duration/preload options
 - ✅ **Client tags on PRIVMSG/NOTICE** - Now relays +typing, +reply, +react, +channel-context
@@ -180,13 +177,10 @@
 
 ## Recommendations
 
-### Medium Priority
-1. **ECDSA-NIST256P-CHALLENGE** - Passwordless SASL mechanism
-
 ### Low Priority
-2. MONITOR (WATCH alternative exists)
-3. UTF8ONLY
-4. network-icon
+1. MONITOR (WATCH alternative exists)
+2. UTF8ONLY
+3. network-icon
 
 ---
 
