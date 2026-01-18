@@ -14,21 +14,20 @@
 
 ## Implementation Summary
 
-SNI support was implemented via feature flags to allow up to 2 additional hostname/certificate pairs.
+SNI support is implemented using a dedicated `SSL` config block for unlimited hostname/certificate pairs.
 
 ### Configuration
 
 ```
-features {
-    /* SNI certificate 1 */
-    "SNI_HOSTNAME1" = "irc.example.net";
-    "SNI_CERTFILE1" = "/path/to/irc.example.net.crt";
-    "SNI_KEYFILE1" = "/path/to/irc.example.net.key";
-
-    /* SNI certificate 2 */
-    "SNI_HOSTNAME2" = "server.example.net";
-    "SNI_CERTFILE2" = "/path/to/server.example.net.crt";
-    "SNI_KEYFILE2" = "/path/to/server.example.net.key";
+SSL {
+    "irc.example.net" {
+        certificate = "/path/to/irc.example.net.crt";
+        key = "/path/to/irc.example.net.key";
+    };
+    "server.example.net" {
+        certificate = "/path/to/server.example.net.crt";
+        key = "/path/to/server.example.net.key";
+    };
 };
 ```
 
@@ -36,17 +35,21 @@ features {
 
 | File | Changes |
 |------|---------|
-| `include/ircd_features.h` | Added FEAT_SNI_HOSTNAME1/2, FEAT_SNI_CERTFILE1/2, FEAT_SNI_KEYFILE1/2 |
-| `ircd/ircd_features.c` | Registered SNI feature flags |
-| `ircd/ssl.c` | Added SNI callback, certificate loading, integration with ssl_init/ssl_reinit |
+| `include/s_conf.h` | Added `struct SSLCertConf`, `sslCertConfList` extern |
+| `ircd/s_conf.c` | Added `sslCertConfList` definition, `clear_sslcert_confs()` |
+| `ircd/ircd_lexer.l` | Added `CERTIFICATE` and `KEY` tokens |
+| `ircd/ircd_parser.y` | Added `sslblock` grammar |
+| `ircd/ssl.c` | Added SNI callback, certificate loading, uses config list |
 
 ### How It Works
 
-1. On startup, `sni_init_certs()` loads configured hostname/cert pairs
-2. SNI callback registered via `SSL_CTX_set_tlsext_servername_callback()`
-3. During TLS handshake, `sni_callback()` checks client's SNI hostname
-4. If match found, `SSL_set_SSL_CTX()` switches to the matching certificate
-5. On SIGUSR1, certificates are reloaded automatically
+1. Config parser reads SSL block entries into `sslCertConfList` linked list
+2. On startup, `sni_init_certs()` loads certificates from the config list
+3. SNI callback registered via `SSL_CTX_set_tlsext_servername_callback()`
+4. During TLS handshake, `sni_callback()` checks client's SNI hostname
+5. If match found, `SSL_set_SSL_CTX()` switches to the matching certificate
+6. On rehash, `clear_sslcert_confs()` clears the list before reparsing config
+7. On SIGUSR1, certificates are reloaded automatically
 
 ---
 
