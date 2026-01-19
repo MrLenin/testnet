@@ -41,6 +41,21 @@ export const CAP_BUNDLES: Record<string, string[]> = {
 
   /** Common base capabilities for most tests */
   base: ['message-tags', 'server-time', 'multi-prefix'],
+
+  /** For testing read-marker (draft/read-marker) */
+  readMarker: ['draft/read-marker', 'server-time', 'sasl', 'message-tags'],
+
+  /** For testing labeled-response with batch support */
+  labeled: ['labeled-response', 'batch', 'message-tags'],
+
+  /** Full messaging capabilities for comprehensive tests */
+  fullMessaging: ['message-tags', 'server-time', 'echo-message', 'batch', 'labeled-response'],
+
+  /** For testing setname capability */
+  setname: ['setname', 'message-tags'],
+
+  /** For testing channel rename */
+  channelRename: ['draft/channel-rename', 'message-tags'],
 };
 
 export type CapBundle = keyof typeof CAP_BUNDLES;

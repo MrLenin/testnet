@@ -1,5 +1,12 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient, uniqueChannel, getTestAccount, setupTestAccount } from '../helpers/index.js';
+import {
+  createRawSocketClient,
+  RawSocketClient,
+  uniqueChannel,
+  getTestAccount,
+  authenticateSaslPlain,
+  getCaps,
+} from '../helpers/index.js';
 
 /**
  * Read Marker Tests (draft/read-marker)
@@ -71,13 +78,8 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       await client.capReq(['draft/read-marker', 'server-time', 'sasl']);
 
       // SASL PLAIN auth
-      client.send('AUTHENTICATE PLAIN');
-      await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 10000);
-      const payload = Buffer.from(`${account}\0${account}\0${password}`).toString('base64');
-      client.send(`AUTHENTICATE ${payload}`);
-
-      // Wait for successful auth (Keycloak can be slow)
-      await client.waitForNumeric('903', 20000);
+      const saslResult = await authenticateSaslPlain(client, account, password, 20000);
+      expect(saslResult.success, `SASL auth failed: ${saslResult.error}`).toBe(true);
 
       client.capEnd();
       client.register(`rm${account.slice(0, 6)}`);
@@ -139,11 +141,8 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       await client.capReq(['draft/read-marker', 'echo-message', 'sasl', 'message-tags']);
 
       // SASL PLAIN auth
-      client.send('AUTHENTICATE PLAIN');
-      await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
-      const payload = Buffer.from(`${account}\0${account}\0${password}`).toString('base64');
-      client.send(`AUTHENTICATE ${payload}`);
-      await client.waitForNumeric('903', 10000);
+      const saslResult = await authenticateSaslPlain(client, account, password);
+      expect(saslResult.success, `SASL auth failed: ${saslResult.error}`).toBe(true);
 
       client.capEnd();
       client.register(`rm${account.slice(0, 6)}`);
@@ -198,30 +197,20 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       // Authenticate client1
       await client1.capLs();
       await client1.capReq(['draft/read-marker', 'sasl']);
-      client1.send('AUTHENTICATE PLAIN');
-      await client1.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
-      const payload1 = Buffer.from(`${account}\0${account}\0${password}`).toString('base64');
-      client1.send(`AUTHENTICATE ${payload1}`);
-      // Extended timeout (20s) for Keycloak validation
-      await client1.waitForNumeric('903', 20000);
+      const sasl1 = await authenticateSaslPlain(client1, account, password, 20000);
+      expect(sasl1.success, `Client1 SASL failed: ${sasl1.error}`).toBe(true);
       client1.capEnd();
       client1.register(`sync1${account.slice(0, 4)}`);
       await client1.waitForNumeric('001');
 
       // Allow time for positive auth cache to be populated before second auth
-      // This ensures client2 can use the cached credentials
       await new Promise(r => setTimeout(r, 500));
 
       // Authenticate client2 to SAME account
       await client2.capLs();
       await client2.capReq(['draft/read-marker', 'sasl']);
-      client2.send('AUTHENTICATE PLAIN');
-      await client2.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
-      const payload2 = Buffer.from(`${account}\0${account}\0${password}`).toString('base64');
-      client2.send(`AUTHENTICATE ${payload2}`);
-      // Extended timeout (25s) for Keycloak validation - second auth should use positive cache
-      // but we allow extra time in case cache isn't populated yet
-      await client2.waitForNumeric('903', 25000);
+      const sasl2 = await authenticateSaslPlain(client2, account, password, 25000);
+      expect(sasl2.success, `Client2 SASL failed: ${sasl2.error}`).toBe(true);
       client2.capEnd();
       client2.register(`sync2${account.slice(0, 4)}`);
       await client2.waitForNumeric('001');
@@ -322,11 +311,8 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       await client.capLs();
       await client.capReq(['draft/read-marker', 'sasl', 'standard-replies']);
 
-      client.send('AUTHENTICATE PLAIN');
-      await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
-      const payload = Buffer.from(`${account}\0${account}\0${password}`).toString('base64');
-      client.send(`AUTHENTICATE ${payload}`);
-      await client.waitForNumeric('903', 10000);
+      const saslResult = await authenticateSaslPlain(client, account, password);
+      expect(saslResult.success, `SASL auth failed: ${saslResult.error}`).toBe(true);
 
       client.capEnd();
       client.register(`rm${account.slice(0, 6)}`);
@@ -367,12 +353,8 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       // Authenticate client1
       await client1.capLs();
       await client1.capReq(['draft/read-marker', 'sasl']);
-      client1.send('AUTHENTICATE PLAIN');
-      await client1.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
-      const payload = Buffer.from(`${account}\0${account}\0${password}`).toString('base64');
-      client1.send(`AUTHENTICATE ${payload}`);
-      // Extended timeout (20s) for Keycloak validation which can be slow
-      await client1.waitForNumeric('903', 20000);
+      const saslResult = await authenticateSaslPlain(client1, account, password, 20000);
+      expect(saslResult.success, `SASL auth failed: ${saslResult.error}`).toBe(true);
       client1.capEnd();
 
       const nick1 = `pmrm1${account.slice(0, 4)}`;

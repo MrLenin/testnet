@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId, isKeycloakAvailable } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId, isKeycloakAvailable, authenticateSaslPlain } from '../helpers/index.js';
 
 /**
  * Keycloak Integration Tests
@@ -1502,13 +1502,12 @@ async function authenticateSecondUser(
     await client.capLs();
     await client.capReq(['sasl']);
 
-    client.send('AUTHENTICATE PLAIN');
-    await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
+    const result = await authenticateSaslPlain(client, username, password);
+    if (!result.success) {
+      client.close();
+      return null;
+    }
 
-    const payload = Buffer.from(`${username}\0${username}\0${password}`).toString('base64');
-    client.send(`AUTHENTICATE ${payload}`);
-
-    await client.waitForNumeric('903', 5000);
     client.capEnd();
     client.register(`${username.slice(0, 7)}${uniqueId().slice(0,3)}`);
     await client.waitForNumeric('001');
@@ -1575,14 +1574,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
       await client.capLs();
       await client.capReq(['sasl']);
 
-      client.send('AUTHENTICATE PLAIN');
-      await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
-
-      const payload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
-      client.send(`AUTHENTICATE ${payload}`);
-
-      // SASL auth should always succeed with Keycloak
-      await client.waitForNumeric('903', 5000);
+      const saslResult = await authenticateSaslPlain(client, TEST_USER, TEST_PASS);
+      expect(saslResult.success, `SASL auth failed: ${saslResult.error}`).toBe(true);
 
       client.capEnd();
       client.register(`bisync${uniqueId().slice(0,4)}`);
@@ -1651,14 +1644,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         await ownerClient.capLs();
         await ownerClient.capReq(['sasl']);
 
-        ownerClient.send('AUTHENTICATE PLAIN');
-        await ownerClient.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
-
-        const ownerPayload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
-        ownerClient.send(`AUTHENTICATE ${ownerPayload}`);
-
-        // SASL auth should always succeed with Keycloak
-        await ownerClient.waitForNumeric('903', 5000);
+        const saslResult = await authenticateSaslPlain(ownerClient, TEST_USER, TEST_PASS);
+        expect(saslResult.success, `SASL auth failed: ${saslResult.error}`).toBe(true);
 
         ownerClient.capEnd();
         ownerClient.register(`bisown${uniqueId().slice(0,4)}`);
@@ -1751,14 +1738,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         await ownerClient.capLs();
         await ownerClient.capReq(['sasl']);
 
-        ownerClient.send('AUTHENTICATE PLAIN');
-        await ownerClient.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
-
-        const payload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
-        ownerClient.send(`AUTHENTICATE ${payload}`);
-
-        // SASL auth should always succeed with Keycloak
-        await ownerClient.waitForNumeric('903', 5000);
+        const saslResult = await authenticateSaslPlain(ownerClient, TEST_USER, TEST_PASS);
+        expect(saslResult.success, `SASL auth failed: ${saslResult.error}`).toBe(true);
 
         ownerClient.capEnd();
         ownerClient.register(`clvl${uniqueId().slice(0,4)}`);
@@ -1862,14 +1843,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
         await ownerClient.capLs();
         await ownerClient.capReq(['sasl']);
 
-        ownerClient.send('AUTHENTICATE PLAIN');
-        await ownerClient.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
-
-        const payload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
-        ownerClient.send(`AUTHENTICATE ${payload}`);
-
-        // SASL auth should always succeed with Keycloak
-        await ownerClient.waitForNumeric('903', 5000);
+        const saslResult = await authenticateSaslPlain(ownerClient, TEST_USER, TEST_PASS);
+        expect(saslResult.success, `SASL auth failed: ${saslResult.error}`).toBe(true);
 
         ownerClient.capEnd();
         ownerClient.register(`delown${uniqueId().slice(0,4)}`);
@@ -1951,14 +1926,8 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Bidirectional Sync', () => {
       await client.capLs();
       await client.capReq(['sasl']);
 
-      client.send('AUTHENTICATE PLAIN');
-      await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 10000);
-
-      const payload = Buffer.from(`${TEST_USER}\0${TEST_USER}\0${TEST_PASS}`).toString('base64');
-      client.send(`AUTHENTICATE ${payload}`);
-
-      // SASL auth should always succeed with Keycloak (extended timeout for Keycloak latency)
-      await client.waitForNumeric('903', 15000);
+      const saslResult = await authenticateSaslPlain(client, TEST_USER, TEST_PASS, 15000);
+      expect(saslResult.success, `SASL auth failed: ${saslResult.error}`).toBe(true);
 
       client.capEnd();
       client.register(`unreg${uniqueId().slice(0,4)}`);

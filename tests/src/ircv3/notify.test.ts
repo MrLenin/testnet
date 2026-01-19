@@ -70,7 +70,6 @@ describe('IRCv3 away-notify', () => {
       awayer.send(`JOIN ${channel}`);
       await observer.waitForJoin(channel);
       await awayer.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 500));
 
       observer.clearRawBuffer();
 
@@ -108,7 +107,6 @@ describe('IRCv3 away-notify', () => {
       awayer.send(`JOIN ${channel}`);
       await observer.waitForJoin(channel);
       await awayer.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 500));
 
       // Go away first
       awayer.send('AWAY :BRB');
@@ -154,7 +152,6 @@ describe('IRCv3 away-notify', () => {
       awayer.send('JOIN #awayuser3channel');
       await observer.waitForJoin('#awayobs3channel');
       await awayer.waitForJoin('#awayuser3channel');
-      await new Promise(r => setTimeout(r, 500));
 
       observer.clearRawBuffer();
 
@@ -199,7 +196,6 @@ describe('IRCv3 away-notify', () => {
       awayer.send(`JOIN ${channel}`);
       await observer.waitForJoin(channel);
       await awayer.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 500));
 
       observer.clearRawBuffer();
 
@@ -249,7 +245,6 @@ describe('IRCv3 away-notify', () => {
       const channel = uniqueChannel('awayjoin');
       observer.send(`JOIN ${channel}`);
       await observer.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       observer.clearRawBuffer();
 
@@ -378,7 +373,6 @@ describe('IRCv3 account-notify', () => {
       const channel = uniqueChannel('extjoin');
       client1.send(`JOIN ${channel}`);
       await client1.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       client1.clearRawBuffer();
 
@@ -463,7 +457,6 @@ describe('IRCv3 invite-notify', () => {
       // Member joins the channel first (before +i is set)
       member.send(`JOIN ${channel}`);
       await member.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       // Now set channel invite-only
       op.send(`MODE ${channel} +i`);

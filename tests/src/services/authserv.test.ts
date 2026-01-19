@@ -21,6 +21,8 @@ import {
   setupTestAccount,
   releaseTestAccount,
   uniqueId,
+  assertServiceSuccess,
+  assertServiceError,
 } from '../helpers/index.js';
 
 describe('AuthServ', () => {
@@ -146,11 +148,9 @@ describe('AuthServ', () => {
       const client2 = trackClient(await createX3Client());
       const authResult = await client2.auth(account, password);
 
-      expect(authResult.lines.length).toBeGreaterThan(0);
+      // Should succeed with acknowledgment message
+      assertServiceSuccess(authResult, /authorized|authenticated|greeting|welcome|recognize/i);
       console.log('AUTH response:', authResult.lines);
-
-      // Should succeed
-      expect(authResult.success).toBe(true);
     });
 
     it('should reject authentication with wrong password', { retry: 2 }, async () => {
@@ -163,15 +163,9 @@ describe('AuthServ', () => {
       const client2 = trackClient(await createX3Client());
       const authResult = await client2.auth(account, 'wrongpassword');
 
-      expect(authResult.lines.length).toBeGreaterThan(0);
+      // Should fail with incorrect password message
+      assertServiceError(authResult, /incorrect|wrong|invalid|denied/i);
       console.log('Wrong password response:', authResult.lines);
-
-      // Should fail - X3 returns "Incorrect password; please try again."
-      expect(authResult.success).toBe(false);
-      // Error may or may not be populated depending on timing
-      if (authResult.error) {
-        expect(authResult.error).toContain('Incorrect');
-      }
     });
 
     it('should reject authentication for non-existent account', async () => {
@@ -180,11 +174,9 @@ describe('AuthServ', () => {
 
       const authResult = await client.auth(fakeAccount, 'anypassword');
 
-      expect(authResult.lines.length).toBeGreaterThan(0);
+      // Should fail with account not found message
+      assertServiceError(authResult, /not registered|unknown|no such|not found|could not find/i);
       console.log('Non-existent account response:', authResult.lines);
-
-      // Should fail
-      expect(authResult.success).toBe(false);
     });
 
     it('should report authentication status via ACCOUNTINFO', async () => {

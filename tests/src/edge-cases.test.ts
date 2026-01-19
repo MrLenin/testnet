@@ -46,7 +46,6 @@ describe('Edge Cases', () => {
       receiver.send(`JOIN ${channel}`);
       await sender.waitForJoin(channel);
       await receiver.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       receiver.clearRawBuffer();
 
@@ -84,7 +83,6 @@ describe('Edge Cases', () => {
       receiver.send(`JOIN ${channel}`);
       await sender.waitForJoin(channel);
       await receiver.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       receiver.clearRawBuffer();
 
@@ -122,7 +120,6 @@ describe('Edge Cases', () => {
       receiver.send(`JOIN ${channel}`);
       await sender.waitForJoin(channel);
       await receiver.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       receiver.clearRawBuffer();
 
@@ -157,7 +154,6 @@ describe('Edge Cases', () => {
       receiver.send(`JOIN ${channel}`);
       await sender.waitForJoin(channel);
       await receiver.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       receiver.clearRawBuffer();
 
@@ -349,7 +345,6 @@ describe('Edge Cases', () => {
       receiver.send(`JOIN ${channel}`);
       await sender.waitForJoin(channel);
       await receiver.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       // Send multiple messages rapidly
       for (let i = 0; i < 10; i++) {
@@ -413,7 +408,6 @@ describe('Edge Cases', () => {
       const channel = uniqueChannel('samemode');
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       // First remove +m so we can set it, then set twice
       client.send(`MODE ${channel} -m`);
@@ -453,7 +447,6 @@ describe('Edge Cases', () => {
       const channel = uniqueChannel('unsetmode');
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       // Ensure -m is not set first, then try to unset it again
       client.send(`MODE ${channel} -m`);
@@ -527,7 +520,6 @@ describe('Edge Cases', () => {
       receiver.send(`JOIN ${channel}`);
       await sender.waitForJoin(channel);
       await receiver.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       receiver.clearRawBuffer();
 

@@ -187,3 +187,51 @@ export {
   getGlobalObserverNick,
   shutdownGlobalCookieObserver,
 } from './cookie-observer.js';
+
+export {
+  // SASL authentication helpers
+  authenticateSaslPlain,
+  authenticateSaslOAuthBearer,
+  sendSaslPayload,
+  performSaslAuth,
+  abortSaslAuth,
+  type SaslResult,
+} from './sasl.js';
+
+export {
+  // IRCv3-specific wait helpers
+  waitForMarkread,
+  waitForLabeledResponse,
+  waitForBatchComplete,
+  waitForMetadata,
+  waitForCapAck,
+  waitForTagmsg,
+  waitForStandardReply,
+  type LabeledResponseResult,
+  type BatchResult,
+  type MetadataResult,
+} from './ircv3-wait.js';
+
+export {
+  // Keycloak synchronization helpers
+  waitForKeycloakAttribute,
+  waitForKeycloakGroup,
+  waitForKeycloakUser,
+  waitForKeycloakEnabled,
+  getKeycloakAdminToken,
+  getKeycloakUserToken,
+} from './keycloak-sync.js';
+
+export {
+  // Test assertion helpers
+  assertServiceSuccess,
+  assertServiceError,
+  assertHasMatchingItem,
+  assertNoMatchingItem,
+  assertMessage,
+  assertNumericReply,
+  assertLinesContain,
+  assertBatchValid,
+  assertNotError,
+  type ExpectedMessage,
+} from './assertions.js';

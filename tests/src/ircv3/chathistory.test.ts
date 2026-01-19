@@ -225,7 +225,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
         msg => (msg.command === 'BATCH' && msg.raw.includes('chathistory')) || msg.command === 'CHATHISTORY',
         5000
       );
-      expect(response).toBeDefined();
+      expect(response.command, 'Should get BATCH or CHATHISTORY response').toMatch(/BATCH|CHATHISTORY/);
       console.log('CHATHISTORY TARGETS response:', response.raw);
       client.send('QUIT');
     });
@@ -324,7 +324,11 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
                /no.*history|not.*member|cannot/i.test(msg.trailing || ''),
         3000
       );
-      expect(response).toBeDefined();
+      // Should be either FAIL, BATCH (empty), or error numeric
+      expect(
+        response.command === 'FAIL' || response.command === 'BATCH' || /^4\d\d$/.test(response.command),
+        'Should get FAIL, BATCH, or error response'
+      ).toBe(true);
       console.log('Unauthorized history error:', response.raw);
       client.send('QUIT');
     });
@@ -396,7 +400,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.send(`CHATHISTORY LATEST ${channelName} * 3`);
 
       const batchStart = await client.waitForBatchStart('chathistory', 5000);
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const messages: string[] = [];
       while (true) {
@@ -441,7 +445,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
         msg => msg.command === 'BATCH' || msg.command === 'FAIL',
         8000
       );
-      expect(response).toBeDefined();
+      expect(response.command, 'Should get BATCH or FAIL response').toMatch(/BATCH|FAIL/);
       console.log('Zero limit response:', response.raw);
       client.send('QUIT');
     });
@@ -473,7 +477,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
         msg => msg.command === 'BATCH' || msg.command === 'FAIL',
         8000
       );
-      expect(response).toBeDefined();
+      expect(response.command, 'Should get BATCH or FAIL response').toMatch(/BATCH|FAIL/);
       console.log('Large limit response:', response.raw);
       client.send('QUIT');
     });
@@ -515,7 +519,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // MUST receive batch
       const batchStart = await client.waitForBatchStart('chathistory', 5000);
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const messages: string[] = [];
       while (true) {
@@ -582,7 +586,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // MUST receive batch
       const batchStart = await client.waitForBatchStart('chathistory', 5000);
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const messages: string[] = [];
       while (true) {
@@ -646,7 +650,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // MUST receive a batch - no try/catch, test fails if no response
       const batchStart = await client1.waitForBatchStart('chathistory', 5000);
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const messages: string[] = [];
       // Collect messages until batch end
@@ -708,7 +712,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // MUST receive a batch - test fails if no response
       const batchStart = await client1.waitForBatchStart('chathistory', 5000);
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const messages: string[] = [];
       // Collect messages until batch end
@@ -763,7 +767,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // MUST receive a batch - test fails if no response
       const batchStart = await client1.waitForBatchStart('chathistory', 5000);
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const messages: string[] = [];
       // Collect messages until batch end
@@ -818,7 +822,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // MUST receive a batch - test fails if no response
       const batchStart = await client1.waitForBatchStart('chathistory', 5000);
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const messages: string[] = [];
       // Collect messages until batch end
@@ -878,7 +882,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // MUST receive a batch - test fails if no response
       const batchStart = await client1.waitForBatchStart('chathistory', 5000);
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const messages: string[] = [];
       // Collect messages until batch end
@@ -948,7 +952,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // MUST receive a batch - test fails if no response
       const batchStart = await client1.waitForBatchStart('chathistory', 5000);
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const messages: string[] = [];
       // Collect messages until batch end
@@ -1310,8 +1314,8 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
                msg.raw.includes('CHATHISTORY') && msg.raw.includes('INVALID_PARAMS'),
         5000
       );
-      expect(response).toBeDefined();
-      expect(response.raw).toContain('INVALID_PARAMS');
+      expect(response.command, 'Should get FAIL or NOTICE response').toMatch(/FAIL|NOTICE/);
+      expect(response.raw, 'Response should contain INVALID_PARAMS').toContain('INVALID_PARAMS');
       console.log('Server correctly rejected invalid timestamp:', response.raw);
 
       client.send('QUIT');
@@ -1344,7 +1348,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // MUST receive batch
       const batchStart = await client.waitForBatchStart('chathistory', 5000);
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const messages: string[] = [];
       while (true) {
@@ -1394,7 +1398,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // MUST receive batch
       const batchStart = await client.waitForBatchStart('chathistory', 5000);
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const privmsgs: string[] = [];
       const notices: string[] = [];
@@ -1448,7 +1452,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // MUST receive batch
       const batchStart = await client.waitForBatchStart('chathistory', 5000);
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const messages: string[] = [];
       while (true) {
@@ -1506,7 +1510,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // MUST receive batch
       const batchStart = await client.waitForBatchStart('chathistory', 5000);
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const messages: string[] = [];
       while (true) {
@@ -1570,7 +1574,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // MUST receive batch
       const batchStart = await client1.waitForBatchStart('chathistory', 5000);
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const joins: string[] = [];
       while (true) {
@@ -1628,7 +1632,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // MUST receive batch
       const batchStart = await client1.waitForBatchStart('chathistory', 5000);
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const parts: string[] = [];
       while (true) {
@@ -1688,7 +1692,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // MUST receive batch
       const batchStart = await op.waitForBatchStart('chathistory', 5000);
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const kicks: string[] = [];
       while (true) {
@@ -1748,7 +1752,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // MUST receive batch
       const batchStart = await client1.waitForBatchStart('chathistory', 5000);
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const quits: string[] = [];
       while (true) {
@@ -1978,7 +1982,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // MUST receive batch
       const batchStart = await client.waitForBatchStart('chathistory', 5000);
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const afterFirst: string[] = [];
       while (true) {
@@ -2036,7 +2040,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // MUST receive batch
       const batchStart = await client.waitForBatchStart('chathistory', 5000);
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
       const batchMatch = batchStart.raw.match(/BATCH \+(\S+)/);
       expect(batchMatch).not.toBeNull();
       const batchId = batchMatch![1];

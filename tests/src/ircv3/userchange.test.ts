@@ -92,7 +92,6 @@ describe('IRCv3 setname', () => {
       observer.send(`JOIN ${channel}`);
       await changer.waitForJoin(channel);
       await observer.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       observer.clearRawBuffer();
 
@@ -155,7 +154,6 @@ describe('IRCv3 setname', () => {
       observer.send(`JOIN ${channel}`);
       await changer.waitForJoin(channel);
       await observer.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       observer.clearRawBuffer();
 
@@ -395,7 +393,6 @@ describe('IRCv3 account-tag', () => {
       receiver.send(`JOIN ${channel}`);
       await sender.waitForJoin(channel);
       await receiver.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       receiver.clearRawBuffer();
 
