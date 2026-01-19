@@ -108,7 +108,6 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send(`JOIN ${channelName}`);
       await client1.waitForJoin(channelName);
       await client2.waitForJoin(channelName);
-      await new Promise(r => setTimeout(r, 500));
 
       // Send multiline message using BATCH
       const batchId = `ml${uniqueId()}`;
@@ -162,8 +161,6 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       const channelName = uniqueChannel('mlcont');
       client.send(`JOIN ${channelName}`);
       await client.waitForJoin(channelName);
-      // Wait for all post-join messages
-      await new Promise(r => setTimeout(r, 500));
       // Clear buffer to capture only echo response
       client.clearRawBuffer();
 
@@ -323,8 +320,6 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client.send(`JOIN ${channelName}`);
       await client.waitForJoin(channelName);
 
-      // Wait for post-join messages to complete
-      await new Promise(r => setTimeout(r, 300));
       client.clearRawBuffer();
 
       // Send multiline with label
@@ -546,8 +541,6 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       await client1.waitForJoin(channelName);
       client2.send(`JOIN ${channelName}`);
       await client2.waitForJoin(channelName);
-
-      await new Promise(resolve => setTimeout(resolve, 500));
       client1.clearRawBuffer();
 
       // Send labeled multiline batch
@@ -608,8 +601,6 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       await client1.waitForJoin(channelName);
       client2.send(`JOIN ${channelName}`);
       await client2.waitForJoin(channelName);
-
-      await new Promise(resolve => setTimeout(resolve, 500));
       client2.clearRawBuffer();
 
       // Send medium-size multiline (8 lines - should trigger 4-line truncation)
@@ -682,8 +673,6 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       await client1.waitForJoin(channelName);
       client2.send(`JOIN ${channelName}`);
       await client2.waitForJoin(channelName);
-
-      await new Promise(resolve => setTimeout(resolve, 1000));
       client2.clearRawBuffer();
 
       // Send large multiline (triggers truncation with retrieval hint)
@@ -775,8 +764,6 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       await client1.waitForJoin(channelName);
       client2.send(`JOIN ${channelName}`);
       await client2.waitForJoin(channelName);
-
-      await new Promise(resolve => setTimeout(resolve, 500));
       client2.clearRawBuffer();
 
       // Send multiline message
@@ -1172,8 +1159,6 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       await client1.waitForJoin(channelName);
       client2.send(`JOIN ${channelName}`);
       await client2.waitForJoin(channelName);
-
-      await new Promise(resolve => setTimeout(resolve, 1000));
       client1.clearRawBuffer();
       client2.clearRawBuffer();
 
@@ -1372,8 +1357,6 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       await client1.waitForJoin(channelName);
       client2.send(`JOIN ${channelName}`);
       await client2.waitForJoin(channelName);
-
-      await new Promise(resolve => setTimeout(resolve, 500));
       client1.clearRawBuffer();
       client2.clearRawBuffer();
 

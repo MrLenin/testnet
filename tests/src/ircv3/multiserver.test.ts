@@ -17,6 +17,7 @@ import {
   SECONDARY_SERVER,
   uniqueChannel,
   uniqueId,
+  authenticateSaslPlain,
   // P10 protocol helpers
   getP10Logs,
   parseBurst,
@@ -252,22 +253,16 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
         return;
       }
 
-      // Attempt SASL auth
-      client.send('AUTHENTICATE PLAIN');
-
-      try {
-        await client.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+', 3000);
-        const payload = Buffer.from(`${testAccount}\0${testAccount}\0${testPassword}`).toString('base64');
-        client.send(`AUTHENTICATE ${payload}`);
-
-        // Wait for result (success or failure)
-        const result = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 5000);
-        // If we get here, SASL interaction worked (success or failure is fine)
-        expect(result.command).toMatch(/90[0-9]/);
-      } catch {
-        // SASL not working - this is okay, it just means no account is configured
-        console.log('SASL not configured with test account');
+      // Attempt SASL auth - success or failure is okay, we're testing the SASL flow works
+      const result = await authenticateSaslPlain(client, testAccount, testPassword, 5000);
+      // Log outcome - both success and failure are acceptable (just testing the flow)
+      if (result.success) {
+        console.log(`SASL auth succeeded on secondary server as ${result.account}`);
+      } else {
+        console.log(`SASL auth response: ${result.numeric || result.error}`);
       }
+      // We expect either success or a valid error numeric - the point is SASL flow worked
+      expect(result.numeric || result.error, 'SASL flow should produce numeric or error').toBeTruthy();
 
       client.capEnd();
       client.send('QUIT');
@@ -1072,13 +1067,13 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
         msg => msg.command === 'MARKREAD' || msg.command === '730',
         3000
       );
-      expect(markread1).toBeDefined();
+      expect(markread1.command, 'Should get MARKREAD or 730 response').toMatch(/MARKREAD|730/);
 
       const markread2 = await client2.waitForParsedLine(
         msg => msg.command === 'MARKREAD' || msg.command === '730',
         3000
       );
-      expect(markread2).toBeDefined();
+      expect(markread2.command, 'Should get MARKREAD or 730 response').toMatch(/MARKREAD|730/);
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -1410,7 +1405,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
         msg => msg.command === 'METADATA' && msg.raw.toLowerCase().includes('testkey'),
         5000
       );
-      expect(response).toBeDefined();
+      expect(response.command, 'Should get METADATA response').toBe('METADATA');
 
       setter.send('QUIT');
       querier.send('QUIT');
@@ -1467,7 +1462,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
         msg => msg.command === 'METADATA' && msg.raw.toLowerCase().includes('avatar'),
         5000
       );
-      expect(notification).toBeDefined();
+      expect(notification.command, 'Should get METADATA notification').toBe('METADATA');
 
       setter.send('QUIT');
       subscriber.send('QUIT');
@@ -1717,7 +1712,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
         m => m.command === 'BATCH' && m.params[0]?.startsWith('+') && m.raw.includes('chathistory'),
         5000
       );
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const messages: string[] = [];
       const startTime = Date.now();
@@ -1815,7 +1810,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
         m => m.command === 'BATCH' && m.params[0]?.startsWith('+') && m.raw.includes('chathistory'),
         5000
       );
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const messages: string[] = [];
       while (true) {
@@ -1886,7 +1881,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
         m => m.command === 'BATCH' && m.params[0]?.startsWith('+') && m.raw.includes('chathistory'),
         5000
       );
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const messages: string[] = [];
       while (true) {
@@ -2024,7 +2019,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
         m => m.command === 'BATCH' && m.params[0]?.startsWith('+') && m.raw.includes('chathistory'),
         5000
       );
-      expect(batchStart).toBeDefined();
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const messages: string[] = [];
       while (true) {
@@ -2106,7 +2101,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
         m => m.command === 'BATCH' && m.params[0]?.startsWith('+') && m.raw.includes('chathistory'),
         5000
       );
-      expect(batch1).toBeDefined();
+      expect(batch1.command, 'Should receive BATCH start').toBe('BATCH');
 
       const client1Messages: string[] = [];
       while (true) {
@@ -2126,7 +2121,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
         m => m.command === 'BATCH' && m.params[0]?.startsWith('+') && m.raw.includes('chathistory'),
         5000
       );
-      expect(batch2).toBeDefined();
+      expect(batch2.command, 'Should receive BATCH start').toBe('BATCH');
 
       const client2Messages: string[] = [];
       while (true) {

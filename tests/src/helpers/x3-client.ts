@@ -24,6 +24,7 @@
 import { RawSocketClient, createRawSocketClient, PRIMARY_SERVER, IRCMessage, isFromService } from './ircv3-client.js';
 import { uniqueId, retryAsync, waitForCondition } from './cap-bundles.js';
 import { checkoutPoolAccount, checkinPoolAccount, isPoolInitialized, type PoolAccount } from './account-pool.js';
+import { authenticateSaslPlain } from './sasl.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -922,21 +923,9 @@ export async function createAuthenticatedX3Client(
   const caps = await client.capReq(['sasl']);
 
   if (caps.ack.includes('sasl')) {
-    client.send('AUTHENTICATE PLAIN');
-    try {
-      await client.waitForLine(/AUTHENTICATE \+/, 5000);
-
-      // Encode credentials
-      const credentials = Buffer.from(`${username}\0${username}\0${password}`).toString('base64');
-      client.send(`AUTHENTICATE ${credentials}`);
-
-      // Wait for success or failure
-      const result = await client.waitForLine(/903|904|905|906/, 10000);
-      if (!result.includes('903')) {
-        throw new Error('SASL authentication failed');
-      }
-    } catch {
-      // SASL failed, continue without auth
+    const result = await authenticateSaslPlain(client, username, password);
+    if (!result.success) {
+      throw new Error(`SASL authentication failed: ${result.error}`);
     }
   }
 

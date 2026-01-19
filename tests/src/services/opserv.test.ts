@@ -30,6 +30,8 @@ import {
   createX3Client,
   createOperClient,
   uniqueId,
+  assertServiceSuccess,
+  assertServiceError,
 } from '../helpers/index.js';
 
 describe('OpServ (O3)', () => {
@@ -60,7 +62,9 @@ describe('OpServ (O3)', () => {
       const lines = await client.serviceCmd('O3', 'HELP');
       console.log('O3 HELP response (first 5):', lines.slice(0, 5));
 
-      expect(lines.length).toBeGreaterThan(0);
+      expect(lines.length, 'Expected HELP response').toBeGreaterThan(0);
+      // Should contain O3/OpServ reference or command list
+      expect(lines.some(l => /O3|OpServ|command|HELP/i.test(l))).toBe(true);
     });
 
     it('should report access level via MYACCESS', async () => {
@@ -215,9 +219,11 @@ describe('OpServ (O3)', () => {
       const lines = await client.serviceCmd('O3', 'STATS');
       console.log('STATS response:', lines);
 
-      expect(lines.length).toBeGreaterThan(0);
+      expect(lines.length, 'Expected STATS response').toBeGreaterThan(0);
       // Should get actual stats, not "privileged service"
-      expect(lines.some(l => l.includes('privileged'))).toBe(false);
+      expect(lines.some(l => l.includes('privileged')), 'Should not get privileged error').toBe(false);
+      // Should contain stats-related content
+      expect(lines.some(l => /stat|uptime|user|channel|server/i.test(l)), 'Should contain stats content').toBe(true);
     });
 
     it('should respond to STATS UPLINK command', async () => {
@@ -227,8 +233,10 @@ describe('OpServ (O3)', () => {
       const lines = await client.serviceCmd('O3', 'STATS UPLINK');
       console.log('STATS UPLINK response:', lines);
 
-      expect(lines.length).toBeGreaterThan(0);
-      expect(lines.some(l => l.includes('privileged'))).toBe(false);
+      expect(lines.length, 'Expected STATS UPLINK response').toBeGreaterThan(0);
+      expect(lines.some(l => l.includes('privileged')), 'Should not get privileged error').toBe(false);
+      // Should contain uplink/server connection info
+      expect(lines.some(l => /uplink|server|link|connect/i.test(l)), 'Should contain uplink info').toBe(true);
     });
 
     it('should respond to STATS UPTIME command', async () => {
@@ -238,8 +246,10 @@ describe('OpServ (O3)', () => {
       const lines = await client.serviceCmd('O3', 'STATS UPTIME');
       console.log('STATS UPTIME response:', lines);
 
-      expect(lines.length).toBeGreaterThan(0);
-      expect(lines.some(l => l.includes('privileged'))).toBe(false);
+      expect(lines.length, 'Expected STATS UPTIME response').toBeGreaterThan(0);
+      expect(lines.some(l => l.includes('privileged')), 'Should not get privileged error').toBe(false);
+      // Should contain uptime info (time units)
+      expect(lines.some(l => /uptime|day|hour|minute|second/i.test(l)), 'Should contain uptime info').toBe(true);
     });
   });
 
@@ -252,9 +262,9 @@ describe('OpServ (O3)', () => {
       const lines = await client.serviceCmd('O3', 'GLINE');
       console.log('Empty GLINE response:', lines);
 
-      expect(lines.length).toBeGreaterThan(0);
+      expect(lines.length, 'Expected GLINE usage response').toBeGreaterThan(0);
       // Should NOT get "privileged service" since we're an oper
-      expect(lines.some(l => l.includes('privileged'))).toBe(false);
+      expect(lines.some(l => l.includes('privileged')), 'Should not get privileged error').toBe(false);
       // Should get usage/syntax error
       const hasUsageError = lines.some(l =>
         l.toLowerCase().includes('usage') ||
@@ -264,7 +274,7 @@ describe('OpServ (O3)', () => {
         l.toLowerCase().includes('missing') ||
         l.toLowerCase().includes('requires')
       );
-      expect(hasUsageError).toBe(true);
+      expect(hasUsageError, 'Should get usage/syntax error for GLINE without args').toBe(true);
     });
 
     it('should handle unknown command gracefully', async () => {
@@ -274,16 +284,16 @@ describe('OpServ (O3)', () => {
       const lines = await client.serviceCmd('O3', 'UNKNOWNCOMMAND123');
       console.log('Unknown command response:', lines);
 
-      expect(lines.length).toBeGreaterThan(0);
+      expect(lines.length, 'Expected unknown command response').toBeGreaterThan(0);
       // Should NOT get "privileged service" since we're an oper
-      expect(lines.some(l => l.includes('privileged'))).toBe(false);
+      expect(lines.some(l => l.includes('privileged')), 'Should not get privileged error').toBe(false);
       // Should get "unknown command" or similar error
       const hasUnknownError = lines.some(l =>
         l.toLowerCase().includes('unknown') ||
         l.toLowerCase().includes('invalid') ||
         l.toLowerCase().includes('unrecognized')
       );
-      expect(hasUnknownError).toBe(true);
+      expect(hasUnknownError, 'Should get unknown/invalid command error').toBe(true);
     });
   });
 });

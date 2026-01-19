@@ -70,8 +70,8 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
         5000
       );
       // Response should indicate success, failure, or authentication requirement
-      expect(response).toBeDefined();
-      expect(response.command.length).toBeGreaterThan(0);
+      expect(response.command === 'WEBPUSH' || response.command === 'FAIL' || /^[49]\d\d$/.test(response.command),
+        `Should get WEBPUSH, FAIL, or error numeric, got: ${response.command}`).toBe(true);
 
       client.send('QUIT');
     });
@@ -105,8 +105,8 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
                /^4\d\d$/.test(msg.command) || msg.raw.includes('ACCOUNT'),
         5000
       );
-      expect(response).toBeDefined();
-      expect(response.command.length).toBeGreaterThan(0);
+      expect(response.command === 'WEBPUSH' || response.command === 'FAIL' || /^4\d\d$/.test(response.command),
+        `Should get WEBPUSH, FAIL, or error numeric, got: ${response.command}`).toBe(true);
 
       client.send('QUIT');
     });
@@ -130,8 +130,8 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
                /^4\d\d$/.test(msg.command) || msg.raw.includes('ACCOUNT'),
         5000
       );
-      expect(response).toBeDefined();
-      expect(response.command.length).toBeGreaterThan(0);
+      expect(response.command === 'WEBPUSH' || response.command === 'FAIL' || /^4\d\d$/.test(response.command),
+        `Should get WEBPUSH, FAIL, or error numeric, got: ${response.command}`).toBe(true);
 
       client.send('QUIT');
     });
@@ -158,8 +158,8 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
                /^4\d\d$/.test(msg.command) || msg.raw.includes('ACCOUNT'),
         5000
       );
-      expect(response).toBeDefined();
-      expect(response.command.length).toBeGreaterThan(0);
+      expect(response.command === 'WEBPUSH' || response.command === 'FAIL' || /^4\d\d$/.test(response.command),
+        `Should get WEBPUSH, FAIL, or error numeric, got: ${response.command}`).toBe(true);
 
       client.send('QUIT');
     });
@@ -186,8 +186,8 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
                /^4\d\d$/.test(msg.command) || msg.raw.includes('ACCOUNT'),
         5000
       );
-      expect(response).toBeDefined();
-      expect(response.command.length).toBeGreaterThan(0);
+      expect(response.command === 'WEBPUSH' || response.command === 'FAIL' || /^4\d\d$/.test(response.command),
+        `Should get WEBPUSH, FAIL, or error numeric, got: ${response.command}`).toBe(true);
 
       client.send('QUIT');
     });
@@ -212,8 +212,8 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
                /^4\d\d$/.test(msg.command) || msg.raw.includes('ACCOUNT'),
         5000
       );
-      expect(response).toBeDefined();
-      expect(response.command.length).toBeGreaterThan(0);
+      expect(response.command === 'WEBPUSH' || response.command === 'FAIL' || /^4\d\d$/.test(response.command),
+        `Should get WEBPUSH, FAIL, or error numeric, got: ${response.command}`).toBe(true);
 
       client.send('QUIT');
     });
@@ -293,9 +293,8 @@ describe('IRCv3 Event Playback (draft/event-playback)', () => {
         msg => msg.command === 'BATCH' && msg.params[0]?.startsWith('+') && msg.params[1] === 'chathistory',
         5000
       );
-      expect(batchStart).toBeDefined();
-      expect(batchStart.command).toBe('BATCH');
-      expect(batchStart.params[1]).toBe('chathistory');
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
+      expect(batchStart.params[1], 'Batch type should be chathistory').toBe('chathistory');
 
       // Collect messages until BATCH end
       const messages: string[] = [];

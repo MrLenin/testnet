@@ -139,7 +139,6 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
       const channel = uniqueChannel('preaway');
       observer.send(`JOIN ${channel}`);
       await observer.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       observer.clearRawBuffer();
 

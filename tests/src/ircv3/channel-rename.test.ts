@@ -126,7 +126,6 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       member.send(`JOIN ${oldName}`);
       await op.waitForJoin(oldName);
       await member.waitForJoin(oldName);
-      await new Promise(r => setTimeout(r, 300));
 
       member.clearRawBuffer();
 
@@ -164,11 +163,8 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       nocap.send(`JOIN ${oldName}`);
       await op.waitForJoin(oldName);
       await nocap.waitForJoin(oldName);
-      await new Promise(r => setTimeout(r, 300));
 
       nocap.clearRawBuffer();
-      // Small sync delay to ensure buffer is ready for new messages
-      await new Promise(r => setTimeout(r, 50));
 
       const newName = uniqueChannel('rennocapnew');
       op.send(`RENAME ${oldName} ${newName}`);
@@ -211,7 +207,6 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
 
       user.send(`JOIN ${channel}`);
       await user.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       user.clearRawBuffer();
 
@@ -248,7 +243,6 @@ describe('IRCv3 Channel Rename (draft/channel-rename)', () => {
       client.send(`JOIN ${channel2}`);
       await client.waitForJoin(channel1);
       await client.waitForJoin(channel2);
-      await new Promise(r => setTimeout(r, 300));
 
       client.clearRawBuffer();
 

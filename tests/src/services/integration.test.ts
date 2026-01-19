@@ -21,6 +21,9 @@ import {
   uniqueId,
   isKeycloakAvailable,
   waitForUserAccess,
+  assertServiceSuccess,
+  assertServiceError,
+  assertHasMatchingItem,
 } from '../helpers/index.js';
 
 describe('Services Integration', () => {
@@ -66,7 +69,6 @@ describe('Services Integration', () => {
       }
       client1.send(`JOIN ${channel}`);
       await client1.waitForJoin(channel, undefined, 5000);
-      await new Promise(r => setTimeout(r, 500));
       const regResult = await client1.registerChannel(channel);
 
       if (!regResult.success) {
@@ -112,7 +114,6 @@ describe('Services Integration', () => {
       // Setup owner
       ownerClient.send(`JOIN ${channel}`);
       await ownerClient.waitForJoin(channel, undefined, 5000);
-      await new Promise(r => setTimeout(r, 500));
 
       // Register channel and verify success
       const regResult = await ownerClient.registerChannel(channel);
@@ -149,9 +150,6 @@ describe('Services Integration', () => {
       }
       expect(promotedOk).toBe(true);
 
-      // Small delay to ensure state is fully synced before final verification
-      await new Promise(r => setTimeout(r, 300));
-
       // Verify user has COOWNER level
       const accessList = await ownerClient.getAccess(channel);
       console.log('Final access list:', JSON.stringify(accessList));
@@ -170,7 +168,6 @@ describe('Services Integration', () => {
       // Setup owner and channel
       ownerClient.send(`JOIN ${channel}`);
       await ownerClient.waitForJoin(channel, undefined, 5000);
-      await new Promise(r => setTimeout(r, 500));
       await ownerClient.registerChannel(channel);
 
       // Set channel to invite-only
@@ -249,7 +246,6 @@ describe('Services Integration', () => {
 
       client1.send(`JOIN ${channel}`);
       await client1.waitForJoin(channel, undefined, 5000);
-      await new Promise(r => setTimeout(r, 500));
 
       const chanRegResult = await client1.registerChannel(channel);
       console.log('Channel registration result:', chanRegResult.success, chanRegResult.lines?.slice(0, 2));
@@ -276,7 +272,6 @@ describe('Services Integration', () => {
 
       client2.send(`JOIN ${channel}`);
       await client2.waitForJoin(channel, undefined, 5000);
-      await new Promise(r => setTimeout(r, 500));
 
       // Both should be able to get channel access
       const access1 = await client1.getAccess(channel);
@@ -284,8 +279,13 @@ describe('Services Integration', () => {
       console.log('Access1:', JSON.stringify(access1));
       console.log('Access2:', JSON.stringify(access2));
 
-      expect(access1.length).toBeGreaterThan(0);
-      expect(access2.length).toBeGreaterThan(0);
+      expect(access1.length, 'Client1 should see access list').toBeGreaterThan(0);
+      expect(access2.length, 'Client2 should see access list').toBeGreaterThan(0);
+      // Both should see the owner in the access list
+      const ownerInAccess1 = access1.some(e => e.account.toLowerCase() === account.toLowerCase());
+      const ownerInAccess2 = access2.some(e => e.account.toLowerCase() === account.toLowerCase());
+      expect(ownerInAccess1, 'Client1 should see owner in access list').toBe(true);
+      expect(ownerInAccess2, 'Client2 should see owner in access list').toBe(true);
     });
   });
 
@@ -377,18 +377,21 @@ describe('Services Integration', () => {
 
       // AuthServ
       const authLines = await client.serviceCmd('AuthServ', 'HELP');
-      expect(authLines.length).toBeGreaterThan(0);
-      expect(authLines.some(l => l.includes('NOTICE'))).toBe(true);
+      expect(authLines.length, 'AuthServ should respond to HELP').toBeGreaterThan(0);
+      expect(authLines.some(l => l.includes('NOTICE')), 'AuthServ should use NOTICE').toBe(true);
+      expect(authLines.some(l => /help|command|auth/i.test(l)), 'AuthServ HELP should contain relevant content').toBe(true);
 
       // ChanServ
       const chanLines = await client.serviceCmd('ChanServ', 'HELP');
-      expect(chanLines.length).toBeGreaterThan(0);
-      expect(chanLines.some(l => l.includes('NOTICE'))).toBe(true);
+      expect(chanLines.length, 'ChanServ should respond to HELP').toBeGreaterThan(0);
+      expect(chanLines.some(l => l.includes('NOTICE')), 'ChanServ should use NOTICE').toBe(true);
+      expect(chanLines.some(l => /help|command|chan/i.test(l)), 'ChanServ HELP should contain relevant content').toBe(true);
 
       // OpServ (O3)
       const opLines = await client.serviceCmd('O3', 'HELP');
-      expect(opLines.length).toBeGreaterThan(0);
-      expect(opLines.some(l => l.includes('NOTICE'))).toBe(true);
+      expect(opLines.length, 'O3 should respond to HELP').toBeGreaterThan(0);
+      expect(opLines.some(l => l.includes('NOTICE')), 'O3 should use NOTICE').toBe(true);
+      expect(opLines.some(l => /help|command|o3|opserv|privileged/i.test(l)), 'O3 HELP should contain relevant content').toBe(true);
     });
 
     it('should handle rapid sequential commands', { retry: 2 }, async () => {
@@ -408,9 +411,12 @@ describe('Services Integration', () => {
       responses.push(await client.serviceCmd('ChanServ', 'HELP', 15000));
       responses.push(await client.serviceCmd('O3', 'HELP', 15000));
 
-      // All should get responses
-      for (const response of responses) {
-        expect(response.length).toBeGreaterThan(0);
+      // All should get responses with relevant help content
+      expect(responses.length, 'Should get all 3 responses').toBe(3);
+      for (let i = 0; i < responses.length; i++) {
+        const serviceName = ['AuthServ', 'ChanServ', 'O3'][i];
+        expect(responses[i].length, `${serviceName} should respond`).toBeGreaterThan(0);
+        expect(responses[i].some(l => /help|command|privileged|service/i.test(l)), `${serviceName} should return help content`).toBe(true);
       }
     });
   });
@@ -427,10 +433,17 @@ describe('Services Integration', () => {
       const chanError = await client.serviceCmd('ChanServ', 'INVALIDCMD');
       const opError = await client.serviceCmd('O3', 'INVALIDCMD');
 
-      // All should return error responses
-      expect(authError.length).toBeGreaterThan(0);
-      expect(chanError.length).toBeGreaterThan(0);
-      expect(opError.length).toBeGreaterThan(0);
+      // All should return error responses with error-related content
+      expect(authError.length, 'AuthServ should respond to invalid cmd').toBeGreaterThan(0);
+      expect(chanError.length, 'ChanServ should respond to invalid cmd').toBeGreaterThan(0);
+      expect(opError.length, 'O3 should respond to invalid cmd').toBeGreaterThan(0);
+
+      // Should contain error-related keywords
+      const errorPattern = /unknown|invalid|unrecognized|not\s+found|error/i;
+      expect(authError.some(l => errorPattern.test(l)), 'AuthServ should return error message').toBe(true);
+      expect(chanError.some(l => errorPattern.test(l)), 'ChanServ should return error message').toBe(true);
+      // O3 may return 'privileged service' for non-opers, which is also an error response
+      expect(opError.some(l => errorPattern.test(l) || l.includes('privileged')), 'O3 should return error message').toBe(true);
 
       console.log('AuthServ error:', authError[0]);
       console.log('ChanServ error:', chanError[0]);

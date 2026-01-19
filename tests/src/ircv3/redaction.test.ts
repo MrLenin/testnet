@@ -122,7 +122,6 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       receiver.send(`JOIN ${channel}`);
       await sender.waitForJoin(channel);
       await receiver.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       // Send message
       const msgid = await sendAndCaptureMsgid(sender, channel, 'This will be redacted');
@@ -166,7 +165,6 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       // Sender is now op, let attacker join
       attacker.send(`JOIN ${channel}`);
       await attacker.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       // Sender sends message
       const msgid = await sendAndCaptureMsgid(sender, channel, 'Protected message');
@@ -210,7 +208,6 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
 
       user.send(`JOIN ${channel}`);
       await user.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       // User sends message
       const msgid = await sendAndCaptureMsgid(user, channel, 'User message');
@@ -318,7 +315,6 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       observer.send(`JOIN ${channel}`);
       await redactor.waitForJoin(channel);
       await observer.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       const msgid = await sendAndCaptureMsgid(redactor, channel, 'Message to be seen redacted');
 

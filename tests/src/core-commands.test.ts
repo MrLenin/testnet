@@ -107,7 +107,6 @@ describe('Core IRC Commands', () => {
 
       user.send(`JOIN ${channel}`);
       await user.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       op.clearRawBuffer();
       user.clearRawBuffer();
@@ -142,7 +141,6 @@ describe('Core IRC Commands', () => {
 
       user.send(`JOIN ${channel}`);
       await user.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       user.clearRawBuffer();
 
@@ -208,7 +206,6 @@ describe('Core IRC Commands', () => {
 
       user.send(`JOIN ${channel}`);
       await user.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       user.clearRawBuffer();
       op.clearRawBuffer();
@@ -252,7 +249,6 @@ describe('Core IRC Commands', () => {
       user2.send(`JOIN ${channel}`);
       await user1.waitForJoin(channel);
       await user2.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       user1.clearRawBuffer();
 
@@ -296,7 +292,6 @@ describe('Core IRC Commands', () => {
       observer.send(`JOIN ${channel}`);
       await user.waitForJoin(channel);
       await observer.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       observer.clearRawBuffer();
 
@@ -326,7 +321,6 @@ describe('Core IRC Commands', () => {
       const channel = uniqueChannel('topic');
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       client.clearRawBuffer();
 
@@ -353,7 +347,6 @@ describe('Core IRC Commands', () => {
       const channel = uniqueChannel('topicq');
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       // Set a topic first
       const topic = `Query test topic ${uniqueId()}`;
@@ -404,7 +397,6 @@ describe('Core IRC Commands', () => {
 
       user.send(`JOIN ${channel}`);
       await user.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       user.clearRawBuffer();
 
@@ -630,9 +622,6 @@ describe('Core IRC Commands', () => {
       await client1.waitForJoin(channel);
       await client2.waitForJoin(channel);
 
-      // Wait for joins to be processed
-      await new Promise(r => setTimeout(r, 500));
-
       client1.clearRawBuffer();
 
       client1.send(`WHO ${channel}`);
@@ -662,9 +651,6 @@ describe('Core IRC Commands', () => {
       const channel = uniqueChannel('list');
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel);
-
-      // Wait for join to be processed
-      await new Promise(r => setTimeout(r, 300));
 
       client.clearRawBuffer();
 
@@ -729,7 +715,6 @@ describe('Core IRC Commands', () => {
       stayer.send(`JOIN ${channel}`);
       await leaver.waitForJoin(channel);
       await stayer.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       stayer.clearRawBuffer();
 
@@ -764,7 +749,6 @@ describe('Core IRC Commands', () => {
       observer.send(`JOIN ${channel}`);
       await quitter.waitForJoin(channel);
       await observer.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       observer.clearRawBuffer();
 

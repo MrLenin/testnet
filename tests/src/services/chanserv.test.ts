@@ -33,6 +33,9 @@ import {
   uniqueId,
   waitForUserAccess,
   waitForChannelMode,
+  assertServiceSuccess,
+  assertServiceError,
+  assertHasMatchingItem,
 } from '../helpers/index.js';
 
 describe('ChanServ (X3)', () => {
@@ -73,7 +76,6 @@ describe('ChanServ (X3)', () => {
       // Join channel - should get ops as first user
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel, undefined, 5000);
-      await new Promise(r => setTimeout(r, 1000)); // Let modes settle
 
       // Register the channel
       const chanResult = await client.registerChannel(channel);
@@ -107,7 +109,6 @@ describe('ChanServ (X3)', () => {
 
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel, undefined, 5000);
-      await new Promise(r => setTimeout(r, 500));
 
       // Register
       const regResult = await client.registerChannel(channel);
@@ -142,7 +143,6 @@ describe('ChanServ (X3)', () => {
 
       ownerClient.send(`JOIN ${channel}`);
       await ownerClient.waitForJoin(channel, undefined, 5000);
-      await new Promise(r => setTimeout(r, 500));
       await ownerClient.registerChannel(channel);
     });
 
@@ -159,8 +159,7 @@ describe('ChanServ (X3)', () => {
       const addResult = await ownerClient.addUser(channel, user2, ACCESS_LEVELS.OP);
       console.log('ADDUSER response:', addResult.lines);
 
-      expect(addResult.lines.length).toBeGreaterThan(0);
-      expect(addResult.success).toBe(true);
+      assertServiceSuccess(addResult, /added|access|level/i);
 
       // Wait for access to propagate before verifying (8s timeout for Keycloak sync)
       const accessOk = await waitForUserAccess(ownerClient, channel, user2, ACCESS_LEVELS.OP, 8000);
@@ -194,8 +193,7 @@ describe('ChanServ (X3)', () => {
       const clvlResult = await ownerClient.clvl(channel, user2, ACCESS_LEVELS.MANAGER);
       console.log('CLVL response:', clvlResult.lines);
 
-      expect(clvlResult.lines.length).toBeGreaterThan(0);
-      expect(clvlResult.success).toBe(true);
+      assertServiceSuccess(clvlResult, /changed|level|access/i);
     });
 
     it('should remove user with DELUSER', { retry: 2 }, async () => {
@@ -220,8 +218,7 @@ describe('ChanServ (X3)', () => {
       const delResult = await ownerClient.delUser(channel, user2);
       console.log('DELUSER response:', delResult.lines);
 
-      expect(delResult.lines.length).toBeGreaterThan(0);
-      expect(delResult.success).toBe(true);
+      assertServiceSuccess(delResult, /removed|deleted|access/i);
     });
 
     // This test creates 3 accounts total (owner in beforeEach + user2 + user3), each taking
@@ -272,7 +269,6 @@ describe('ChanServ (X3)', () => {
       // Setup owner and channel
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel, undefined, 5000);
-      await new Promise(r => setTimeout(r, 500));
       const chanResult = await client.registerChannel(channel);
       expect(chanResult.success, `Channel reg failed: ${chanResult.error}`).toBe(true);
 
@@ -348,7 +344,6 @@ describe('ChanServ (X3)', () => {
       // Setup owner and channel
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel, undefined, 5000);
-      await new Promise(r => setTimeout(r, 500));
       const chanResult = await client.registerChannel(channel);
       expect(chanResult.success, `Channel reg failed: ${chanResult.error}`).toBe(true);
 
@@ -417,7 +412,6 @@ describe('ChanServ (X3)', () => {
 
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel, undefined, 5000);
-      await new Promise(r => setTimeout(r, 500));
       await client.registerChannel(channel);
 
       // Set MODES (not DEFAULTMODES - that's not a valid option)
@@ -443,14 +437,15 @@ describe('ChanServ (X3)', () => {
 
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel, undefined, 5000);
-      await new Promise(r => setTimeout(r, 500));
       await client.registerChannel(channel);
 
       // Ban a hostmask
       const banResult = await client.ban(channel, '*!*@banned.example.com', 'Test ban');
       console.log('BAN response:', banResult.lines);
 
-      expect(banResult.lines.length).toBeGreaterThan(0);
+      expect(banResult.lines.length, 'Expected response from BAN command').toBeGreaterThan(0);
+      // X3 responds with "Banned" or similar on success
+      expect(banResult.lines.some(l => /banned|added|set/i.test(l))).toBe(true);
     });
 
     it('should unban a user from the channel', async () => {
@@ -464,7 +459,6 @@ describe('ChanServ (X3)', () => {
 
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel, undefined, 5000);
-      await new Promise(r => setTimeout(r, 500));
       await client.registerChannel(channel);
       await client.ban(channel, '*!*@banned.example.com', 'Test ban');
 
@@ -472,7 +466,9 @@ describe('ChanServ (X3)', () => {
       const unbanResult = await client.unban(channel, '*!*@banned.example.com');
       console.log('UNBAN response:', unbanResult.lines);
 
-      expect(unbanResult.lines.length).toBeGreaterThan(0);
+      expect(unbanResult.lines.length, 'Expected response from UNBAN command').toBeGreaterThan(0);
+      // X3 responds with "Removed" or similar on success
+      expect(unbanResult.lines.some(l => /removed|unbanned|deleted/i.test(l))).toBe(true);
     });
   });
 
@@ -494,7 +490,6 @@ describe('ChanServ (X3)', () => {
 
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel, undefined, 5000);
-      await new Promise(r => setTimeout(r, 500));
       await client.registerChannel(channel);
 
       // Get channel info

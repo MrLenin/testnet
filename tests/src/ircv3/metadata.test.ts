@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId, getTestAccount, releaseTestAccount } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId, getTestAccount, releaseTestAccount, authenticateSaslPlain } from '../helpers/index.js';
 
 /**
  * Metadata Tests (draft/metadata-2)
@@ -70,7 +70,8 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
         msg => msg.command === 'METADATA' || ['761', '762', '764', '765', '766', '767'].includes(msg.command),
         3000
       );
-      expect(response).toBeDefined();
+      expect(response.command === 'METADATA' || /^76[1-7]$/.test(response.command),
+        `Should get METADATA response or numeric 761-767, got: ${response.command}`).toBe(true);
       console.log('METADATA SET response:', response.raw);
 
       client.send('QUIT');
@@ -98,7 +99,8 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
         msg => msg.command === '761' || (msg.command === 'METADATA' && msg.raw.includes('testkey')),
         3000
       );
-      expect(response).toBeDefined();
+      expect(response.command === '761' || response.command === 'METADATA',
+        `Should get 761 or METADATA response, got: ${response.command}`).toBe(true);
       console.log('METADATA GET response:', response.raw);
 
       client.send('QUIT');
@@ -165,7 +167,8 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
         msg => msg.command === '761' || msg.command === '766' || msg.command === 'METADATA',
         3000
       );
-      expect(response).toBeDefined();
+      expect(['761', '766', 'METADATA'].includes(response.command),
+        `Should get 761, 766, or METADATA response, got: ${response.command}`).toBe(true);
 
       client.send('QUIT');
     });
@@ -195,7 +198,8 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
         msg => ['761', '764', '766', 'METADATA'].includes(msg.command),
         3000
       );
-      expect(response).toBeDefined();
+      expect(['761', '764', '766', 'METADATA'].includes(response.command),
+        `Should get 761, 764, 766, or METADATA response, got: ${response.command}`).toBe(true);
 
       client.send('QUIT');
     });
@@ -224,7 +228,8 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
         msg => ['761', '765', 'METADATA'].includes(msg.command),
         3000
       );
-      expect(response).toBeDefined();
+      expect(['761', '765', 'METADATA'].includes(response.command),
+        `Should get 761, 765, or METADATA response, got: ${response.command}`).toBe(true);
 
       client.send('QUIT');
     });
@@ -315,8 +320,8 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
                msg.raw.includes('TARGET_INVALID'),
         5000
       );
-      expect(response).toBeDefined();
-      expect(response.raw).toContain('TARGET_INVALID');
+      expect(response.command, 'Should get FAIL or NOTICE response').toMatch(/FAIL|NOTICE/);
+      expect(response.raw, 'Response should contain TARGET_INVALID').toContain('TARGET_INVALID');
       console.log('METADATA channel error response:', response.raw);
 
       client.send('QUIT');
@@ -350,8 +355,8 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
                msg.raw.includes('TARGET_INVALID'),
         10000
       );
-      expect(response).toBeDefined();
-      expect(response.raw).toContain('TARGET_INVALID');
+      expect(response.command, 'Should get FAIL or NOTICE response').toMatch(/FAIL|NOTICE/);
+      expect(response.raw, 'Response should contain TARGET_INVALID').toContain('TARGET_INVALID');
       console.log('METADATA account error response:', response.raw);
 
       client.send('QUIT');
@@ -698,11 +703,8 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client1.capReq([metaCap, 'sasl']);
 
       // Authenticate with pool account
-      client1.send('AUTHENTICATE PLAIN');
-      await client1.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+');
-      const payload = Buffer.from(`${account}\0${account}\0${password}`).toString('base64');
-      client1.send(`AUTHENTICATE ${payload}`);
-      await client1.waitForNumeric('903', 5000);
+      const sasl1 = await authenticateSaslPlain(client1, account, password);
+      expect(sasl1.success, `SASL auth failed: ${sasl1.error}`).toBe(true);
 
       client1.capEnd();
       client1.register('metapersist1');
@@ -722,11 +724,8 @@ describe('IRCv3 Metadata (draft/metadata-2)', () => {
       await client2.capReq([metaCap, 'sasl']);
 
       // Authenticate on reconnect with same account
-      client2.send('AUTHENTICATE PLAIN');
-      await client2.waitForParsedLine(msg => msg.command === 'AUTHENTICATE' && msg.params[0] === '+');
-      const payload2 = Buffer.from(`${account}\0${account}\0${password}`).toString('base64');
-      client2.send(`AUTHENTICATE ${payload2}`);
-      await client2.waitForNumeric('903', 5000);
+      const sasl2 = await authenticateSaslPlain(client2, account, password);
+      expect(sasl2.success, `SASL auth failed: ${sasl2.error}`).toBe(true);
 
       client2.capEnd();
       client2.register('metapersist2');

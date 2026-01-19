@@ -211,7 +211,8 @@ describe('IRCv3 SASL Authentication', () => {
         msg => msg.command === 'AUTHENTICATE' || ['900', '904', '908'].includes(msg.command),
         5000
       );
-      expect(response).toBeDefined();
+      expect(response.command === 'AUTHENTICATE' || ['900', '904', '908'].includes(response.command),
+        `Should get AUTHENTICATE or SASL response, got: ${response.command}`).toBe(true);
       client.send('QUIT');
     });
   });
@@ -369,7 +370,8 @@ describe('SASL Error Handling', () => {
       msg => msg.command === 'AUTHENTICATE' || ['904', '908'].includes(msg.command),
       3000
     );
-    expect(response).toBeDefined();
+    expect(response.command === 'AUTHENTICATE' || ['904', '908'].includes(response.command),
+      `Should get AUTHENTICATE or SASL error, got: ${response.command}`).toBe(true);
     console.log('Unknown mechanism response:', response.raw);
     client.send('QUIT');
   });
@@ -415,7 +417,7 @@ describe('SASL Error Handling', () => {
     // Should receive error
     // Note: Error path can be slow under load
     const response = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 20000);
-    expect(response).toBeDefined();
+    expect(/^90\d$/.test(response.command), `Should get 9XX SASL numeric, got: ${response.command}`).toBe(true);
     console.log('Malformed base64 response:', response.raw);
     client.send('QUIT');
   });
@@ -438,7 +440,7 @@ describe('SASL Error Handling', () => {
     // Should receive error (empty SASL response)
     // Note: Keycloak auth can take ~6s for error responses
     const response = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 20000);
-    expect(response).toBeDefined();
+    expect(/^90\d$/.test(response.command), `Should get 9XX SASL numeric, got: ${response.command}`).toBe(true);
     client.send('QUIT');
   });
 
@@ -571,7 +573,7 @@ describe('SASL 400-byte Chunking', () => {
     await new Promise(r => setTimeout(r, 100));
 
     const response = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 20000);
-    expect(response).toBeDefined();
+    expect(/^90\d$/.test(response.command), `Should get 9XX SASL numeric, got: ${response.command}`).toBe(true);
     client.send('QUIT');
   });
 
@@ -604,7 +606,7 @@ describe('SASL 400-byte Chunking', () => {
     // Should get SASLFAIL (904) because credentials are invalid, but that proves
     // the server received and processed the full chunked payload
     const response = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 20000);
-    expect(response).toBeDefined();
+    expect(/^90\d$/.test(response.command), `Should get 9XX SASL numeric, got: ${response.command}`).toBe(true);
     console.log(`2-chunk test response: ${response.command}`);
     client.send('QUIT');
   });
@@ -634,7 +636,7 @@ describe('SASL 400-byte Chunking', () => {
     await new Promise(r => setTimeout(r, 100));
 
     const response = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 20000);
-    expect(response).toBeDefined();
+    expect(/^90\d$/.test(response.command), `Should get 9XX SASL numeric, got: ${response.command}`).toBe(true);
     console.log(`3-chunk test response: ${response.command}`);
     client.send('QUIT');
   });
@@ -665,7 +667,7 @@ describe('SASL 400-byte Chunking', () => {
     await new Promise(r => setTimeout(r, 100));
 
     const response = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 20000);
-    expect(response).toBeDefined();
+    expect(/^90\d$/.test(response.command), `Should get 9XX SASL numeric, got: ${response.command}`).toBe(true);
     console.log(`Exact 400-byte test response: ${response.command}`);
     client.send('QUIT');
   });
@@ -695,7 +697,7 @@ describe('SASL 400-byte Chunking', () => {
     await new Promise(r => setTimeout(r, 100));
 
     const response = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 20000);
-    expect(response).toBeDefined();
+    expect(/^90\d$/.test(response.command), `Should get 9XX SASL numeric, got: ${response.command}`).toBe(true);
     console.log(`Exact 800-byte test response: ${response.command}`);
     client.send('QUIT');
   });
@@ -733,7 +735,7 @@ describe('SASL 400-byte Chunking', () => {
     await new Promise(r => setTimeout(r, 100));
 
     const response = await client.waitForNumeric(['900', '901', '902', '903', '904', '905', '906', '907', '908', '909'], 20000);
-    expect(response).toBeDefined();
+    expect(/^90\d$/.test(response.command), `Should get 9XX SASL numeric, got: ${response.command}`).toBe(true);
     console.log(`Stress test response: ${response.command}`);
     client.send('QUIT');
   });

@@ -152,7 +152,8 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
                msg.command === '315' || msg.raw.includes('label='),
         5000
       );
-      expect(response).toBeDefined();
+      expect(['BATCH', '352', '315'].includes(response.command) || response.raw.includes('label='),
+        `Should get BATCH or WHO response, got: ${response.command}`).toBe(true);
 
       // Collect remaining WHO responses until end (315)
       const startTime = Date.now();
@@ -230,7 +231,7 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
         msg => msg.command === 'PONG' || msg.command === 'FAIL',
         5000
       );
-      expect(response).toBeDefined();
+      expect(response.command, 'Should get PONG or FAIL response').toMatch(/PONG|FAIL/);
 
       client.send('QUIT');
     });
@@ -255,7 +256,7 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
         msg => msg.command === 'PONG' || msg.command === 'FAIL',
         5000
       );
-      expect(response).toBeDefined();
+      expect(response.command, 'Should get PONG or FAIL response').toMatch(/PONG|FAIL/);
 
       client.send('QUIT');
     });
@@ -280,7 +281,8 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
         msg => msg.command === 'PONG' || msg.raw.includes('label='),
         5000
       );
-      expect(response).toBeDefined();
+      expect(response.command === 'PONG' || response.raw.includes('label='),
+        'Should get PONG response or labeled response').toBe(true);
       // If response includes label, it should match
       if (response.raw.includes('label=')) {
         expect(response.raw).toContain(specialLabel);
@@ -349,7 +351,8 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
                msg.raw.includes('label='),
         5000
       );
-      expect(response).toBeDefined();
+      expect(response.command === 'ACK' || response.command === 'MODE' || response.raw.includes('label='),
+        `Should get ACK or MODE response, got: ${response.command}`).toBe(true);
 
       client.send('QUIT');
     });
@@ -376,7 +379,8 @@ describe('IRCv3 Labeled Response (labeled-response)', () => {
         msg => /^4\d\d$/.test(msg.command) || msg.command === 'JOIN' || msg.raw.includes('label='),
         5000
       );
-      expect(response).toBeDefined();
+      expect(/^4\d\d$/.test(response.command) || response.command === 'JOIN' || response.raw.includes('label='),
+        `Should get error numeric or JOIN response, got: ${response.command}`).toBe(true);
 
       client.send('QUIT');
     });
@@ -449,7 +453,6 @@ describe('IRCv3 Message Tags (message-tags)', () => {
       receiver.send(`JOIN ${channel}`);
       await sender.waitForJoin(channel);
       await receiver.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       receiver.clearRawBuffer();
 
@@ -496,7 +499,6 @@ describe('IRCv3 Message Tags (message-tags)', () => {
       receiver.send(`JOIN ${channel}`);
       await sender.waitForJoin(channel);
       await receiver.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       receiver.clearRawBuffer();
 
@@ -537,7 +539,6 @@ describe('IRCv3 Message Tags (message-tags)', () => {
       receiver.send(`JOIN ${channel}`);
       await sender.waitForJoin(channel);
       await receiver.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       receiver.clearRawBuffer();
 
@@ -578,7 +579,6 @@ describe('IRCv3 Message Tags (message-tags)', () => {
       receiver.send(`JOIN ${channel}`);
       await sender.waitForJoin(channel);
       await receiver.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       receiver.clearRawBuffer();
 

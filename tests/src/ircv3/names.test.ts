@@ -66,7 +66,6 @@ describe('IRCv3 extended-join', () => {
       const channel = uniqueChannel('extjtest');
       observer.send(`JOIN ${channel}`);
       await observer.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       observer.clearRawBuffer();
 
@@ -130,7 +129,6 @@ describe('IRCv3 extended-join', () => {
       const channel = uniqueChannel('extjunauth');
       observer.send(`JOIN ${channel}`);
       await observer.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       observer.clearRawBuffer();
 
@@ -168,7 +166,6 @@ describe('IRCv3 extended-join', () => {
       const channel = uniqueChannel('stdjoin');
       observer.send(`JOIN ${channel}`);
       await observer.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       observer.clearRawBuffer();
 
@@ -294,7 +291,6 @@ describe('IRCv3 userhost-in-names', () => {
       client2.send(`JOIN ${channel}`);
       await client1.waitForJoin(channel);
       await client2.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       client1.clearRawBuffer();
 
@@ -585,7 +581,6 @@ describe('draft/no-implicit-names', () => {
       const channel = uniqueChannel('nimexpl');
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel);
-      await new Promise(r => setTimeout(r, 300));
 
       client.clearRawBuffer();
 
