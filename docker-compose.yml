@@ -7,11 +7,12 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
+          - libkc=./libkc
     user: "0:0"  # Run as root to fix permissions
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        chown -R 1234:1234 /home/nefarious/ircd/history /home/nefarious/ircd/metadata /home/nefarious/ircd/gitsync /home/nefarious/ircd/ssl
+        chown -R 1234:1234 /home/nefarious/ircd/history /home/nefarious/ircd/metadata /home/nefarious/ircd/webpush /home/nefarious/ircd/gitsync /home/nefarious/ircd/ssl
         touch /home/nefarious/ircd/gitsync/gitsync.conf
         chown 1234:1234 /home/nefarious/ircd/gitsync/gitsync.conf
         # Generate ECDSA SSL cert if it doesn't exist (ECDSA works with GitHub for SSH)
@@ -24,6 +25,7 @@ services:
     volumes:
       - history_data:/home/nefarious/ircd/history
       - metadata_data:/home/nefarious/ircd/metadata
+      - webpush_data:/home/nefarious/ircd/webpush
       - gitsync_data:/home/nefarious/ircd/gitsync
       - ssl_data:/home/nefarious/ircd/ssl
 
@@ -34,6 +36,7 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
+          - libkc=./libkc
     user: "1234:1234"  # nefarious user
     # Enable core dumps for crash debugging
     ulimits:
@@ -53,6 +56,7 @@ services:
      - ./data/saslusers:/home/nefarious/ircd/saslusers
      - history_data:/home/nefarious/ircd/history
      - metadata_data:/home/nefarious/ircd/metadata
+     - webpush_data:/home/nefarious/ircd/webpush
      - gitsync_data:/home/nefarious/ircd/gitsync
      - ssl_data:/home/nefarious/ircd/ssl
      - ./nefcores:/home/nefarious/ircd/cores  # Core dump directory
@@ -82,11 +86,12 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
+          - libkc=./libkc
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        chown -R 1234:1234 /home/nefarious/ircd/history /home/nefarious/ircd/metadata /home/nefarious/ircd/ssl
+        chown -R 1234:1234 /home/nefarious/ircd/history /home/nefarious/ircd/metadata /home/nefarious/ircd/webpush /home/nefarious/ircd/ssl
         # Generate ECDSA SSL cert if it doesn't exist (ECDSA works with GitHub for SSH)
         if [ ! -f /home/nefarious/ircd/ssl/ircd.pem ]; then
           openssl req -new -x509 -days 365 -nodes -out /home/nefarious/ircd/ssl/ircd.pem -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -keyout /home/nefarious/ircd/ssl/ircd.pem -subj "/CN=${IRCD_GENERAL_NAME:-leaf.local}/"
@@ -97,6 +102,7 @@ services:
     volumes:
       - history_data2:/home/nefarious/ircd/history
       - metadata_data2:/home/nefarious/ircd/metadata
+      - webpush_data2:/home/nefarious/ircd/webpush
       - ssl_data2:/home/nefarious/ircd/ssl
     profiles:
       - linked
@@ -108,6 +114,7 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
+          - libkc=./libkc
     user: "1234:1234"  # nefarious user
     networks:
       irc_net:
@@ -120,6 +127,7 @@ services:
      - ./data/saslusers:/home/nefarious/ircd/saslusers
      - history_data2:/home/nefarious/ircd/history
      - metadata_data2:/home/nefarious/ircd/metadata
+     - webpush_data2:/home/nefarious/ircd/webpush
      - gitsync_data:/home/nefarious/ircd/gitsync
      - ssl_data2:/home/nefarious/ircd/ssl
     ports:
@@ -152,11 +160,12 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
+          - libkc=./libkc
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        chown -R 1234:1234 /home/nefarious/ircd/history /home/nefarious/ircd/metadata /home/nefarious/ircd/ssl
+        chown -R 1234:1234 /home/nefarious/ircd/history /home/nefarious/ircd/metadata /home/nefarious/ircd/webpush /home/nefarious/ircd/ssl
         if [ ! -f /home/nefarious/ircd/ssl/ircd.pem ]; then
           openssl req -new -x509 -days 365 -nodes -out /home/nefarious/ircd/ssl/ircd.pem -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -keyout /home/nefarious/ircd/ssl/ircd.pem -subj "/CN=hub2.fractalrealities.net/"
           chown 1234:1234 /home/nefarious/ircd/ssl/ircd.pem
@@ -166,6 +175,7 @@ services:
     volumes:
       - history_data3:/home/nefarious/ircd/history
       - metadata_data3:/home/nefarious/ircd/metadata
+      - webpush_data3:/home/nefarious/ircd/webpush
       - ssl_data3:/home/nefarious/ircd/ssl
     profiles:
       - multi
@@ -177,6 +187,7 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
+          - libkc=./libkc
     user: "1234:1234"
     networks:
       irc_net:
@@ -189,6 +200,7 @@ services:
      - ./data/saslusers:/home/nefarious/ircd/saslusers
      - history_data3:/home/nefarious/ircd/history
      - metadata_data3:/home/nefarious/ircd/metadata
+     - webpush_data3:/home/nefarious/ircd/webpush
      - gitsync_data:/home/nefarious/ircd/gitsync
      - ssl_data3:/home/nefarious/ircd/ssl
     ports:
@@ -221,11 +233,12 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
+          - libkc=./libkc
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        chown -R 1234:1234 /home/nefarious/ircd/history /home/nefarious/ircd/metadata /home/nefarious/ircd/ssl
+        chown -R 1234:1234 /home/nefarious/ircd/history /home/nefarious/ircd/metadata /home/nefarious/ircd/webpush /home/nefarious/ircd/ssl
         if [ ! -f /home/nefarious/ircd/ssl/ircd.pem ]; then
           openssl req -new -x509 -days 365 -nodes -out /home/nefarious/ircd/ssl/ircd.pem -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -keyout /home/nefarious/ircd/ssl/ircd.pem -subj "/CN=leaf2.fractalrealities.net/"
           chown 1234:1234 /home/nefarious/ircd/ssl/ircd.pem
@@ -235,6 +248,7 @@ services:
     volumes:
       - history_data4:/home/nefarious/ircd/history
       - metadata_data4:/home/nefarious/ircd/metadata
+      - webpush_data4:/home/nefarious/ircd/webpush
       - ssl_data4:/home/nefarious/ircd/ssl
     profiles:
       - multi
@@ -246,6 +260,7 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
+          - libkc=./libkc
     user: "1234:1234"
     networks:
       irc_net:
@@ -258,6 +273,7 @@ services:
      - ./data/saslusers:/home/nefarious/ircd/saslusers
      - history_data4:/home/nefarious/ircd/history
      - metadata_data4:/home/nefarious/ircd/metadata
+     - webpush_data4:/home/nefarious/ircd/webpush
      - gitsync_data:/home/nefarious/ircd/gitsync
      - ssl_data4:/home/nefarious/ircd/ssl
     ports:
@@ -290,6 +306,7 @@ services:
       dockerfile: Dockerfile
       additional_contexts:
         - data=./data
+        - libkc=./libkc
     user: "0:0"  # Run as root to fix permissions
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -306,6 +323,7 @@ services:
       dockerfile: Dockerfile
       additional_contexts:
         - data=./data
+        - libkc=./libkc
     user: "1234:1234"  # x3 user
     # Enable core dumps for crash debugging
     ulimits:
@@ -560,6 +578,10 @@ volumes:
   ssl_data2:
   ssl_data3:
   ssl_data4:
+  webpush_data:
+  webpush_data2:
+  webpush_data3:
+  webpush_data4:
   x3_data:
 
 networks:

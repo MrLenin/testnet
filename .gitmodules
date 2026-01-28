@@ -9,3 +9,6 @@
 [submodule "linesync-data"]
 	path = linesync-data
 	url = git@github.com:MrLenin/gitsync-test.git
+[submodule "libkc"]
+	path = libkc
+	url = git@github.com:MrLenin/libkc.git
