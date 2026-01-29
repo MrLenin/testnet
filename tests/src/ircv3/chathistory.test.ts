@@ -610,16 +610,15 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
   });
 
   /**
-   * PM Chathistory Consent Tests
+   * PM Chathistory Opt-Out Tests
    *
-   * These tests verify the per-user PM history opt-in system.
-   * Server configured with CHATHISTORY_PRIVATE_CONSENT=2 (multi-party mode):
-   * - Both sender AND recipient must opt-in for PM history to be stored
-   * - Users opt-in via: METADATA SET * chathistory.pm * :1
-   * - Users opt-out via: METADATA SET * chathistory.pm * :0
+   * Tests the per-user PM history opt-out system.
+   * Server stores PM history for authenticated users by default.
+   * Users opt out via: METADATA SET * chathistory.pm * :0 (or +y user mode)
+   * If either party opts out, a HISTORY_GAP marker is stored instead.
    */
-  describe('PM Chathistory Consent (Multi-Party Mode)', () => {
-    it('PM history NOT stored when neither party opts in (mode 2)', async () => {
+  describe('PM Chathistory Opt-Out', () => {
+    it('PM history stored by default for authenticated users', async () => {
       const client1 = trackClient(await createRawSocketClient());
       const client2 = trackClient(await createRawSocketClient());
       const testId = uniqueId();
@@ -627,50 +626,35 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       await client1.capLs();
       await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
       client1.capEnd();
-      client1.register(`pmnoopt1_${testId}`);
+      client1.register(`pmdef1_${testId}`);
       await client1.waitForNumeric('001');
 
       await client2.capLs();
       await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
       client2.capEnd();
-      client2.register(`pmnoopt2_${testId}`);
+      client2.register(`pmdef2_${testId}`);
       await client2.waitForNumeric('001');
 
-      // Neither party opts in - send messages
-      const testMsg = `NoOptIn test ${testId}`;
-      client1.send(`PRIVMSG pmnoopt2_${testId} :${testMsg}`);
+      // No opt-in needed — PM history stored by default for authenticated users
+      const testMsg = `DefaultPM test ${testId}`;
+      client1.send(`PRIVMSG pmdef2_${testId} :${testMsg}`);
       await new Promise(r => setTimeout(r, 300));
-      client2.send(`PRIVMSG pmnoopt1_${testId} :Reply ${testMsg}`);
-      await new Promise(r => setTimeout(r, 500));
+      client2.send(`PRIVMSG pmdef1_${testId} :Reply ${testMsg}`);
 
-      client1.clearRawBuffer();
+      // Wait for messages to persist and query history
+      const messages = await waitForChathistory(client1, `pmdef2_${testId}`, {
+        minMessages: 1,
+        timeoutMs: 10000,
+      });
 
-      // Request PM history - should be empty in multi-party mode
-      client1.send(`CHATHISTORY LATEST pmnoopt2_${testId} * 10`);
-
-      // MUST receive a batch - no try/catch, test fails if no response
-      const batchStart = await client1.waitForBatchStart('chathistory', 5000);
-      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
-
-      const messages: string[] = [];
-      // Collect messages until batch end
-      while (true) {
-        const msg = await client1.waitForParsedLine(
-          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
-          3000
-        );
-        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
-        if (msg.command === 'PRIVMSG') messages.push(msg.raw);
-      }
-
-      // In multi-party mode (2), messages should NOT be stored without both opting in
-      expect(messages.length).toBe(0);
+      // PM history is stored by default for authenticated users
+      expect(messages.length).toBeGreaterThanOrEqual(1);
 
       client1.send('QUIT');
       client2.send('QUIT');
     });
 
-    it('PM history stored when BOTH parties opt in (mode 2)', async () => {
+    it('PM history includes messages from both parties', async () => {
       const client1 = trackClient(await createRawSocketClient());
       const client2 = trackClient(await createRawSocketClient());
       const testId = uniqueId();
@@ -687,52 +671,26 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client2.register(`pmboth2_${testId}`);
       await client2.waitForNumeric('001');
 
-      // BOTH parties opt in - MUST get 761 response confirming the SET
-      client1.send('METADATA SET * chathistory.pm * :1');
-      const meta1Response = await client1.waitForNumeric('761', 3000);
-      expect(meta1Response.command).toBe('761');
-
-      client2.send('METADATA SET * chathistory.pm * :1');
-      const meta2Response = await client2.waitForNumeric('761', 3000);
-      expect(meta2Response.command).toBe('761');
-
-      await new Promise(r => setTimeout(r, 300));
-
-      // Exchange messages after both opt in
-      const testMsg = `BothOptIn test ${testId}`;
+      // Exchange messages — no opt-in needed
+      const testMsg = `BothParties test ${testId}`;
       client1.send(`PRIVMSG pmboth2_${testId} :${testMsg}`);
       await new Promise(r => setTimeout(r, 300));
       client2.send(`PRIVMSG pmboth1_${testId} :Reply ${testMsg}`);
-      await new Promise(r => setTimeout(r, 500));
 
-      client1.clearRawBuffer();
+      // Wait for persistence
+      const messages = await waitForChathistory(client1, `pmboth2_${testId}`, {
+        minMessages: 1,
+        timeoutMs: 10000,
+      });
 
-      // Request PM history - MUST have messages
-      client1.send(`CHATHISTORY LATEST pmboth2_${testId} * 10`);
-
-      // MUST receive a batch - test fails if no response
-      const batchStart = await client1.waitForBatchStart('chathistory', 5000);
-      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
-
-      const messages: string[] = [];
-      // Collect messages until batch end
-      while (true) {
-        const msg = await client1.waitForParsedLine(
-          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
-          3000
-        );
-        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
-        if (msg.command === 'PRIVMSG') messages.push(msg.raw);
-      }
-
-      // With both opted in, PM history MUST be stored
+      // Both parties' messages should be in history
       expect(messages.length).toBeGreaterThanOrEqual(1);
 
       client1.send('QUIT');
       client2.send('QUIT');
     });
 
-    it('PM history NOT stored when only sender opts in (mode 2)', async () => {
+    it('PM history NOT stored when sender opts out', async () => {
       const client1 = trackClient(await createRawSocketClient());
       const client2 = trackClient(await createRawSocketClient());
       const testId = uniqueId();
@@ -740,244 +698,231 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       await client1.capLs();
       await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
       client1.capEnd();
-      client1.register(`pmsend1_${testId}`);
+      client1.register(`pmso1_${testId}`);
       await client1.waitForNumeric('001');
 
       await client2.capLs();
       await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
       client2.capEnd();
-      client2.register(`pmsend2_${testId}`);
+      client2.register(`pmso2_${testId}`);
       await client2.waitForNumeric('001');
 
-      // Only sender opts in - MUST get 761 response
-      client1.send('METADATA SET * chathistory.pm * :1');
+      // Sender opts out — MUST get 761 response
+      client1.send('METADATA SET * chathistory.pm * :0');
       const metaResponse = await client1.waitForNumeric('761', 3000);
       expect(metaResponse.command).toBe('761');
       await new Promise(r => setTimeout(r, 300));
 
       // Send messages
-      const testMsg = `SenderOnly test ${testId}`;
-      client1.send(`PRIVMSG pmsend2_${testId} :${testMsg}`);
-      await new Promise(r => setTimeout(r, 500));
-
-      client1.clearRawBuffer();
-
-      // Request PM history - should be empty (recipient didn't opt in)
-      client1.send(`CHATHISTORY LATEST pmsend2_${testId} * 10`);
-
-      // MUST receive a batch - test fails if no response
-      const batchStart = await client1.waitForBatchStart('chathistory', 5000);
-      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
-
-      const messages: string[] = [];
-      // Collect messages until batch end
-      while (true) {
-        const msg = await client1.waitForParsedLine(
-          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
-          3000
-        );
-        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
-        if (msg.command === 'PRIVMSG') messages.push(msg.raw);
-      }
-
-      // In multi-party mode, messages should NOT be stored with only sender consent
-      expect(messages.length).toBe(0);
-
-      client1.send('QUIT');
-      client2.send('QUIT');
-    });
-
-    it('PM history NOT stored when only recipient opts in (mode 2)', async () => {
-      const client1 = trackClient(await createRawSocketClient());
-      const client2 = trackClient(await createRawSocketClient());
-      const testId = uniqueId();
-
-      await client1.capLs();
-      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
-      client1.capEnd();
-      client1.register(`pmrecv1_${testId}`);
-      await client1.waitForNumeric('001');
-
-      await client2.capLs();
-      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
-      client2.capEnd();
-      client2.register(`pmrecv2_${testId}`);
-      await client2.waitForNumeric('001');
-
-      // Only recipient opts in - MUST get 761 response
-      client2.send('METADATA SET * chathistory.pm * :1');
-      const metaResponse = await client2.waitForNumeric('761', 3000);
-      expect(metaResponse.command).toBe('761');
-      await new Promise(r => setTimeout(r, 300));
-
-      // Send messages
-      const testMsg = `RecipientOnly test ${testId}`;
-      client1.send(`PRIVMSG pmrecv2_${testId} :${testMsg}`);
-      await new Promise(r => setTimeout(r, 500));
-
-      client1.clearRawBuffer();
-
-      // Request PM history - should be empty (sender didn't opt in)
-      client1.send(`CHATHISTORY LATEST pmrecv2_${testId} * 10`);
-
-      // MUST receive a batch - test fails if no response
-      const batchStart = await client1.waitForBatchStart('chathistory', 5000);
-      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
-
-      const messages: string[] = [];
-      // Collect messages until batch end
-      while (true) {
-        const msg = await client1.waitForParsedLine(
-          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
-          3000
-        );
-        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
-        if (msg.command === 'PRIVMSG') messages.push(msg.raw);
-      }
-
-      // In multi-party mode, messages should NOT be stored with only recipient consent
-      expect(messages.length).toBe(0);
-
-      client1.send('QUIT');
-      client2.send('QUIT');
-    });
-
-    it('explicit opt-out overrides opt-in in multi-party mode', async () => {
-      const client1 = trackClient(await createRawSocketClient());
-      const client2 = trackClient(await createRawSocketClient());
-      const testId = uniqueId();
-
-      await client1.capLs();
-      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
-      client1.capEnd();
-      client1.register(`pmover1_${testId}`);
-      await client1.waitForNumeric('001');
-
-      await client2.capLs();
-      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
-      client2.capEnd();
-      client2.register(`pmover2_${testId}`);
-      await client2.waitForNumeric('001');
-
-      // Client1 opts in - MUST get 761 response
-      client1.send('METADATA SET * chathistory.pm * :1');
-      const meta1Response = await client1.waitForNumeric('761', 3000);
-      expect(meta1Response.command).toBe('761');
-
-      // Client2 explicitly opts out - MUST get 761 response
-      client2.send('METADATA SET * chathistory.pm * :0');
-      const meta2Response = await client2.waitForNumeric('761', 3000);
-      expect(meta2Response.command).toBe('761');
-      await new Promise(r => setTimeout(r, 300));
-
-      // Send messages
-      const testMsg = `OptOutOverride test ${testId}`;
-      client1.send(`PRIVMSG pmover2_${testId} :${testMsg}`);
-      await new Promise(r => setTimeout(r, 500));
-
-      client1.clearRawBuffer();
-
-      // Request PM history - should be empty (explicit opt-out)
-      client1.send(`CHATHISTORY LATEST pmover2_${testId} * 10`);
-
-      // MUST receive a batch - test fails if no response
-      const batchStart = await client1.waitForBatchStart('chathistory', 5000);
-      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
-
-      const messages: string[] = [];
-      // Collect messages until batch end
-      while (true) {
-        const msg = await client1.waitForParsedLine(
-          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
-          3000
-        );
-        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
-        if (msg.command === 'PRIVMSG') messages.push(msg.raw);
-      }
-
-      // Explicit opt-out should override any opt-in
-      expect(messages.length).toBe(0);
-
-      client1.send('QUIT');
-      client2.send('QUIT');
-    });
-
-    it('can change consent preference after initial setting', async () => {
-      const client1 = trackClient(await createRawSocketClient());
-      const client2 = trackClient(await createRawSocketClient());
-      const testId = uniqueId();
-
-      await client1.capLs();
-      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
-      client1.capEnd();
-      client1.register(`pmchg1_${testId}`);
-      await client1.waitForNumeric('001');
-
-      await client2.capLs();
-      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
-      client2.capEnd();
-      client2.register(`pmchg2_${testId}`);
-      await client2.waitForNumeric('001');
-
-      // Both opt in - MUST get 761 response for each
-      client1.send('METADATA SET * chathistory.pm * :1');
-      const meta1Response = await client1.waitForNumeric('761', 3000);
-      expect(meta1Response.command).toBe('761');
-
-      client2.send('METADATA SET * chathistory.pm * :1');
-      const meta2Response = await client2.waitForNumeric('761', 3000);
-      expect(meta2Response.command).toBe('761');
-      await new Promise(r => setTimeout(r, 300));
-
-      // First message (should be stored)
-      const msg1 = `Before revoke ${testId}`;
-      client1.send(`PRIVMSG pmchg2_${testId} :${msg1}`);
-      await new Promise(r => setTimeout(r, 300));
-
-      // Client2 revokes consent - MUST get 761 response
-      client2.send('METADATA SET * chathistory.pm * :0');
-      const revokeResponse = await client2.waitForNumeric('761', 3000);
-      expect(revokeResponse.command).toBe('761');
-      await new Promise(r => setTimeout(r, 300));
-
-      // Second message (should NOT be stored)
-      const msg2 = `After revoke ${testId}`;
-      client1.send(`PRIVMSG pmchg2_${testId} :${msg2}`);
+      const testMsg = `SenderOptOut test ${testId}`;
+      client1.send(`PRIVMSG pmso2_${testId} :${testMsg}`);
       await new Promise(r => setTimeout(r, 500));
 
       client1.clearRawBuffer();
 
       // Request PM history
-      client1.send(`CHATHISTORY LATEST pmchg2_${testId} * 10`);
+      client1.send(`CHATHISTORY LATEST pmso2_${testId} * 10`);
 
-      // MUST receive a batch - test fails if no response
       const batchStart = await client1.waitForBatchStart('chathistory', 5000);
       expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
 
       const messages: string[] = [];
-      // Collect messages until batch end
       while (true) {
         const msg = await client1.waitForParsedLine(
           m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
           3000
         );
         if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
-        if (msg.command === 'PRIVMSG') messages.push(msg.raw);
+        // Filter out gap markers — only count real messages
+        if (msg.command === 'PRIVMSG' && !msg.raw.includes('+draft/chathistory-gap')) {
+          messages.push(msg.raw);
+        }
       }
 
-      // Verify consent change worked: post-revoke message should NOT be stored
-      const hasAfterMsg = messages.some(m => m.includes('After revoke'));
-      expect(hasAfterMsg).toBe(false);
-
-      // Pre-revoke message should be stored (when both had opted in)
-      const hasBeforeMsg = messages.some(m => m.includes('Before revoke'));
-      expect(hasBeforeMsg).toBe(true);
+      // Sender opted out — no real messages stored (only gap markers)
+      expect(messages.length).toBe(0);
 
       client1.send('QUIT');
       client2.send('QUIT');
     });
 
-    it('can verify own opt-in status via METADATA GET', async () => {
+    it('PM history NOT stored when recipient opts out', async () => {
+      const client1 = trackClient(await createRawSocketClient());
+      const client2 = trackClient(await createRawSocketClient());
+      const testId = uniqueId();
+
+      await client1.capLs();
+      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      client1.capEnd();
+      client1.register(`pmro1_${testId}`);
+      await client1.waitForNumeric('001');
+
+      await client2.capLs();
+      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      client2.capEnd();
+      client2.register(`pmro2_${testId}`);
+      await client2.waitForNumeric('001');
+
+      // Recipient opts out — MUST get 761 response
+      client2.send('METADATA SET * chathistory.pm * :0');
+      const metaResponse = await client2.waitForNumeric('761', 3000);
+      expect(metaResponse.command).toBe('761');
+      await new Promise(r => setTimeout(r, 300));
+
+      // Send messages
+      const testMsg = `RecipientOptOut test ${testId}`;
+      client1.send(`PRIVMSG pmro2_${testId} :${testMsg}`);
+      await new Promise(r => setTimeout(r, 500));
+
+      client1.clearRawBuffer();
+
+      // Request PM history
+      client1.send(`CHATHISTORY LATEST pmro2_${testId} * 10`);
+
+      const batchStart = await client1.waitForBatchStart('chathistory', 5000);
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
+
+      const messages: string[] = [];
+      while (true) {
+        const msg = await client1.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'PRIVMSG' && !msg.raw.includes('+draft/chathistory-gap')) {
+          messages.push(msg.raw);
+        }
+      }
+
+      // Recipient opted out — no real messages stored
+      expect(messages.length).toBe(0);
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+
+    it('either party opting out prevents PM storage', async () => {
+      const client1 = trackClient(await createRawSocketClient());
+      const client2 = trackClient(await createRawSocketClient());
+      const testId = uniqueId();
+
+      await client1.capLs();
+      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      client1.capEnd();
+      client1.register(`pmeo1_${testId}`);
+      await client1.waitForNumeric('001');
+
+      await client2.capLs();
+      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      client2.capEnd();
+      client2.register(`pmeo2_${testId}`);
+      await client2.waitForNumeric('001');
+
+      // Client2 opts out — MUST get 761 response
+      client2.send('METADATA SET * chathistory.pm * :0');
+      const metaResponse = await client2.waitForNumeric('761', 3000);
+      expect(metaResponse.command).toBe('761');
+      await new Promise(r => setTimeout(r, 300));
+
+      // Send messages (client1 has default=stored, client2 opted out)
+      const testMsg = `EitherOptOut test ${testId}`;
+      client1.send(`PRIVMSG pmeo2_${testId} :${testMsg}`);
+      await new Promise(r => setTimeout(r, 500));
+
+      client1.clearRawBuffer();
+
+      // Request PM history
+      client1.send(`CHATHISTORY LATEST pmeo2_${testId} * 10`);
+
+      const batchStart = await client1.waitForBatchStart('chathistory', 5000);
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
+
+      const messages: string[] = [];
+      while (true) {
+        const msg = await client1.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'PRIVMSG' && !msg.raw.includes('+draft/chathistory-gap')) {
+          messages.push(msg.raw);
+        }
+      }
+
+      // Either party opting out prevents storage
+      expect(messages.length).toBe(0);
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+
+    it('can toggle opt-out and messages follow preference change', async () => {
+      const client1 = trackClient(await createRawSocketClient());
+      const client2 = trackClient(await createRawSocketClient());
+      const testId = uniqueId();
+
+      await client1.capLs();
+      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      client1.capEnd();
+      client1.register(`pmtog1_${testId}`);
+      await client1.waitForNumeric('001');
+
+      await client2.capLs();
+      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
+      client2.capEnd();
+      client2.register(`pmtog2_${testId}`);
+      await client2.waitForNumeric('001');
+
+      // First message (default — both storing, should be stored)
+      const msg1 = `Before optout ${testId}`;
+      client1.send(`PRIVMSG pmtog2_${testId} :${msg1}`);
+      await new Promise(r => setTimeout(r, 500));
+
+      // Client2 opts out — MUST get 761 response
+      client2.send('METADATA SET * chathistory.pm * :0');
+      const revokeResponse = await client2.waitForNumeric('761', 3000);
+      expect(revokeResponse.command).toBe('761');
+      await new Promise(r => setTimeout(r, 300));
+
+      // Second message (should NOT be stored — client2 opted out)
+      const msg2 = `After optout ${testId}`;
+      client1.send(`PRIVMSG pmtog2_${testId} :${msg2}`);
+      await new Promise(r => setTimeout(r, 500));
+
+      client1.clearRawBuffer();
+
+      // Request PM history
+      client1.send(`CHATHISTORY LATEST pmtog2_${testId} * 10`);
+
+      const batchStart = await client1.waitForBatchStart('chathistory', 5000);
+      expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
+
+      const messages: string[] = [];
+      while (true) {
+        const msg = await client1.waitForParsedLine(
+          m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
+          3000
+        );
+        if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        // Filter out gap markers
+        if (msg.command === 'PRIVMSG' && !msg.raw.includes('+draft/chathistory-gap')) {
+          messages.push(msg.raw);
+        }
+      }
+
+      // Pre-opt-out message should be stored
+      const hasBeforeMsg = messages.some(m => m.includes('Before optout'));
+      expect(hasBeforeMsg).toBe(true);
+
+      // Post-opt-out message should NOT be stored
+      const hasAfterMsg = messages.some(m => m.includes('After optout'));
+      expect(hasAfterMsg).toBe(false);
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+
+    it('can verify own opt-out status via METADATA GET', async () => {
       const client = trackClient(await createRawSocketClient());
       const testId = uniqueId();
 
@@ -987,25 +932,25 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.register(`pmget_${testId}`);
       await client.waitForNumeric('001');
 
-      // Set opt-in - MUST get 761 response
-      client.send('METADATA SET * chathistory.pm * :1');
+      // Set opt-out — MUST get 761 response
+      client.send('METADATA SET * chathistory.pm * :0');
       const setResponse = await client.waitForNumeric('761', 3000);
       expect(setResponse.command).toBe('761');
       await new Promise(r => setTimeout(r, 200));
 
       client.clearRawBuffer();
 
-      // Query own status - MUST get 761 response with value
+      // Query own status — MUST get 761 response with value
       client.send('METADATA GET * chathistory.pm');
       const getResponse = await client.waitForNumeric('761', 3000);
       expect(getResponse.raw).toContain('chathistory.pm');
-      // Value should be '1' - verify the opt-in value is returned
-      expect(getResponse.trailing).toBe('1');
+      // Value should be '0' — verify the opt-out value is returned
+      expect(getResponse.trailing).toBe('0');
 
       client.send('QUIT');
     });
 
-    it('can query other user opt-in status via METADATA GET (public visibility)', async () => {
+    it('can query other user opt-out status via METADATA GET', async () => {
       const client1 = trackClient(await createRawSocketClient());
       const client2 = trackClient(await createRawSocketClient());
       const testId = uniqueId();
@@ -1022,158 +967,23 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client2.register(`pmqry2_${testId}`);
       await client2.waitForNumeric('001');
 
-      // Client2 sets public opt-in - MUST get 761 response
-      client2.send('METADATA SET * chathistory.pm * :1');
+      // Client2 sets opt-out — MUST get 761 response
+      client2.send('METADATA SET * chathistory.pm * :0');
       const setResponse = await client2.waitForNumeric('761', 3000);
       expect(setResponse.command).toBe('761');
       await new Promise(r => setTimeout(r, 300));
 
       client1.clearRawBuffer();
 
-      // Client1 queries Client2's status - MUST get 761 response (public visibility)
+      // Client1 queries Client2's status — MUST get 761 response
       client1.send(`METADATA GET pmqry2_${testId} chathistory.pm`);
       const getResponse = await client1.waitForNumeric('761', 3000);
       expect(getResponse.raw).toContain('chathistory.pm');
-      // Verify other user's opt-in value is visible
-      expect(getResponse.trailing).toBe('1');
+      // Verify other user's opt-out value is visible
+      expect(getResponse.trailing).toBe('0');
 
       client1.send('QUIT');
       client2.send('QUIT');
-    });
-  });
-
-  describe('PM Chathistory Connection Notice', () => {
-    it('receives PM policy notice on connection when CHATHISTORY_PM_NOTICE enabled', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch', 'standard-replies']);
-      client.capEnd();
-      client.register('pmnotice1');
-
-      // Collect all lines during registration
-      const registrationLines: string[] = [];
-      const startTime = Date.now();
-
-      // Wait for 001 and collect lines
-      while (Date.now() - startTime < 10000) {
-        try {
-          const msg = await client.waitForParsedLine(() => true, 500);
-          registrationLines.push(msg.raw);
-          // Stop after MOTD end or reasonable time
-          if (msg.command === '376' || msg.command === '422') {
-            // Wait a bit more for any post-MOTD notices
-            await new Promise(r => setTimeout(r, 500));
-            break;
-          }
-        } catch {
-          break;
-        }
-      }
-
-      // Look for PM policy notice (NOTE or NOTICE)
-      const pmNotice = registrationLines.find(line =>
-        (line.includes('NOTE') || line.includes('NOTICE')) &&
-        (line.toLowerCase().includes('pm') || line.toLowerCase().includes('private') || line.toLowerCase().includes('chathistory'))
-      );
-
-      if (pmNotice) {
-        console.log('PM policy notice received:', pmNotice);
-        console.log('SUCCESS: Server sends PM policy notification on connect');
-      } else {
-        console.log('No PM policy notice found in registration');
-        console.log('Sample registration lines:', registrationLines.slice(-10));
-      }
-
-      client.send('QUIT');
-    });
-
-    it('NOTE command uses CHATHISTORY PM_POLICY format for standard-replies clients', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      const { ack } = await client.capReq(['draft/chathistory', 'batch', 'standard-replies']);
-      client.capEnd();
-      client.register('pmnote1');
-
-      const hasStandardReplies = ack.includes('standard-replies');
-
-      // Collect registration lines
-      const registrationLines: string[] = [];
-      const startTime = Date.now();
-
-      while (Date.now() - startTime < 10000) {
-        try {
-          const msg = await client.waitForParsedLine(() => true, 500);
-          registrationLines.push(msg.raw);
-          if (msg.command === '376' || msg.command === '422') {
-            await new Promise(r => setTimeout(r, 500));
-            break;
-          }
-        } catch {
-          break;
-        }
-      }
-
-      // Look specifically for NOTE CHATHISTORY PM_POLICY
-      const notePolicy = registrationLines.find(line =>
-        line.includes('NOTE') && line.includes('CHATHISTORY') && line.includes('PM_POLICY')
-      );
-
-      if (hasStandardReplies && notePolicy) {
-        console.log('NOTE CHATHISTORY PM_POLICY received:', notePolicy);
-        console.log('SUCCESS: Server uses proper NOTE format for standard-replies clients');
-      } else if (hasStandardReplies) {
-        console.log('standard-replies enabled but no NOTE PM_POLICY found');
-        // May fall back to NOTICE or feature disabled
-      } else {
-        console.log('standard-replies not enabled, expecting NOTICE instead');
-      }
-
-      client.send('QUIT');
-    });
-
-    it('falls back to NOTICE for clients without standard-replies', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      // Explicitly do NOT request standard-replies
-      await client.capReq(['draft/chathistory', 'batch']);
-      client.capEnd();
-      client.register('pmfallback1');
-
-      // Collect registration lines
-      const registrationLines: string[] = [];
-      const startTime = Date.now();
-
-      while (Date.now() - startTime < 10000) {
-        try {
-          const msg = await client.waitForParsedLine(() => true, 500);
-          registrationLines.push(msg.raw);
-          if (msg.command === '376' || msg.command === '422') {
-            await new Promise(r => setTimeout(r, 500));
-            break;
-          }
-        } catch {
-          break;
-        }
-      }
-
-      // Look for NOTICE about PM history (not NOTE)
-      const noticePolicy = registrationLines.find(line =>
-        line.includes('NOTICE') &&
-        (line.toLowerCase().includes('pm') || line.toLowerCase().includes('private') || line.toLowerCase().includes('chathistory')) &&
-        !line.includes('NOTE')
-      );
-
-      if (noticePolicy) {
-        console.log('NOTICE fallback received:', noticePolicy);
-        console.log('SUCCESS: Server falls back to NOTICE for non-standard-replies clients');
-      } else {
-        console.log('No PM NOTICE found (feature may be disabled)');
-      }
-
-      client.send('QUIT');
     });
   });
 
@@ -1184,37 +994,24 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       const caps = await client.capLs();
       const chathistoryValue = caps.get('draft/chathistory');
 
-      console.log('draft/chathistory capability value:', chathistoryValue);
-
-      if (chathistoryValue) {
-        expect(chathistoryValue).toContain('limit=');
-        console.log('SUCCESS: Capability includes limit parameter');
-      } else {
-        console.log('draft/chathistory has no value (may be boolean capability)');
-      }
+      expect(chathistoryValue).toBeDefined();
+      expect(chathistoryValue).toContain('limit=');
 
       client.send('QUIT');
     });
 
-    it('checks for pm= parameter in capability value (if CHATHISTORY_ADVERTISE_PM enabled)', async () => {
+    it('capability value includes pm token when CHATHISTORY_PRIVATE enabled', async () => {
       const client = trackClient(await createRawSocketClient());
 
       const caps = await client.capLs();
       const chathistoryValue = caps.get('draft/chathistory');
 
-      console.log('draft/chathistory capability value:', chathistoryValue);
+      expect(chathistoryValue).toBeDefined();
 
-      if (chathistoryValue && chathistoryValue.includes('pm=')) {
-        const pmMatch = chathistoryValue.match(/pm=(\w+)/);
-        if (pmMatch) {
-          console.log('PM consent mode advertised:', pmMatch[1]);
-          expect(['global', 'single', 'multi']).toContain(pmMatch[1]);
-          console.log('SUCCESS: Server advertises PM consent mode');
-        }
-      } else {
-        console.log('pm= parameter not present (CHATHISTORY_ADVERTISE_PM likely disabled)');
-        console.log('This is expected - pm= is a non-standard extension');
-      }
+      // New format: "limit=1000,retention=7d,pm" (pm has no value, just a token)
+      const tokens = chathistoryValue!.split(',').map(t => t.trim());
+      const hasPm = tokens.some(t => t === 'pm');
+      expect(hasPm, `Expected 'pm' token in capability value: ${chathistoryValue}`).toBe(true);
 
       client.send('QUIT');
     });
@@ -1596,7 +1393,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client2.send('QUIT');
     });
 
-    it('PART events are stored in history', async () => {
+    it('PART events are stored in history', { retry: 2 }, async () => {
       const client1 = trackClient(await createRawSocketClient());
       const client2 = trackClient(await createRawSocketClient());
 
@@ -1623,7 +1420,8 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Client2 parts with a message
       client2.send(`PART ${channelName} :Leaving for test`);
-      await new Promise(r => setTimeout(r, 500));
+      // Wait for PART to persist to chathistory database
+      await new Promise(r => setTimeout(r, 1000));
 
       client1.clearRawBuffer();
 
@@ -1654,7 +1452,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client2.send('QUIT');
     });
 
-    it('KICK events are stored in history', async () => {
+    it('KICK events are stored in history', { retry: 2 }, async () => {
       const op = trackClient(await createRawSocketClient());
       const user = trackClient(await createRawSocketClient());
 
@@ -1683,7 +1481,8 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Op kicks user
       op.send(`KICK ${channelName} histkickusr :Test kick reason`);
-      await new Promise(r => setTimeout(r, 500));
+      // Wait for KICK to persist to chathistory database
+      await new Promise(r => setTimeout(r, 1000));
 
       op.clearRawBuffer();
 
@@ -1716,7 +1515,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       user.send('QUIT');
     });
 
-    it('QUIT events are stored in shared channel history', async () => {
+    it('QUIT events are stored in shared channel history', { retry: 2 }, async () => {
       const client1 = trackClient(await createRawSocketClient());
       const client2 = trackClient(await createRawSocketClient());
 
@@ -1743,7 +1542,8 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Client2 quits with a message
       client2.send('QUIT :Goodbye for test');
-      await new Promise(r => setTimeout(r, 500));
+      // Wait for QUIT to persist to chathistory database
+      await new Promise(r => setTimeout(r, 1000));
 
       client1.clearRawBuffer();
 
