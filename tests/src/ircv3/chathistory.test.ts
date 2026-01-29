@@ -1,5 +1,46 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId, waitForChathistory } from '../helpers/index.js';
+import {
+  createRawSocketClient,
+  RawSocketClient,
+  uniqueChannel,
+  uniqueId,
+  waitForChathistory,
+  getCaps,
+  X3Client,
+  setupTestAccount,
+  releaseTestAccount,
+  PRIMARY_SERVER,
+} from '../helpers/index.js';
+
+/**
+ * Create an authenticated chathistory client.
+ * Uses X3Client (extends RawSocketClient), negotiates chathistory caps,
+ * registers, then authenticates via the account pool.
+ *
+ * @param extraCaps - Additional capabilities beyond the chathistory bundle
+ * @returns The client and account info (for pool release)
+ */
+async function createAuthedHistoryClient(
+  extraCaps: string[] = [],
+  nick?: string,
+): Promise<{ client: X3Client; account: string; fromPool: boolean; nick: string }> {
+  const client = new X3Client();
+  await client.connect(PRIMARY_SERVER.host, PRIMARY_SERVER.port);
+
+  await client.capLs();
+  await client.capReq(getCaps('chathistory', ...extraCaps));
+  client.capEnd();
+  const actualNick = nick || `hist${uniqueId().slice(0, 6)}`;
+  client.register(actualNick);
+  await client.waitForNumeric('001');
+
+  // Let server finish sending welcome notices before AUTH
+  await new Promise(r => setTimeout(r, 500));
+  client.clearRawBuffer();
+
+  const { account, fromPool } = await setupTestAccount(client);
+  return { client, account, fromPool, nick: actualNick };
+}
 
 /**
  * Chathistory Tests (draft/chathistory)
@@ -14,8 +55,9 @@ import { createRawSocketClient, RawSocketClient, uniqueChannel, uniqueId, waitFo
  */
 describe('IRCv3 Chathistory (draft/chathistory)', () => {
   const clients: RawSocketClient[] = [];
+  const poolAccounts: string[] = [];
 
-  const trackClient = (client: RawSocketClient): RawSocketClient => {
+  const trackClient = <T extends RawSocketClient>(client: T): T => {
     clients.push(client);
     return client;
   };
@@ -29,6 +71,10 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       }
     }
     clients.length = 0;
+    for (const account of poolAccounts) {
+      releaseTestAccount(account);
+    }
+    poolAccounts.length = 0;
   });
 
   describe('Capability', () => {
@@ -52,13 +98,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
   describe('CHATHISTORY LATEST', () => {
     it('CHATHISTORY LATEST returns messages in a batch', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch', 'server-time']);
-      client.capEnd();
-      client.register('histlatest1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient();
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histlatest');
       client.send(`JOIN ${channelName}`);
@@ -84,13 +126,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
   describe('CHATHISTORY BEFORE', () => {
     it('CHATHISTORY BEFORE retrieves messages before a timestamp', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch', 'server-time']);
-      client.capEnd();
-      client.register('histbefore1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient();
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histbefore');
       client.send(`JOIN ${channelName}`);
@@ -116,13 +154,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
   describe('CHATHISTORY AFTER', () => {
     it('CHATHISTORY AFTER retrieves messages after a timestamp', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch', 'server-time']);
-      client.capEnd();
-      client.register('histafter1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient();
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histafter');
       client.send(`JOIN ${channelName}`);
@@ -150,13 +184,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
   describe('CHATHISTORY AROUND', () => {
     it('CHATHISTORY AROUND retrieves messages around a timestamp', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch', 'server-time']);
-      client.capEnd();
-      client.register('histaround1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient();
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histaround');
       client.send(`JOIN ${channelName}`);
@@ -191,13 +221,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
   describe('CHATHISTORY TARGETS', () => {
     it('CHATHISTORY TARGETS lists channels with history', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch', 'server-time']);
-      client.capEnd();
-      client.register('histtargets1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient();
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       // Join a channel and send a message to create history
       const channelName = uniqueChannel('histtargets');
@@ -233,13 +259,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
   describe('Chathistory Message Format', () => {
     it('chathistory messages include time tag', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch', 'server-time']);
-      client.capEnd();
-      client.register('histformat1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient();
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histformat');
       client.send(`JOIN ${channelName}`);
@@ -265,13 +287,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
 
     it('chathistory messages include msgid tag', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch', 'server-time']);
-      client.capEnd();
-      client.register('histmsgid1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient();
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histmsgid');
       client.send(`JOIN ${channelName}`);
@@ -336,13 +354,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
   describe('CHATHISTORY BETWEEN', () => {
     it('CHATHISTORY BETWEEN retrieves messages in time range', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch', 'server-time']);
-      client.capEnd();
-      client.register('histbetween1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient();
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histbetween');
       client.send(`JOIN ${channelName}`);
@@ -374,13 +388,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
   describe('Chathistory Limit Handling', () => {
     it('respects message limit parameter', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch', 'server-time', 'echo-message']);
-      client.capEnd();
-      client.register('histlimit1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient(['echo-message']);
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histlimit');
       client.send(`JOIN ${channelName}`);
@@ -419,13 +429,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
 
     it('handles limit of zero gracefully', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch']);
-      client.capEnd();
-      client.register('histzero1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient();
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histzero');
       client.send(`JOIN ${channelName}`);
@@ -451,13 +457,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
 
     it('handles very large limit', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch']);
-      client.capEnd();
-      client.register('histlarge1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient();
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histlarge');
       client.send(`JOIN ${channelName}`);
@@ -485,13 +487,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
   describe('Chathistory with msgid References', () => {
     it('CHATHISTORY BEFORE with msgid', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch', 'server-time', 'echo-message']);
-      client.capEnd();
-      client.register('histmsgid2');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient(['echo-message']);
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histmsgid');
       client.send(`JOIN ${channelName}`);
@@ -542,13 +540,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
 
     it('CHATHISTORY AFTER with msgid', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch', 'server-time', 'echo-message']);
-      client.capEnd();
-      client.register('histafter2');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient(['echo-message']);
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histafter2');
       client.send(`JOIN ${channelName}`);
@@ -619,30 +613,23 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
    */
   describe('PM Chathistory Opt-Out', () => {
     it('PM history stored by default for authenticated users', async () => {
-      const client1 = trackClient(await createRawSocketClient());
-      const client2 = trackClient(await createRawSocketClient());
-      const testId = uniqueId();
+      const { client: client1, account: account1, fromPool: fromPool1, nick: nick1 } = await createAuthedHistoryClient(['draft/metadata-2']);
+      trackClient(client1);
+      if (fromPool1) poolAccounts.push(account1);
 
-      await client1.capLs();
-      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
-      client1.capEnd();
-      client1.register(`pmdef1_${testId}`);
-      await client1.waitForNumeric('001');
-
-      await client2.capLs();
-      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
-      client2.capEnd();
-      client2.register(`pmdef2_${testId}`);
-      await client2.waitForNumeric('001');
+      const { client: client2, account: account2, fromPool: fromPool2, nick: nick2 } = await createAuthedHistoryClient(['draft/metadata-2']);
+      trackClient(client2);
+      if (fromPool2) poolAccounts.push(account2);
 
       // No opt-in needed — PM history stored by default for authenticated users
+      const testId = uniqueId();
       const testMsg = `DefaultPM test ${testId}`;
-      client1.send(`PRIVMSG pmdef2_${testId} :${testMsg}`);
+      client1.send(`PRIVMSG ${nick2} :${testMsg}`);
       await new Promise(r => setTimeout(r, 300));
-      client2.send(`PRIVMSG pmdef1_${testId} :Reply ${testMsg}`);
+      client2.send(`PRIVMSG ${nick1} :Reply ${testMsg}`);
 
       // Wait for messages to persist and query history
-      const messages = await waitForChathistory(client1, `pmdef2_${testId}`, {
+      const messages = await waitForChathistory(client1, nick2, {
         minMessages: 1,
         timeoutMs: 10000,
       });
@@ -655,30 +642,23 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
 
     it('PM history includes messages from both parties', async () => {
-      const client1 = trackClient(await createRawSocketClient());
-      const client2 = trackClient(await createRawSocketClient());
-      const testId = uniqueId();
+      const { client: client1, account: account1, fromPool: fromPool1, nick: nick1 } = await createAuthedHistoryClient(['draft/metadata-2']);
+      trackClient(client1);
+      if (fromPool1) poolAccounts.push(account1);
 
-      await client1.capLs();
-      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
-      client1.capEnd();
-      client1.register(`pmboth1_${testId}`);
-      await client1.waitForNumeric('001');
-
-      await client2.capLs();
-      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
-      client2.capEnd();
-      client2.register(`pmboth2_${testId}`);
-      await client2.waitForNumeric('001');
+      const { client: client2, account: account2, fromPool: fromPool2, nick: nick2 } = await createAuthedHistoryClient(['draft/metadata-2']);
+      trackClient(client2);
+      if (fromPool2) poolAccounts.push(account2);
 
       // Exchange messages — no opt-in needed
+      const testId = uniqueId();
       const testMsg = `BothParties test ${testId}`;
-      client1.send(`PRIVMSG pmboth2_${testId} :${testMsg}`);
+      client1.send(`PRIVMSG ${nick2} :${testMsg}`);
       await new Promise(r => setTimeout(r, 300));
-      client2.send(`PRIVMSG pmboth1_${testId} :Reply ${testMsg}`);
+      client2.send(`PRIVMSG ${nick1} :Reply ${testMsg}`);
 
       // Wait for persistence
-      const messages = await waitForChathistory(client1, `pmboth2_${testId}`, {
+      const messages = await waitForChathistory(client1, nick2, {
         minMessages: 1,
         timeoutMs: 10000,
       });
@@ -691,21 +671,13 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
 
     it('PM history NOT stored when sender opts out', async () => {
-      const client1 = trackClient(await createRawSocketClient());
-      const client2 = trackClient(await createRawSocketClient());
-      const testId = uniqueId();
+      const { client: client1, account: account1, fromPool: fromPool1, nick: nick1 } = await createAuthedHistoryClient(['draft/metadata-2']);
+      trackClient(client1);
+      if (fromPool1) poolAccounts.push(account1);
 
-      await client1.capLs();
-      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
-      client1.capEnd();
-      client1.register(`pmso1_${testId}`);
-      await client1.waitForNumeric('001');
-
-      await client2.capLs();
-      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
-      client2.capEnd();
-      client2.register(`pmso2_${testId}`);
-      await client2.waitForNumeric('001');
+      const { client: client2, account: account2, fromPool: fromPool2, nick: nick2 } = await createAuthedHistoryClient(['draft/metadata-2']);
+      trackClient(client2);
+      if (fromPool2) poolAccounts.push(account2);
 
       // Sender opts out — MUST get 761 response
       client1.send('METADATA SET * chathistory.pm * :0');
@@ -714,14 +686,15 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       await new Promise(r => setTimeout(r, 300));
 
       // Send messages
+      const testId = uniqueId();
       const testMsg = `SenderOptOut test ${testId}`;
-      client1.send(`PRIVMSG pmso2_${testId} :${testMsg}`);
+      client1.send(`PRIVMSG ${nick2} :${testMsg}`);
       await new Promise(r => setTimeout(r, 500));
 
       client1.clearRawBuffer();
 
       // Request PM history
-      client1.send(`CHATHISTORY LATEST pmso2_${testId} * 10`);
+      client1.send(`CHATHISTORY LATEST ${nick2} * 10`);
 
       const batchStart = await client1.waitForBatchStart('chathistory', 5000);
       expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
@@ -747,21 +720,13 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
 
     it('PM history NOT stored when recipient opts out', async () => {
-      const client1 = trackClient(await createRawSocketClient());
-      const client2 = trackClient(await createRawSocketClient());
-      const testId = uniqueId();
+      const { client: client1, account: account1, fromPool: fromPool1, nick: nick1 } = await createAuthedHistoryClient(['draft/metadata-2']);
+      trackClient(client1);
+      if (fromPool1) poolAccounts.push(account1);
 
-      await client1.capLs();
-      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
-      client1.capEnd();
-      client1.register(`pmro1_${testId}`);
-      await client1.waitForNumeric('001');
-
-      await client2.capLs();
-      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
-      client2.capEnd();
-      client2.register(`pmro2_${testId}`);
-      await client2.waitForNumeric('001');
+      const { client: client2, account: account2, fromPool: fromPool2, nick: nick2 } = await createAuthedHistoryClient(['draft/metadata-2']);
+      trackClient(client2);
+      if (fromPool2) poolAccounts.push(account2);
 
       // Recipient opts out — MUST get 761 response
       client2.send('METADATA SET * chathistory.pm * :0');
@@ -770,14 +735,15 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       await new Promise(r => setTimeout(r, 300));
 
       // Send messages
+      const testId = uniqueId();
       const testMsg = `RecipientOptOut test ${testId}`;
-      client1.send(`PRIVMSG pmro2_${testId} :${testMsg}`);
+      client1.send(`PRIVMSG ${nick2} :${testMsg}`);
       await new Promise(r => setTimeout(r, 500));
 
       client1.clearRawBuffer();
 
       // Request PM history
-      client1.send(`CHATHISTORY LATEST pmro2_${testId} * 10`);
+      client1.send(`CHATHISTORY LATEST ${nick2} * 10`);
 
       const batchStart = await client1.waitForBatchStart('chathistory', 5000);
       expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
@@ -802,21 +768,13 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
 
     it('either party opting out prevents PM storage', async () => {
-      const client1 = trackClient(await createRawSocketClient());
-      const client2 = trackClient(await createRawSocketClient());
-      const testId = uniqueId();
+      const { client: client1, account: account1, fromPool: fromPool1, nick: nick1 } = await createAuthedHistoryClient(['draft/metadata-2']);
+      trackClient(client1);
+      if (fromPool1) poolAccounts.push(account1);
 
-      await client1.capLs();
-      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
-      client1.capEnd();
-      client1.register(`pmeo1_${testId}`);
-      await client1.waitForNumeric('001');
-
-      await client2.capLs();
-      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
-      client2.capEnd();
-      client2.register(`pmeo2_${testId}`);
-      await client2.waitForNumeric('001');
+      const { client: client2, account: account2, fromPool: fromPool2, nick: nick2 } = await createAuthedHistoryClient(['draft/metadata-2']);
+      trackClient(client2);
+      if (fromPool2) poolAccounts.push(account2);
 
       // Client2 opts out — MUST get 761 response
       client2.send('METADATA SET * chathistory.pm * :0');
@@ -825,14 +783,15 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       await new Promise(r => setTimeout(r, 300));
 
       // Send messages (client1 has default=stored, client2 opted out)
+      const testId = uniqueId();
       const testMsg = `EitherOptOut test ${testId}`;
-      client1.send(`PRIVMSG pmeo2_${testId} :${testMsg}`);
+      client1.send(`PRIVMSG ${nick2} :${testMsg}`);
       await new Promise(r => setTimeout(r, 500));
 
       client1.clearRawBuffer();
 
       // Request PM history
-      client1.send(`CHATHISTORY LATEST pmeo2_${testId} * 10`);
+      client1.send(`CHATHISTORY LATEST ${nick2} * 10`);
 
       const batchStart = await client1.waitForBatchStart('chathistory', 5000);
       expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
@@ -857,25 +816,18 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
 
     it('can toggle opt-out and messages follow preference change', async () => {
-      const client1 = trackClient(await createRawSocketClient());
-      const client2 = trackClient(await createRawSocketClient());
-      const testId = uniqueId();
+      const { client: client1, account: account1, fromPool: fromPool1, nick: nick1 } = await createAuthedHistoryClient(['draft/metadata-2']);
+      trackClient(client1);
+      if (fromPool1) poolAccounts.push(account1);
 
-      await client1.capLs();
-      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
-      client1.capEnd();
-      client1.register(`pmtog1_${testId}`);
-      await client1.waitForNumeric('001');
-
-      await client2.capLs();
-      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'draft/metadata-2']);
-      client2.capEnd();
-      client2.register(`pmtog2_${testId}`);
-      await client2.waitForNumeric('001');
+      const { client: client2, account: account2, fromPool: fromPool2, nick: nick2 } = await createAuthedHistoryClient(['draft/metadata-2']);
+      trackClient(client2);
+      if (fromPool2) poolAccounts.push(account2);
 
       // First message (default — both storing, should be stored)
+      const testId = uniqueId();
       const msg1 = `Before optout ${testId}`;
-      client1.send(`PRIVMSG pmtog2_${testId} :${msg1}`);
+      client1.send(`PRIVMSG ${nick2} :${msg1}`);
       await new Promise(r => setTimeout(r, 500));
 
       // Client2 opts out — MUST get 761 response
@@ -886,13 +838,13 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Second message (should NOT be stored — client2 opted out)
       const msg2 = `After optout ${testId}`;
-      client1.send(`PRIVMSG pmtog2_${testId} :${msg2}`);
+      client1.send(`PRIVMSG ${nick2} :${msg2}`);
       await new Promise(r => setTimeout(r, 500));
 
       client1.clearRawBuffer();
 
       // Request PM history
-      client1.send(`CHATHISTORY LATEST pmtog2_${testId} * 10`);
+      client1.send(`CHATHISTORY LATEST ${nick2} * 10`);
 
       const batchStart = await client1.waitForBatchStart('chathistory', 5000);
       expect(batchStart.command, 'Should receive BATCH start').toBe('BATCH');
@@ -923,14 +875,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
 
     it('can verify own opt-out status via METADATA GET', async () => {
-      const client = trackClient(await createRawSocketClient());
-      const testId = uniqueId();
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch', 'draft/metadata-2']);
-      client.capEnd();
-      client.register(`pmget_${testId}`);
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient(['draft/metadata-2']);
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       // Set opt-out — MUST get 761 response
       client.send('METADATA SET * chathistory.pm * :0');
@@ -951,21 +898,13 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
 
     it('can query other user opt-out status via METADATA GET', async () => {
-      const client1 = trackClient(await createRawSocketClient());
-      const client2 = trackClient(await createRawSocketClient());
-      const testId = uniqueId();
+      const { client: client1, account: account1, fromPool: fromPool1 } = await createAuthedHistoryClient(['draft/metadata-2']);
+      trackClient(client1);
+      if (fromPool1) poolAccounts.push(account1);
 
-      await client1.capLs();
-      await client1.capReq(['draft/chathistory', 'batch', 'draft/metadata-2']);
-      client1.capEnd();
-      client1.register(`pmqry1_${testId}`);
-      await client1.waitForNumeric('001');
-
-      await client2.capLs();
-      await client2.capReq(['draft/chathistory', 'batch', 'draft/metadata-2']);
-      client2.capEnd();
-      client2.register(`pmqry2_${testId}`);
-      await client2.waitForNumeric('001');
+      const { client: client2, account: account2, fromPool: fromPool2, nick: nick2 } = await createAuthedHistoryClient(['draft/metadata-2']);
+      trackClient(client2);
+      if (fromPool2) poolAccounts.push(account2);
 
       // Client2 sets opt-out — MUST get 761 response
       client2.send('METADATA SET * chathistory.pm * :0');
@@ -976,7 +915,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client1.clearRawBuffer();
 
       // Client1 queries Client2's status — MUST get 761 response
-      client1.send(`METADATA GET pmqry2_${testId} chathistory.pm`);
+      client1.send(`METADATA GET ${nick2} chathistory.pm`);
       const getResponse = await client1.waitForNumeric('761', 3000);
       expect(getResponse.raw).toContain('chathistory.pm');
       // Verify other user's opt-out value is visible
@@ -1019,13 +958,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
   describe('Chathistory Empty Results', () => {
     it('returns empty batch for channel with no history', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch']);
-      client.capEnd();
-      client.register('histempty1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient();
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histempty');
       client.send(`JOIN ${channelName}`);
@@ -1047,13 +982,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
   describe('Chathistory Timestamp Formats', () => {
     it('accepts ISO8601 timestamp format', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch', 'server-time']);
-      client.capEnd();
-      client.register('histiso1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient();
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histiso');
       client.send(`JOIN ${channelName}`);
@@ -1085,14 +1016,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // e.g., an unknown subcommand, missing parameters, excess parameters, or parameters
       // that cannot be parsed, the INVALID_PARAMS error code SHOULD be returned"
       // Example: FAIL CHATHISTORY INVALID_PARAMS the_given_command :Invalid timestamp
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      // Need standard-replies to receive FAIL command (otherwise server sends NOTICE fallback)
-      await client.capReq(['draft/chathistory', 'batch', 'labeled-response', 'standard-replies']);
-      client.capEnd();
-      client.register('histbadts1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient(['labeled-response', 'standard-replies']);
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histbadts');
       client.send(`JOIN ${channelName}`);
@@ -1121,13 +1047,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
   describe('CHATHISTORY NOTICE Messages', () => {
     it('NOTICE messages are stored in history', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch', 'server-time']);
-      client.capEnd();
-      client.register('histnotice1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient();
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histnotice');
       client.send(`JOIN ${channelName}`);
@@ -1169,13 +1091,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
 
     it('NOTICE and PRIVMSG appear together in history', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch', 'server-time']);
-      client.capEnd();
-      client.register('histmixed1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient();
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histmixed');
       client.send(`JOIN ${channelName}`);
@@ -1223,14 +1141,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
      * 2. Client requests draft/event-playback capability
      */
     it('TAGMSG messages are stored in history', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      // Note: draft/event-playback is required for TAGMSG to be stored in history
-      await client.capReq(['draft/chathistory', 'draft/event-playback', 'batch', 'server-time', 'message-tags']);
-      client.capEnd();
-      client.register('histtag1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient(['draft/event-playback']);
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histtag');
       client.send(`JOIN ${channelName}`);
@@ -1273,14 +1186,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
 
     it('TAGMSG with +reply tag links to original message', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      // Note: draft/event-playback is required for TAGMSG to be stored in history
-      await client.capReq(['draft/chathistory', 'draft/event-playback', 'batch', 'server-time', 'message-tags', 'echo-message']);
-      client.capEnd();
-      client.register('histreply1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient(['draft/event-playback', 'echo-message']);
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histreply');
       client.send(`JOIN ${channelName}`);
@@ -1336,21 +1244,13 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
      * 2. Client requests draft/event-playback capability
      */
     it('JOIN events are stored in history', async () => {
-      const client1 = trackClient(await createRawSocketClient());
-      const client2 = trackClient(await createRawSocketClient());
+      const { client: client1, account: account1, fromPool: fromPool1 } = await createAuthedHistoryClient(['draft/event-playback', 'extended-join']);
+      trackClient(client1);
+      if (fromPool1) poolAccounts.push(account1);
 
-      await client1.capLs();
-      // Note: draft/event-playback is required for JOIN events to be stored in history
-      await client1.capReq(['draft/chathistory', 'draft/event-playback', 'batch', 'server-time', 'extended-join']);
-      client1.capEnd();
-      client1.register('histjoin1');
-      await client1.waitForNumeric('001');
-
-      await client2.capLs();
-      await client2.capReq(['draft/chathistory', 'draft/event-playback', 'batch', 'server-time', 'extended-join']);
-      client2.capEnd();
-      client2.register('histjoin2');
-      await client2.waitForNumeric('001');
+      const { client: client2, account: account2, fromPool: fromPool2, nick: nick2 } = await createAuthedHistoryClient(['draft/event-playback', 'extended-join']);
+      trackClient(client2);
+      if (fromPool2) poolAccounts.push(account2);
 
       const channelName = uniqueChannel('histjoin');
 
@@ -1386,7 +1286,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // JOIN events must be stored when event-playback is enabled
       expect(joins.length).toBeGreaterThan(0);
       // Verify client2's join is recorded
-      const hasJoin2 = joins.some(j => j.includes('histjoin2'));
+      const hasJoin2 = joins.some(j => j.includes(nick2));
       expect(hasJoin2).toBe(true);
 
       client1.send('QUIT');
@@ -1394,20 +1294,13 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
 
     it('PART events are stored in history', { retry: 2 }, async () => {
-      const client1 = trackClient(await createRawSocketClient());
-      const client2 = trackClient(await createRawSocketClient());
+      const { client: client1, account: account1, fromPool: fromPool1 } = await createAuthedHistoryClient(['draft/event-playback']);
+      trackClient(client1);
+      if (fromPool1) poolAccounts.push(account1);
 
-      await client1.capLs();
-      await client1.capReq(['draft/chathistory', 'draft/event-playback', 'batch', 'server-time']);
-      client1.capEnd();
-      client1.register('histpart1');
-      await client1.waitForNumeric('001');
-
-      await client2.capLs();
-      await client2.capReq(['draft/chathistory', 'draft/event-playback', 'batch', 'server-time']);
-      client2.capEnd();
-      client2.register('histpart2');
-      await client2.waitForNumeric('001');
+      const { client: client2, account: account2, fromPool: fromPool2 } = await createAuthedHistoryClient(['draft/event-playback']);
+      trackClient(client2);
+      if (fromPool2) poolAccounts.push(account2);
 
       const channelName = uniqueChannel('histpart');
 
@@ -1453,20 +1346,13 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
 
     it('KICK events are stored in history', { retry: 2 }, async () => {
-      const op = trackClient(await createRawSocketClient());
-      const user = trackClient(await createRawSocketClient());
+      const { client: op, account: accountOp, fromPool: fromPoolOp } = await createAuthedHistoryClient(['draft/event-playback']);
+      trackClient(op);
+      if (fromPoolOp) poolAccounts.push(accountOp);
 
-      await op.capLs();
-      await op.capReq(['draft/chathistory', 'draft/event-playback', 'batch', 'server-time']);
-      op.capEnd();
-      op.register('histkickop');
-      await op.waitForNumeric('001');
-
-      await user.capLs();
-      await user.capReq(['draft/chathistory', 'draft/event-playback', 'batch', 'server-time']);
-      user.capEnd();
-      user.register('histkickusr');
-      await user.waitForNumeric('001');
+      const { client: user, account: accountUser, fromPool: fromPoolUser, nick: userNick } = await createAuthedHistoryClient(['draft/event-playback']);
+      trackClient(user);
+      if (fromPoolUser) poolAccounts.push(accountUser);
 
       const channelName = uniqueChannel('histkick');
 
@@ -1480,7 +1366,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       await new Promise(r => setTimeout(r, 300));
 
       // Op kicks user
-      op.send(`KICK ${channelName} histkickusr :Test kick reason`);
+      op.send(`KICK ${channelName} ${userNick} :Test kick reason`);
       // Wait for KICK to persist to chathistory database
       await new Promise(r => setTimeout(r, 1000));
 
@@ -1506,7 +1392,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // KICK events must be stored when event-playback is enabled
       expect(kicks.length).toBeGreaterThan(0);
       // Verify kick info
-      const hasKickedUser = kicks.some(k => k.includes('histkickusr'));
+      const hasKickedUser = kicks.some(k => k.includes(userNick));
       const hasKickReason = kicks.some(k => k.includes('Test kick reason'));
       expect(hasKickedUser).toBe(true);
       expect(hasKickReason).toBe(true);
@@ -1516,20 +1402,13 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
 
     it('QUIT events are stored in shared channel history', { retry: 2 }, async () => {
-      const client1 = trackClient(await createRawSocketClient());
-      const client2 = trackClient(await createRawSocketClient());
+      const { client: client1, account: account1, fromPool: fromPool1 } = await createAuthedHistoryClient(['draft/event-playback']);
+      trackClient(client1);
+      if (fromPool1) poolAccounts.push(account1);
 
-      await client1.capLs();
-      await client1.capReq(['draft/chathistory', 'draft/event-playback', 'batch', 'server-time']);
-      client1.capEnd();
-      client1.register('histquit1');
-      await client1.waitForNumeric('001');
-
-      await client2.capLs();
-      await client2.capReq(['draft/chathistory', 'draft/event-playback', 'batch', 'server-time']);
-      client2.capEnd();
-      client2.register('histquit2');
-      await client2.waitForNumeric('001');
+      const { client: client2, account: account2, fromPool: fromPool2, nick: nick2 } = await createAuthedHistoryClient(['draft/event-playback']);
+      trackClient(client2);
+      if (fromPool2) poolAccounts.push(account2);
 
       const channelName = uniqueChannel('histquit');
 
@@ -1567,7 +1446,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // QUIT events must be stored when event-playback is enabled
       expect(quits.length).toBeGreaterThan(0);
       // Verify quit info
-      const hasQuitUser = quits.some(q => q.includes('histquit2'));
+      const hasQuitUser = quits.some(q => q.includes(nick2));
       const hasQuitMsg = quits.some(q => q.includes('Goodbye for test'));
       expect(hasQuitUser).toBe(true);
       expect(hasQuitMsg).toBe(true);
@@ -1576,13 +1455,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
 
     it('TOPIC changes are stored in history', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'draft/event-playback', 'batch', 'server-time']);
-      client.capEnd();
-      client.register('histtopic1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient(['draft/event-playback']);
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histtopic');
       client.send(`JOIN ${channelName}`);
@@ -1611,13 +1486,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
 
     it('MODE changes are stored in history', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'draft/event-playback', 'batch', 'server-time']);
-      client.capEnd();
-      client.register('histmode1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient(['draft/event-playback']);
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histmode');
       client.send(`JOIN ${channelName}`);
@@ -1648,13 +1519,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
   describe('CHATHISTORY Pagination', () => {
     it('can paginate through history using BEFORE with msgid', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch', 'server-time', 'echo-message']);
-      client.capEnd();
-      client.register('histpage1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient(['echo-message']);
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histpage');
       client.send(`JOIN ${channelName}`);
@@ -1747,13 +1614,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
 
     it('can paginate forward using AFTER with msgid', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch', 'server-time', 'echo-message']);
-      client.capEnd();
-      client.register('histfwd1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient(['echo-message']);
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histfwd');
       client.send(`JOIN ${channelName}`);
@@ -1805,13 +1668,9 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
 
     it('handles pagination at end of history', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/chathistory', 'batch', 'server-time', 'echo-message']);
-      client.capEnd();
-      client.register('histend1');
-      await client.waitForNumeric('001');
+      const { client, account, fromPool } = await createAuthedHistoryClient(['echo-message']);
+      trackClient(client);
+      if (fromPool) poolAccounts.push(account);
 
       const channelName = uniqueChannel('histend');
       client.send(`JOIN ${channelName}`);
@@ -1863,20 +1722,13 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
 
     it('pagination consistency during message arrival', async () => {
-      const sender = trackClient(await createRawSocketClient());
-      const reader = trackClient(await createRawSocketClient());
+      const { client: sender, account: accountSender, fromPool: fromPoolSender } = await createAuthedHistoryClient(['echo-message']);
+      trackClient(sender);
+      if (fromPoolSender) poolAccounts.push(accountSender);
 
-      await sender.capLs();
-      await sender.capReq(['draft/chathistory', 'batch', 'server-time', 'echo-message']);
-      sender.capEnd();
-      sender.register('histrace1');
-      await sender.waitForNumeric('001');
-
-      await reader.capLs();
-      await reader.capReq(['draft/chathistory', 'batch', 'server-time']);
-      reader.capEnd();
-      reader.register('histrace2');
-      await reader.waitForNumeric('001');
+      const { client: reader, account: accountReader, fromPool: fromPoolReader } = await createAuthedHistoryClient();
+      trackClient(reader);
+      if (fromPoolReader) poolAccounts.push(accountReader);
 
       const channelName = uniqueChannel('histrace');
       sender.send(`JOIN ${channelName}`);
