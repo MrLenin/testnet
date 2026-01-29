@@ -67,7 +67,7 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
   });
 
   describe('MARKREAD Command (Authenticated)', () => {
-    it('can set and query read marker with MARKREAD', { retry: 2 }, async () => {
+    it('can set and query read marker with MARKREAD', { retry: 2, timeout: 30000 }, async () => {
       const client = trackClient(await createRawSocketClient());
 
       // Get test account and authenticate via SASL
@@ -125,7 +125,7 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       console.log('MARKREAD query response:', queryResponse.raw);
 
       client.send('QUIT');
-    }, 30000);
+    });
 
     // NOTE: The IRCv3 read-marker spec does NOT support msgid parameter.
     // Only timestamp= is specified. This test is skipped until/unless

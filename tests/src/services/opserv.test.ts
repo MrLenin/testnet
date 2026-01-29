@@ -176,7 +176,7 @@ describe('OpServ (O3)', () => {
       // Force join target to a channel
       // Use retry logic since X3 can be blocked on Keycloak sync operations
       const channel = `#optest${uniqueId().slice(0, 5)}`;
-      let result = { lines: [] as string[], success: false, error: undefined as string | undefined };
+      let result: { lines: string[]; success: boolean; error?: string } = { lines: [], success: false };
       for (let attempt = 0; attempt < 3; attempt++) {
         result = await operClient.forceJoin(targetNick, channel);
         console.log(`SVSJOIN attempt ${attempt + 1}:`, result.lines);

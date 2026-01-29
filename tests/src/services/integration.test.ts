@@ -261,7 +261,7 @@ describe('Services Integration', () => {
       await new Promise(r => setTimeout(r, 1000));
 
       // Retry auth since X3 may be blocked on Keycloak sync from first client
-      let authResult = { success: false, lines: [] as string[], error: undefined as string | undefined };
+      let authResult: { success: boolean; lines: string[]; error?: string } = { success: false, lines: [] };
       for (let attempt = 0; attempt < 3; attempt++) {
         authResult = await client2.auth(account, password);
         if (authResult.success || authResult.lines.length > 0) break;

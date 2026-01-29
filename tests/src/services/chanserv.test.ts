@@ -332,7 +332,7 @@ describe('ChanServ (X3)', () => {
       expect(hasOps, `User ${user2} should have ops (@) in ${channel}`).toBe(true);
     }, 45000);
 
-    it('should auto-voice users with level >= 100', { retry: 2 }, async () => {
+    it('should auto-voice users with level >= 100', { retry: 2, timeout: 45000 }, async () => {
       const client = trackClient(await createX3Client());
       const { account, fromPool } = await setupTestAccount(client);
       if (fromPool) poolAccounts.push(account);
@@ -400,7 +400,7 @@ describe('ChanServ (X3)', () => {
       // Extended timeout to 10s to handle slow ChanServ processing
       const hasVoice = await waitForChannelMode(user2Client, channel, user2, '+', 10000);
       expect(hasVoice, `User ${user2} should have voice (+) in ${channel}`).toBe(true);
-    }, 45000);
+    });
   });
 
   describe('Channel Settings', () => {

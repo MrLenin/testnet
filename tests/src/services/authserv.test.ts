@@ -84,7 +84,7 @@ describe('AuthServ', () => {
 
       // Try to register with invalid email
       // Use retry logic since X3 can be blocked on Keycloak sync operations
-      let result = { lines: [] as string[], success: false, error: undefined as string | undefined };
+      let result: { lines: string[]; success: boolean; error?: string } = { lines: [], success: false };
       for (let attempt = 0; attempt < 3; attempt++) {
         result = await client.registerAccount(
           `test${id}`,
