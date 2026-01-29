@@ -235,3 +235,18 @@ export {
   assertNotError,
   type ExpectedMessage,
 } from './assertions.js';
+
+export {
+  // Bouncer test helpers
+  createSaslBouncerClient,
+  createBouncerClient,
+  bouncerEnableHold,
+  bouncerDisableHold,
+  bouncerInfo,
+  disconnectAbruptly,
+  reconnectBouncer,
+  assertBouncerActive,
+  assertNoBouncerSession,
+  type BouncerInfo,
+  type BouncerClientResult,
+} from './bouncer.js';

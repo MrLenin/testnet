@@ -10,6 +10,8 @@ import {
   releaseTestAccount,
   getTestAccount,
   authenticateSaslPlain,
+  bouncerEnableHold,
+  bouncerDisableHold,
 } from '../helpers/index.js';
 
 /**
@@ -405,64 +407,67 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
 
   describe('Presence Aggregation (multi-connection)', () => {
     /**
-     * Helper: create a second authenticated connection to the same account.
-     * Uses SASL PLAIN to bind the connection to the account before registration.
+     * Helper: create a SASL-authenticated connection to an account.
+     * Uses SASL PLAIN during CAP negotiation.
+     *
+     * If enableHold is true, sends BOUNCER SET HOLD on after registration
+     * to create a bouncer session (required for presence aggregation gating
+     * since Phase 1 gates aggregation on bounce_has_sessions()).
      */
-    async function createSecondConnection(
+    async function createSaslConnection(
       account: string,
       password: string,
-      nick?: string,
-      extraCaps: string[] = [],
+      options: { nick?: string; extraCaps?: string[]; enableHold?: boolean } = {},
     ): Promise<{ client: RawSocketClient; nick: string }> {
+      const { nick, extraCaps = [], enableHold = false } = options;
       const client = await createRawSocketClient();
       await client.capLs();
       await client.capReq(['sasl', 'away-notify', ...extraCaps]);
 
-      // SASL PLAIN auth to bind to same account
       const result = await authenticateSaslPlain(client, account, password);
       if (!result.success) {
-        throw new Error(`SASL auth failed for second connection: ${result.error}`);
+        throw new Error(`SASL auth failed for ${account}: ${result.error}`);
       }
 
       client.capEnd();
-      const actualNick = nick || `aw2_${uniqueId().slice(0, 6)}`;
+      const actualNick = nick || `pr${uniqueId().slice(0, 6)}`;
       client.register(actualNick);
       await client.waitForNumeric('001');
       await new Promise(r => setTimeout(r, 500));
+
+      if (enableHold) {
+        await bouncerEnableHold(client);
+      }
+
       client.clearRawBuffer();
       return { client, nick: actualNick };
     }
 
     /**
-     * Helper: create an authenticated X3Client for presence tests.
+     * Helper: get a test account for presence tests.
+     * Returns credentials without connecting — callers use createSaslConnection().
      */
-    async function createPresenceClient(
-      extraCaps: string[] = [],
-      nick?: string,
-    ): Promise<{ client: X3Client; account: string; password: string; fromPool: boolean; nick: string }> {
-      const client = new X3Client();
-      await client.connect(PRIMARY_SERVER.host, PRIMARY_SERVER.port);
-      await client.capLs();
-      await client.capReq(['away-notify', ...extraCaps]);
-      client.capEnd();
-      const actualNick = nick || `pr${uniqueId().slice(0, 7)}`;
-      client.register(actualNick);
-      await client.waitForNumeric('001');
-      await new Promise(r => setTimeout(r, 500));
-      client.clearRawBuffer();
-      const { account, password, fromPool } = await setupTestAccount(client);
-      return { client, account, password, fromPool, nick: actualNick };
+    async function getPresenceAccount(): Promise<{
+      account: string;
+      password: string;
+      fromPool: boolean;
+    }> {
+      const { account, password, fromPool } = await getTestAccount();
+      return { account, password, fromPool };
     }
 
     it('one present + one away-star connection: effective state is PRESENT', async () => {
-      // Create first connection and authenticate
-      const { client: conn1, account, password, fromPool, nick: nick1 } =
-        await createPresenceClient();
-      trackClient(conn1);
+      // Get test account credentials
+      const { account, password, fromPool } = await getPresenceAccount();
       if (fromPool) poolAccounts.push(account);
 
+      // Create first connection via SASL with hold enabled (creates bouncer session
+      // which activates presence aggregation via bounce_has_sessions() gating)
+      const { client: conn1, nick: nick1 } = await createSaslConnection(account, password, { enableHold: true });
+      trackClient(conn1);
+
       // Create second connection to same account via SASL
-      const { client: conn2, nick: nick2 } = await createSecondConnection(account, password);
+      const { client: conn2, nick: nick2 } = await createSaslConnection(account, password);
       trackClient(conn2);
 
       // Create observer
@@ -512,20 +517,24 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
       const whoisEnd = await observer.waitForNumeric('318', 5000);
       expect(whoisEnd).toBeDefined();
 
+      // Cleanup: disable hold before closing
+      await bouncerDisableHold(conn1);
       conn1.send('QUIT');
       conn2.send('QUIT');
       observer.send('QUIT');
     });
 
     it('all connections away-star: effective state is AWAY (hidden)', async () => {
-      // Create first connection and authenticate
-      const { client: conn1, account, password, fromPool, nick: nick1 } =
-        await createPresenceClient();
-      trackClient(conn1);
+      // Get test account credentials
+      const { account, password, fromPool } = await getPresenceAccount();
       if (fromPool) poolAccounts.push(account);
 
+      // Create first connection via SASL with hold enabled (creates bouncer session)
+      const { client: conn1, nick: nick1 } = await createSaslConnection(account, password, { enableHold: true });
+      trackClient(conn1);
+
       // Create second connection to same account via SASL
-      const { client: conn2, nick: nick2 } = await createSecondConnection(account, password);
+      const { client: conn2, nick: nick2 } = await createSaslConnection(account, password);
       trackClient(conn2);
 
       // Create observer
@@ -572,20 +581,24 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
       const whoisAway = await observer.waitForNumeric('301', 5000);
       expect(whoisAway.raw).toContain('Away');
 
+      // Cleanup: disable hold before closing
+      await bouncerDisableHold(conn1);
       conn1.send('QUIT');
       conn2.send('QUIT');
       observer.send('QUIT');
     });
 
     it('transition from all-away-star to present clears away', async () => {
-      // Create first connection and authenticate
-      const { client: conn1, account, password, fromPool, nick: nick1 } =
-        await createPresenceClient();
-      trackClient(conn1);
+      // Get test account credentials
+      const { account, password, fromPool } = await getPresenceAccount();
       if (fromPool) poolAccounts.push(account);
 
+      // Create first connection via SASL with hold enabled (creates bouncer session)
+      const { client: conn1, nick: nick1 } = await createSaslConnection(account, password, { enableHold: true });
+      trackClient(conn1);
+
       // Create second connection to same account via SASL
-      const { client: conn2 } = await createSecondConnection(account, password);
+      const { client: conn2 } = await createSaslConnection(account, password);
       trackClient(conn2);
 
       // Create observer
@@ -636,20 +649,24 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
       const whoisEnd = await observer.waitForNumeric('318', 5000);
       expect(whoisEnd).toBeDefined();
 
+      // Cleanup: disable hold before closing
+      await bouncerDisableHold(conn1);
       conn1.send('QUIT');
       conn2.send('QUIT');
       observer.send('QUIT');
     });
 
     it('mixed away states: one AWAY, one AWAY * — effective is AWAY with message', async () => {
-      // Create first connection and authenticate
-      const { client: conn1, account, password, fromPool, nick: nick1 } =
-        await createPresenceClient();
-      trackClient(conn1);
+      // Get test account credentials
+      const { account, password, fromPool } = await getPresenceAccount();
       if (fromPool) poolAccounts.push(account);
 
+      // Create first connection via SASL with hold enabled (creates bouncer session)
+      const { client: conn1, nick: nick1 } = await createSaslConnection(account, password, { enableHold: true });
+      trackClient(conn1);
+
       // Create second connection to same account via SASL
-      const { client: conn2, nick: nick2 } = await createSecondConnection(account, password);
+      const { client: conn2, nick: nick2 } = await createSaslConnection(account, password);
       trackClient(conn2);
 
       // Create observer
@@ -697,6 +714,8 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
       const whoisAway = await observer.waitForNumeric('301', 5000);
       expect(whoisAway.raw).toContain('In a meeting');
 
+      // Cleanup: disable hold before closing
+      await bouncerDisableHold(conn1);
       conn1.send('QUIT');
       conn2.send('QUIT');
       observer.send('QUIT');
