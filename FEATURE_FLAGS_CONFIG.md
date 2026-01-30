@@ -266,7 +266,7 @@ This eliminates unnecessary decompress/recompress cycles between services.
 
 **Away Throttle**: When `AWAY_THROTTLE` is set to a value > 0, users are rate-limited on how frequently they can change their away status. This prevents abuse and reduces network traffic from clients that rapidly toggle away state. The value represents the minimum seconds between AWAY command changes.
 
-**LMDB Persistence**: The `last_present` timestamp for each account is persisted via the METADATA LMDB backend using the reserved key `$last_present`.
+**LMDB Persistence**: The `last_present` timestamp for each account is persisted via the METADATA LMDB backend using the reserved key `last_present`.
 
 ### P10 Protocol Features
 
@@ -321,8 +321,8 @@ Built-in DNS-based blocklist checking without external scripts.
 - No P10 tokens (DNSBL is local to each server)
 
 **Virtual METADATA Keys**:
-- `$presence` - Returns current effective presence ("present", "away:message", or "away-star")
-- `$last_present` - Returns Unix timestamp of when account was last present
+- `presence` - Returns current effective presence ("present", "away:message", or "away-star")
+- `last_present` - Returns Unix timestamp of when account was last present
 
 ### Example Configuration
 
