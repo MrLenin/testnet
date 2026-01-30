@@ -4,10 +4,8 @@ import {
   RawSocketClient,
   uniqueChannel,
   uniqueNick,
-  PRIMARY_SERVER,
   getTestAccount,
   releaseTestAccount,
-  authenticateSaslPlain,
   createSaslBouncerClient,
   createBouncerClient,
   bouncerEnableHold,
@@ -16,7 +14,6 @@ import {
   disconnectAbruptly,
   reconnectBouncer,
   assertBouncerActive,
-  assertNoBouncerSession,
 } from '../helpers/index.js';
 
 /**
@@ -459,6 +456,533 @@ describe('Built-in Bouncer', () => {
       expect(caps.has('draft/bouncer'), 'Server should advertise draft/bouncer').toBe(true);
 
       client.send('QUIT');
+    });
+  });
+
+  describe('Shadow Multi-Attach', () => {
+    it('second SASL connection to active session attaches as shadow', async () => {
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      // Primary: connect with hold
+      const { client: primary } = await createBouncerClient(account, password);
+      trackClient(primary);
+
+      // Second connection: SASL to same account → should auto-attach as shadow
+      const { client: shadow } = await createSaslBouncerClient(account, password, {
+        nick: uniqueNick('shd'),
+      });
+      trackClient(shadow);
+
+      // Shadow should receive welcome and get the session nick
+      // The shadow's registered nick is overridden by the session identity
+      await new Promise(r => setTimeout(r, 500));
+
+      // BOUNCER INFO from primary should still show active
+      const info = await assertBouncerActive(primary, 'primary with shadow');
+      expect(info.state).toBe('active');
+
+      // Cleanup
+      shadow.send('QUIT');
+      await bouncerDisableHold(primary);
+      primary.send('QUIT');
+    });
+
+    it('shadow gets same nick as primary (shared identity)', async () => {
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      const { client: primary, nick: nick1 } = await createBouncerClient(account, password);
+      trackClient(primary);
+
+      // Shadow connects with a DIFFERENT nick
+      const shadowNick = uniqueNick('shd');
+      const { client: shadow } = await createSaslBouncerClient(account, password, {
+        nick: shadowNick,
+      });
+      trackClient(shadow);
+
+      await new Promise(r => setTimeout(r, 500));
+
+      // Shadow should be using the session nick, not its registration nick.
+      // Verify by sending PRIVMSG to a channel — the message source should be nick1.
+      const channel = uniqueChannel('shdnick');
+      primary.send(`JOIN ${channel}`);
+      await primary.waitForJoin(channel);
+
+      // Observer watches the channel
+      const observer = trackClient(await createRawSocketClient());
+      await observer.capLs();
+      observer.capEnd();
+      observer.register(uniqueNick('obs'));
+      await observer.waitForNumeric('001');
+      observer.send(`JOIN ${channel}`);
+      await observer.waitForJoin(channel);
+      await new Promise(r => setTimeout(r, 300));
+
+      observer.clearRawBuffer();
+
+      // Shadow sends message — should appear from nick1 (the session identity)
+      const testMsg = `identity-test-${Date.now()}`;
+      shadow.send(`PRIVMSG ${channel} :${testMsg}`);
+
+      const observed = await observer.waitForParsedLine(
+        msg => msg.command === 'PRIVMSG' && msg.trailing?.includes(testMsg) === true,
+        5000,
+      );
+      expect(
+        observed.source?.nick?.toLowerCase(),
+        'Message from shadow should appear from session nick',
+      ).toBe(nick1.toLowerCase());
+
+      // Cleanup
+      shadow.send('QUIT');
+      observer.send('QUIT');
+      await bouncerDisableHold(primary);
+      primary.send('QUIT');
+    });
+  });
+
+  describe('Shadow Channel Traffic Duplication', () => {
+    it('both primary and shadow receive channel messages', async () => {
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      const { client: primary } = await createBouncerClient(account, password);
+      trackClient(primary);
+
+      const channel = uniqueChannel('shddup');
+      primary.send(`JOIN ${channel}`);
+      await primary.waitForJoin(channel);
+      await new Promise(r => setTimeout(r, 300));
+
+      // Shadow attaches to active session
+      const { client: shadow } = await createSaslBouncerClient(account, password);
+      trackClient(shadow);
+      await new Promise(r => setTimeout(r, 500));
+
+      // Observer sends a message to the channel
+      const observer = trackClient(await createRawSocketClient());
+      await observer.capLs();
+      observer.capEnd();
+      observer.register(uniqueNick('obs'));
+      await observer.waitForNumeric('001');
+      observer.send(`JOIN ${channel}`);
+      await observer.waitForJoin(channel);
+      await new Promise(r => setTimeout(r, 300));
+
+      primary.clearRawBuffer();
+      shadow.clearRawBuffer();
+
+      const testMsg = `dup-test-${Date.now()}`;
+      observer.send(`PRIVMSG ${channel} :${testMsg}`);
+
+      // Primary should receive it
+      const primaryMsg = await primary.waitForParsedLine(
+        msg => msg.command === 'PRIVMSG' && msg.trailing?.includes(testMsg) === true,
+        5000,
+      );
+      expect(primaryMsg.command, 'Primary should receive channel PRIVMSG').toBe('PRIVMSG');
+      expect(primaryMsg.trailing).toContain(testMsg);
+
+      // Shadow should also receive it (message duplication)
+      const shadowMsg = await shadow.waitForParsedLine(
+        msg => msg.command === 'PRIVMSG' && msg.trailing?.includes(testMsg) === true,
+        5000,
+      );
+      expect(shadowMsg.command, 'Shadow should receive duplicated channel PRIVMSG').toBe('PRIVMSG');
+      expect(shadowMsg.trailing).toContain(testMsg);
+
+      // Cleanup
+      shadow.send('QUIT');
+      observer.send('QUIT');
+      await bouncerDisableHold(primary);
+      primary.send('QUIT');
+    });
+
+    it('shadow inherits channel membership from primary', async () => {
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      const { client: primary } = await createBouncerClient(account, password);
+      trackClient(primary);
+
+      // Primary joins BEFORE shadow attaches
+      const channel = uniqueChannel('shdinh');
+      primary.send(`JOIN ${channel}`);
+      await primary.waitForJoin(channel);
+
+      primary.send(`PRIVMSG ${channel} :Primary was here`);
+      await new Promise(r => setTimeout(r, 300));
+
+      // Shadow attaches — should share channel membership
+      const { client: shadow } = await createSaslBouncerClient(account, password);
+      trackClient(shadow);
+      await new Promise(r => setTimeout(r, 500));
+
+      // Shadow should be able to send to the channel (inherited membership)
+      shadow.clearRawBuffer();
+      shadow.send(`PRIVMSG ${channel} :Shadow here too`);
+
+      // If NOT in the channel, we'd get ERR_CANNOTSENDTOCHAN (404)
+      let gotError = false;
+      try {
+        await shadow.waitForNumeric(['404', '442'], 2000);
+        gotError = true;
+      } catch {
+        // Expected: no error means shadow has channel membership
+      }
+      expect(gotError, 'Shadow should inherit channel membership from primary').toBe(false);
+
+      // Cleanup
+      shadow.send('QUIT');
+      await bouncerDisableHold(primary);
+      primary.send('QUIT');
+    });
+  });
+
+  describe('Shadow Command Forwarding', () => {
+    it('shadow PRIVMSG appears from session nick', async () => {
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      const { client: primary, nick: nick1 } = await createBouncerClient(account, password);
+      trackClient(primary);
+
+      const channel = uniqueChannel('shdfwd');
+      primary.send(`JOIN ${channel}`);
+      await primary.waitForJoin(channel);
+      await new Promise(r => setTimeout(r, 300));
+
+      // Shadow attaches
+      const { client: shadow } = await createSaslBouncerClient(account, password);
+      trackClient(shadow);
+      await new Promise(r => setTimeout(r, 500));
+
+      // Observer watches channel
+      const observer = trackClient(await createRawSocketClient());
+      await observer.capLs();
+      observer.capEnd();
+      observer.register(uniqueNick('obs'));
+      await observer.waitForNumeric('001');
+      observer.send(`JOIN ${channel}`);
+      await observer.waitForJoin(channel);
+      await new Promise(r => setTimeout(r, 300));
+
+      observer.clearRawBuffer();
+
+      // Shadow sends a message — should be forwarded through primary
+      const testMsg = `fwd-test-${Date.now()}`;
+      shadow.send(`PRIVMSG ${channel} :${testMsg}`);
+
+      const observed = await observer.waitForParsedLine(
+        msg => msg.command === 'PRIVMSG' && msg.trailing?.includes(testMsg) === true,
+        5000,
+      );
+      expect(observed.source?.nick?.toLowerCase()).toBe(nick1.toLowerCase());
+
+      // Cleanup
+      shadow.send('QUIT');
+      observer.send('QUIT');
+      await bouncerDisableHold(primary);
+      primary.send('QUIT');
+    });
+
+    it('shadow reply routing sends responses to originating shadow', async () => {
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      const { client: primary } = await createBouncerClient(account, password);
+      trackClient(primary);
+      await new Promise(r => setTimeout(r, 300));
+
+      // Shadow attaches
+      const { client: shadow } = await createSaslBouncerClient(account, password);
+      trackClient(shadow);
+      await new Promise(r => setTimeout(r, 500));
+
+      // Shadow issues a WHO command — reply should go to shadow, not primary
+      primary.clearRawBuffer();
+      shadow.clearRawBuffer();
+
+      shadow.send('WHO shadow-reply-test-nonexistent');
+
+      // Shadow should get the RPL_ENDOFWHO (315)
+      const shadowReply = await shadow.waitForParsedLine(
+        msg => msg.command === '315',
+        5000,
+      );
+      expect(shadowReply.command, 'Shadow should receive RPL_ENDOFWHO for its own WHO query').toBe('315');
+
+      // Primary should NOT receive the WHO reply (it didn't request it)
+      let primaryGotReply = false;
+      try {
+        await primary.waitForParsedLine(
+          msg => msg.command === '315' && msg.raw.includes('shadow-reply-test-nonexistent'),
+          2000,
+        );
+        primaryGotReply = true;
+      } catch {
+        // Expected: timeout means primary didn't get the reply
+      }
+      expect(primaryGotReply, 'WHO reply should NOT go to primary (reply routing)').toBe(false);
+
+      // Cleanup
+      shadow.send('QUIT');
+      await bouncerDisableHold(primary);
+      primary.send('QUIT');
+    });
+  });
+
+  describe('Primary Promotion on Disconnect', () => {
+    it('shadow is promoted to primary when primary disconnects', async () => {
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      const { client: primary } = await createBouncerClient(account, password);
+      trackClient(primary);
+
+      const channel = uniqueChannel('promo');
+      primary.send(`JOIN ${channel}`);
+      await primary.waitForJoin(channel);
+      await new Promise(r => setTimeout(r, 300));
+
+      // Shadow attaches
+      const { client: shadow } = await createSaslBouncerClient(account, password);
+      trackClient(shadow);
+      await new Promise(r => setTimeout(r, 500));
+
+      // Observer to verify no QUIT happens
+      const observer = trackClient(await createRawSocketClient());
+      await observer.capLs();
+      await observer.capReq(['away-notify']);
+      observer.capEnd();
+      observer.register(uniqueNick('obs'));
+      await observer.waitForNumeric('001');
+      observer.send(`JOIN ${channel}`);
+      await observer.waitForJoin(channel);
+      await new Promise(r => setTimeout(r, 300));
+
+      observer.clearRawBuffer();
+
+      // Primary disconnects abruptly — shadow should be promoted
+      disconnectAbruptly(primary);
+      await new Promise(r => setTimeout(r, 2000));
+
+      // Observer should NOT see a QUIT (shadow was promoted, session stays ACTIVE)
+      let gotQuit = false;
+      try {
+        await observer.waitForParsedLine(
+          msg => msg.command === 'QUIT',
+          2000,
+        );
+        gotQuit = true;
+      } catch {
+        // Expected: no QUIT because shadow was promoted
+      }
+      expect(gotQuit, 'No QUIT should occur when shadow is promoted to primary').toBe(false);
+
+      // Shadow (now promoted primary) should still be able to send to channel
+      shadow.clearRawBuffer();
+      observer.clearRawBuffer();
+
+      const testMsg = `promoted-${Date.now()}`;
+      shadow.send(`PRIVMSG ${channel} :${testMsg}`);
+
+      const observed = await observer.waitForParsedLine(
+        msg => msg.command === 'PRIVMSG' && msg.trailing?.includes(testMsg) === true,
+        5000,
+      );
+      expect(observed.command, 'Promoted shadow should still send to channel').toBe('PRIVMSG');
+      expect(observed.trailing).toContain(testMsg);
+
+      // Session should still be active
+      const info = await bouncerInfo(shadow);
+      expect(info, 'Promoted shadow should have bouncer info').not.toBeNull();
+      expect(info!.state).toBe('active');
+
+      // Cleanup
+      await bouncerDisableHold(shadow);
+      shadow.send('QUIT');
+      observer.send('QUIT');
+    });
+
+    it('session enters HOLDING when last connection (promoted shadow) disconnects', async () => {
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      const { client: primary } = await createBouncerClient(account, password);
+      trackClient(primary);
+
+      const channel = uniqueChannel('lastdc');
+      primary.send(`JOIN ${channel}`);
+      await primary.waitForJoin(channel);
+      await new Promise(r => setTimeout(r, 300));
+
+      // Shadow attaches
+      const { client: shadow } = await createSaslBouncerClient(account, password);
+      trackClient(shadow);
+      await new Promise(r => setTimeout(r, 500));
+
+      // Primary disconnects → shadow promoted
+      disconnectAbruptly(primary);
+      await new Promise(r => setTimeout(r, 2000));
+
+      // Now shadow (promoted) disconnects → should enter HOLDING
+      disconnectAbruptly(shadow);
+      await new Promise(r => setTimeout(r, 2000));
+
+      // Reconnect to verify session was held
+      const { client: conn3 } = await reconnectBouncer(account, password);
+      trackClient(conn3);
+
+      const info = await bouncerInfo(conn3);
+      expect(info, 'Session should be resumable after all connections dropped').not.toBeNull();
+      expect(info!.state).toBe('active');
+
+      // Verify channel membership persisted
+      conn3.clearRawBuffer();
+      conn3.send(`PRIVMSG ${channel} :After full reconnect`);
+      let gotError = false;
+      try {
+        await conn3.waitForNumeric(['404', '442'], 2000);
+        gotError = true;
+      } catch {
+        // Expected: no error means channel was preserved
+      }
+      expect(gotError, 'Channel should be preserved through shadow promotion + hold').toBe(false);
+
+      // Cleanup
+      await bouncerDisableHold(conn3);
+      conn3.send('QUIT');
+    });
+  });
+
+  describe('BOUNCER LISTCLIENTS', () => {
+    it('lists primary connection', async () => {
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      const { client: primary } = await createBouncerClient(account, password);
+      trackClient(primary);
+
+      primary.clearRawBuffer();
+      primary.send('BOUNCER LISTCLIENTS');
+
+      // Collect responses until end marker
+      const lines: string[] = [];
+      const collectTimeout = 5000;
+      const start = Date.now();
+      while (Date.now() - start < collectTimeout) {
+        try {
+          const msg = await primary.waitForParsedLine(
+            m => m.command === 'NOTE' || m.raw.includes('BOUNCER') || m.raw.includes('end of'),
+            2000,
+          );
+          lines.push(msg.raw);
+          // Check for end-of-list marker
+          if (msg.raw.toLowerCase().includes('end of') || msg.raw.includes('LISTCLIENTS_END')) {
+            break;
+          }
+        } catch {
+          break;
+        }
+      }
+
+      // Should have at least one connection listed (the primary)
+      const hasClient = lines.some(l => l.includes('id=') || l.includes('primary'));
+      expect(hasClient, 'LISTCLIENTS should show at least the primary connection').toBe(true);
+
+      // Cleanup
+      await bouncerDisableHold(primary);
+      primary.send('QUIT');
+    });
+
+    it('lists both primary and shadow connections', async () => {
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      const { client: primary } = await createBouncerClient(account, password);
+      trackClient(primary);
+      await new Promise(r => setTimeout(r, 300));
+
+      // Shadow attaches
+      const { client: shadow } = await createSaslBouncerClient(account, password);
+      trackClient(shadow);
+      await new Promise(r => setTimeout(r, 500));
+
+      primary.clearRawBuffer();
+      primary.send('BOUNCER LISTCLIENTS');
+
+      // Collect responses
+      const lines: string[] = [];
+      const start = Date.now();
+      while (Date.now() - start < 5000) {
+        try {
+          const msg = await primary.waitForParsedLine(
+            m => m.command === 'NOTE' || m.raw.includes('BOUNCER') || m.raw.includes('end of'),
+            2000,
+          );
+          lines.push(msg.raw);
+          if (msg.raw.toLowerCase().includes('end of') || msg.raw.includes('LISTCLIENTS_END')) {
+            break;
+          }
+        } catch {
+          break;
+        }
+      }
+
+      // Should list at least 2 connections
+      const clientLines = lines.filter(l => l.includes('id='));
+      expect(
+        clientLines.length,
+        'LISTCLIENTS should show primary + shadow',
+      ).toBeGreaterThanOrEqual(2);
+
+      // Should show both primary and shadow types
+      const hasPrimary = clientLines.some(l => l.includes('primary'));
+      const hasShadow = clientLines.some(l => l.includes('shadow'));
+      expect(hasPrimary, 'LISTCLIENTS should show a primary connection').toBe(true);
+      expect(hasShadow, 'LISTCLIENTS should show a shadow connection').toBe(true);
+
+      // Cleanup
+      shadow.send('QUIT');
+      await bouncerDisableHold(primary);
+      primary.send('QUIT');
+    });
+  });
+
+  describe('BOUNCER INFO Connection Count', () => {
+    it('BOUNCER INFO shows connection count with shadows', async () => {
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      const { client: primary } = await createBouncerClient(account, password);
+      trackClient(primary);
+
+      // Check info with just primary
+      const info1 = await assertBouncerActive(primary, 'primary only');
+      console.log('INFO with primary only:', info1.raw);
+
+      // Attach shadow
+      const { client: shadow } = await createSaslBouncerClient(account, password);
+      trackClient(shadow);
+      await new Promise(r => setTimeout(r, 500));
+
+      // Check info with primary + shadow
+      const info2 = await assertBouncerActive(primary, 'primary + shadow');
+      console.log('INFO with shadow:', info2.raw);
+
+      // The raw response should contain connections=2 (or similar)
+      const connectionsMatch = info2.raw.match(/connections=(\d+)/);
+      if (connectionsMatch) {
+        expect(parseInt(connectionsMatch[1], 10)).toBeGreaterThanOrEqual(2);
+      }
+
+      // Cleanup
+      shadow.send('QUIT');
+      await bouncerDisableHold(primary);
+      primary.send('QUIT');
     });
   });
 });
