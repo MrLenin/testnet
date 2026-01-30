@@ -169,8 +169,8 @@ Special keys computed dynamically:
 
 | Key | Description |
 |-----|-------------|
-| `$presence` | Effective presence (present/away/away-star) |
-| `$last_present` | Unix timestamp of last presence |
+| `presence` | Effective presence (present/away/away-star) |
+| `last_present` | Unix timestamp of last presence |
 
 ## Standard Keys
 

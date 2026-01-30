@@ -106,7 +106,7 @@ export async function createSaslBouncerClient(
  * Enable bouncer hold for the current account.
  *
  * Sends BOUNCER SET HOLD on, which:
- * - Sets $bouncer/hold metadata to "1"
+ * - Sets bouncer/hold metadata to "1"
  * - Auto-creates a session if none exists
  *
  * @param client - Authenticated client

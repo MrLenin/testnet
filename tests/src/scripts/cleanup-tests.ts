@@ -196,12 +196,20 @@ async function cleanup(): Promise<void> {
   };
 
   try {
-    // Register
+    // Negotiate CAP for METADATA support (needed to clear bouncer metadata)
+    send('CAP LS 302');
     send(`NICK cleanup_bot`);
     send(`USER cleanup cleanup localhost :Cleanup Bot`);
 
+    // Wait for CAP LS response
+    await waitForLine(/CAP \* LS/, 5000);
+    // Request metadata capability
+    send('CAP REQ :draft/metadata-2');
+    await waitForLine(/CAP .* ACK/, 5000);
+    send('CAP END');
+
     await waitForLine(/001/, 10000);
-    console.log('Connected.');
+    console.log('Connected (with metadata capability).');
 
     // Oper up
     send(`OPER ${OPER_NAME} ${OPER_PASS}`);
@@ -519,8 +527,29 @@ async function cleanup(): Promise<void> {
       console.log(` Done (${stats.channelsDeleted})`);
     }
 
+    // Clear bouncer hold metadata on pool accounts
+    // This prevents stale bouncer/hold=1 in LMDB from auto-creating
+    // bouncer sessions on server restart after a crashed test run.
+    // Uses METADATA SET *accountname (oper-only account target) to write
+    // directly to LMDB without needing the account to be online.
+    console.log('\nClearing bouncer metadata on pool accounts...');
+    let bouncerCleared = 0;
+    for (let i = 0; i < 10; i++) {
+      const poolAccount = `pool${i.toString().padStart(2, '0')}`;
+      send(`METADATA SET *${poolAccount} bouncer/hold 0`);
+      try {
+        // Wait for 761 (RPL_KEYVALUE) or FAIL response for this account
+        await waitForLine(new RegExp(`\\*${poolAccount}.*bouncer/hold|FAIL METADATA`), 5000);
+        bouncerCleared++;
+        if (DEBUG) console.log(`  Cleared bouncer hold for ${poolAccount}`);
+      } catch {
+        if (DEBUG) console.log(`  No response for ${poolAccount}`);
+      }
+    }
+    console.log(`Cleared bouncer hold metadata on ${bouncerCleared} pool accounts`);
+
     // Write databases to disk so deletions persist across X3 restart
-    if (stats.accountsDeleted > 0 || stats.channelsDeleted > 0) {
+    if (stats.accountsDeleted > 0 || stats.channelsDeleted > 0 || bouncerCleared > 0) {
       console.log('\nPersisting changes to disk...');
       send('PRIVMSG O3 :WRITEALL');
       await new Promise(r => setTimeout(r, 2000)); // Give time for disk write
@@ -536,6 +565,7 @@ async function cleanup(): Promise<void> {
     console.log('\n=== Cleanup Summary ===');
     console.log(`X3 Accounts deleted: ${stats.accountsDeleted} (Keycloak users deleted via OUNREGISTER)`);
     console.log(`X3 Channels unregistered: ${stats.channelsDeleted}`);
+    console.log(`Bouncer hold cleared: ${bouncerCleared} pool accounts`);
 
     send('QUIT :Cleanup complete');
     await new Promise(r => setTimeout(r, 500));
