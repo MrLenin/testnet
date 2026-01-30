@@ -1,5 +1,14 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient, createIRCv3Client, IRCv3TestClient, uniqueChannel, uniqueId } from '../helpers/index.js';
+import {
+  createRawSocketClient,
+  RawSocketClient,
+  uniqueChannel,
+  uniqueId,
+  uniqueNick,
+  getTestAccount,
+  releaseTestAccount,
+  authenticateSaslPlain,
+} from '../helpers/index.js';
 
 /**
  * Multiline Message Tests (draft/multiline)
@@ -9,6 +18,7 @@ import { createRawSocketClient, RawSocketClient, createIRCv3Client, IRCv3TestCli
  */
 describe('IRCv3 Multiline Messages (draft/multiline)', () => {
   const clients: RawSocketClient[] = [];
+  const poolAccounts: string[] = [];
 
   const trackClient = (client: RawSocketClient): RawSocketClient => {
     clients.push(client);
@@ -24,6 +34,10 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       }
     }
     clients.length = 0;
+    for (const account of poolAccounts) {
+      releaseTestAccount(account);
+    }
+    poolAccounts.length = 0;
   });
 
   describe('Capability Advertisement', () => {
@@ -644,8 +658,9 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send('QUIT');
     });
 
-    // Retrieval hints: HistServ FETCH (when HistServ available) or &ml- channel (fallback)
-    it('truncated multiline includes retrieval hint', async () => {
+    // Unauthenticated recipients always get &ml- channel fallback (tier 4)
+    // because history-based fallback (tiers 2/3) requires authentication
+    it('unauthenticated recipient gets &ml- retrieval hint (not HistServ/chathistory)', async () => {
       const client1 = trackClient(await createRawSocketClient());
       const client2 = trackClient(await createRawSocketClient());
 
@@ -659,7 +674,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('USER mlhint1 0 * :mlhint1');
       await client1.waitForNumeric('001');
 
-      // Client2: NO multiline
+      // Client2: NO multiline, NOT authenticated — should get &ml- (not HistServ)
       client2.send('CAP LS 302');
       await client2.waitForCap('LS');
       client2.send('CAP END');
@@ -684,7 +699,6 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send(`BATCH -${batchId}`);
 
       // Look for truncation notice with retrieval hint
-      // Could be HistServ FETCH (when HistServ available) or &ml- channel (fallback)
       let foundHistServHint = false;
       let foundMlChannelHint = false;
       let receivedLines = 0;
@@ -717,8 +731,88 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
 
       // Should have received some content
       expect(receivedLines).toBeGreaterThan(0);
-      // Should have some form of retrieval hint
-      expect(foundHistServHint || foundMlChannelHint).toBe(true);
+      // Unauthenticated recipient should get &ml- (tier 4), NOT HistServ (tier 3)
+      expect(foundMlChannelHint, 'Unauthenticated recipient should get &ml- hint').toBe(true);
+      expect(foundHistServHint, 'Unauthenticated recipient should NOT get HistServ hint').toBe(false);
+
+      client1.send('QUIT');
+      client2.send('QUIT');
+    });
+
+    // Authenticated recipients get HistServ hint (tier 3) when available
+    it('authenticated recipient gets HistServ retrieval hint', async () => {
+      const client1 = trackClient(await createRawSocketClient());
+      const client2 = trackClient(await createRawSocketClient());
+
+      // Client1: has multiline
+      client1.send('CAP LS 302');
+      await client1.waitForCap('LS');
+      client1.send('CAP REQ :draft/multiline batch message-tags');
+      await client1.waitForCap('ACK');
+      client1.send('CAP END');
+      client1.send('NICK mlahint1');
+      client1.send('USER mlahint1 0 * :mlahint1');
+      await client1.waitForNumeric('001');
+
+      // Client2: SASL-authenticated, NO multiline — should get HistServ hint (tier 3)
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      await client2.capLs();
+      await client2.capReq(['sasl']);
+      const saslResult = await authenticateSaslPlain(client2, account, password);
+      expect(saslResult.success, `SASL auth failed: ${saslResult.error}`).toBe(true);
+      client2.capEnd();
+      client2.register(uniqueNick('mlah'));
+      await client2.waitForNumeric('001');
+
+      const channelName = uniqueChannel('mlahint');
+
+      client1.send(`JOIN ${channelName}`);
+      await client1.waitForJoin(channelName);
+      client2.send(`JOIN ${channelName}`);
+      await client2.waitForJoin(channelName);
+      await new Promise(r => setTimeout(r, 300));
+      client2.clearRawBuffer();
+
+      // Send large multiline
+      const batchId = `ahint${uniqueId()}`;
+      client1.send(`BATCH +${batchId} draft/multiline ${channelName}`);
+      for (let i = 1; i <= 12; i++) {
+        client1.send(`@batch=${batchId} PRIVMSG ${channelName} :Auth hint line ${i}`);
+      }
+      client1.send(`BATCH -${batchId}`);
+
+      let foundHistServHint = false;
+      let foundChathistoryHint = false;
+      let foundMlChannelHint = false;
+      let receivedLines = 0;
+      const startTime = Date.now();
+      while (Date.now() - startTime < 4000) {
+        try {
+          const msg = await client2.waitForParsedLine(
+            m => m.command === 'PRIVMSG' || m.command === 'NOTICE',
+            500
+          );
+          receivedLines++;
+
+          if (msg.raw.toLowerCase().includes('histserv')) foundHistServHint = true;
+          if (msg.raw.toLowerCase().includes('chathistory')) foundChathistoryHint = true;
+          if (msg.raw.includes('&ml-')) foundMlChannelHint = true;
+        } catch {
+          break;
+        }
+      }
+
+      console.log('Authenticated hint test - received:', receivedLines);
+      console.log('HistServ:', foundHistServHint, 'Chathistory:', foundChathistoryHint, '&ml-:', foundMlChannelHint);
+
+      expect(receivedLines).toBeGreaterThan(0);
+      // Authenticated recipient should get history-based hint (HistServ or chathistory), not &ml-
+      expect(
+        foundHistServHint || foundChathistoryHint,
+        'Authenticated recipient should get HistServ or chathistory hint',
+      ).toBe(true);
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -800,7 +894,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
   });
 
   describe('Multiline Retrieval Mechanisms', () => {
-    it('chathistory fallback hint for clients with chathistory but not multiline', async () => {
+    it('chathistory fallback hint for authenticated clients with chathistory but not multiline', async () => {
       const client1 = trackClient(await createRawSocketClient());
       const client2 = trackClient(await createRawSocketClient());
 
@@ -814,14 +908,17 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('USER mlchhist1 0 * :mlchhist1');
       await client1.waitForNumeric('001');
 
-      // Client2: has chathistory but NOT multiline (should get chathistory hint)
-      client2.send('CAP LS 302');
-      await client2.waitForParsedLine(msg => msg.command === 'CAP');
-      client2.send('CAP REQ :draft/chathistory batch message-tags');
-      await client2.waitForParsedLine(msg => msg.command === 'CAP' && msg.params.includes('ACK'));
-      client2.send('CAP END');
-      client2.send('NICK mlchhist2');
-      client2.send('USER mlchhist2 0 * :mlchhist2');
+      // Client2: has chathistory but NOT multiline, SASL-authenticated
+      // (history-based fallback requires authentication)
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      await client2.capLs();
+      await client2.capReq(['draft/chathistory', 'batch', 'message-tags', 'sasl']);
+      const saslResult = await authenticateSaslPlain(client2, account, password);
+      expect(saslResult.success, `SASL auth failed: ${saslResult.error}`).toBe(true);
+      client2.capEnd();
+      client2.register(uniqueNick('mlch'));
       await client2.waitForNumeric('001');
 
       const channelName = uniqueChannel('mlchhist');
@@ -980,7 +1077,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send('QUIT');
     });
 
-    it('HistServ fallback for clients without chathistory or multiline', { retry: 2 }, async () => {
+    it('HistServ fallback for authenticated clients without chathistory or multiline', { retry: 2 }, async () => {
       const client1 = trackClient(await createRawSocketClient());
       const client2 = trackClient(await createRawSocketClient());
 
@@ -994,15 +1091,17 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('USER mlhserv1 0 * :mlhserv1');
       await client1.waitForNumeric('001');
 
-      // Client2: message-tags ONLY - no batch, chathistory, or multiline
-      // Testing if the issue is "no caps at all" vs "no batch cap specifically"
-      client2.send('CAP LS 302');
-      await client2.waitForCap('LS');
-      client2.send('CAP REQ :message-tags');
-      await client2.waitForCap('ACK');
-      client2.send('CAP END');
-      client2.send('NICK mlhserv2');
-      client2.send('USER mlhserv2 0 * :mlhserv2');
+      // Client2: SASL-authenticated, message-tags ONLY - no batch, chathistory, or multiline
+      // History-based fallback (HistServ) requires authentication
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      await client2.capLs();
+      await client2.capReq(['message-tags', 'sasl']);
+      const saslResult = await authenticateSaslPlain(client2, account, password);
+      expect(saslResult.success, `SASL auth failed: ${saslResult.error}`).toBe(true);
+      client2.capEnd();
+      client2.register(uniqueNick('mlhs'));
       await client2.waitForNumeric('001');
 
       const channelName = uniqueChannel('mlhserv');
@@ -1145,12 +1244,17 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('USER mlvirt1 0 * :mlvirt1');
       await client1.waitForNumeric('001');
 
-      // Client2: NO multiline, NO chathistory (basic client - should get HistServ or &ml- hint)
-      client2.send('CAP LS 302');
-      await client2.waitForCap('LS');
-      client2.send('CAP END');
-      client2.send('NICK mlvirt2');
-      client2.send('USER mlvirt2 0 * :mlvirt2');
+      // Client2: SASL-authenticated, NO multiline, NO chathistory
+      // History-based fallback requires authentication
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      await client2.capLs();
+      await client2.capReq(['sasl']);
+      const saslResult = await authenticateSaslPlain(client2, account, password);
+      expect(saslResult.success, `SASL auth failed: ${saslResult.error}`).toBe(true);
+      client2.capEnd();
+      client2.register(uniqueNick('mlvt'));
       await client2.waitForNumeric('001');
 
       const channelName = uniqueChannel('mlvirt');
@@ -1331,14 +1435,17 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('USER mlmatch1 0 * :mlmatch1');
       await client1.waitForNumeric('001');
 
-      // Client2: receiver without multiline (will get truncated with retrieval hint)
-      client2.send('CAP LS 302');
-      await client2.waitForCap('LS');
-      client2.send('CAP REQ :message-tags');
-      await client2.waitForCap('ACK');
-      client2.send('CAP END');
-      client2.send('NICK mlmatch2');
-      client2.send('USER mlmatch2 0 * :mlmatch2');
+      // Client2: SASL-authenticated, message-tags but NO multiline
+      // History-based fallback requires authentication
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      await client2.capLs();
+      await client2.capReq(['message-tags', 'sasl']);
+      const saslResult = await authenticateSaslPlain(client2, account, password);
+      expect(saslResult.success, `SASL auth failed: ${saslResult.error}`).toBe(true);
+      client2.capEnd();
+      client2.register(uniqueNick('mlmt'));
       await client2.waitForNumeric('001');
 
       const channelName = uniqueChannel('mlmatch');

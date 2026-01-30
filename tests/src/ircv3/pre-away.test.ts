@@ -466,10 +466,6 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
       const { client: conn1, nick: nick1 } = await createSaslConnection(account, password, { enableHold: true });
       trackClient(conn1);
 
-      // Create second connection to same account via SASL
-      const { client: conn2, nick: nick2 } = await createSaslConnection(account, password);
-      trackClient(conn2);
-
       // Create observer
       const observer = trackClient(await createRawSocketClient());
       await observer.capLs();
@@ -479,30 +475,34 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
       await observer.waitForNumeric('001');
       await new Promise(r => setTimeout(r, 500));
 
-      // All join a channel
+      // Primary and observer join a channel
       const channel = uniqueChannel('presagg');
       observer.send(`JOIN ${channel}`);
       await observer.waitForJoin(channel);
       conn1.send(`JOIN ${channel}`);
       await conn1.waitForJoin(channel);
-      conn2.send(`JOIN ${channel}`);
-      await conn2.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 500));
 
-      // Set conn2 to away-star, conn1 stays present
+      // Create second connection to same account via SASL
+      // (auto-attaches as shadow — shares primary's nick and channel memberships,
+      // does NOT need to independently JOIN channels)
+      const { client: conn2 } = await createSaslConnection(account, password);
+      trackClient(conn2);
+      await new Promise(r => setTimeout(r, 500));
+
+      // Set conn2 (shadow) to away-star, conn1 (primary) stays present
       observer.clearRawBuffer();
       conn2.send('AWAY *');
       await conn2.waitForNumeric('306', 5000);
 
       // With aggregation, effective state should remain PRESENT
-      // because conn1 is still present. Observer should NOT get an AWAY notification.
+      // because conn1 (primary) is still present. Observer should NOT get an AWAY notification.
+      // (With shadow model, both connections share nick1 — AWAY broadcast would come from nick1)
       let gotUnexpectedAway = false;
       try {
         await observer.waitForParsedLine(
-          msg => msg.command === 'AWAY' && (
-            msg.source?.nick?.toLowerCase() === nick1.toLowerCase() ||
-            msg.source?.nick?.toLowerCase() === nick2.toLowerCase()
-          ),
+          msg => msg.command === 'AWAY' &&
+            msg.source?.nick?.toLowerCase() === nick1.toLowerCase(),
           2000
         );
         gotUnexpectedAway = true;
@@ -533,10 +533,6 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
       const { client: conn1, nick: nick1 } = await createSaslConnection(account, password, { enableHold: true });
       trackClient(conn1);
 
-      // Create second connection to same account via SASL
-      const { client: conn2, nick: nick2 } = await createSaslConnection(account, password);
-      trackClient(conn2);
-
       // Create observer
       const observer = trackClient(await createRawSocketClient());
       await observer.capLs();
@@ -546,14 +542,17 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
       await observer.waitForNumeric('001');
       await new Promise(r => setTimeout(r, 500));
 
-      // All join a channel
+      // Primary and observer join a channel
       const channel = uniqueChannel('presall');
       observer.send(`JOIN ${channel}`);
       await observer.waitForJoin(channel);
       conn1.send(`JOIN ${channel}`);
       await conn1.waitForJoin(channel);
-      conn2.send(`JOIN ${channel}`);
-      await conn2.waitForJoin(channel);
+      await new Promise(r => setTimeout(r, 500));
+
+      // Create second connection (shadow — shares primary's identity and channels)
+      const { client: conn2 } = await createSaslConnection(account, password);
+      trackClient(conn2);
       await new Promise(r => setTimeout(r, 500));
       observer.clearRawBuffer();
 
@@ -564,12 +563,10 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
       await conn2.waitForNumeric('306', 5000);
 
       // With all connections away-star, effective state should be AWAY
-      // Observer should receive an AWAY notification
+      // Observer should receive an AWAY notification (from nick1, the shared identity)
       const awayNotif = await observer.waitForParsedLine(
-        msg => msg.command === 'AWAY' && (
-          msg.source?.nick?.toLowerCase() === nick1.toLowerCase() ||
-          msg.source?.nick?.toLowerCase() === nick2.toLowerCase()
-        ),
+        msg => msg.command === 'AWAY' &&
+          msg.source?.nick?.toLowerCase() === nick1.toLowerCase(),
         3000
       );
       // Should contain the AWAY_STAR_MSG fallback
@@ -597,10 +594,6 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
       const { client: conn1, nick: nick1 } = await createSaslConnection(account, password, { enableHold: true });
       trackClient(conn1);
 
-      // Create second connection to same account via SASL
-      const { client: conn2 } = await createSaslConnection(account, password);
-      trackClient(conn2);
-
       // Create observer
       const observer = trackClient(await createRawSocketClient());
       await observer.capLs();
@@ -610,14 +603,17 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
       await observer.waitForNumeric('001');
       await new Promise(r => setTimeout(r, 500));
 
-      // All join a channel
+      // Primary and observer join a channel
       const channel = uniqueChannel('prestrans');
       observer.send(`JOIN ${channel}`);
       await observer.waitForJoin(channel);
       conn1.send(`JOIN ${channel}`);
       await conn1.waitForJoin(channel);
-      conn2.send(`JOIN ${channel}`);
-      await conn2.waitForJoin(channel);
+      await new Promise(r => setTimeout(r, 500));
+
+      // Create second connection (shadow — shares primary's identity and channels)
+      const { client: conn2 } = await createSaslConnection(account, password);
+      trackClient(conn2);
       await new Promise(r => setTimeout(r, 500));
 
       // Set both to away-star
@@ -633,10 +629,10 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
       await conn1.waitForNumeric('305', 5000);
 
       // Observer should receive an un-away notification (AWAY with no message)
+      // from nick1 (the shared session identity)
       const unawayNotif = await observer.waitForParsedLine(
-        msg => msg.command === 'AWAY' && (
-          msg.source?.nick?.toLowerCase() === nick1.toLowerCase()
-        ),
+        msg => msg.command === 'AWAY' &&
+          msg.source?.nick?.toLowerCase() === nick1.toLowerCase(),
         3000
       );
       // Un-away: trailing should be empty or absent
@@ -665,10 +661,6 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
       const { client: conn1, nick: nick1 } = await createSaslConnection(account, password, { enableHold: true });
       trackClient(conn1);
 
-      // Create second connection to same account via SASL
-      const { client: conn2, nick: nick2 } = await createSaslConnection(account, password);
-      trackClient(conn2);
-
       // Create observer
       const observer = trackClient(await createRawSocketClient());
       await observer.capLs();
@@ -678,32 +670,31 @@ describe('IRCv3 Pre-Away (draft/pre-away)', () => {
       await observer.waitForNumeric('001');
       await new Promise(r => setTimeout(r, 500));
 
-      // All join a channel
+      // Primary and observer join a channel
       const channel = uniqueChannel('presmix');
       observer.send(`JOIN ${channel}`);
       await observer.waitForJoin(channel);
       conn1.send(`JOIN ${channel}`);
       await conn1.waitForJoin(channel);
-      conn2.send(`JOIN ${channel}`);
-      await conn2.waitForJoin(channel);
+      await new Promise(r => setTimeout(r, 500));
+
+      // Create second connection (shadow — shares primary's identity and channels)
+      const { client: conn2 } = await createSaslConnection(account, password);
+      trackClient(conn2);
       await new Promise(r => setTimeout(r, 500));
       observer.clearRawBuffer();
 
-      // conn1: regular AWAY, conn2: AWAY *
+      // conn1 (primary): regular AWAY, conn2 (shadow): AWAY *
       conn1.send('AWAY :In a meeting');
       await conn1.waitForNumeric('306', 5000);
       conn2.send('AWAY *');
       await conn2.waitForNumeric('306', 5000);
 
       // Both connections are away, so effective state should be AWAY.
-      // With presence aggregation, the AWAY broadcast may come from either nick:
-      // - nick1 if individual AWAYs are broadcast
-      // - nick2 if only the effective-state transition triggers a broadcast
+      // AWAY broadcast comes from nick1 (the shared session identity)
       const awayNotif = await observer.waitForParsedLine(
-        msg => msg.command === 'AWAY' && (
-          msg.source?.nick?.toLowerCase() === nick1.toLowerCase() ||
-          msg.source?.nick?.toLowerCase() === nick2.toLowerCase()
-        ),
+        msg => msg.command === 'AWAY' &&
+          msg.source?.nick?.toLowerCase() === nick1.toLowerCase(),
         3000
       );
       expect(awayNotif.command).toBe('AWAY');

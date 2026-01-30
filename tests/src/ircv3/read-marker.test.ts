@@ -3,9 +3,11 @@ import {
   createRawSocketClient,
   RawSocketClient,
   uniqueChannel,
+  uniqueNick,
   getTestAccount,
   authenticateSaslPlain,
-  getCaps,
+  createBouncerClient,
+  bouncerDisableHold,
 } from '../helpers/index.js';
 
 /**
@@ -106,7 +108,10 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
         msg => msg.command === 'MARKREAD' || msg.command === '730',
         5000
       );
-      expect(setResponse).toBeDefined();
+      expect(
+        ['MARKREAD', '730'],
+        'Set response should be MARKREAD or RPL_MARKREAD',
+      ).toContain(setResponse.command);
       expect(setResponse.raw).toContain(channel);
       console.log('MARKREAD set response:', setResponse.raw);
 
@@ -120,7 +125,10 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
         msg => msg.command === 'MARKREAD' || msg.command === '730',
         5000
       );
-      expect(queryResponse).toBeDefined();
+      expect(
+        ['MARKREAD', '730'],
+        'Query response should be MARKREAD or RPL_MARKREAD',
+      ).toContain(queryResponse.command);
       expect(queryResponse.raw).toContain(channel);
       console.log('MARKREAD query response:', queryResponse.raw);
 
@@ -232,7 +240,10 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
         msg => msg.command === 'MARKREAD' || msg.command === '730',
         5000
       );
-      expect(setResponse).toBeDefined();
+      expect(
+        ['MARKREAD', '730'],
+        'Set response should be MARKREAD or RPL_MARKREAD',
+      ).toContain(setResponse.command);
       console.log('Client1 set marker:', setResponse.raw);
 
       // Allow sync to propagate
@@ -246,7 +257,10 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
         msg => msg.command === 'MARKREAD' || msg.command === '730',
         5000
       );
-      expect(queryResponse).toBeDefined();
+      expect(
+        ['MARKREAD', '730'],
+        'Query response should be MARKREAD or RPL_MARKREAD',
+      ).toContain(queryResponse.command);
       expect(queryResponse.raw).toContain(channel);
       console.log('Client2 queried marker:', queryResponse.raw);
 
@@ -295,7 +309,7 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
 
       // If MARKREAD returned, it should be an error or empty marker
       // If FAIL, NOTICE, or error numeric, that's expected
-      expect(response).toBeDefined();
+      expect(response.command, 'Unauthenticated MARKREAD should get error response').toBeTruthy();
       console.log('Unauthenticated MARKREAD response:', response.raw);
 
       client.send('QUIT');
@@ -382,11 +396,89 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
         msg => msg.command === 'MARKREAD' || msg.command === '730',
         5000
       );
-      expect(response).toBeDefined();
+      expect(
+        ['MARKREAD', '730'],
+        'PM MARKREAD response should be MARKREAD or RPL_MARKREAD',
+      ).toContain(response.command);
       console.log('PM MARKREAD response:', response.raw);
 
       client1.send('QUIT');
       client2.send('QUIT');
     }, 30000);
+  });
+
+  describe('MARKREAD with Bouncer Session', () => {
+    it('read marker syncs across primary and shadow via bouncer session', async () => {
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      // Primary: SASL + hold + read-marker
+      const { client: primary } = await createBouncerClient(account, password, {
+        extraCaps: ['draft/read-marker'],
+      });
+      clients.push(primary);
+
+      const channel = uniqueChannel('rmsess');
+      primary.send(`JOIN ${channel}`);
+      await primary.waitForJoin(channel);
+      await new Promise(r => setTimeout(r, 300));
+
+      // Shadow: SASL to same account + read-marker (auto-attaches as shadow)
+      const shadow = await createRawSocketClient();
+      clients.push(shadow);
+      await shadow.capLs();
+      await shadow.capReq(['draft/read-marker', 'sasl']);
+      const saslResult = await authenticateSaslPlain(shadow, account, password, 20000);
+      expect(saslResult.success, `Shadow SASL failed: ${saslResult.error}`).toBe(true);
+      shadow.capEnd();
+      shadow.register(uniqueNick('rms'));
+      await shadow.waitForNumeric('001');
+      await new Promise(r => setTimeout(r, 500));
+
+      // Primary sets a read marker on the channel
+      await new Promise(r => setTimeout(r, 200));
+      primary.clearRawBuffer();
+      const timestamp = new Date().toISOString();
+      primary.send(`MARKREAD ${channel} timestamp=${timestamp}`);
+
+      const setResponse = await primary.waitForParsedLine(
+        msg => msg.command === 'MARKREAD' || msg.command === '730',
+        5000,
+      );
+      expect(
+        ['MARKREAD', '730'],
+        'Primary set MARKREAD should succeed',
+      ).toContain(setResponse.command);
+      expect(setResponse.raw).toContain(channel);
+
+      // Allow sync to propagate
+      await new Promise(r => setTimeout(r, 500));
+
+      // Shadow queries the read marker — should see primary's marker
+      shadow.clearRawBuffer();
+      shadow.send(`MARKREAD ${channel}`);
+
+      const queryResponse = await shadow.waitForParsedLine(
+        msg => msg.command === 'MARKREAD' || msg.command === '730',
+        5000,
+      );
+      expect(
+        ['MARKREAD', '730'],
+        'Shadow MARKREAD query should succeed',
+      ).toContain(queryResponse.command);
+      expect(queryResponse.raw).toContain(channel);
+      expect(
+        queryResponse.raw.includes('timestamp='),
+        'Shadow should see the timestamp set by primary',
+      ).toBe(true);
+
+      console.log('Primary set:', setResponse.raw);
+      console.log('Shadow queried:', queryResponse.raw);
+
+      // Cleanup
+      shadow.send('QUIT');
+      await bouncerDisableHold(primary);
+      primary.send('QUIT');
+    }, 45000);
   });
 });
