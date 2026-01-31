@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient, uniqueChannel } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueChannel, X3Client, setupTestAccount, PRIMARY_SERVER, getCaps } from '../helpers/index.js';
 
 /**
  * WebPush Tests (draft/webpush)
@@ -266,13 +266,19 @@ describe('IRCv3 Event Playback (draft/event-playback)', () => {
 
   describe('Event Playback with Chathistory', () => {
     it('chathistory includes events with event-playback', async () => {
-      const client = trackClient(await createRawSocketClient());
+      // Chathistory requires authentication (IsAccount) for non-+H channels
+      const client = new X3Client();
+      await client.connect(PRIMARY_SERVER.host, PRIMARY_SERVER.port);
+      trackClient(client);
 
       await client.capLs();
       await client.capReq(['draft/event-playback', 'draft/chathistory', 'batch', 'server-time']);
       client.capEnd();
       client.register('ephistory1');
       await client.waitForNumeric('001');
+
+      // Authenticate with X3 so chathistory access works
+      const { account } = await setupTestAccount(client);
 
       const channel = uniqueChannel('ephistory');
       client.send(`JOIN ${channel}`);
