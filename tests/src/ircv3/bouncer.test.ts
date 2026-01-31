@@ -292,7 +292,7 @@ describe('Built-in Bouncer', () => {
       conn1.send(`JOIN ${channel}`);
       await conn1.waitForJoin(channel);
       conn1.send(`TOPIC ${channel} :Resume test topic`);
-      await conn1.waitForNumeric('332', 3000);
+      await conn1.waitForCommand('TOPIC', 3000);
 
       // Send a message so the channel has history
       conn1.send(`PRIVMSG ${channel} :Before disconnect`);
@@ -654,7 +654,7 @@ describe('Built-in Bouncer', () => {
       primary.send(`JOIN ${channel}`);
       await primary.waitForJoin(channel);
       primary.send(`TOPIC ${channel} :Shadow replay test topic`);
-      await primary.waitForNumeric('332', 3000);
+      await primary.waitForCommand('TOPIC', 3000);
       await new Promise(r => setTimeout(r, 300));
 
       // Shadow attaches — should receive channel state replay
