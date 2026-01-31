@@ -477,7 +477,7 @@ describe('Shadow CAP Tag Filtering', () => {
       primary.send(`JOIN ${channel}`);
       await primary.waitForJoin(channel);
       primary.send(`TOPIC ${channel} :Cap filtering replay test`);
-      await primary.waitForNumeric('332', 3000);
+      await primary.waitForCommand('TOPIC', 3000);
       await new Promise(r => setTimeout(r, 300));
 
       // Shadow: WITH extended-join — should get extended JOIN in channel state replay
