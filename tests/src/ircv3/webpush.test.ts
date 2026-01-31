@@ -277,6 +277,10 @@ describe('IRCv3 Event Playback (draft/event-playback)', () => {
       client.register('ephistory1');
       await client.waitForNumeric('001');
 
+      // Let server finish sending welcome notices before AUTH
+      await new Promise(r => setTimeout(r, 500));
+      client.clearRawBuffer();
+
       // Authenticate with X3 so chathistory access works
       const { account } = await setupTestAccount(client);
 
