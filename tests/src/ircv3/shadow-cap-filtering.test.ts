@@ -404,6 +404,107 @@ describe('Shadow CAP Tag Filtering', () => {
     });
   });
 
+  describe('Content format filtering (CapRecipientHas)', () => {
+    it('shadow with extended-join receives extended JOIN format, primary without does not', async () => {
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      // Primary: WITHOUT extended-join
+      const { client: primary } = await createSaslConnection(account, password, {
+        extraCaps: ['server-time'],
+        enableHold: true,
+      });
+      trackClient(primary);
+
+      // Primary joins channel
+      const channel = uniqueChannel('shdext');
+      primary.send(`JOIN ${channel}`);
+      await primary.waitForJoin(channel);
+      await new Promise(r => setTimeout(r, 300));
+
+      // Shadow: WITH extended-join
+      const { client: shadow } = await createSaslConnection(account, password, {
+        extraCaps: ['server-time', 'extended-join'],
+      });
+      trackClient(shadow);
+      await new Promise(r => setTimeout(r, 500));
+
+      // Observer joins — both primary and shadow should see the JOIN
+      const { client: observer, nick: obsNick } = await createObserver();
+      trackClient(observer);
+
+      primary.clearRawBuffer();
+      shadow.clearRawBuffer();
+
+      observer.send(`JOIN ${channel}`);
+      await observer.waitForJoin(channel);
+
+      // Primary should get standard JOIN (no account/realname)
+      const primaryJoin = await primary.waitForParsedLine(
+        msg => msg.command === 'JOIN' && msg.source?.nick === obsNick,
+        5000,
+      );
+      // Standard JOIN: params[0] is the channel, no account/realname fields
+      expect(primaryJoin.params.length).toBe(1);
+
+      // Shadow should get extended JOIN (with account and realname)
+      const shadowJoin = await shadow.waitForParsedLine(
+        msg => msg.command === 'JOIN' && msg.source?.nick === obsNick,
+        5000,
+      );
+      // Extended JOIN: params[0] is channel, params[1] is account (or "*"), trailing is realname
+      expect(shadowJoin.params.length).toBeGreaterThanOrEqual(2);
+
+      // Cleanup
+      await bouncerDisableHold(primary);
+      primary.send('QUIT');
+      observer.send('QUIT');
+    });
+
+    it('shadow receives channel state replay with correct format per its own caps', async () => {
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      // Primary: minimal caps
+      const { client: primary } = await createSaslConnection(account, password, {
+        extraCaps: [],
+        enableHold: true,
+      });
+      trackClient(primary);
+
+      // Primary joins channel and sets topic
+      const channel = uniqueChannel('shdrepl');
+      primary.send(`JOIN ${channel}`);
+      await primary.waitForJoin(channel);
+      primary.send(`TOPIC ${channel} :Cap filtering replay test`);
+      await primary.waitForNumeric('332', 3000);
+      await new Promise(r => setTimeout(r, 300));
+
+      // Shadow: WITH extended-join — should get extended JOIN in channel state replay
+      const { client: shadow } = await createSaslConnection(account, password, {
+        extraCaps: ['extended-join'],
+      });
+      trackClient(shadow);
+
+      // Shadow should receive channel state replay with extended JOIN format
+      const joinMsg = await shadow.waitForJoin(channel, undefined, 5000);
+      // Extended JOIN: has account and realname params
+      expect(joinMsg.params.length).toBeGreaterThanOrEqual(2);
+
+      // Shadow should receive TOPIC
+      const topicMsg = await shadow.waitForNumeric('332', 3000);
+      expect(topicMsg.raw).toContain('Cap filtering replay test');
+
+      // Shadow should receive NAMES
+      await shadow.waitForNumeric('353', 3000);
+      await shadow.waitForNumeric('366', 3000);
+
+      // Cleanup
+      await bouncerDisableHold(primary);
+      primary.send('QUIT');
+    });
+  });
+
   describe('Multiple messages and consistency', () => {
     it('tag filtering is consistent across multiple messages', async () => {
       const { account, password, fromPool } = await getTestAccount();
