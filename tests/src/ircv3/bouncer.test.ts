@@ -286,11 +286,13 @@ describe('Built-in Bouncer', () => {
 
       const channel = uniqueChannel('resume');
 
-      // Connect with hold, join channel
+      // Connect with hold, join channel, set topic
       const { client: conn1 } = await createBouncerClient(account, password);
       trackClient(conn1);
       conn1.send(`JOIN ${channel}`);
       await conn1.waitForJoin(channel);
+      conn1.send(`TOPIC ${channel} :Resume test topic`);
+      await conn1.waitForNumeric('332', 3000);
 
       // Send a message so the channel has history
       conn1.send(`PRIVMSG ${channel} :Before disconnect`);
@@ -300,23 +302,23 @@ describe('Built-in Bouncer', () => {
       disconnectAbruptly(conn1);
       await new Promise(r => setTimeout(r, 2000));
 
-      // Reconnect — should auto-resume with channel membership
+      // Reconnect — should auto-resume with channel membership AND receive state replay
       const { client: conn2 } = await reconnectBouncer(account, password);
       trackClient(conn2);
 
-      // Verify we're in the channel by sending a message (no error = we're in)
-      conn2.clearRawBuffer();
-      conn2.send(`PRIVMSG ${channel} :After resume`);
+      // After held session resume, server should replay channel state:
+      // JOIN, TOPIC (332+333), NAMES (353+366)
+      const joinMsg = await conn2.waitForJoin(channel, undefined, 5000);
+      expect(joinMsg.command).toBe('JOIN');
 
-      // If we're NOT in the channel, we'd get ERR_CANNOTSENDTOCHAN (404)
-      let gotError = false;
-      try {
-        await conn2.waitForNumeric(['404', '442'], 2000);
-        gotError = true;
-      } catch {
-        // Expected: no error means we're in the channel
-      }
-      expect(gotError, `Should be in ${channel} after auto-resume`).toBe(false);
+      const topicMsg = await conn2.waitForNumeric('332', 3000);
+      expect(topicMsg.params).toContain(channel);
+
+      const namesMsg = await conn2.waitForNumeric('353', 3000);
+      expect(namesMsg.raw).toContain(channel);
+
+      const endNames = await conn2.waitForNumeric('366', 3000);
+      expect(endNames.params).toContain(channel);
 
       // Cleanup
       await bouncerDisableHold(conn2);
@@ -633,6 +635,48 @@ describe('Built-in Bouncer', () => {
         // Expected: no error means shadow has channel membership
       }
       expect(gotError, 'Shadow should inherit channel membership from primary').toBe(false);
+
+      // Cleanup
+      shadow.send('QUIT');
+      await bouncerDisableHold(primary);
+      primary.send('QUIT');
+    });
+
+    it('shadow receives channel state replay (JOIN, TOPIC, NAMES) on attachment', async () => {
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      const { client: primary } = await createBouncerClient(account, password);
+      trackClient(primary);
+
+      // Primary joins a channel and sets a topic
+      const channel = uniqueChannel('shreplay');
+      primary.send(`JOIN ${channel}`);
+      await primary.waitForJoin(channel);
+      primary.send(`TOPIC ${channel} :Shadow replay test topic`);
+      await primary.waitForNumeric('332', 3000);
+      await new Promise(r => setTimeout(r, 300));
+
+      // Shadow attaches — should receive channel state replay
+      const { client: shadow } = await createSaslBouncerClient(account, password);
+      trackClient(shadow);
+
+      // Wait for the full welcome + channel state to arrive
+      // The shadow should receive: JOIN, 332 (TOPIC), 333 (TOPICWHOTIME), 353 (NAMES), 366 (ENDOFNAMES)
+      const joinMsg = await shadow.waitForJoin(channel, undefined, 5000);
+      expect(joinMsg.command).toBe('JOIN');
+      expect(joinMsg.params[0].toLowerCase()).toBe(channel.toLowerCase());
+
+      // Verify TOPIC (332)
+      const topicMsg = await shadow.waitForNumeric('332', 3000);
+      expect(topicMsg.params).toContain(channel);
+      expect(topicMsg.trailing || topicMsg.params[topicMsg.params.length - 1]).toContain('Shadow replay test topic');
+
+      // Verify NAMES (353 + 366)
+      const namesMsg = await shadow.waitForNumeric('353', 3000);
+      expect(namesMsg.raw).toContain(channel);
+      const endNames = await shadow.waitForNumeric('366', 3000);
+      expect(endNames.params).toContain(channel);
 
       // Cleanup
       shadow.send('QUIT');
