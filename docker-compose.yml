@@ -8,6 +8,7 @@ services:
         additional_contexts:
           - data=./data
           - libkc=./libkc
+          - libmdbx=./libmdbx
     user: "0:0"  # Run as root to fix permissions
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -37,6 +38,7 @@ services:
         additional_contexts:
           - data=./data
           - libkc=./libkc
+          - libmdbx=./libmdbx
     user: "1234:1234"  # nefarious user
     # Enable core dumps for crash debugging
     ulimits:
@@ -87,6 +89,7 @@ services:
         additional_contexts:
           - data=./data
           - libkc=./libkc
+          - libmdbx=./libmdbx
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -115,6 +118,7 @@ services:
         additional_contexts:
           - data=./data
           - libkc=./libkc
+          - libmdbx=./libmdbx
     user: "1234:1234"  # nefarious user
     networks:
       irc_net:
@@ -161,6 +165,7 @@ services:
         additional_contexts:
           - data=./data
           - libkc=./libkc
+          - libmdbx=./libmdbx
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -188,6 +193,7 @@ services:
         additional_contexts:
           - data=./data
           - libkc=./libkc
+          - libmdbx=./libmdbx
     user: "1234:1234"
     networks:
       irc_net:
@@ -234,6 +240,7 @@ services:
         additional_contexts:
           - data=./data
           - libkc=./libkc
+          - libmdbx=./libmdbx
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -261,6 +268,7 @@ services:
         additional_contexts:
           - data=./data
           - libkc=./libkc
+          - libmdbx=./libmdbx
     user: "1234:1234"
     networks:
       irc_net:
@@ -307,6 +315,7 @@ services:
       additional_contexts:
         - data=./data
         - libkc=./libkc
+        - libmdbx=./libmdbx
     user: "0:0"  # Run as root to fix permissions
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -324,6 +333,7 @@ services:
       additional_contexts:
         - data=./data
         - libkc=./libkc
+        - libmdbx=./libmdbx
     user: "1234:1234"  # x3 user
     # Enable core dumps for crash debugging
     ulimits:

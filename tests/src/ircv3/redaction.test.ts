@@ -1,14 +1,20 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { createRawSocketClient, RawSocketClient, uniqueChannel } from '../helpers/index.js';
+import { authenticateSaslPlain } from '../helpers/sasl.js';
+import { getTestAccount, releaseTestAccount } from '../helpers/x3-client.js';
 
 /**
  * Message Redaction Tests (draft/message-redaction)
  *
  * Tests the IRCv3 message redaction specification for deleting messages.
- * Allows users to remove their own messages or ops to remove any message.
+ * REDACT requires authentication (ACCOUNT_REQUIRED).
+ * - Authenticated users can redact their own messages (no time window)
+ * - Authenticated chanops can redact any message (time window)
+ * - IRC operators can redact any message (oper window)
  */
 describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
   const clients: RawSocketClient[] = [];
+  const poolAccounts: string[] = [];
 
   const trackClient = (client: RawSocketClient): RawSocketClient => {
     clients.push(client);
@@ -24,7 +30,36 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       }
     }
     clients.length = 0;
+    for (const account of poolAccounts) {
+      releaseTestAccount(account);
+    }
+    poolAccounts.length = 0;
   });
+
+  /**
+   * Helper to create an authenticated client with redaction caps.
+   */
+  async function createAuthClient(
+    nick: string,
+    extraCaps: string[] = []
+  ): Promise<RawSocketClient> {
+    const { account, password, fromPool } = await getTestAccount();
+    if (fromPool) poolAccounts.push(account);
+
+    const client = trackClient(await createRawSocketClient());
+    await client.capLs();
+    await client.capReq(['sasl', 'draft/message-redaction', ...extraCaps]);
+
+    const result = await authenticateSaslPlain(client, account, password);
+    if (!result.success) {
+      throw new Error(`SASL auth failed for ${account}: ${result.error}`);
+    }
+
+    client.capEnd();
+    client.register(nick);
+    await client.waitForNumeric('001');
+    return client;
+  }
 
   /**
    * Helper to send a message and capture its msgid from echo-message.
@@ -73,13 +108,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
 
   describe('REDACT Command', () => {
     it('can redact own message with REDACT', { retry: 2 }, async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/message-redaction', 'echo-message']);
-      client.capEnd();
-      client.register('redact1');
-      await client.waitForNumeric('001');
+      const client = await createAuthClient('redact1', ['echo-message']);
 
       const channel = uniqueChannel('redact');
       client.send(`JOIN ${channel}`);
@@ -102,20 +131,8 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
     });
 
     it('REDACT with reason is accepted', { retry: 2 }, async () => {
-      const sender = trackClient(await createRawSocketClient());
-      const receiver = trackClient(await createRawSocketClient());
-
-      await sender.capLs();
-      await sender.capReq(['draft/message-redaction', 'echo-message']);
-      sender.capEnd();
-      sender.register('redsend1');
-      await sender.waitForNumeric('001');
-
-      await receiver.capLs();
-      await receiver.capReq(['draft/message-redaction']);
-      receiver.capEnd();
-      receiver.register('redrecv1');
-      await receiver.waitForNumeric('001');
+      const sender = await createAuthClient('redsend1', ['echo-message']);
+      const receiver = await createAuthClient('redrecv1');
 
       const channel = uniqueChannel('redreason');
       sender.send(`JOIN ${channel}`);
@@ -128,7 +145,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
 
       receiver.clearRawBuffer();
 
-      // Redact with reason
+      // Redact with reason (sender is chanop, first to join)
       sender.send(`REDACT ${channel} ${msgid} :Posted by mistake`);
 
       // Receiver should get REDACT notification
@@ -143,20 +160,8 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
 
   describe('REDACT Permissions', () => {
     it('cannot redact other user message without op', { retry: 2 }, async () => {
-      const sender = trackClient(await createRawSocketClient());
-      const attacker = trackClient(await createRawSocketClient());
-
-      await sender.capLs();
-      await sender.capReq(['draft/message-redaction', 'echo-message']);
-      sender.capEnd();
-      sender.register('redsender2');
-      await sender.waitForNumeric('001');
-
-      await attacker.capLs();
-      await attacker.capReq(['draft/message-redaction', 'standard-replies']);
-      attacker.capEnd();
-      attacker.register('redattack1');
-      await attacker.waitForNumeric('001');
+      const sender = await createAuthClient('redsender2', ['echo-message']);
+      const attacker = await createAuthClient('redattack1', ['standard-replies']);
 
       const channel = uniqueChannel('redperm');
       sender.send(`JOIN ${channel}`);
@@ -172,6 +177,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       attacker.clearRawBuffer();
 
       // Attacker tries to redact sender's message - should fail
+      // (different account, not chanop)
       attacker.send(`REDACT ${channel} ${msgid}`);
 
       // Should receive FAIL or error numeric, NOT a successful REDACT
@@ -187,20 +193,8 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
     });
 
     it('op can redact any message in channel', { retry: 2 }, async () => {
-      const op = trackClient(await createRawSocketClient());
-      const user = trackClient(await createRawSocketClient());
-
-      await op.capLs();
-      await op.capReq(['draft/message-redaction', 'echo-message']);
-      op.capEnd();
-      op.register('redop1');
-      await op.waitForNumeric('001');
-
-      await user.capLs();
-      await user.capReq(['draft/message-redaction', 'echo-message']);
-      user.capEnd();
-      user.register('reduser1');
-      await user.waitForNumeric('001');
+      const op = await createAuthClient('redop1', ['echo-message']);
+      const user = await createAuthClient('reduser1', ['echo-message']);
 
       const channel = uniqueChannel('redop');
       op.send(`JOIN ${channel}`);
@@ -214,7 +208,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
 
       op.clearRawBuffer();
 
-      // Op redacts user's message - should succeed
+      // Op redacts user's message - should succeed (chanop privilege)
       op.send(`REDACT ${channel} ${msgid} :Moderation action`);
 
       const response = await op.waitForCommand('REDACT', 5000);
@@ -228,13 +222,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
 
   describe('REDACT Edge Cases', () => {
     it('REDACT nonexistent msgid returns error', { retry: 2 }, async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/message-redaction', 'standard-replies']);
-      client.capEnd();
-      client.register('redinv1');
-      await client.waitForNumeric('001');
+      const client = await createAuthClient('redinv1', ['standard-replies']);
 
       const channel = uniqueChannel('redinv');
       client.send(`JOIN ${channel}`);
@@ -256,13 +244,7 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
     });
 
     it('REDACT same message twice returns error on second attempt', { retry: 2 }, async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['draft/message-redaction', 'echo-message', 'standard-replies']);
-      client.capEnd();
-      client.register('redtwice1');
-      await client.waitForNumeric('001');
+      const client = await createAuthClient('redtwice1', ['echo-message', 'standard-replies']);
 
       const channel = uniqueChannel('redtwice');
       client.send(`JOIN ${channel}`);
@@ -295,20 +277,8 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
 
   describe('REDACT Notification', () => {
     it('other channel members receive REDACT notification', { retry: 2 }, async () => {
-      const redactor = trackClient(await createRawSocketClient());
-      const observer = trackClient(await createRawSocketClient());
-
-      await redactor.capLs();
-      await redactor.capReq(['draft/message-redaction', 'echo-message']);
-      redactor.capEnd();
-      redactor.register('rednote1');
-      await redactor.waitForNumeric('001');
-
-      await observer.capLs();
-      await observer.capReq(['draft/message-redaction']);
-      observer.capEnd();
-      observer.register('redobs1');
-      await observer.waitForNumeric('001');
+      const redactor = await createAuthClient('rednote1', ['echo-message']);
+      const observer = await createAuthClient('redobs1');
 
       const channel = uniqueChannel('rednote');
       redactor.send(`JOIN ${channel}`);
