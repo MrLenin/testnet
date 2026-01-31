@@ -55,9 +55,9 @@ describe('Shadow CAP Tag Filtering', () => {
   async function createSaslConnection(
     account: string,
     password: string,
-    options: { nick?: string; extraCaps?: string[]; enableHold?: boolean } = {},
+    options: { nick?: string; extraCaps?: string[]; enableHold?: boolean; clearBuffer?: boolean } = {},
   ): Promise<{ client: RawSocketClient; nick: string }> {
-    const { nick, extraCaps = [], enableHold = false } = options;
+    const { nick, extraCaps = [], enableHold = false, clearBuffer = true } = options;
     const client = await createRawSocketClient();
     await client.capLs();
     await client.capReq(['sasl', ...extraCaps]);
@@ -77,7 +77,9 @@ describe('Shadow CAP Tag Filtering', () => {
       await bouncerEnableHold(client);
     }
 
-    client.clearRawBuffer();
+    if (clearBuffer) {
+      client.clearRawBuffer();
+    }
     return { client, nick: actualNick };
   }
 
@@ -481,8 +483,10 @@ describe('Shadow CAP Tag Filtering', () => {
       await new Promise(r => setTimeout(r, 300));
 
       // Shadow: WITH extended-join — should get extended JOIN in channel state replay
+      // Don't clear buffer — shadow needs to see channel state replay messages
       const { client: shadow } = await createSaslConnection(account, password, {
         extraCaps: ['extended-join'],
+        clearBuffer: false,
       });
       trackClient(shadow);
 
