@@ -11,13 +11,17 @@ This document provides a comprehensive reference for the P10 server-to-server pr
 ## Table of Contents
 
 1. [Protocol Overview](#protocol-overview)
-2. [Message Format](#message-format)
-3. [Numeric System](#numeric-system)
-4. [Token Reference](#token-reference)
-5. [New IRCv3 Extensions](#new-ircv3-extensions)
-6. [SASL Protocol](#sasl-protocol)
-7. [Message Tags](#message-tags)
-8. [Backward Compatibility](#backward-compatibility)
+2. [IP Address Encoding](#ip-address-encoding)
+3. [Message Format](#message-format)
+4. [Numeric System](#numeric-system)
+5. [Token Reference](#token-reference)
+6. [New IRCv3 Extensions](#new-ircv3-extensions)
+7. [SASL Protocol](#sasl-protocol)
+8. [Message Tags](#message-tags)
+9. [Backward Compatibility](#backward-compatibility)
+10. [Quick Reference](#quick-reference)
+11. [Implementation Files Reference](#implementation-files-reference)
+12. [Document History](#document-history)
 
 ---
 
@@ -285,63 +289,168 @@ AB B #test 1703334400 +nt ABAAB,ABAAC:o :%ABAAD
 
 ## Token Reference
 
-### Core Protocol Tokens
+### Complete S2S Token Reference
+
+All tokens below have server-to-server handlers (ms_* functions in parse.c).
+
+#### Connection & Server Management
 
 | Token | Command | Direction | Description |
 |-------|---------|-----------|-------------|
+| `PA` | PASS | S→S | Connection password |
+| `S` | SERVER | Both | Server introduction |
+| `SQ` | SQUIT | Both | Server disconnect |
+| `Y` | ERROR | Both | Error message |
+| `CO` | CONNECT | S→S | Request server connection |
+| `RH` | REHASH | Both | Reload server config |
 | `G` | PING | Both | Keepalive/lag check |
 | `Z` | PONG | Both | Response to PING |
-| `N` | NICK | Both | User introduction/nick change |
-| `Q` | QUIT | Both | User disconnect |
-| `B` | BURST | S→S | Channel state during burst |
 | `EB` | END_OF_BURST | S→S | Burst completion signal |
 | `EA` | EOB_ACK | S→S | Burst acknowledgment |
-| `SQ` | SQUIT | Both | Server disconnect |
-| `S` | SERVER | Both | Server introduction |
+
+#### User Management
+
+| Token | Command | Direction | Description |
+|-------|---------|-----------|-------------|
+| `N` | NICK | Both | User introduction/nick change |
+| `Q` | QUIT | Both | User disconnect |
+| `D` | KILL | Both | Forcibly disconnect user |
+| `A` | AWAY | Both | Away status (with presence aggregation) |
+| `U` | SILENCE | Both | Server-side ignore management |
+| `SID` | SVSIDENT | Both | Services-issued ident change |
+| `SI` | SVSINFO | Both | Services info broadcast |
+| `SX` | SVSQUIT | Both | Services-issued quit |
+
+#### Channel Management
+
+| Token | Command | Direction | Description |
+|-------|---------|-----------|-------------|
+| `B` | BURST | S→S | Channel state during burst |
+| `C` | CREATE | Both | Channel creation |
 | `J` | JOIN | Both | Channel join |
 | `L` | PART | Both | Channel part |
 | `K` | KICK | Both | Channel kick |
 | `M` | MODE | Both | Mode change |
-| `P` | PRIVMSG | Both | Private message |
-| `O` | NOTICE | Both | Notice message |
 | `T` | TOPIC | Both | Topic change |
 | `I` | INVITE | Both | Channel invitation |
-| `W` | WHOIS | Both | User query |
-| `X` | WHO | Both | Channel/user list |
-| `A` | AWAY | Both | Away status |
-| `AC` | ACCOUNT | Both | Account state change |
-| `FA` | FAKEHOST | Both | Virtual host change |
+| `DE` | DESTRUCT | Both | Channel destruction |
+| `OM` | OPMODE | Both | Oper mode change (no access check) |
+| `CM` | CLEARMODE | Both | Clear all channel modes |
 
-### New IRCv3 Extension Tokens
+#### Messaging
 
 | Token | Command | Direction | Description |
 |-------|---------|-----------|-------------|
-| `SE` | SETNAME | Both | Realname change (Phase 12) |
-| `TM` | TAGMSG | Both | Tag-only message (Phase 17) |
-| `BT` | BATCH | Both | Batch coordination (Phase 13d) |
-| `CH` | CHATHISTORY | Both | Message history with S2S federation (Phase 32) |
-| `RD` | REDACT | Both | Message redaction (Phase 27) |
-| `RG` | REGISTER | Both | Account registration (Phase 24) |
-| `VF` | VERIFY | Both | Account verification (Phase 24) |
-| `RR` | REGREPLY | X3→Nef | Registration reply (Phase 24) |
-| `MR` | MARKREAD | Both | Read marker sync (Phase 25) |
-| `RN` | RENAME | Both | Channel rename (Phase 28) |
-| `MD` | METADATA | Both | User/channel metadata (Phase 29) |
-| `MDQ` | METADATAQUERY | Both | Metadata query to services (Phase 29) |
-| `WP` | WEBPUSH | Both | Web push notifications (Phase 30) |
-| `ML` | MULTILINE | Both | S2S multiline batch propagation (Phase 31) |
+| `P` | PRIVMSG | Both | Private message |
+| `O` | NOTICE | Both | Notice message |
+| `WA` | WALLOPS | Both | Broadcast to opers |
+| `WU` | WALLUSERS | Both | Broadcast to all users |
+| `WC` | WALLCHOPS | Both | Message to channel ops |
+| `WV` | WALLVOICES | Both | Message to channel voices+ |
+| `WH` | WALLHOPS | Both | Message to channel halfops+ |
+| `DS` | DESYNCH | Both | Desync notification |
 
-### SASL Tokens
+#### Query Commands
 
 | Token | Command | Direction | Description |
 |-------|---------|-----------|-------------|
-| `SA` | SASL | Both | SASL authentication |
+| `H` | WHO | Both | Channel/user list query |
+| `W` | WHOIS | Both | User info query |
+| `X` | WHOWAS | Both | Historical user query |
+| `R` | STATS | Both | Server statistics |
+| `F` | INFO | Both | Server info |
+| `LI` | LINKS | Both | Server links |
+| `LU` | LUSERS | Both | Connection counts |
+| `TR` | TRACE | Both | Route tracing |
+| `AD` | ADMIN | Both | Admin info |
+| `TI` | TIME | Both | Server time |
+| `V` | VERSION | Both | Server version |
+| `E` | NAMES | Both | Channel names list |
+| `LL` | ASLL | Both | Asymmetric link latency |
+
+#### Services Control
+
+| Token | Command | Direction | Description |
+|-------|---------|-----------|-------------|
+| `AC` | ACCOUNT | Both | Account state change (see [ACCOUNT section](#account-ac)) |
+| `MK` | MARK | Both | Server marks/tags (see [MARK section](#mark-mk)) |
+| `FA` | FAKE | Both | Virtual host (fakehost) change |
+| `SO` | SVSNOOP | Both | Services-issued oper noop |
+| `SM` | SVSMODE | Both | Services-issued mode change |
+| `SN` | SVSNICK | Both | Services-issued nick change |
+| `SP` | SVSPART | Both | Services-issued channel part |
+| `SJ` | SVSJOIN | Both | Services-issued channel join |
+| `SW` | SWHOIS | Both | Services-issued WHOIS info line |
+| `JU` | JUPE | Both | Server jupe (fake server entry) |
+| `XQ` | XQUERY | Both | Extension query (services RPC) |
+| `XR` | XREPLY | Both | Extension reply |
+| `SNO` | SNO | Both | Server notice broadcast |
+| `SMO` | SMO | Both | Server message (oper broadcast) |
+| `PRIVS` | PRIVS | Both | Oper privilege management |
+
+#### Security
+
+| Token | Command | Direction | Description |
+|-------|---------|-----------|-------------|
+| `GL` | GLINE | Both | Global ban (user@host) |
+| `SU` | SHUN | Both | Shun (silence ban) |
+| `ZL` | ZLINE | Both | IP-based ban |
+| `TS` | TEMPSHUN | Both | Temporary shun |
+| `RM` | REMOVE | Both | Forced part (soft kick) |
+
+#### Timing & Network
+
+| Token | Command | Direction | Description |
+|-------|---------|-----------|-------------|
+| `SE` | SETTIME | Both | Clock synchronization |
+| `RI` | RPING | Both | Remote ping initiation |
+| `RO` | RPONG | Both | Remote ping response |
+| `UP` | UPING | Both | UDP ping |
+
+#### IRCv3 Extensions
+
+| Token | Command | Direction | Description |
+|-------|---------|-----------|-------------|
+| `SR` | SETNAME | Both | Realname change |
+| `TM` | TAGMSG | Both | Tag-only message |
+| `BT` | BATCH | Both | Batch coordination |
+| `CH` | CHATHISTORY | Both | Message history with S2S federation |
+| `RD` | REDACT | Both | Message redaction |
+| `RG` | REGISTER | Both | Account registration |
+| `VF` | VERIFY | Both | Account verification |
+| `RR` | REGREPLY | X3→Nef | Registration reply |
+| `MR` | MARKREAD | Both | Read marker sync |
+| `RN` | RENAME | Both | Channel rename |
+| `MD` | METADATA | Both | User/channel metadata |
+| `MDQ` | METADATAQUERY | Both | Metadata query to services **(deprecated)** |
+| `WP` | WEBPUSH | Both | Web push notifications |
+| `ML` | MULTILINE | Both | S2S multiline batch propagation |
+
+#### Bouncer
+
+| Token | Command | Direction | Description |
+|-------|---------|-----------|-------------|
+| `BS` | BOUNCER_SESSION | Both | Bouncer session sync (see [BOUNCER_SESSION section](#bouncer_session-bs)) |
+| `BX` | BOUNCER_TRANSFER | Both | Cross-server session transfer |
+
+#### SASL
+
+| Token | Command | Direction | Description |
+|-------|---------|-----------|-------------|
+| `SASL` | SASL | Both | SASL authentication (note: 4-char token, MSG and TOK identical) |
+
+### Token Collisions (Resolved)
+
+Two token collisions previously existed and have been fixed:
+
+- **SETNAME**: Was `SE` (colliding with SETTIME) → reassigned to **`SR`**
+- **BOUNCER_TRANSFER**: Was `BT` (colliding with BATCH) → reassigned to **`BX`**
 
 ---
 
 ## New IRCv3 Extensions
 
-### SETNAME (SE) - Phase 12
+### SETNAME (SR) - Phase 12
 
 **Purpose**: Allow users to change their realname (GECOS) mid-session.
 
@@ -350,14 +459,14 @@ AB B #test 1703334400 +nt ABAAB,ABAAC:o :%ABAAD
 #### P10 Format
 
 ```
-[USER_NUMERIC] SE :[NEW_REALNAME]
+[USER_NUMERIC] SR :[NEW_REALNAME]
 ```
 
 #### Examples
 
 ```
 # User ABAAB changes realname
-ABAAB SE :New Real Name
+ABAAB SR :New Real Name
 
 # Maximum length: REALLEN (50 characters)
 ```
@@ -375,7 +484,7 @@ ABAAB SE :New Real Name
 1. Client sends `SETNAME :new name`
 2. Validate length (max 50 chars)
 3. Update `cli_info(sptr)`
-4. Send `SE :[name]` to all servers
+4. Send `SR :[name]` to all servers
 5. Notify local channel members with `setname` capability
 
 **Receiver (Nefarious)**:
@@ -552,7 +661,7 @@ Chathistory uses a **federated query** model:
 - Clients query their connected server via the `CHATHISTORY` client command
 - When local results are incomplete, servers query peers for additional messages
 - Results are merged and deduplicated by msgid before returning to client
-- X3 does not participate in chathistory
+- X3 participates in chathistory queries: responds to `CH Q` with `CH E <reqid> 0` (no local store), sends `CH Q` queries for HistServ functionality, and processes `CH R/Z/B/E` responses including zstd decompression and multi-chunk base64 reassembly
 
 #### Client Command Format
 
@@ -617,8 +726,11 @@ Final:       [SERVER] CH B <reqid> <msgid> :<b64>
 | `B` | BEFORE | Messages before reference |
 | `A` | AFTER | Messages after reference |
 | `R` | AROUND | Messages around reference |
-| `W` | BETWEEN | Messages between two references |
-| `T` | TARGETS | Channels with recent activity |
+| `W` | BETWEEN | Messages between two references (local only¹) |
+| `T` | TARGETS | Channels with recent activity (local only¹) |
+| `X` | EXACT | Exact message lookup by msgid (for federated REDACT) |
+
+¹ W (BETWEEN) and T (TARGETS) are only handled in the client-facing command handler. They are **not** implemented in the S2S federation path (`ms_chathistory` CH Q dispatch) and cannot be federated to other servers.
 
 #### S2S Reference Format
 
@@ -627,8 +739,9 @@ Final:       [SERVER] CH B <reqid> <msgid> :<b64>
 | `*` | No reference | `*` |
 | `<timestamp>` | Unix timestamp (starts with digit) | `1735689600.123` |
 | `<msgid>` | Message ID (starts with server numeric) | `AB-1703334400-123` |
+| `M<msgid>` | Explicit msgid reference (CH Q X only) | `MAB-1703334400-123` |
 
-**Disambiguation**: Timestamps always start with a digit (0-9), while msgids start with a server numeric (A-Z, a-z). No prefix needed.
+**Disambiguation**: Timestamps always start with a digit (0-9), while msgids start with a server numeric (A-Z, a-z). No prefix needed. The `M` prefix form is used exclusively by the X (EXACT) subcmd to unambiguously identify a message ID reference.
 
 #### S2S Fields
 
@@ -691,6 +804,41 @@ EF CH E AB1735300000 0
 5. Requester collects responses until timeout or all `CH E` received
 6. Merge all messages, deduplicate by msgid, sort by timestamp
 7. Send final result batch to client
+
+#### Federated REDACT Lookup (CH Q X)
+
+When a REDACT command targets a message not stored locally, the server uses the X (EXACT) subcmd to query storage servers for the specific message by msgid. This allows authorization checks (sender verification) before propagating the REDACT.
+
+**Wire format:**
+```
+[SERVER] CH Q <target> X M<msgid> 1 <reqid>
+```
+
+**Response (found):**
+```
+[STORAGE] CH R <reqid> <msgid> <ts> <type> <sender> <account> :<content>
+[STORAGE] CH E <reqid> 1
+```
+
+**Response (not found):**
+```
+[STORAGE] CH E <reqid> 0
+```
+
+**Key behaviors:**
+- Only accepts `M<msgid>` references (rejects timestamps and `*`)
+- Limit is always 1 (single message lookup)
+- Does **not** cascade — the storage server returns immediately without propagating to other servers
+- Queries are sent to all non-U-lined servers advertising chathistory storage (skips services)
+- X3 responds with `CH E <reqid> 0` (no local store)
+
+**Flow:**
+1. Client sends `REDACT #channel AB-1703334400-123 :reason`
+2. Server checks local LMDB — message not found locally
+3. Server sends `CH Q #channel X MAB-1703334400-123 1 <reqid>` to all storage servers
+4. Storage server finds message, responds with `CH R` + `CH E <reqid> 1`
+5. Originating server verifies sender authorization from the response
+6. If authorized, propagates `RD` to the network and deletes from local store
 
 #### S2S Advertisement (CH A) - Storage Presence
 
@@ -823,6 +971,10 @@ B4 CH WB #channel abc123 :cyBtdWx0aWxpbmU=
 ABAAB RD #channel AB-1703334400-123 :Removing inappropriate content
 ```
 
+#### Federation
+
+When the target message is not in the local server's LMDB store, the server uses the CHATHISTORY `X` (EXACT) subcmd to locate the message on remote storage servers before propagating the REDACT. See [Federated REDACT Lookup (CH Q X)](#federated-redact-lookup-ch-q-x) in the CHATHISTORY section for the full wire protocol.
+
 ---
 
 ### REGISTER (RG) - Phase 24
@@ -834,7 +986,15 @@ ABAAB RD #channel AB-1703334400-123 :Removing inappropriate content
 #### P10 Format
 
 ```
-[SERVER] RG [USER_NUMERIC] [ACCOUNT] [EMAIL] :[PASSWORD_HASH]
+[SERVER] RG [TARGET_SERVER] [CLIENT_ID] [ACCOUNT] [EMAIL] :[PASSWORD]
+```
+
+Where `CLIENT_ID` uses `server!fd.cookie` format (same as SASL) to identify pre-registration clients that don't yet have a user numeric.
+
+#### Example
+
+```
+AB RG Az AB!3.42 newuser email@example.com :mypassword
 ```
 
 ---
@@ -846,7 +1006,15 @@ ABAAB RD #channel AB-1703334400-123 :Removing inappropriate content
 #### P10 Format
 
 ```
-[SERVER] VF [USER_NUMERIC] [ACCOUNT] [CODE]
+[SERVER] VF [TARGET_SERVER] [CLIENT_ID] [ACCOUNT] [CODE]
+```
+
+Where `CLIENT_ID` uses the same `server!fd.cookie` format as REGISTER.
+
+#### Example
+
+```
+AB VF Az AB!3.42 newuser 123456
 ```
 
 ---
@@ -858,16 +1026,42 @@ ABAAB RD #channel AB-1703334400-123 :Removing inappropriate content
 #### P10 Format
 
 ```
-[X3] RR [TARGET_SERVER] [USER_NUMERIC] [RESULT] :[MESSAGE]
+[X3] RR [CLIENT_ID] [STATUS] [ACCOUNT] :[MESSAGE]
 ```
 
-#### Result Codes
+Where `CLIENT_ID` is the `server!fd.cookie` identifier from the original RG/VF request.
+
+#### Status Codes
 
 | Code | Meaning |
 |------|---------|
-| `OK` | Registration successful |
-| `VERIFY` | Verification needed |
-| `FAIL` | Registration failed |
+| `S` | Registration successful |
+| `V` | Verification needed (email code required) |
+| `F` | Registration failed |
+
+#### X3 Verify Result Codes
+
+| Internal Code | Status | Message |
+|--------------|--------|---------|
+| `NSVERIFY_SUCCESS` | `S` | Success message |
+| `NSVERIFY_NO_ACCOUNT` | `F` | Account not found |
+| `NSVERIFY_NO_COOKIE` | `F` | No verification pending |
+| `NSVERIFY_BAD_CODE` | `F` | INVALID_CODE |
+| `NSVERIFY_SUSPENDED` | `F` | Account suspended |
+| `NSVERIFY_INTERNAL_ERROR` | `F` | TEMPORARILY_UNAVAILABLE |
+
+#### Example
+
+```
+# Successful registration
+Az RR AB!3.42 S newuser :Account registered successfully
+
+# Verification needed
+Az RR AB!3.42 V newuser :Check your email for a verification code
+
+# Failed registration
+Az RR AB!3.42 F newuser :Account already exists
+```
 
 ---
 
@@ -962,6 +1156,8 @@ Each intermediate server:
 1. For S: Validate newer timestamp, store in LMDB and Keycloak, broadcast
 2. For G: Look up in LMDB, send R reply with timestamp (or `*`)
 
+**Implementation Note**: As of current X3, no `cmd_markread` handler is registered in proto-p10.c for the MR token. The read marker protocol described above is handled entirely by Nefarious's `ms_markread` handler. X3 stores read markers via its LMDB layer, but the storage is accessed through service bot commands (PRIVMSG to X3 service nicks), not via native MR P10 tokens. The flow described above represents the intended design documented when MR was added.
+
 ---
 
 ### RENAME (RN) - Phase 28
@@ -1013,6 +1209,7 @@ ABAAB RN #oldname #newname :Rebranding
 |-------|---------|
 | `*` | Public - visible to everyone |
 | `P` | Private - visible only to owner and opers |
+| `!` | Error - no such target (X3 error response) |
 
 #### Compression Flag (Z)
 
@@ -1055,13 +1252,49 @@ ABAAB MD ABAAB avatar
 2. Store in Keycloak with visibility prefix for private values
 3. Only send back to user's connections on login
 
+**Implementation Note**: X3 only **sends** MD tokens (via `irc_metadata()` in proto-p10.c). There is no incoming MD handler registered in X3 — metadata received from Nefarious is not processed by X3.
+
+#### X3 Service Metadata Keys
+
+X3 pushes these metadata keys via MD tokens when a user authenticates or changes settings:
+
+**User Metadata (pushed on auth)**:
+
+| Key | Visibility | Description |
+|-----|-----------|-------------|
+| `x3.title` | Public | User's epithet/title |
+| `x3.registered` | Public | Account registration timestamp |
+| `x3.karma` | Public | User karma score |
+| `$last_present` | Public | Last presence timestamp (targets account handle, not nick) |
+| `x3.email` | Private | Email address |
+| `x3.lasthost` | Private | Last quit hostname |
+| `x3.screen_width` | Private | Display width preference |
+| `x3.table_width` | Private | Table width preference |
+| `x3.style` | Private | Display style preference |
+| `x3.announcements` | Private | Announcement preference |
+| `x3.maxlogins` | Private | Max concurrent logins |
+
+**Channel Metadata (pushed on registration/change)**:
+
+| Key | Visibility | Description |
+|-----|-----------|-------------|
+| `x3.greeting` | Public | Channel greeting |
+| `x3.user_greeting` | Public | User-specific greeting |
+| `x3.topic_mask` | Public | Topic mask template |
+| `x3.modes` | Public | Default channel modes |
+| `x3.registered` | Public | Channel registration timestamp |
+| `x3.founder` | Public | Channel founder account |
+| `x3.infoline.<#channel>` | Public | User's infoline for a specific channel |
+
 ---
 
-### METADATAQUERY (MDQ) - Phase 29
+### METADATAQUERY (MDQ) - Phase 29 (DEPRECATED)
 
-**Purpose**: Query metadata for offline users or cached data from X3 services.
+> **Never Implemented**: MDQ was designed but never went live. Nefarious's LMDB-backed metadata cache handles offline metadata lookups locally, eliminating the need for S2S queries to X3. X3 has no incoming MDQ handler registered. This section is retained for historical reference only.
 
-**Use Case**: When a client requests metadata for a user not currently online, Nefarious queries X3 (the authoritative source) for persisted metadata.
+**Original Purpose**: Query metadata for offline users or cached data from X3 services.
+
+**Original Use Case**: When a client requests metadata for a user not currently online, Nefarious queries X3 (the authoritative source) for persisted metadata.
 
 #### P10 Format
 
@@ -1295,6 +1528,205 @@ Clients with `draft/pre-away` capability can set away state before registration 
 
 ---
 
+### ACCOUNT (AC)
+
+**Purpose**: Account authentication, registration, rename, and deletion between Nefarious and X3 services. Also used for channel rename authorization.
+
+#### Overview
+
+The AC token operates in two modes:
+- **Legacy mode**: `[SERVER] AC [USER_NUMERIC] [ACCOUNT] [TIMESTAMP]` (no subcmd)
+- **Extended mode** (EXTENDED_ACCOUNTS): Subcmd character in 3rd parameter
+
+Extended mode is used by all current deployments.
+
+#### P10 Formats (Extended Mode)
+
+**Auth Check — Basic (C)** (Nefarious → X3):
+```
+[SERVER] AC [TARGET_SERVER] C [COOKIE] [ACCOUNT] :[PASSWORD]
+```
+
+**Auth Check — With Host (H)** (Nefarious → X3):
+```
+[SERVER] AC [TARGET_SERVER] H [COOKIE] [HOST] [ACCOUNT] :[PASSWORD]
+```
+
+**Auth Check — SASL-style (S)** (Nefarious → X3):
+```
+[SERVER] AC [TARGET_SERVER] S [COOKIE] [HOST] [AUTHZID] [ACCOUNT] :[PASSWORD]
+```
+
+**Auth Allow (A)** (X3 → Nefarious):
+```
+[X3] AC [TARGET_SERVER] A [COOKIE] [REGISTERED_TIMESTAMP]
+```
+
+**Auth Deny (D)** (X3 → Nefarious):
+```
+[X3] AC [TARGET_SERVER] D [COOKIE] [:[REASON]]
+```
+
+**Account Registration (R)** (Both):
+```
+[SERVER] AC [USER_NUMERIC] R [ACCOUNT] [TIMESTAMP]
+```
+
+**Rename Authorization Query (R + RENAME)** (Nefarious → X3):
+```
+[SERVER] AC [USER_NUMERIC] R [COOKIE] [CHANNEL] RENAME [NEW_CHANNEL]
+```
+
+**Account Rename (M)** (Both):
+```
+[SERVER] AC [USER_NUMERIC] M [NEW_ACCOUNT] [TIMESTAMP]
+```
+
+**Account Unregister (U)** (Both):
+```
+[SERVER] AC [USER_NUMERIC] U
+```
+
+#### Subcmd Summary
+
+| Subcmd | Direction | Description |
+|--------|-----------|-------------|
+| `C` | Nef→X3 | Login-On-Connect auth check (basic) |
+| `H` | Nef→X3 | LOC auth check with hostname |
+| `S` | Nef→X3 | LOC auth check with SASL authzid |
+| `A` | X3→Nef | Auth success (with account creation timestamp) |
+| `D` | X3→Nef | Auth failure (with optional reason) |
+| `R` | Both | Account set/registration broadcast |
+| `R` + `RENAME` | Nef→X3 | Channel rename permission query |
+| `M` | Both | Account handle change |
+| `U` | Both | Account deletion/logout |
+
+#### Cookie Format
+
+Auth cookies (C/H/S subcmds) use the format from Nefarious's `make_auth_id()`: a combined server fd and sequence number. X3 echoes the cookie back in A/D responses for correlation.
+
+#### RENAME Authorization Flow
+
+When a user requests a channel rename:
+1. Nefarious sends `AC [USER] R [COOKIE] [#old] RENAME [#new]` to X3
+2. X3's ChanServ checks: channel registered, user authenticated, user has co-owner+ access (level 400+)
+3. X3 responds with `AC [COOKIE] A` (allow) or `AC [COOKIE] D :[reason]` (deny)
+4. On allow, Nefarious proceeds with the rename operation
+
+#### Legacy Format (EXTENDED_ACCOUNTS disabled)
+
+```
+[SERVER] AC [USER_NUMERIC] [ACCOUNT] [TIMESTAMP]
+```
+
+No subcmd — account name is in the 3rd parameter directly. Used by older P10 implementations.
+
+#### Examples
+
+```
+# LOC auth check with host info
+AB AC Az H 42 user@host.com testuser :mypassword
+
+# X3 allows auth
+Az AC AB A 42 1735689600
+
+# X3 denies auth
+Az AC AB D 42 :Bad password
+
+# Account registration broadcast
+AB AC ABAAB R testuser 1735689600
+
+# Channel rename authorization
+AB AC ABAAB R 99 #oldname RENAME #newname
+
+# X3 allows rename
+Az AC 99 A
+
+# Account rename (handle change)
+Az AC ABAAB M newhandle 1735689600
+
+# Account unregister
+Az AC ABAAB U
+```
+
+---
+
+### MARK (MK)
+
+**Purpose**: Server-to-server propagation of user marks — metadata tags set by the server about connected clients (SSL fingerprints, CTCP version, GeoIP data, DNSBL matches, etc.).
+
+#### P10 Format
+
+```
+[SERVER] MK [NICK] [SUBTYPE] [PARAMS...] :[VALUE]
+```
+
+Origin must be a server (protocol violation if sent by a non-server source). Propagated to all servers via `sendcmdto_serv_butone`.
+
+#### Subtypes
+
+| Subtype | Wire Format | Description |
+|---------|-------------|-------------|
+| `SSLCLIFP` | `[SVR] MK [nick] SSLCLIFP :[sha256_fingerprint]` | SSL client certificate fingerprint |
+| `SSLCLIEXP` | `[SVR] MK [nick] SSLCLIEXP :[unix_timestamp]` | SSL certificate expiry time |
+| `CVERSION` | `[SVR] MK [nick] CVERSION :[version_string]` | CTCP VERSION reply |
+| `GEOIP` | `[SVR] MK [nick] GEOIP [CC] [country_name] [:[city]]` | GeoIP location (5 or 6 params) |
+| `WEBIRC` | `[SVR] MK [nick] WEBIRC :[gateway_info]` | WebIRC gateway identifier |
+| `DNSBL_DATA` | `[SVR] MK [nick] DNSBL_DATA :[mark_data]` | DNSBL match data (alias of MARK) |
+| `MARK` | `[SVR] MK [nick] MARK :[tag_text]` | Generic mark/tag (adds to marks list) |
+| `KILL` | `[SVR] MK [nick] KILL :[exemption]` | Kill block exemption |
+| `DNSBL` | `[SVR] MK [nick] DNSBL [modes]` | DNSBL mode flags |
+
+#### X3 Processing
+
+X3 handles these subtypes in `cmd_mark()`:
+
+| Subtype | X3 Action |
+|---------|-----------|
+| `SSLCLIFP` | Stores fingerprint in `user->sslfp`, triggers `nickserv_do_autoauth()` for SASL EXTERNAL certificate-based auto-login |
+| `SSLCLIEXP` | Stores certificate expiry in LMDB via `x3_lmdb_certexp_set()` (requires `WITH_MDBX`) |
+| `CVERSION` | Stores in `user->version_reply`; WebTV clients (`WebTV;*`) get `no_notice` flag |
+| `DNSBL_DATA` / `MARK` | Appends to `user->marks` list (server type >= 9) or sets `user->mark` (older) |
+| `GEOIP` | Accepted but no processing |
+| `WEBIRC` | Accepted but no processing |
+| `DNSBL` | Accepted but no processing |
+
+#### X3 Sending Marks
+
+X3 sends marks via `irc_mark()` in two formats depending on server type:
+
+**Server type >= 9** (current):
+```
+[X3] MK [nick] MARK :[mark_name]
+```
+
+**Server type < 9** (legacy, with fakehost):
+```
+[X3] MK [nick] DNSBL +m [mark].[hostname]
+[X3] MK [nick] DNSBL_DATA [mark_name]
+```
+
+#### Examples
+
+```
+# Server sends SSL fingerprint after TLS handshake
+AB MK testuser SSLCLIFP :a1b2c3d4e5f6...
+
+# Server sends certificate expiry
+AB MK testuser SSLCLIEXP :1735689600
+
+# Server sends CTCP VERSION result
+AB MK testuser CVERSION :HexChat 2.16.1 [x86_64/Linux]
+
+# Server sends GeoIP data
+AB MK testuser GEOIP US United States :San Francisco
+
+# X3 sends a mark
+Az MK testuser MARK :authenticated
+```
+
+---
+
 ### MULTILINE (ML) - Phase 31
 
 **Purpose**: Propagate multiline message batches between servers (S2S relay).
@@ -1489,16 +1921,158 @@ Certificates can be stored as git tags and automatically synchronized:
 
 ---
 
+### BOUNCER_SESSION (BS)
+
+**Purpose**: Synchronize bouncer session state across servers. When the built-in bouncer (`draft/bouncer` CAP) is enabled, sessions are tracked globally so that a user can resume a session from any server in the network.
+
+#### P10 Format
+
+```
+[SERVER] BS [SUBCMD] [ACCOUNT] [SESSION_ID] [PARAMS...] [:[CHANNELS]]
+```
+
+#### Subcmds
+
+| Subcmd | Direction | Description |
+|--------|-----------|-------------|
+| `C` | Broadcast/Burst | Create session (new or burst existing) |
+| `A` | Broadcast | Client attached to session |
+| `D` | Broadcast | Client detached from session |
+| `X` | Broadcast | Session destroyed |
+| `U` | Broadcast | Update session metadata |
+
+#### Wire Formats
+
+**Create — Active Session (C)**:
+```
+[SERVER] BS C [ACCOUNT] [SESSID] [TOKEN] active [CREATED_TS] [ATTACH_COUNT] [TOTAL_ACTIVE] :[CHANNELS]
+```
+
+**Create — Holding Session (C)** (disconnected, waiting for resume):
+```
+[SERVER] BS C [ACCOUNT] [SESSID] [TOKEN] holding [CREATED_TS] [DISCONNECT_TS] [ATTACH_COUNT] [TOTAL_ACTIVE] :[CHANNELS]
+```
+
+**Attach (A)** — client connected to existing session:
+```
+[SERVER] BS A [ACCOUNT] [SESSID] [CLIENT_NUMERIC]
+```
+
+**Detach (D)** — client disconnected from session (session enters hold):
+```
+[SERVER] BS D [ACCOUNT] [SESSID] [GHOST_NUMERIC] [DISCONNECT_TS] :[CHANNELS]
+```
+
+**Destroy (X)** — session removed:
+```
+[SERVER] BS X [ACCOUNT] [SESSID]
+```
+
+**Update (U)** — session metadata changed:
+```
+[SERVER] BS U [ACCOUNT] [SESSID] [FIELD]=[VALUE]
+```
+
+Currently only `name=<value>` is implemented for session rename.
+
+#### Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| ACCOUNT | String | Account name owning the session |
+| SESSID | String | Unique session identifier |
+| TOKEN | String | Session authentication token |
+| CREATED_TS | Number | Unix timestamp of session creation |
+| DISCONNECT_TS | Number | Unix timestamp of last disconnect (holding only) |
+| ATTACH_COUNT | Number | Number of clients attached to this session |
+| TOTAL_ACTIVE | Number | Total active sessions for this account |
+| CHANNELS | String | Space-separated channel list |
+| CLIENT_NUMERIC | String(5) | 5-character user numeric |
+| GHOST_NUMERIC | String(5) | Numeric of the ghost (shadow) client |
+
+#### Session States
+
+| State | Description |
+|-------|-------------|
+| `active` | At least one client is connected to the session |
+| `holding` | No clients connected; session is held for potential resume |
+
+Holding sessions have a configurable TTL (`FEAT_BOUNCER_SESSION_HOLD`). When the TTL expires, the session is destroyed via `BS X`.
+
+#### Burst Behavior
+
+During server link burst (`bounce_burst()`), all local sessions are sent as `BS C` messages with full state:
+- Active sessions include current channel list and attach count
+- Holding sessions additionally include the disconnect timestamp
+
+This ensures the remote server has complete session state after linking.
+
+#### Examples
+
+```
+# New active session created for user "alice"
+AB BS C alice sess1 tok123abc active 1735689600 1 1 :#general #dev
+
+# User resumes session from another server
+CD BS A alice sess1 CDAAB
+
+# User disconnects — session enters hold
+AB BS D alice sess1 ABAAB 1735693200 :#general #dev
+
+# Session TTL expires — session destroyed
+AB BS X alice sess1
+
+# Session renamed
+AB BS U alice sess1 name=Work Session
+```
+
+---
+
+### BOUNCER_TRANSFER (BX)
+
+**Purpose**: Transfer channel memberships from a ghost client to a new client during cross-server bouncer session resume.
+
+#### P10 Format
+
+```
+[SERVER] BX [OLD_NUMERIC] [NEW_NUMERIC] [SESSION_ID]
+```
+
+#### Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| OLD_NUMERIC | String(5) | P10 numeric of the ghost client (being transferred from) |
+| NEW_NUMERIC | String(5) | P10 numeric of the new client (being transferred to) |
+| SESSION_ID | String | Bouncer session ID being resumed |
+
+#### Processing
+
+1. Look up both clients by numeric
+2. Transfer all channel memberships from old client to new client
+3. KILL the old client with reason "Session transferred"
+
+This occurs when a user resumes a bouncer session on a different server than where the ghost client exists. The ghost client holds the channel memberships; the transfer moves them to the resuming client.
+
+#### Example
+
+```
+# Transfer ghost ABAAB's channels to new client CDAAC for session sess1
+AB BX ABAAB CDAAC sess1
+```
+
+---
+
 ## SASL Protocol
 
 ### Overview
 
-SASL authentication uses the SA token with subcmd codes to coordinate between IRC server and services.
+SASL authentication uses the `SASL` token (unusually, both MSG and TOK are the 4-character string `SASL`) with subcmd codes to coordinate between IRC server and services.
 
 ### P10 Format
 
 ```
-[ORIGIN] SA [TARGET] [TOKEN] [SUBCMD] :[DATA]
+[ORIGIN] SASL [TARGET] [TOKEN] [SUBCMD] :[DATA]
 ```
 
 ### Subcmd Codes
@@ -1521,14 +2095,14 @@ Client                Nefarious              X3
    +--CAP REQ :sasl------>|                   |
    |<--CAP ACK :sasl------|                   |
    +--AUTHENTICATE PLAIN->|                   |
-   |                      |--SA target S PLAIN|
-   |                      |--SA target H info-|
-   |                      |<--SA target C +----|
+   |                      |--SASL tgt S PLAIN-|
+   |                      |--SASL tgt H info--|
+   |                      |<--SASL tgt C +----|
    |<--AUTHENTICATE +-----|                   |
    +--AUTHENTICATE data-->|                   |
-   |                      |--SA target C data-|
-   |                      |<--SA target L acct|
-   |                      |<--SA target D S---|
+   |                      |--SASL tgt C data--|
+   |                      |<--SASL tgt L acct-|
+   |                      |<--SASL tgt D S----|
    |<--903 SASL success---|                   |
 ```
 
@@ -1539,12 +2113,12 @@ Client                Nefarious              X3
 **Direction**: X3 → Nefarious (broadcast)
 
 ```
-[X3_NUMERIC] SA * * M :[MECHANISM_LIST]
+[X3_NUMERIC] SASL * * M :[MECHANISM_LIST]
 ```
 
 **Example**:
 ```
-Az SA * * M :PLAIN,EXTERNAL,OAUTHBEARER
+Az SASL * * M :PLAIN,EXTERNAL,OAUTHBEARER
 ```
 
 **When Sent**:
@@ -1555,6 +2129,23 @@ Az SA * * M :PLAIN,EXTERNAL,OAUTHBEARER
 **Nefarious Handling**:
 - Stores mechanism list in global `SaslMechanisms[]`
 - Used in CAP LS 302 response: `sasl=PLAIN,EXTERNAL,OAUTHBEARER`
+
+### Data Chunking (C Subcmd)
+
+SASL authentication data in the `C` subcmd is split at **400-byte boundaries**:
+- Data longer than 400 bytes is sent as multiple `C` messages, each with up to 400 bytes
+- If the final chunk is exactly 400 bytes, a trailing continuation with `+` as the data is sent to signal "send me more"
+- The receiver accumulates chunks until a chunk shorter than 400 bytes (or `+`) arrives
+
+```
+# Large SASL response split across multiple messages
+Az SASL AB AB!3.42 C :base64data...400bytes...
+Az SASL AB AB!3.42 C :base64data...remainder...
+
+# If last chunk is exactly 400 bytes, send + continuation
+Az SASL AB AB!3.42 C :base64data...exactly400bytes...
+Az SASL AB AB!3.42 C :+
+```
 
 ### Re-Authentication
 
@@ -1668,17 +2259,21 @@ All P10 extensions are designed for backward compatibility:
 
 | Message Type | Old Nefarious | New Nefarious | Old X3 | New X3 |
 |--------------|---------------|---------------|--------|--------|
-| SE (SETNAME) | Ignored | Processed | Ignored | Ignored |
-| TM (TAGMSG) | Ignored | Processed | Ignored | Ignored |
+| SR (SETNAME) | Ignored | Processed | Ignored | Ignored |
+| TM (TAGMSG) | Ignored | Processed | Ignored | No-op ack |
 | BT (BATCH) | Ignored | Processed | Ignored | Ignored |
-| CH (CHATHISTORY) | Ignored | Processed | Ignored | Ignored |
+| CH (CHATHISTORY) | Ignored | Processed | Ignored | Processed (responds empty, sends queries) |
 | RD (REDACT) | Ignored | Processed | Ignored | Ignored |
 | RN (RENAME) | Ignored | Processed | Ignored | Processed |
-| MD (METADATA) | Ignored | Processed | Ignored | Processed |
-| MR (MARKREAD) | Ignored | Processed | Ignored | Processed |
+| MD (METADATA) | Ignored | Processed | Ignored | Sends only (no incoming handler) |
+| MR (MARKREAD) | Ignored | Processed | Ignored | No handler registered |
 | WP (WEBPUSH) | Ignored | Processed | N/A | Processed |
-| SA M (mechanisms) | Ignored | Processed | N/A | Sent |
+| SASL M (mechanisms) | Ignored | Processed | N/A | Sent |
 | ML (MULTILINE) | Ignored | Processed | Ignored | Ignored |
+| AC (ACCOUNT) | Processed | Processed | Processed | Processed |
+| MK (MARK) | Processed | Processed | Processed | Processed |
+| BS (BOUNCER_SESSION) | Ignored | Processed | Ignored | Ignored |
+| BX (BOUNCER_TRANSFER) | Ignored | Processed | Ignored | Ignored |
 | @tags prefix | Possible error | Parsed & skipped | Error | Skipped |
 
 ### Mixed Network Behavior
@@ -1698,27 +2293,31 @@ In a network with mixed old/new servers:
 
 | Token | Format | Purpose |
 |-------|--------|---------|
-| `SE` | `[NUMERIC] SE :[realname]` | Change realname |
+| `SR` | `[NUMERIC] SR :[realname]` | Change realname |
 | `TM` | `[NUMERIC] TM @[tags] [target]` | Tag-only message |
-| `BT` | `[NUMERIC] BT +/-[id] [type] [params]` | Batch coordination |
+| `BT` | `[NUMERIC] BT +/-[id] [type] [params]` | Batch coordination (IRCv3 batch) |
 | `CH` | `[SERVER] CH [Q\|R\|E] [params...]` | S2S chathistory federation |
 | `RD` | `[NUMERIC] RD [target] [msgid] :[reason]` | Message redaction |
 | `RG` | `[SERVER] RG [user] [account] [email] :[pass]` | Account registration |
 | `VF` | `[SERVER] VF [user] [account] [code]` | Verification |
-| `RR` | `[X3] RR [server] [user] [result] :[msg]` | Registration reply |
+| `RR` | `[X3] RR [client_id] [S\|V\|F] [account] :[msg]` | Registration reply |
 | `MR` | `[SOURCE] MR [subcmd] [params...]` | Read marker (S, G, R, broadcast) |
 | `RN` | `[NUMERIC] RN [old] [new] :[reason]` | Channel rename |
-| `MD` | `[SOURCE] MD [target] [key] [vis] :[value]` | Metadata (vis: `*` or `P`) |
-| `MDQ` | `[SOURCE] MDQ [target] [key\|*]` | Metadata query to X3 |
+| `MD` | `[SOURCE] MD [target] [key] [vis] :[value]` | Metadata (vis: `*`, `P`, or `!`) |
+| `MDQ` | `[SOURCE] MDQ [target] [key\|*]` | Metadata query to X3 **(deprecated)** |
 | `WP` | `[SOURCE] WP [subcmd] [params...]` | Web push |
 | `ML` | `[NUMERIC] ML [+\|-\|c]batchid target :[text]` | S2S multiline batch |
 | `GS` | `[SOURCE] GS [subcmd] [params...]` | GitSync remote control |
+| `AC` | `[SERVER] AC [target] [subcmd] [params...]` | Account auth/register/rename |
+| `MK` | `[SERVER] MK [nick] [subtype] [params] :[value]` | Server marks (SSL, GeoIP, etc.) |
+| `BS` | `[SERVER] BS [subcmd] [account] [sessid] [params]` | Bouncer session sync |
+| `BX` | `[SERVER] BX [old] [new] [sessid]` | Bouncer transfer |
 
 ### New SASL Subcmds
 
 | Subcmd | Format | Purpose |
 |--------|--------|---------|
-| `M` | `[X3] SA * * M :[mechanisms]` | Mechanism broadcast |
+| `M` | `[X3] SASL * * M :[mechanisms]` | Mechanism broadcast |
 
 ### WEBPUSH Subcmds
 
@@ -1773,12 +2372,20 @@ In a network with mixed old/new servers:
 | `ircd/m_rename.c` | Channel RENAME command handler |
 | `ircd/m_metadata.c` | METADATA command handler |
 | `ircd/m_webpush.c` | WEBPUSH command handler |
+| `ircd/m_account.c` | ACCOUNT (AC) S2S handler |
+| `ircd/m_mark.c` | MARK (MK) S2S handler |
+| `ircd/m_bouncer.c` | BOUNCER client command + BS/BT S2S handlers |
+| `ircd/bouncer_session.c` | Bouncer session state machine, burst, transfer |
+| `ircd/m_away.c` | AWAY with presence aggregation |
+| `ircd/m_multiline.c` | MULTILINE (ML) S2S relay |
 | `ircd/parse.c` | Tag parsing, command registration |
 | `ircd/send.c` | Tag-aware send functions |
 | `ircd/gitsync.c` | GitSync implementation (libgit2) |
 | `ircd/m_gitsync.c` | GITSYNC command handler |
 | `ircd/dnsbl.c` | Native DNSBL implementation |
 | `include/msg.h` | Token definitions |
+| `include/mark.h` | MARK subtype definitions |
+| `include/bouncer_session.h` | Bouncer session declarations |
 | `include/gitsync.h` | GitSync declarations |
 | `include/dnsbl.h` | DNSBL declarations |
 | `include/capab.h` | Capability flags |
@@ -1790,11 +2397,10 @@ In a network with mixed old/new servers:
 | File | Purpose |
 |------|---------|
 | `src/proto-p10.c` | P10 parser, all token handlers |
-| `src/nickserv.c` | SASL, registration, metadata |
-| `src/chanserv.c` | Channel metadata, rename |
-| `src/webpush.c` | RFC 8291 encryption, push delivery |
-| `src/webpush.h` | Web push API declarations |
+| `src/nickserv.c` | SASL, registration, metadata, MARK handling |
+| `src/chanserv.c` | Channel metadata, rename authorization |
 | `src/keycloak.c` | Metadata/subscription storage |
+| `src/x3_lmdb.c` | libmdbx persistence (accounts, channels, metadata) |
 
 ---
 
@@ -1810,7 +2416,7 @@ In a network with mixed old/new servers:
 | 1.5 | December 2024 | Added compression passthrough Z flag to MD token for zstd-compressed metadata |
 | 1.6 | December 2024 | Added MULTILINE (ML) token for S2S multiline batch propagation |
 | 1.7 | December 2024 | Corrected CHATHISTORY documentation - local LMDB only, no X3 involvement |
-| 1.8 | December 2024 | Added S2S chathistory federation protocol (CH Q/R/E subcommands) for Phase 32 |
+| 1.8 | December 2024 | Added S2S chathistory federation protocol (CH Q/R/E subcommands) |
 | 1.9 | December 2024 | Corrected N (NICK) user introduction format - account is a mode parameter for +r, not a fixed position |
 | 1.10 | December 2024 | Added N token nick change format; S2S commands use Unix timestamps (ISO 8601 only in message tags per IRCv3) |
 | 1.11 | December 2024 | Optimized CHATHISTORY S2S format: single-char subcmds (L/B/A/R/W/T), compact refs |
@@ -1819,6 +2425,9 @@ In a network with mixed old/new servers:
 | 1.14 | January 2025 | Added GITSYNC (GS) token for remote git-based config distribution; added CH A/W/WB subcommands for chathistory federation Phase 4 |
 | 1.15 | January 2025 | Added CH Z (compressed passthrough) and CH B (base64 chunked) response formats for federation |
 | 1.16 | January 2025 | CH A +/- now support multiple space-separated channels for batch add/remove |
+| 2.0 | February 2026 | Comprehensive update: Fixed token errors (WHO=H not X, SASL not SA), documented SE/BT token collisions, replaced 22-entry token table with complete ~80-token categorized reference, added ACCOUNT (AC) subcmd protocol, MARK (MK) subtypes, BOUNCER_SESSION (BS), BOUNCER_TRANSFER (BX) sections, corrected REGREPLY result codes (S/V/F) and wire format, updated CHATHISTORY X3 participation, added MD visibility `!` token and X3 metadata keys, noted MR implementation gap in X3, added SASL chunking details, marked MDQ as never implemented, updated compatibility matrix and implementation files |
+| 2.1 | February 2026 | Added CH X (EXACT) subcmd for federated REDACT message lookup, documented W/T subcmds as local-only (not federated), added M-prefix reference format, added federated REDACT flow to RD section |
+| 2.2 | February 2026 | Resolved token collisions: SETNAME SE→SR (was colliding with SETTIME), BOUNCER_TRANSFER BT→BX (was colliding with BATCH) |
 
 ---
 
