@@ -15,3 +15,6 @@
 [submodule "libmdbx"]
 	path = libmdbx
 	url = https://gitflic.ru/project/erthink/libmdbx.git
+[submodule "nefarious-upstream"]
+	path = nefarious-upstream
+	url = https://github.com/evilnet/nefarious2.git
