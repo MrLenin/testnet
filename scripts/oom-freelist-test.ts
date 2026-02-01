@@ -306,14 +306,23 @@ async function squitAndReconnect(
     // and issue CONNECT from the upstream side (where the Connect block has SSL)
     console.log(`  Cycle ${cycle}: SQUIT sent, reconnecting upstream oper...`);
 
-    try {
-      newUpstreamClient = await createUpstreamOperClient();
-      newUpstreamClient.clearRawBuffer();
-      // Issue CONNECT from upstream side — its Connect block has ssl=yes for the hub
-      newUpstreamClient.send(`CONNECT testnet.fractalrealities.net 4496`);
-      console.log(`  Cycle ${cycle}: CONNECT issued from upstream, waiting for link...`);
-    } catch (err) {
-      console.log(`  Cycle ${cycle}: Could not connect to upstream, waiting for autoconnect...`);
+    // Retry connecting to upstream — it may briefly refuse connections after SQUIT
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try {
+        newUpstreamClient = await createUpstreamOperClient();
+        newUpstreamClient.clearRawBuffer();
+        // Issue CONNECT from upstream side — its Connect block has ssl=yes for the hub
+        newUpstreamClient.send(`CONNECT testnet.fractalrealities.net 4496`);
+        console.log(`  Cycle ${cycle}: CONNECT issued from upstream (attempt ${attempt}), waiting for link...`);
+        break;
+      } catch (err) {
+        if (attempt < 5) {
+          console.log(`  Cycle ${cycle}: Upstream not ready (attempt ${attempt}/5), retrying in 3s...`);
+          await new Promise(r => setTimeout(r, 3000));
+        } else {
+          console.log(`  Cycle ${cycle}: Could not connect to upstream after 5 attempts, waiting for autoconnect...`);
+        }
+      }
     }
   } else {
     // X3 services — just wait for autoconnect (x3 reconnects on its own)
