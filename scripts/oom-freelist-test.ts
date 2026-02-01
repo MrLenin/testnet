@@ -20,7 +20,7 @@
  *   UPSTREAM_CONTAINER      - Upstream docker container name (default: nefarious-upstream)
  */
 
-import { createOperClient, X3Client } from '../tests/src/helpers/x3-client.js';
+import { createOperClient, X3Client, IRC_OPER } from '../tests/src/helpers/x3-client.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -256,35 +256,81 @@ async function collectSnapshot(client: X3Client): Promise<MemorySnapshot> {
   };
 }
 
+// ── Upstream Oper Client ───────────────────────────────────────────────────
+
+const UPSTREAM_PORT = parseInt(process.env.UPSTREAM_PORT || '6671');
+
+async function createUpstreamOperClient(): Promise<X3Client> {
+  const upClient = new X3Client();
+  const host = process.env.IRC_HOST ?? 'localhost';
+  await upClient.connect(host, UPSTREAM_PORT);
+
+  await upClient.capLs();
+  upClient.capEnd();
+  upClient.register('oom-upstream');
+  await upClient.waitForLine(/001/);
+
+  await new Promise(r => setTimeout(r, 1000));
+
+  // Oper up on upstream (same credentials as hub)
+  upClient.send(`OPER ${IRC_OPER.name} ${IRC_OPER.password}`);
+  try {
+    await upClient.waitForLine(/381/, 5000);
+  } catch {
+    console.warn('  WARNING: Failed to oper up on upstream');
+  }
+
+  upClient.clearRawBuffer();
+  return upClient;
+}
+
 // ── SQUIT / CONNECT Cycle ──────────────────────────────────────────────────
 
 async function squitAndReconnect(
-  client: X3Client,
+  hubClient: X3Client,
+  upstreamClient: X3Client | null,
   serverName: string,
   cycle: number,
   timeout = 60000
-): Promise<boolean> {
-  client.clearRawBuffer();
-  client.send(`SQUIT ${serverName} :oom-test cycle ${cycle}`);
+): Promise<{ reconnected: boolean; upstreamClient: X3Client | null }> {
+  hubClient.clearRawBuffer();
+  hubClient.send(`SQUIT ${serverName} :oom-test cycle ${cycle}`);
 
   // Let SQUIT fully process
-  await new Promise(r => setTimeout(r, 2000));
+  await new Promise(r => setTimeout(r, 3000));
 
-  // Explicitly reconnect
-  client.clearRawBuffer();
-  client.send(`CONNECT ${serverName} 4496`);
+  let newUpstreamClient: X3Client | null = null;
 
-  // Poll LINKS until server reappears
+  if (serverName !== 'x3.services') {
+    // The upstream oper client gets disconnected by the SQUIT, so reconnect it
+    // and issue CONNECT from the upstream side (where the Connect block has SSL)
+    console.log(`  Cycle ${cycle}: SQUIT sent, reconnecting upstream oper...`);
+
+    try {
+      newUpstreamClient = await createUpstreamOperClient();
+      newUpstreamClient.clearRawBuffer();
+      // Issue CONNECT from upstream side — its Connect block has ssl=yes for the hub
+      newUpstreamClient.send(`CONNECT testnet.fractalrealities.net 4496`);
+      console.log(`  Cycle ${cycle}: CONNECT issued from upstream, waiting for link...`);
+    } catch (err) {
+      console.log(`  Cycle ${cycle}: Could not connect to upstream, waiting for autoconnect...`);
+    }
+  } else {
+    // X3 services — just wait for autoconnect (x3 reconnects on its own)
+    console.log(`  Cycle ${cycle}: SQUIT sent, waiting for services autoconnect...`);
+  }
+
+  // Poll LINKS on hub until upstream server reappears
   const start = Date.now();
   while (Date.now() - start < timeout) {
     await new Promise(r => setTimeout(r, 3000));
-    client.clearRawBuffer();
-    client.send('LINKS');
+    hubClient.clearRawBuffer();
+    hubClient.send('LINKS');
 
     const links: string[] = [];
     try {
       while (true) {
-        const msg = await client.waitForParsedLine(
+        const msg = await hubClient.waitForParsedLine(
           m => m.command === '364' || m.command === '365',
           5000
         );
@@ -294,10 +340,10 @@ async function squitAndReconnect(
     } catch { /* timeout on individual line */ }
 
     if (links.some(l => l.includes(serverName))) {
-      return true;
+      return { reconnected: true, upstreamClient: newUpstreamClient };
     }
   }
-  return false;
+  return { reconnected: false, upstreamClient: newUpstreamClient };
 }
 
 // ── Output Formatting ──────────────────────────────────────────────────────
@@ -510,9 +556,12 @@ async function main(): Promise<void> {
   printRow(baseline);
 
   // Phase 3: SQUIT/Reconnect Loop
+  let upstreamClient: X3Client | null = null;
+
   for (let cycle = 1; cycle <= CONFIG.cycles && !interrupted; cycle++) {
-    const reconnected = await squitAndReconnect(client, CONFIG.target, cycle);
-    if (!reconnected) {
+    const result = await squitAndReconnect(client, upstreamClient, CONFIG.target, cycle);
+    upstreamClient = result.upstreamClient;
+    if (!result.reconnected) {
       console.log(`  WARNING: ${CONFIG.target} did not reconnect within timeout at cycle ${cycle}`);
       console.log('  Continuing with measurements anyway...');
     }
@@ -526,14 +575,20 @@ async function main(): Promise<void> {
     printRow(m);
   }
 
+  // Clean up upstream oper client
+  if (upstreamClient) {
+    try { upstreamClient.send('QUIT'); } catch {}
+  }
+
   // Phase 3b: Optional services cycles
   if (CONFIG.servicesCycles > 0 && !interrupted) {
     console.log('');
     console.log(`--- Services SQUIT cycles (x3.services x ${CONFIG.servicesCycles}) ---`);
 
     for (let cycle = 1; cycle <= CONFIG.servicesCycles && !interrupted; cycle++) {
-      const reconnected = await squitAndReconnect(client, 'x3.services', cycle);
-      if (!reconnected) {
+      // For services, CONNECT from hub side works (x3 accepts inbound)
+      const result = await squitAndReconnect(client, null, 'x3.services', cycle);
+      if (!result.reconnected) {
         console.log(`  WARNING: x3.services did not reconnect within timeout at cycle ${cycle}`);
       }
 
