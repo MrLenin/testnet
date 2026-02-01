@@ -64,6 +64,17 @@ expect(response).toBeDefined();
 expect(/^90\d$/.test(response.command), `Should get 9XX SASL numeric, got: ${response.command}`).toBe(true);
 ```
 
+### ✅ Phase 3b: Authenticated Clients & New Test Coverage (COMPLETE)
+
+Migrated tests to use authenticated clients (account pool) and added new test coverage:
+
+- ✅ `ircv3/chathistory.test.ts` - All tests rewritten to use `createAuthedHistoryClient()` with account pool auth
+- ✅ `ircv3/pre-away.test.ts` - Added Away-Star (AWAY *) tests (3 tests) and Presence Aggregation (multi-connection) tests (4 tests)
+  - Away-star hidden state, clearing, observer notification on join
+  - Presence aggregation: one present + one away-star, all away-star, transition to present, mixed away states
+  - Uses SASL PLAIN for second connection binding to same account
+  - Fixed weak assertions: removed try/catch swallowing core test failures, added `gotUnexpectedAway` flag pattern for negative assertions
+
 ### 🔄 Phase 4: Fixed Timeouts (IN PROGRESS)
 
 **Original count**: 349 instances across 36 files
@@ -83,6 +94,11 @@ expect(/^90\d$/.test(response.command), `Should get 9XX SASL numeric, got: ${res
   - `labeled-response.test.ts` (4 removed)
   - `integration.test.ts` (3 removed)
   - `pre-away.test.ts` (1 removed)
+
+#### Flaky Test Fixes:
+- ✅ `chathistory.test.ts` - Event-playback tests (PART, KICK, QUIT):
+  - Increased persistence delay from 500ms to 1000ms
+  - Added `{ retry: 2 }` for timing variability
 
 #### Remaining Delays (Categorized):
 

@@ -312,6 +312,6 @@ Solution: Update the cache immediately after merging your changes, before the PU
 
 Active development - IRCv3.2+ upgrade project with comprehensive test suite. Nefarious and X3 are git submodules tracking custom forks with enhancements:
 - Nefarious: Full IRCv3.2+ support (CAP, SASL, chathistory, metadata, multiline, etc.)
-- X3: Keycloak integration, LMDB caching, P10 protocol extensions
+- X3: Keycloak integration, libmdbx persistence, P10 protocol extensions
 
 **For Claude sessions**: Don't build containers - it uses too many tokens. Use pre-built images.

@@ -175,6 +175,11 @@ AB MK <numeric> SSLCLIEXP :<timestamp>
 | `FEAT_CHATHISTORY_LOW_WATERMARK` | 75 | Storage usage % target after eviction |
 | `FEAT_CHATHISTORY_MAINTENANCE_INTERVAL` | 300 | Seconds between maintenance cycles |
 | `FEAT_CHATHISTORY_EVICT_BATCH_SIZE` | 1000 | Max entries to evict per maintenance cycle |
+| `FEAT_CHATHISTORY_DB_AUTOGROW` | TRUE | Enable auto-growing database geometry |
+| `FEAT_CHATHISTORY_DB_GROWTH_STEP` | 16777216 | Growth increment in bytes (16MB default) |
+| `FEAT_CHATHISTORY_DB_NOSYNC` | TRUE | Use MDBX_SAFE_NOSYNC for reduced fsync overhead |
+| `FEAT_CHATHISTORY_DB_SYNC_INTERVAL` | 10 | Seconds between periodic syncs when nosync enabled |
+| `FEAT_CHATHISTORY_DB_PARK_INTERVAL` | 50 | Park read txn every N messages during queries (0 = disable) |
 
 **Storage vs CAP Decoupling**: `FEAT_CAP_draft_chathistory` controls whether the server advertises and handles the `draft/chathistory` capability for clients. `FEAT_CHATHISTORY_STORE` controls whether the server actually stores messages locally. Setting `STORE=FALSE` with `CAP=TRUE` creates a "relay server" that can handle chathistory queries by forwarding them to storage servers via federation, without storing messages itself. This is useful for leaf servers that want to offer chathistory to clients without the storage overhead.
 
@@ -183,6 +188,10 @@ AB MK <numeric> SSLCLIEXP :<timestamp>
 **Federation**: When enabled, if local LMDB results are incomplete (fewer messages than requested or gaps detected), the server will query all other servers for additional messages. Results are merged and deduplicated by msgid before returning to the client. This allows clients to access history even if their connected server was down when messages were sent.
 
 **Write Forwarding (Phase 4)**: When `CHATHISTORY_WRITE_FORWARD` is enabled and `CHATHISTORY_STORE` is disabled, non-storage servers forward incoming messages to storage servers via CH W/WB tokens. This creates a hub-and-spoke architecture where leaf servers relay to hub storage servers.
+
+**MDBX NOSYNC Mode**: When `CHATHISTORY_DB_NOSYNC` is enabled (default), the chathistory database uses `MDBX_SAFE_NOSYNC` to skip fsync on every commit. Instead, libmdbx's built-in periodic sync flushes data at the interval specified by `CHATHISTORY_DB_SYNC_INTERVAL`. This significantly reduces I/O overhead on the write-hot chathistory path (every PRIVMSG triggers 3 mdbx_put calls). On clean shutdown, a forced sync ensures all pending data is flushed. Safe for chathistory — losing a few seconds of messages on crash is acceptable.
+
+**Read Transaction Parking**: Large `CHATHISTORY BEFORE/AFTER` queries hold a read transaction open while iterating, which pins the read snapshot and prevents page reclamation by writers. When `CHATHISTORY_DB_PARK_INTERVAL` is non-zero, the read transaction is periodically parked (releasing the snapshot) and unparked (acquiring a fresh snapshot) every N messages. The cursor is saved and re-positioned after each park cycle. Set to 0 to disable. Lower values release snapshots more frequently but add overhead from cursor re-positioning.
 
 **Storage Watermarks**: The watermark system prevents unbounded storage growth:
 - When storage exceeds `HIGH_WATERMARK` (85%), eviction starts
@@ -221,6 +230,10 @@ draft/chathistory=limit=100,pm=global
 | `FEAT_METADATA_DB` | "metadata" | LMDB database directory path for metadata storage |
 | `FEAT_METADATA_CACHE_TTL` | 14400 | Seconds before cached metadata expires (4 hours) |
 | `FEAT_METADATA_PURGE_FREQUENCY` | 3600 | Seconds between cache purge runs (1 hour) |
+| `FEAT_METADATA_DB_AUTOGROW` | TRUE | Enable auto-growing database geometry |
+| `FEAT_METADATA_DB_NORDAHEAD` | TRUE | Disable OS readahead for random-access pattern |
+
+**MDBX NORDAHEAD**: When `METADATA_DB_NORDAHEAD` is enabled (default), the metadata database opens with `MDBX_NORDAHEAD` to disable OS readahead. Metadata access is random by account/channel key, so sequential readahead wastes I/O prefetching pages that won't be used. This flag is NOT applied to chathistory, whose range-scan access pattern benefits from readahead.
 
 **Cache-Aware Metadata**: When enabled, Nefarious maintains an LMDB-backed cache for metadata:
 - **X3 Detection**: Automatically detects X3 availability via heartbeat on METADATA updates
@@ -793,7 +806,7 @@ readmarker.$nick = "1703334500.654321"
 | Option | Description |
 |--------|-------------|
 | `--with-keycloak` | Enable Keycloak integration (requires libcurl) |
-| `--with-lmdb` | Enable LMDB metadata cache (requires liblmdb) |
+| `--with-mdbx` | Enable libmdbx persistence (requires libmdbx) |
 | `--with-ssl` | Enable SSL/TLS support |
 | `--with-ldap` | Enable LDAP support |
 | `--with-zstd` | Enable zstd compression for metadata (requires libzstd) |
@@ -811,6 +824,10 @@ When LMDB is enabled, X3 uses it as a cache layer for metadata:
 | `services/x3/lmdb_snapshot_path` | "x3data/backups" | Directory for automatic snapshots |
 | `services/x3/lmdb_snapshot_interval` | 0 | Seconds between snapshots (0 = disabled) |
 | `services/x3/lmdb_snapshot_retention` | 7 | Number of snapshots to keep |
+| `services/x3/lmdb_autogrow` | "yes" | Enable auto-growing database geometry |
+| `services/x3/lmdb_growth_step` | 16777216 | Growth increment in bytes (1MB-256MB) |
+| `services/x3/lmdb_nordahead` | 1 | Disable OS readahead for random-access pattern (MDBX_NORDAHEAD) |
+| `services/x3/lmdb_purge_batch_size` | 100 | Max keys per purge transaction batch (10-10000) |
 | `services/x3/async_logging` | 0 | Enable ring buffer background logging |
 
 **LMDB NoSync Mode**: When `lmdb_nosync=1`, LMDB skips fsync on every transaction, improving write performance significantly but risking data loss on crash. The `lmdb_sync_interval` controls how often explicit syncs occur.

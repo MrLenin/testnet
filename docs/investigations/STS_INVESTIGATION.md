@@ -1,12 +1,12 @@
 # IRCv3 Strict Transport Security (STS) Extension Investigation
 
-## Status: NOT IMPLEMENTED
+## Status: IMPLEMENTED ✅
 
 **Specification**: https://ircv3.net/specs/extensions/sts
 
 **Capability**: `sts`
 
-**Effort**: Medium (32-48 hours)
+**Implementation Date**: 2026-01-17
 
 **Priority**: Medium-High - Important for security, but requires careful implementation
 

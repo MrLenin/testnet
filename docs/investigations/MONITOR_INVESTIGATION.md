@@ -1,14 +1,16 @@
 # IRCv3 MONITOR Extension Investigation
 
-## Status: NOT IMPLEMENTED
+## Status: IMPLEMENTED ✅
 
 **Specification**: https://ircv3.net/specs/extensions/monitor
 
 **ISUPPORT Token**: `MONITOR=<limit>`
 
-**Effort**: Medium (40-60 hours)
+**Effort**: Medium (estimated 40-60 hours, actual ~2 hours by reusing WATCH infrastructure)
 
 **Priority**: Low - Nefarious already has WATCH which provides similar functionality
+
+**Implementation**: `ircd/m_monitor.c` - Full MONITOR command sharing WATCH internals
 
 ---
 

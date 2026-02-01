@@ -387,25 +387,25 @@ if (new_state == 2) {
 2. **Presence computation**: All state combinations
 3. **Edge cases**: Single connection, logout, re-login
 
-### Integration Tests
+### Integration Tests ✅ IMPLEMENTED
 
-1. **Two-client scenario**:
-   - Client A connects as account X, sets AWAY
-   - Client B connects as account X, stays present
-   - Verify: User appears present
-   - Client B sets AWAY
-   - Verify: User appears away with A's message
+Tests in `tests/src/ircv3/pre-away.test.ts`:
 
-2. **Away-star scenario**:
-   - Client A connects as account X, sets AWAY *
-   - Client B connects as account X, stays present
-   - Verify: User appears present
-   - Client B disconnects
-   - Verify: User appears away (with substituted message)
+**Away-Star (AWAY \*) Tests:**
+- ✅ AWAY * sets hidden (away-star) state — verifies 306 + WHOIS 301 with fallback "Away"
+- ✅ AWAY * can be cleared with empty AWAY — verifies 305 + no WHOIS 301
+- ✅ Observer sees AWAY notification for away-star user joining channel
 
-3. **Network propagation**:
-   - Verify AWAY messages propagate correctly via P10
-   - Verify away-notify only sent on effective change
+**Presence Aggregation (multi-connection) Tests:**
+- ✅ One present + one away-star: effective state is PRESENT — negative assertion (no AWAY broadcast)
+- ✅ All connections away-star: effective state is AWAY (hidden) — AWAY broadcast + WHOIS
+- ✅ Transition from all-away-star to present clears away — un-away broadcast + no WHOIS 301
+- ✅ Mixed away states: one AWAY, one AWAY * — effective AWAY with explicit message
+
+**Test Infrastructure:**
+- Uses `createPresenceClient()` with X3Client + account pool AUTH
+- Uses `createSecondConnection()` with SASL PLAIN for same-account multi-connection
+- Observer client with `away-notify` capability
 
 ### Performance Tests
 

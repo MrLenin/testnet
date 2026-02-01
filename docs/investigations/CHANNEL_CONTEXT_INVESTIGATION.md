@@ -1,6 +1,6 @@
 # IRCv3 Channel-Context Client Tag Investigation
 
-## Status: PARTIAL - TAGMSG only
+## Status: IMPLEMENTED ✅
 
 **Specification**: https://ircv3.net/specs/client-tags/channel-context
 
@@ -59,8 +59,8 @@ Client-only tags (prefixed with `+`) are sent by clients and relayed by servers 
 | Message Type | Client Tags Relayed |
 |--------------|---------------------|
 | TAGMSG | ✅ Yes - `cli_client_tags()` passed to recipients |
-| PRIVMSG | ❌ No - client tags not relayed |
-| NOTICE | ❌ No - client tags not relayed |
+| PRIVMSG | ✅ Yes - via `sendcmdto_channel_butone_with_client_tags()` |
+| NOTICE | ✅ Yes - via `sendcmdto_channel_butone_with_client_tags()` |
 
 ### Code Analysis
 

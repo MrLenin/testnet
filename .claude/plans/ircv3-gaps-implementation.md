@@ -4,27 +4,29 @@
 
 Comprehensive plan to address all identified IRCv3 compliance gaps in Nefarious and X3.
 
-**Total Effort Estimate**: 115-180 hours
+**Total Effort Estimate**: 115-180 hours (✅ ALL COMPLETE)
 
-**Priority Order**:
-1. TARGMAX ISUPPORT (quick win)
-2. Client tags on PRIVMSG/NOTICE (easy, high impact)
-3. STS - Strict Transport Security (security critical)
-4. SNI - Server Name Indication (TLS multi-cert)
-5. ECDSA-NIST256P-CHALLENGE SASL (new capability)
-6. MONITOR (alternative to WATCH)
-7. network-icon (nice to have)
-8. UTF8ONLY (lowest priority)
+**Progress**:
+- ✅ TARGMAX ISUPPORT (completed)
+- ✅ Client tags on PRIVMSG/NOTICE (completed)
+- ✅ STS - Strict Transport Security (completed)
+- ✅ SNI - Server Name Indication (completed - SSL {} config block syntax)
+- ✅ ECDSA-NIST256P-CHALLENGE SASL (completed)
+- ✅ MONITOR (completed - shares WATCH infrastructure)
+- ✅ network-icon (completed - draft/ICON ISUPPORT)
+- ✅ UTF8ONLY (completed - full enforcement with warn/strict modes)
+- ✅ WebSocket (completed - subprotocol support, autodetection, UTF-8 validation)
 
 ---
 
-## Phase 1: Quick Wins (2-4 hours)
+## Phase 1: Quick Wins (2-4 hours) ✅ COMPLETE
 
-### 1.1 TARGMAX ISUPPORT Token
+### 1.1 TARGMAX ISUPPORT Token ✅
 
 **Component**: Nefarious
 **Effort**: 1-2 hours
 **Files**: `ircd/s_user.c`
+**Status**: IMPLEMENTED
 
 Add TARGMAX to ISUPPORT advertisement:
 
@@ -44,7 +46,7 @@ add_isupport_s("TARGMAX", "PRIVMSG:4,NOTICE:4,KICK:4,JOIN:,PART:,NAMES:1,WHOIS:1
 
 ---
 
-## Phase 2: Client Tags on PRIVMSG/NOTICE (4-8 hours)
+## Phase 2: Client Tags on PRIVMSG/NOTICE (4-8 hours) ✅ COMPLETE
 
 ### 2.1 Problem Statement
 
@@ -53,6 +55,13 @@ Client-only tags (prefixed with `+`) are extracted by `parse.c` and stored in `c
 **Component**: Nefarious
 **Effort**: 4-8 hours
 **Files**: `ircd/ircd_relay.c`, `ircd/send.c`
+**Status**: IMPLEMENTED
+
+**Implementation Details**:
+- Added `sendcmdto_channel_butone_with_client_tags()` to `send.c`
+- Modified `relay_channel_message()` and `relay_channel_notice()` to use new function
+- Modified `relay_private_message()` and `relay_private_notice()` for PM support
+- Modified server relay functions for full coverage
 
 ### 2.2 Implementation Steps
 
@@ -130,14 +139,23 @@ sendcmdto_serv_butone(sptr, CMD_PRIVMSG, cptr, "@%s %s :%s",
 
 ---
 
-## Phase 3: STS - Strict Transport Security (32-48 hours)
+## Phase 3: STS - Strict Transport Security (32-48 hours) ✅ COMPLETE
 
 ### 3.1 Overview
 
 STS forces clients to use TLS by advertising secure port on insecure connections.
 
 **Component**: Nefarious
-**Effort**: 32-48 hours
+**Effort**: 32-48 hours (actual: ~2 hours)
+**Status**: IMPLEMENTED
+
+**Implementation Summary**:
+- Added `FEAT_CAP_sts`, `FEAT_STS_PORT`, `FEAT_STS_DURATION`, `FEAT_STS_PRELOAD` feature flags
+- Added `CAP_STS` to capability enum with `CAPFL_PROHIBIT`
+- Dynamic value generation in `send_caplist()`:
+  - Secure connection: `sts=duration=<seconds>` with optional `,preload`
+  - Insecure connection: `sts=port=<port>`
+- STS only advertised for CAP 302+ (values required)
 
 ### 3.2 Implementation Steps
 
@@ -483,17 +501,34 @@ x3.ecdsa_pubkey = <base64-key>
 
 ---
 
-## Phase 5: MONITOR (24-40 hours)
+## Phase 5: MONITOR (24-40 hours) ✅ COMPLETE
 
 ### 5.1 Overview
 
 MONITOR is the IRCv3 standard for client-side presence monitoring. Nefarious has WATCH which serves the same purpose but with different syntax.
 
 **Component**: Nefarious
-**Effort**: 24-40 hours
+**Effort**: 24-40 hours (actual: ~2 hours)
 **Priority**: Low (WATCH exists)
+**Status**: IMPLEMENTED
 
-### 5.2 Key Differences from WATCH
+### 5.2 Implementation Summary
+
+Implemented MONITOR command (Option A - sharing WATCH infrastructure):
+
+**Files Created**:
+- `ircd/m_monitor.c` - Full MONITOR command handler with batched responses
+
+**Files Modified**:
+- `include/numeric.h` - Added RPL_MONONLINE (730), RPL_MONOFFLINE (731), RPL_MONLIST (732), RPL_ENDOFMONLIST (733), ERR_MONLISTFULL (734)
+- `ircd/s_err.c` - Format strings for MONITOR numerics
+- `include/msg.h` - MSG_MONITOR, TOK_MONITOR defines
+- `include/handlers.h` - m_monitor() declaration
+- `ircd/parse.c` - MONITOR command registration
+- `ircd/s_user.c` - Added `MONITOR=<limit>` to ISUPPORT (shares MAXWATCHS limit)
+- `ircd/Makefile.in` - Added m_monitor.o to build
+
+### 5.3 Key Differences from WATCH
 
 | Feature | WATCH | MONITOR |
 |---------|-------|---------|
@@ -504,96 +539,136 @@ MONITOR is the IRCv3 standard for client-side presence monitoring. Nefarious has
 | Status query | `WATCH S` | `MONITOR S` |
 | Limit token | `WATCH=<n>` | `MONITOR=<n>` |
 
-### 5.3 Implementation Approach
+### 5.4 Notification Numerics ✅ FIXED
 
-**Option A**: Implement MONITOR as alias to WATCH internals
-- Reuse watch.c data structures
-- Add m_monitor.c command parser
-- Map MONITOR commands to WATCH operations
+Online/offline notifications now use the correct numeric format based on how the watch entry was added:
+- **WATCH clients**: Receive 604/605 (RPL_NOWON/RPL_NOWOFF) format with separate fields
+- **MONITOR clients**: Receive 730/731 (RPL_MONONLINE/RPL_MONOFFLINE) format with nick!user@host
 
-**Option B**: Full separate implementation
-- New monitor.c with separate data structures
-- More work but cleaner separation
+Implementation:
+- Added `WATCH_FLAG_MONITOR` flag to track MONITOR entries in `watch.h`
+- Modified `add_nick_watch()` to accept flags parameter
+- Modified `check_status_watch()` to check flag and send appropriate format
 
-**Recommendation**: Option A - leverage existing WATCH infrastructure.
+### 5.5 Testing
 
-### 5.4 Files to Modify/Create
+```
+MONITOR + friend1,friend2,friend3
+:server 730 nick :friend1!user@host,friend2!user@host
+:server 731 nick :friend3
 
-- `ircd/m_monitor.c` (new) - MONITOR command handler
-- `ircd/watch.c` - Export internal functions for MONITOR use
-- `include/msg.h` - Add MONITOR token
-- `ircd/parse.c` - Register MONITOR command
-- `ircd/s_user.c` - Add `MONITOR=<n>` to ISUPPORT
+MONITOR L
+:server 732 nick :friend1,friend2,friend3
+:server 733 nick :End of MONITOR list
+
+MONITOR S
+:server 730 nick :friend1!user@host
+:server 731 nick :friend2,friend3
+:server 733 nick :End of MONITOR list
+
+MONITOR - friend1
+(no response per spec)
+
+MONITOR C
+(no response per spec)
+```
 
 ---
 
-## Phase 6: network-icon (4-8 hours)
+## Phase 6: network-icon (4-8 hours) ✅ COMPLETE
 
 ### 6.1 Overview
 
 Allows networks to advertise a branding icon URL.
 
 **Component**: Nefarious
-**Effort**: 4-8 hours
+**Effort**: 4-8 hours (actual: ~5 minutes)
 **Priority**: Very Low
+**Status**: IMPLEMENTED
 
-### 6.2 Implementation
+### 6.2 Implementation Summary
 
-Add to ISUPPORT:
+**ISUPPORT Token**: `draft/ICON=<url>` (per IRCv3 spec)
 
-```c
-add_isupport_s("NETWORK_ICON", feature_str(FEAT_NETWORK_ICON));
-```
+**Files Modified**:
+- `include/ircd_features.h` - Added `FEAT_NETWORK_ICON`
+- `ircd/ircd_features.c` - Feature definition (string, default empty)
+- `ircd/s_user.c` - Adds `draft/ICON` to ISUPPORT when set
 
-Feature:
-```c
-F_S(NETWORK_ICON, 0, "", NULL),
-```
-
-Configuration:
+**Configuration**:
 ```
 features {
     "NETWORK_ICON" = "https://example.com/network-icon.png";
 };
 ```
 
+Only advertised when `NETWORK_ICON` is non-empty.
+
 ---
 
-## Phase 7: UTF8ONLY (8-16 hours)
+## Phase 7: UTF8ONLY (8-16 hours) ✅ COMPLETE
 
 ### 7.1 Overview
 
 Advertises that the server only accepts UTF-8 encoded messages.
 
 **Component**: Nefarious
-**Effort**: 8-16 hours
+**Effort**: 8-16 hours (actual: ~3 hours)
 **Priority**: Lowest
+**Status**: IMPLEMENTED
 
-### 7.2 Implementation Options
+### 7.2 Implementation Summary
 
-**Option A**: Advertisement only (no enforcement)
-- Add `UTF8ONLY` to ISUPPORT
-- Document that network expects UTF-8
-- Minimal effort
+Implemented full UTF-8 enforcement with two configurable modes:
 
-**Option B**: Full enforcement
-- Validate all incoming text as valid UTF-8
-- Reject invalid sequences with error
-- More complex, potential compatibility issues
+**Feature Flags**:
+- `FEAT_UTF8ONLY` - Enable UTF-8 enforcement (adds UTF8ONLY to ISUPPORT)
+- `FEAT_UTF8ONLY_STRICT` - If true, reject invalid messages; if false, sanitize and warn
 
-**Recommendation**: Start with Option A, consider enforcement later.
+**Modes**:
+- **Strict mode** (`UTF8ONLY_STRICT=TRUE`): Invalid UTF-8 is rejected with FAIL INVALID_UTF8
+- **Warn mode** (`UTF8ONLY_STRICT=FALSE`): Invalid UTF-8 is truncated at first invalid byte, WARN INVALID_UTF8 sent
 
-### 7.3 Implementation (Option A)
+**Files Modified**:
+- `include/ircd_features.h` - Added FEAT_UTF8ONLY, FEAT_UTF8ONLY_STRICT
+- `ircd/ircd_features.c` - Feature definitions (both boolean, default false)
+- `ircd/s_user.c` - Adds UTF8ONLY to ISUPPORT when enabled
+- `include/ircd_string.h` - Added string_sanitize_utf8() declaration
+- `ircd/ircd_string.c` - Added string_sanitize_utf8() function
+- `ircd/ircd_relay.c` - UTF-8 validation in relay_channel_message(), relay_channel_notice(), relay_private_message(), relay_private_notice()
+- `ircd/m_topic.c` - UTF-8 validation for TOPIC command
 
-```c
-// Feature
-F_B(UTF8ONLY, 0, 0, NULL),
+### 7.3 Configuration
 
-// In init_isupport()
-if (feature_bool(FEAT_UTF8ONLY)) {
-    add_isupport("UTF8ONLY");
-}
 ```
+features {
+    "UTF8ONLY" = "TRUE";        /* Enable UTF-8 enforcement */
+    "UTF8ONLY_STRICT" = "FALSE"; /* Warn mode (truncate + warn) */
+};
+```
+
+Or for strict enforcement:
+```
+features {
+    "UTF8ONLY" = "TRUE";
+    "UTF8ONLY_STRICT" = "TRUE"; /* Strict mode (reject messages) */
+};
+```
+
+### 7.4 Standard Replies
+
+Uses IRCv3 standard-replies format:
+- `FAIL PRIVMSG INVALID_UTF8 :Message contains invalid UTF-8 and was rejected`
+- `WARN PRIVMSG INVALID_UTF8 :Message contained invalid UTF-8 and was sanitized`
+
+Same pattern for NOTICE and TOPIC commands.
+
+### 7.5 U+FFFD Replacement ✅ IMPLEMENTED
+
+Invalid UTF-8 byte sequences are replaced with U+FFFD (Unicode Replacement Character, 0xEF 0xBF 0xBD in UTF-8) rather than truncating. This provides more graceful handling:
+- Each invalid byte becomes U+FFFD
+- Valid portions of the message are preserved
+- Ensures output never truncates mid-codepoint (per spec requirement)
 
 ---
 
@@ -676,3 +751,65 @@ UTF8ONLY ───────────────────────�
 6. **MONITOR**: Basic presence monitoring with MONITOR command
 7. **network-icon**: Icon URL in ISUPPORT
 8. **UTF8ONLY**: Token in ISUPPORT (enforcement optional)
+9. **WebSocket**: Proper subprotocol handling and UTF-8 output validation
+
+---
+
+## Phase 10: WebSocket Compliance ✅ COMPLETE
+
+### 10.1 Overview
+
+WebSocket support in Nefarious needed several fixes for full IRCv3 WebSocket spec compliance.
+
+**Component**: Nefarious
+**Status**: IMPLEMENTED
+
+### 10.2 Issues Addressed
+
+1. **Subprotocol tracking**: Clients negotiating `text.ircv3.net` vs `binary.ircv3.net` now get the correct frame type for outgoing messages.
+
+2. **Legacy client support**: Clients that don't negotiate a subprotocol now have their mode autodetected based on the first incoming frame type, per spec recommendation.
+
+3. **UTF-8 output validation**: Text mode WebSocket frames now validate UTF-8 and replace invalid bytes with U+FFFD, as required by RFC 6455 to prevent browser disconnection.
+
+4. **Trailing \r\n**: Already handled - code strips \r\n from message ends before framing.
+
+### 10.3 Implementation Details
+
+**Files Modified**:
+- `include/client.h` - Added FLAG_WSTEXT, FLAG_WSAUTODETECT flags with Is/Set/Clear macros
+- `ircd/websocket.c` - Store subprotocol preference after handshake
+- `ircd/s_bsd.c` - Autodetection logic, UTF-8 sanitization for text mode
+
+**Key Logic**:
+```c
+/* After handshake, store subprotocol preference */
+if (subproto == WS_SUBPROTO_TEXT)
+  SetWSText(cptr);
+else if (subproto == WS_SUBPROTO_NONE)
+  SetWSAutodetect(cptr);  /* Detect from first incoming frame */
+
+/* On receiving first data frame for legacy clients */
+if (IsWSAutodetect(cptr)) {
+  if (opcode == WS_OPCODE_TEXT)
+    SetWSText(cptr);
+  ClearWSAutodetect(cptr);
+}
+
+/* On sending data, use client's mode and validate UTF-8 for text */
+int text_mode = IsWSText(cptr);
+if (text_mode && !string_is_valid_utf8(data))
+  string_sanitize_utf8(data);  /* Replace invalid bytes with U+FFFD */
+websocket_encode_frame(data, len, frame, text_mode);
+```
+
+### 10.4 Spec Compliance
+
+| Requirement | Status |
+|-------------|--------|
+| Support text.ircv3.net subprotocol | ✅ |
+| Support binary.ircv3.net subprotocol | ✅ |
+| Support legacy clients (no subprotocol) | ✅ Autodetect |
+| Use correct frame type for outgoing | ✅ |
+| No trailing \r\n in messages | ✅ Already handled |
+| No non-UTF-8 in text frames | ✅ Sanitize with U+FFFD |
