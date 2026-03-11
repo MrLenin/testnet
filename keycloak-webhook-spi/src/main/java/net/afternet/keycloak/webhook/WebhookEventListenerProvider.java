@@ -78,7 +78,7 @@ public class WebhookEventListenerProvider implements EventListenerProvider {
      */
     @Override
     public void onEvent(Event event) {
-        if (config.getWebhookUrl() == null || config.getWebhookUrl().isEmpty()) {
+        if (config.getWebhookUrls().isEmpty()) {
             return;
         }
 
@@ -89,8 +89,8 @@ public class WebhookEventListenerProvider implements EventListenerProvider {
         }
 
         String payload = formatUserEvent(event);
-        LOG.infof("Sending user event webhook: type=%s, userId=%s",
-            event.getType(), event.getUserId());
+        LOG.infof("Sending user event webhook to %d endpoint(s): type=%s, userId=%s",
+            config.getWebhookUrls().size(), event.getType(), event.getUserId());
 
         sendWebhookAsync(payload);
     }
@@ -100,7 +100,7 @@ public class WebhookEventListenerProvider implements EventListenerProvider {
      */
     @Override
     public void onEvent(AdminEvent event, boolean includeRepresentation) {
-        if (config.getWebhookUrl() == null || config.getWebhookUrl().isEmpty()) {
+        if (config.getWebhookUrls().isEmpty()) {
             return;
         }
 
@@ -111,8 +111,8 @@ public class WebhookEventListenerProvider implements EventListenerProvider {
         }
 
         String payload = formatAdminEvent(event);
-        LOG.infof("Sending admin event webhook: resourceType=%s, operationType=%s, path=%s",
-            event.getResourceType(), event.getOperationType(), event.getResourcePath());
+        LOG.infof("Sending admin event webhook to %d endpoint(s): resourceType=%s, operationType=%s, path=%s",
+            config.getWebhookUrls().size(), event.getResourceType(), event.getOperationType(), event.getResourcePath());
 
         sendWebhookAsync(payload);
     }
@@ -300,29 +300,32 @@ public class WebhookEventListenerProvider implements EventListenerProvider {
     }
 
     /**
-     * Send webhook asynchronously with retry logic.
+     * Send webhook asynchronously to all configured URLs with retry logic.
      */
     private void sendWebhookAsync(String payload) {
-        CompletableFuture.runAsync(() -> sendWithRetry(payload, config.getRetryCount()));
+        for (String url : config.getWebhookUrls()) {
+            CompletableFuture.runAsync(() -> sendWithRetry(url, payload, config.getRetryCount()));
+        }
     }
 
     /**
-     * Send webhook with exponential backoff retry.
+     * Send webhook to a single URL with exponential backoff retry.
      */
-    private void sendWithRetry(String payload, int maxRetries) {
+    private void sendWithRetry(String url, String payload, int maxRetries) {
         int delay = 1000; // Start with 1 second
 
         for (int attempt = 0; attempt <= maxRetries; attempt++) {
             try {
-                sendWebhook(payload);
+                sendWebhook(url, payload);
                 return; // Success
             } catch (Exception e) {
                 if (attempt == maxRetries) {
-                    LOG.errorf("Webhook failed after %d attempts: %s", maxRetries + 1, e.getMessage());
+                    LOG.errorf("Webhook to %s failed after %d attempts: %s",
+                        url, maxRetries + 1, e.getMessage());
                     return;
                 }
-                LOG.warnf("Webhook attempt %d failed, retrying in %dms: %s",
-                    attempt + 1, delay, e.getMessage());
+                LOG.warnf("Webhook to %s attempt %d failed, retrying in %dms: %s",
+                    url, attempt + 1, delay, e.getMessage());
                 try {
                     Thread.sleep(delay);
                     delay = Math.min(delay * 2, 30000); // Cap at 30 seconds
@@ -335,16 +338,16 @@ public class WebhookEventListenerProvider implements EventListenerProvider {
     }
 
     /**
-     * Send a single webhook request.
+     * Send a single webhook request to one URL.
      */
-    private void sendWebhook(String payload) throws Exception {
+    private void sendWebhook(String url, String payload) throws Exception {
         HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-            .uri(URI.create(config.getWebhookUrl()))
+            .uri(URI.create(url))
             .header("Content-Type", "application/json")
             .timeout(Duration.ofSeconds(10))
             .POST(HttpRequest.BodyPublishers.ofString(payload));
 
-        // Add secret header if configured (matches X3's X-Webhook-Secret expectation)
+        // Add secret header if configured (matches X3/Nefarious X-Webhook-Secret expectation)
         if (config.getWebhookSecret() != null && !config.getWebhookSecret().isEmpty()) {
             requestBuilder.header("X-Webhook-Secret", config.getWebhookSecret());
         }
@@ -356,10 +359,10 @@ public class WebhookEventListenerProvider implements EventListenerProvider {
 
         if (response.statusCode() >= 400) {
             throw new RuntimeException(String.format(
-                "Webhook returned error: %d %s", response.statusCode(), response.body()));
+                "Webhook to %s returned error: %d %s", url, response.statusCode(), response.body()));
         }
 
-        LOG.debugf("Webhook delivered successfully: %d", response.statusCode());
+        LOG.debugf("Webhook delivered to %s: %d", url, response.statusCode());
     }
 
     @Override

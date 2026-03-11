@@ -17,7 +17,7 @@ import org.keycloak.models.KeycloakSessionFactory;
  *
  * <p>Via keycloak.conf:</p>
  * <pre>
- * spi-events-listener-webhook-events-url=http://x3:9080/keycloak-webhook
+ * spi-events-listener-webhook-events-url=http://x3:9080/keycloak-webhook,http://nefarious:9090/keycloak-webhook
  * spi-events-listener-webhook-events-secret=your-shared-secret
  * spi-events-listener-webhook-events-retry-count=3
  * spi-events-listener-webhook-events-send-all-events=false
@@ -25,11 +25,15 @@ import org.keycloak.models.KeycloakSessionFactory;
  *
  * <p>Via environment variables:</p>
  * <pre>
- * KC_SPI_EVENTS_LISTENER_WEBHOOK_EVENTS_URL=http://x3:9080/keycloak-webhook
+ * KC_SPI_EVENTS_LISTENER_WEBHOOK_EVENTS_URL=http://x3:9080/keycloak-webhook,http://nefarious:9090/keycloak-webhook
  * KC_SPI_EVENTS_LISTENER_WEBHOOK_EVENTS_SECRET=your-shared-secret
  * KC_SPI_EVENTS_LISTENER_WEBHOOK_EVENTS_RETRY_COUNT=3
  * KC_SPI_EVENTS_LISTENER_WEBHOOK_EVENTS_SEND_ALL_EVENTS=false
  * </pre>
+ *
+ * <p>The URL parameter accepts comma-separated values to send events to multiple
+ * endpoints (e.g., both X3 services and Nefarious IRCd). Each endpoint receives
+ * all events independently with its own retry logic.</p>
  *
  * <h2>Enabling the Listener</h2>
  *
@@ -73,9 +77,9 @@ public class WebhookEventListenerProviderFactory implements EventListenerProvide
 
         this.config = new WebhookConfig(url, secret, retryCount, sendAllEvents);
 
-        if (url != null && !url.isEmpty()) {
-            LOG.infof("Webhook event listener initialized: url=%s, retryCount=%d, sendAllEvents=%b",
-                url, retryCount, sendAllEvents);
+        if (!config.getWebhookUrls().isEmpty()) {
+            LOG.infof("Webhook event listener initialized: urls=%s, retryCount=%d, sendAllEvents=%b",
+                config.getWebhookUrls(), retryCount, sendAllEvents);
         } else {
             LOG.warn("Webhook event listener initialized but URL not configured - events will not be sent");
         }

@@ -1,5 +1,9 @@
 package net.afternet.keycloak.webhook;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 /**
  * Configuration holder for webhook settings.
  *
@@ -8,25 +12,51 @@ package net.afternet.keycloak.webhook;
  */
 public class WebhookConfig {
 
-    private final String webhookUrl;
+    private final List<String> webhookUrls;
     private final String webhookSecret;
     private final int retryCount;
     private final boolean sendAllEvents;
 
     public WebhookConfig(String webhookUrl, String webhookSecret, int retryCount, boolean sendAllEvents) {
-        this.webhookUrl = webhookUrl;
+        this.webhookUrls = parseUrls(webhookUrl);
         this.webhookSecret = webhookSecret;
         this.retryCount = retryCount;
         this.sendAllEvents = sendAllEvents;
     }
 
     /**
-     * Get the target webhook URL.
+     * Parse a comma-separated URL string into a list of trimmed, non-empty URLs.
+     */
+    private static List<String> parseUrls(String urlString) {
+        if (urlString == null || urlString.isBlank()) {
+            return Collections.emptyList();
+        }
+        List<String> urls = new ArrayList<>();
+        for (String part : urlString.split(",")) {
+            String trimmed = part.trim();
+            if (!trimmed.isEmpty()) {
+                urls.add(trimmed);
+            }
+        }
+        return Collections.unmodifiableList(urls);
+    }
+
+    /**
+     * Get the target webhook URLs.
      *
-     * @return the webhook URL, or null if not configured
+     * @return unmodifiable list of webhook URLs (may be empty)
+     */
+    public List<String> getWebhookUrls() {
+        return webhookUrls;
+    }
+
+    /**
+     * Get the first webhook URL for backwards compatibility.
+     *
+     * @return the first webhook URL, or null if not configured
      */
     public String getWebhookUrl() {
-        return webhookUrl;
+        return webhookUrls.isEmpty() ? null : webhookUrls.get(0);
     }
 
     /**
