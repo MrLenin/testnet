@@ -18,3 +18,6 @@
 [submodule "nefarious-upstream"]
 	path = nefarious-upstream
 	url = https://github.com/evilnet/nefarious2.git
+[submodule "keycloak-webhook-spi"]
+	path = keycloak-webhook-spi
+	url = git@github.com:MrLenin/keycloak-webhook-spi.git
