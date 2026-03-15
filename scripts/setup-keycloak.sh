@@ -63,6 +63,9 @@ REALM_EXISTS=$(curl -s -o /dev/null -w "%{http_code}" \
 if [ "$REALM_EXISTS" = "200" ]; then
   echo "Realm '$REALM_NAME' already exists, updating settings..."
   # Update realm settings for IRC compatibility
+  # Token lifetimes set at realm level — IRC sessions are long-lived.
+  # Per-client overrides only work if SHORTER than realm, so realm must
+  # be the ceiling. x3-services gets an explicit shorter override below.
   curl -s -X PUT "$KEYCLOAK_URL/admin/realms/$REALM_NAME" \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
@@ -83,9 +86,14 @@ if [ "$REALM_EXISTS" = "200" ]; then
       "quickLoginCheckMilliSeconds": 1000,
       "maxDeltaTimeSeconds": 43200,
       "failureFactor": 30,
-      "requiredActions": []
+      "requiredActions": [],
+      "accessTokenLifespan": 604800,
+      "ssoSessionIdleTimeout": 2592000,
+      "ssoSessionMaxLifespan": 2592000,
+      "offlineSessionIdleTimeout": 2592000,
+      "offlineSessionMaxLifespan": 2592000
     }'
-  echo "Realm updated"
+  echo "Realm updated (token lifetimes: 7d access, 30d session/offline)"
 else
   echo "Creating realm '$REALM_NAME'..."
   curl -s -X POST "$KEYCLOAK_URL/admin/realms" \
@@ -109,10 +117,33 @@ else
       "quickLoginCheckMilliSeconds": 1000,
       "maxDeltaTimeSeconds": 43200,
       "failureFactor": 30,
-      "requiredActions": []
+      "requiredActions": [],
+      "accessTokenLifespan": 604800,
+      "ssoSessionIdleTimeout": 2592000,
+      "ssoSessionMaxLifespan": 2592000,
+      "offlineSessionIdleTimeout": 2592000,
+      "offlineSessionMaxLifespan": 2592000
     }'
-  echo "Realm created"
+  echo "Realm created (token lifetimes: 7d access, 30d session/offline)"
 fi
+
+# Override default clients to short token lifetimes (5 min).
+# Realm ceiling is 7 days for IRC, but admin/account clients should stay short.
+echo ""
+echo "Setting short token lifetimes on default clients..."
+for DEFAULT_CLIENT_ID in admin-cli security-admin-console account account-console; do
+  DC_ID=$(curl -s -H "Authorization: Bearer $TOKEN" \
+    "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients?clientId=$DEFAULT_CLIENT_ID" \
+    | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+  if [ -n "$DC_ID" ]; then
+    curl -s -X PUT "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$DC_ID" \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "{\"clientId\":\"$DEFAULT_CLIENT_ID\",\"attributes\":{\"access.token.lifespan\":\"300\"}}" \
+      2>/dev/null || true
+    echo "  $DEFAULT_CLIENT_ID: 5 min"
+  fi
+done
 
 # =============================================================================
 # X.509 Authentication Flow Configuration (Scenario 2 - Future)
@@ -333,28 +364,38 @@ X3_CLIENT=$(curl -s \
   -H "Authorization: Bearer $TOKEN" \
   "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients?clientId=x3-services" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
+X3_CLIENT_CONFIG='{
+  "clientId": "x3-services",
+  "name": "X3 IRC Services",
+  "description": "X3 services bot - manages IRC accounts",
+  "enabled": true,
+  "clientAuthenticatorType": "client-secret",
+  "secret": "x3-services-secret",
+  "serviceAccountsEnabled": true,
+  "authorizationServicesEnabled": false,
+  "standardFlowEnabled": false,
+  "implicitFlowEnabled": false,
+  "directAccessGrantsEnabled": true,
+  "publicClient": false,
+  "protocol": "openid-connect",
+  "attributes": {
+    "access.token.lifespan": "300"
+  }
+}'
+
 if [ -n "$X3_CLIENT" ]; then
-  echo "X3 services client already exists (id: $X3_CLIENT)"
+  echo "X3 services client already exists (id: $X3_CLIENT), updating config..."
+  curl -s -X PUT "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$X3_CLIENT" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$X3_CLIENT_CONFIG"
+  echo "X3 services client updated"
 else
   echo "Creating X3 services client..."
   curl -s -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients" \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
-    -d '{
-      "clientId": "x3-services",
-      "name": "X3 IRC Services",
-      "description": "X3 services bot - manages IRC accounts",
-      "enabled": true,
-      "clientAuthenticatorType": "client-secret",
-      "secret": "x3-services-secret",
-      "serviceAccountsEnabled": true,
-      "authorizationServicesEnabled": false,
-      "standardFlowEnabled": false,
-      "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": true,
-      "publicClient": false,
-      "protocol": "openid-connect"
-    }'
+    -d "$X3_CLIENT_CONFIG"
   echo "X3 services client created"
 
   # Get the client ID
@@ -667,6 +708,99 @@ else
     echo "ERROR: Failed to create irc-channels group (HTTP $HTTP_CODE)"
     echo "$CREATE_RESULT" | grep -v "^HTTP:"
   fi
+fi
+
+# =============================================================================
+# LDAP User Federation (READ_ONLY — LDAP is authoritative)
+# =============================================================================
+echo ""
+echo "=== Configuring LDAP User Federation ==="
+
+# Check if OpenLDAP is reachable (it should be, keycloak-setup depends on it)
+# Refresh token before LDAP federation setup
+TOKEN=$(get_admin_token)
+
+# Check if LDAP federation already exists
+EXISTING_LDAP=$(curl -s -H "Authorization: Bearer $TOKEN" \
+  "$KEYCLOAK_URL/admin/realms/$REALM_NAME/components?name=openldap&type=org.keycloak.storage.UserStorageProvider")
+
+LDAP_CONFIG='{
+  "name": "openldap",
+  "providerId": "ldap",
+  "providerType": "org.keycloak.storage.UserStorageProvider",
+  "config": {
+    "vendor": ["other"],
+    "connectionUrl": ["ldap://openldap:389"],
+    "bindDn": ["cn=admin,dc=fractalrealities,dc=net"],
+    "bindCredential": ["adminpassword"],
+    "usersDn": ["ou=users,dc=fractalrealities,dc=net"],
+    "usernameLDAPAttribute": ["uid"],
+    "rdnLDAPAttribute": ["uid"],
+    "uuidLDAPAttribute": ["entryUUID"],
+    "userObjectClasses": ["inetOrgAnonAccount"],
+    "editMode": ["READ_ONLY"],
+    "syncRegistrations": ["false"],
+    "importEnabled": ["true"],
+    "batchSizeForSync": ["1000"],
+    "fullSyncPeriod": ["3600"],
+    "changedSyncPeriod": ["60"],
+    "searchScope": ["1"],
+    "pagination": ["true"],
+    "trustEmail": ["true"],
+    "enabled": ["true"],
+    "priority": ["0"],
+    "cachePolicy": ["DEFAULT"]
+  }
+}'
+
+EXISTING_LDAP_ID=$(echo "$EXISTING_LDAP" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+if [ -n "$EXISTING_LDAP_ID" ]; then
+  echo "LDAP federation 'openldap' exists (id: $EXISTING_LDAP_ID), updating config..."
+  LDAP_RESULT=$(curl -s -w "\nHTTP:%{http_code}" -X PUT \
+    "$KEYCLOAK_URL/admin/realms/$REALM_NAME/components/$EXISTING_LDAP_ID" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$LDAP_CONFIG")
+
+  HTTP_CODE=$(echo "$LDAP_RESULT" | grep "HTTP:" | cut -d: -f2)
+  if [ "$HTTP_CODE" = "204" ]; then
+    echo "  LDAP federation updated successfully"
+  else
+    echo "  WARNING: LDAP federation update returned HTTP $HTTP_CODE"
+    echo "  $LDAP_RESULT" | grep -v "^HTTP:"
+  fi
+else
+  echo "Creating LDAP User Federation provider (READ_ONLY)..."
+  LDAP_RESULT=$(curl -s -w "\nHTTP:%{http_code}" -X POST \
+    "$KEYCLOAK_URL/admin/realms/$REALM_NAME/components" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$LDAP_CONFIG")
+
+  HTTP_CODE=$(echo "$LDAP_RESULT" | grep "HTTP:" | cut -d: -f2)
+  if [ "$HTTP_CODE" = "201" ]; then
+    echo "  LDAP federation created successfully"
+  else
+    echo "  WARNING: LDAP federation creation returned HTTP $HTTP_CODE"
+    echo "  $LDAP_RESULT" | grep -v "^HTTP:"
+    echo "  (This may be OK if OpenLDAP is not running)"
+  fi
+fi
+
+# Trigger initial user sync from LDAP
+LDAP_COMP_ID=$(curl -s -H "Authorization: Bearer $TOKEN" \
+  "$KEYCLOAK_URL/admin/realms/$REALM_NAME/components?name=openldap&type=org.keycloak.storage.UserStorageProvider" \
+  | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+if [ -n "$LDAP_COMP_ID" ]; then
+  echo "  Triggering full user sync from LDAP..."
+  SYNC_RESULT=$(curl -s -X POST \
+    "$KEYCLOAK_URL/admin/realms/$REALM_NAME/user-storage/$LDAP_COMP_ID/sync?action=triggerFullSync" \
+    -H "Authorization: Bearer $TOKEN")
+  echo "  Sync result: $SYNC_RESULT"
+else
+  echo "  WARNING: Could not find LDAP federation component ID for sync"
 fi
 
 # Create/recreate test user with IRC-friendly settings
