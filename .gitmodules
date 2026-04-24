@@ -20,4 +20,7 @@
 	url = https://github.com/evilnet/nefarious2.git
 [submodule "keycloak-webhook-spi"]
 	path = keycloak-webhook-spi
-	url = git@github.com:MrLenin/keycloak-webhook-spi.git
+	url = git@github.com:evilnet/keycloak-webhook-spi.git
+[submodule "nefarious-rs"]
+	path = nefarious-rs
+	url = git@github.com:MrLenin/nefarious-rs.git
