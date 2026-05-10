@@ -132,3 +132,32 @@ cd ..
 git add nefarious  # or x3
 git commit -m "Update nefarious submodule"
 ```
+
+### Iterating on libkc
+
+By default, `nefarious/Dockerfile` pulls libkc as a prebuilt OCI image
+from `ghcr.io/evilnet/libkc` (pinned via `LIBKC_IMAGE` build-arg in
+`docker-compose.yml`). When you're editing the libkc submodule, build a
+local image and use the override file to swap it in:
+
+```bash
+docker build -t local/libkc:dev libkc/
+COMPOSE_FILE=docker-compose.yml:docker-compose.libkc-dev.yml \
+  docker compose build nefarious
+```
+
+A shell alias keeps it ergonomic:
+
+```bash
+alias dcl='COMPOSE_FILE=docker-compose.yml:docker-compose.libkc-dev.yml docker compose'
+# then:
+docker build -t local/libkc:dev libkc/
+dcl build nefarious
+```
+
+When you're done iterating and ready to land the change:
+1. Push the libkc commit; wait for the publish workflow to produce
+   `ghcr.io/evilnet/libkc:sha-<short>`.
+2. Bump `LIBKC_IMAGE` in `docker-compose.yml` (every nefarious service
+   block) and the default in `nefarious/Dockerfile` to the new SHA.
+3. Bump the libkc submodule pointer in this repo to match.

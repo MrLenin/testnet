@@ -1,0 +1,51 @@
+# Override file for libkc developers iterating on the submodule.
+#
+# Usage:
+#   docker build -t local/libkc:dev libkc/
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.libkc-dev.yml \
+#     docker compose build nefarious
+#
+# The named context `libkc` shadows the LIBKC_IMAGE-derived stage of the
+# same name in nefarious/Dockerfile, so a single override flips the libkc
+# source for every nefarious service.
+
+services:
+  nefarious-init:
+    build:
+      additional_contexts:
+        - libkc=docker-image://local/libkc:dev
+
+  nefarious:
+    build:
+      additional_contexts:
+        - libkc=docker-image://local/libkc:dev
+
+  nefarious2-init:
+    build:
+      additional_contexts:
+        - libkc=docker-image://local/libkc:dev
+
+  nefarious2:
+    build:
+      additional_contexts:
+        - libkc=docker-image://local/libkc:dev
+
+  nefarious3-init:
+    build:
+      additional_contexts:
+        - libkc=docker-image://local/libkc:dev
+
+  nefarious3:
+    build:
+      additional_contexts:
+        - libkc=docker-image://local/libkc:dev
+
+  nefarious4-init:
+    build:
+      additional_contexts:
+        - libkc=docker-image://local/libkc:dev
+
+  nefarious4:
+    build:
+      additional_contexts:
+        - libkc=docker-image://local/libkc:dev

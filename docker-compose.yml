@@ -7,8 +7,8 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-          - libkc=./libkc
-          - libmdbx=./libmdbx
+        args:
+          LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "0:0"  # Run as root to fix permissions
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -37,9 +37,14 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-          - libkc=./libkc
-          - libmdbx=./libmdbx
+        args:
+          LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "1234:1234"  # nefarious user
+    # SYS_PTRACE for `docker exec nefarious gdb -p 1` live attach during
+    # diagnostic runs.  Safe to leave enabled in dev (no security cost
+    # in a local testnet).
+    cap_add:
+      - SYS_PTRACE
     # Enable core dumps for crash debugging
     ulimits:
       core:
@@ -53,6 +58,7 @@ services:
         ipv4_address: 172.29.0.2
         aliases:
           - testnet.fractalrealities.net
+    command: ["/home/nefarious/bin/ircd", "-n", "-x", "8", "-f", "ircd.conf"]
     volumes:
      - ./data/ircd.conf:/home/nefarious/ircd/local.conf
      - ./data/saslusers:/home/nefarious/ircd/saslusers
@@ -67,7 +73,7 @@ services:
       - 0.0.0.0:6697:6697
       - 0.0.0.0:4497:4497
       - 0.0.0.0:9998:9998
-      - 0.0.0.0:8443:8443  # WebSocket (SSL)
+      - 0.0.0.0:8444:8444  # WebSocket (SSL)
     env_file:
       - .env
       - .env.local
@@ -88,8 +94,8 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-          - libkc=./libkc
-          - libmdbx=./libmdbx
+        args:
+          LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -117,9 +123,18 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-          - libkc=./libkc
-          - libmdbx=./libmdbx
+        args:
+          LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "1234:1234"  # nefarious user
+    # Match nefarious's ulimits — ircd boot calls os_set_fdlimit(MAXCONNECTIONS=4096)
+    # and bails if the container's RLIMIT_NOFILE hard cap is below that.
+    ulimits:
+      core:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 8192
+        hard: 16384
     networks:
       irc_net:
         ipv4_address: 172.29.0.5
@@ -135,8 +150,8 @@ services:
      - gitsync_data:/home/nefarious/ircd/gitsync
      - ssl_data2:/home/nefarious/ircd/ssl
     ports:
-      - 127.0.0.1:6668:6667
-      - 127.0.0.1:6698:6697
+      - 0.0.0.0:6668:6667
+      - 0.0.0.0:6698:6697
     env_file:
       - .env
       - .env.local
@@ -164,8 +179,8 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-          - libkc=./libkc
-          - libmdbx=./libmdbx
+        args:
+          LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -192,8 +207,8 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-          - libkc=./libkc
-          - libmdbx=./libmdbx
+        args:
+          LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "1234:1234"
     networks:
       irc_net:
@@ -239,8 +254,8 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-          - libkc=./libkc
-          - libmdbx=./libmdbx
+        args:
+          LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -267,8 +282,8 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-          - libkc=./libkc
-          - libmdbx=./libmdbx
+        args:
+          LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "1234:1234"
     networks:
       irc_net:
@@ -307,6 +322,67 @@ services:
     profiles:
       - multi
 
+  nefarious-upstream-init:
+    container_name: nefarious-upstream-init
+    build:
+        context: ./nefarious-upstream
+        dockerfile: Dockerfile
+        additional_contexts:
+          - data=./data
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        chown -R 1234:1234 /home/nefarious/ircd/ssl
+        if [ ! -f /home/nefarious/ircd/ssl/ircd.pem ]; then
+          openssl req -new -x509 -days 365 -nodes -out /home/nefarious/ircd/ssl/ircd.pem -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -keyout /home/nefarious/ircd/ssl/ircd.pem -subj "/CN=upstream.fractalrealities.net/"
+          chown 1234:1234 /home/nefarious/ircd/ssl/ircd.pem
+          echo "Generated new ECDSA SSL certificate"
+        fi
+        echo "Nefarious-upstream volume permissions fixed"
+    volumes:
+      - ssl_data_upstream:/home/nefarious/ircd/ssl
+    profiles:
+      - upstream
+
+  nefarious-upstream:
+    container_name: nefarious-upstream
+    build:
+        context: ./nefarious-upstream
+        dockerfile: Dockerfile
+        additional_contexts:
+          - data=./data
+    user: "1234:1234"
+    networks:
+      irc_net:
+        ipv4_address: 172.29.0.8
+        aliases:
+          - upstream.fractalrealities.net
+    command: ["/home/nefarious/bin/ircd", "-n", "-x", "8", "-f", "ircd-docker.conf"]
+    volumes:
+     - ./data/ircd-upstream.conf:/home/nefarious/ircd/ircd.conf
+     - ssl_data_upstream:/home/nefarious/ircd/ssl
+    ports:
+      - 0.0.0.0:6671:6667
+      - 0.0.0.0:6701:6697
+    env_file:
+      - .env
+      - .env.local
+    environment:
+      - IRCD_GENERAL_NAME=upstream.fractalrealities.net
+      - IRCD_GENERAL_NUMERIC=5
+    depends_on:
+      nefarious-upstream-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f '/home/nefarious/bin/ircd'"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+    profiles:
+      - upstream
+
   x3-init:
     container_name: x3-init
     build:
@@ -315,7 +391,6 @@ services:
       additional_contexts:
         - data=./data
         - libkc=./libkc
-        - libmdbx=./libmdbx
     user: "0:0"  # Run as root to fix permissions
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -333,7 +408,6 @@ services:
       additional_contexts:
         - data=./data
         - libkc=./libkc
-        - libmdbx=./libmdbx
     user: "1234:1234"  # x3 user
     # Enable core dumps for crash debugging
     ulimits:
@@ -588,6 +662,7 @@ volumes:
   ssl_data2:
   ssl_data3:
   ssl_data4:
+  ssl_data_upstream:
   webpush_data:
   webpush_data2:
   webpush_data3:
