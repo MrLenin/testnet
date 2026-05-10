@@ -146,10 +146,14 @@ COMPOSE_FILE=docker-compose.yml:docker-compose.libkc-dev.yml \
   docker compose build nefarious
 ```
 
-A shell alias keeps it ergonomic:
+A shell function keeps it ergonomic. If you already have a `dc` wrapper
+that auto-sources `.env`/`.env.local`, define `dcl` as a thin delegate
+so env-loading stays in one place:
 
 ```bash
-alias dcl='COMPOSE_FILE=docker-compose.yml:docker-compose.libkc-dev.yml docker compose'
+dcl() {
+    COMPOSE_FILE=docker-compose.yml:docker-compose.libkc-dev.yml dc "$@"
+}
 # then:
 docker build -t local/libkc:dev libkc/
 dcl build nefarious
