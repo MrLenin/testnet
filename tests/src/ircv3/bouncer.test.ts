@@ -1081,9 +1081,8 @@ describe('Built-in Bouncer', () => {
         = await createBouncerClient(account, password);
       trackClient(primary);
 
-      const shadowNick = uniqueNick('shddeo');
       const { client: shadow } = await createSaslBouncerClient(account, password, {
-        nick: shadowNick,
+        nick: uniqueNick('shddeo'),
       });
       trackClient(shadow);
       await new Promise(r => setTimeout(r, 500));
@@ -1097,8 +1096,14 @@ describe('Built-in Bouncer', () => {
       // through bounce_sync_session_umodes: clearing umode on any
       // session member must flow to the rest, and the session-level
       // grant must clear too.
+      // Note: shadow's effective nick after alias attach is primaryNick
+      // (aliases share the bouncer session's nick); the original
+      // registration nick was overwritten by bounce_setup_local_alias.
+      // So we MODE against primaryNick — the server resolves it to
+      // primary, set_user_mode clears +o, and bounce_sync_session_umodes
+      // propagates the clear back to shadow.
       shadow.clearRawBuffer();
-      shadow.send(`MODE ${shadowNick} -o`);
+      shadow.send(`MODE ${primaryNick} -o`);
       await new Promise(r => setTimeout(r, 300));
 
       // WHOIS the canonical nick (resolves to primary).  Should NOT
@@ -1139,10 +1144,11 @@ describe('Built-in Bouncer', () => {
       const { account, password, fromPool } = await getTestAccount();
       if (fromPool) poolAccounts.push(account);
 
-      const { client: primary } = await createBouncerClient(account, password);
+      const { client: primary, nick: primaryNick }
+        = await createBouncerClient(account, password);
       trackClient(primary);
 
-      const { client: shadow, nick: shadowNick } = await createSaslBouncerClient(
+      const { client: shadow } = await createSaslBouncerClient(
         account, password, { nick: uniqueNick('shdrcv') }
       );
       trackClient(shadow);
@@ -1153,12 +1159,15 @@ describe('Built-in Bouncer', () => {
       primary.send(`OPER ${IRC_OPER.name} ${IRC_OPER.password}`);
       await primary.waitForNumeric('381', 5000);
 
-      // Shadow's umode should now include +o; ask it for its own MODE
-      // (server replies RPL_UMODEIS, 221, with the current modes).
-      // We sleep briefly so the sync helper has time to apply.
+      // Shadow's umode should now include +o.  Ask the server for
+      // primary's umode (which is shadow's effective umode too, since
+      // they share the session identity) via `MODE <primaryNick>` —
+      // the original shadow registration nick has been overwritten by
+      // bounce_setup_local_alias, so we can't use that.  Server
+      // replies RPL_UMODEIS (221) with the current modes.
       await new Promise(r => setTimeout(r, 200));
       shadow.clearRawBuffer();
-      shadow.send(`MODE ${shadowNick}`);
+      shadow.send(`MODE ${primaryNick}`);
 
       const modeReply = await shadow.waitForParsedLine(
         msg => msg.command === '221' || msg.command === 'MODE',
