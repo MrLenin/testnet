@@ -14,6 +14,7 @@ import {
   disconnectAbruptly,
   reconnectBouncer,
   assertBouncerActive,
+  IRC_OPER,
 } from '../helpers/index.js';
 
 /**
@@ -988,6 +989,187 @@ describe('Built-in Bouncer', () => {
       const hasShadow = clientLines.some(l => l.includes('shadow'));
       expect(hasPrimary, 'LISTCLIENTS should show a primary connection').toBe(true);
       expect(hasShadow, 'LISTCLIENTS should show a shadow connection').toBe(true);
+
+      // Cleanup
+      shadow.send('QUIT');
+      await bouncerDisableHold(primary);
+      primary.send('QUIT');
+    });
+  });
+
+  describe('Session-Anchored Oper', () => {
+    /* These cover the Phase A/B oper sub-arc: /OPER fired on any
+     * session member (primary or alias) must propagate to all other
+     * local members.  Pre-fix, bounce_sync_alias_umodes returned
+     * early when called with an alias as the source — /OPER on a
+     * shadow stayed scoped to that one connection.  The grant is
+     * also recorded on the BouncerSession so promote/demote and
+     * server restart preserve the oper state. */
+
+    it('/OPER on shadow propagates +o to primary (WHOIS observer view)', async () => {
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      // Primary attaches with hold.
+      const { client: primary, nick: primaryNick } =
+          await createBouncerClient(account, password);
+      trackClient(primary);
+      await assertBouncerActive(primary, 'primary');
+
+      // Shadow attaches as second SASL connection on same account.
+      const { client: shadow } = await createSaslBouncerClient(account, password, {
+        nick: uniqueNick('shdop'),
+      });
+      trackClient(shadow);
+      await new Promise(r => setTimeout(r, 500));
+
+      // /OPER on the shadow.  Pre-fix this stayed scoped to shadow's
+      // Client struct and never reached primary; the WHOIS observer
+      // below would not see RPL_WHOISOPERATOR.
+      shadow.clearRawBuffer();
+      shadow.send(`OPER ${IRC_OPER.name} ${IRC_OPER.password}`);
+      await shadow.waitForNumeric('381', 5000);  // RPL_YOUREOPER
+
+      // Observer client does /WHOIS on the bouncer user's nick.  WHOIS
+      // resolves by FindUser → returns the canonical (primary) Client;
+      // its oper status is what the WHOIS reply carries.  If the sync
+      // helper failed to propagate, line 313 (RPL_WHOISOPERATOR) won't
+      // appear.
+      const observer = trackClient(await createRawSocketClient());
+      await observer.capLs();
+      observer.capEnd();
+      observer.register(uniqueNick('whoperobs'));
+      await observer.waitForNumeric('001');
+
+      observer.clearRawBuffer();
+      observer.send(`WHOIS ${primaryNick}`);
+
+      // Collect WHOIS responses until end-of-whois (318).  We're
+      // looking specifically for RPL_WHOISOPERATOR (313).
+      let sawOper = false;
+      try {
+        await observer.waitForParsedLine(
+          msg => {
+            if (msg.command === '313') {
+              sawOper = true;
+              return true;
+            }
+            return msg.command === '318';   // end of whois — stop waiting
+          },
+          5000
+        );
+      } catch {
+        // timeout — sawOper stays false, assertion below fails meaningfully
+      }
+      expect(sawOper,
+        '/OPER on shadow must propagate to primary; observer WHOIS should '
+        + 'show RPL_WHOISOPERATOR (313) for the session\'s canonical nick'
+      ).toBe(true);
+
+      // Cleanup
+      observer.send('QUIT');
+      shadow.send('QUIT');
+      await bouncerDisableHold(primary);
+      primary.send('QUIT');
+    });
+
+    it('/MODE -o on alias clears +o across the session', async () => {
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      const { client: primary, nick: primaryNick }
+        = await createBouncerClient(account, password);
+      trackClient(primary);
+
+      const shadowNick = uniqueNick('shddeo');
+      const { client: shadow } = await createSaslBouncerClient(account, password, {
+        nick: shadowNick,
+      });
+      trackClient(shadow);
+      await new Promise(r => setTimeout(r, 500));
+
+      // Oper on primary, verify it propagated to shadow.
+      primary.send(`OPER ${IRC_OPER.name} ${IRC_OPER.password}`);
+      await primary.waitForNumeric('381', 5000);
+      await new Promise(r => setTimeout(r, 200));
+
+      // Now deop from the shadow.  Mirrors the /OPER-on-alias path
+      // through bounce_sync_session_umodes: clearing umode on any
+      // session member must flow to the rest, and the session-level
+      // grant must clear too.
+      shadow.clearRawBuffer();
+      shadow.send(`MODE ${shadowNick} -o`);
+      await new Promise(r => setTimeout(r, 300));
+
+      // WHOIS the canonical nick (resolves to primary).  Should NOT
+      // include RPL_WHOISOPERATOR (313).
+      const observer = trackClient(await createRawSocketClient());
+      await observer.capLs();
+      observer.capEnd();
+      observer.register(uniqueNick('whodeop'));
+      await observer.waitForNumeric('001');
+
+      observer.clearRawBuffer();
+      observer.send(`WHOIS ${primaryNick}`);
+
+      let sawOper = false;
+      try {
+        await observer.waitForParsedLine(
+          msg => {
+            if (msg.command === '313') {
+              sawOper = true;
+              return true;
+            }
+            return msg.command === '318';
+          },
+          5000
+        );
+      } catch { /* timeout — sawOper stays false, which is the success case */ }
+      expect(sawOper,
+        '/MODE -o on shadow must clear +o on primary too (session-level deop)'
+      ).toBe(false);
+
+      observer.send('QUIT');
+      shadow.send('QUIT');
+      await bouncerDisableHold(primary);
+      primary.send('QUIT');
+    });
+
+    it('/OPER on primary propagates to shadow (shadow sees its own +o)', async () => {
+      const { account, password, fromPool } = await getTestAccount();
+      if (fromPool) poolAccounts.push(account);
+
+      const { client: primary } = await createBouncerClient(account, password);
+      trackClient(primary);
+
+      const { client: shadow, nick: shadowNick } = await createSaslBouncerClient(
+        account, password, { nick: uniqueNick('shdrcv') }
+      );
+      trackClient(shadow);
+      await new Promise(r => setTimeout(r, 500));
+
+      // Oper on primary.
+      primary.clearRawBuffer();
+      primary.send(`OPER ${IRC_OPER.name} ${IRC_OPER.password}`);
+      await primary.waitForNumeric('381', 5000);
+
+      // Shadow's umode should now include +o; ask it for its own MODE
+      // (server replies RPL_UMODEIS, 221, with the current modes).
+      // We sleep briefly so the sync helper has time to apply.
+      await new Promise(r => setTimeout(r, 200));
+      shadow.clearRawBuffer();
+      shadow.send(`MODE ${shadowNick}`);
+
+      const modeReply = await shadow.waitForParsedLine(
+        msg => msg.command === '221' || msg.command === 'MODE',
+        3000
+      );
+      // The umode string is the trailing arg.  Look for +o (or, for
+      // PRIV_PROPAGATE-less opers, +O — accept either as "synced").
+      const modeStr = modeReply.raw || '';
+      expect(/\s\+\S*[oO]/.test(modeStr),
+        `Shadow should reflect primary's +o after sync; got: ${modeStr}`
+      ).toBe(true);
 
       // Cleanup
       shadow.send('QUIT');

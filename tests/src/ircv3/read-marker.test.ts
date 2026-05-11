@@ -16,8 +16,11 @@ import {
  * Tests the IRCv3 read marker specification for syncing read positions
  * across clients. Used by bouncers and multi-device setups.
  *
- * IMPORTANT: Read marker functionality requires SASL authentication.
- * Without authentication, MARKREAD commands are rejected or ignored.
+ * Authenticated clients persist markers in the metadata LMDB store
+ * and sync them cross-server via the MR P10 token.  Unauthenticated
+ * (ephemeral) clients use a session-anchored in-memory marker store
+ * keyed on the per-connection cli_session_id; no persistence, no
+ * S2S broadcast, markers disappear with the session.
  */
 describe('IRCv3 Read Marker (draft/read-marker)', () => {
   const clients: RawSocketClient[] = [];
@@ -274,46 +277,105 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
     }, 45000);
   });
 
-  describe('MARKREAD Errors', () => {
-    it('rejects MARKREAD without authentication', { retry: 2 }, async () => {
+  describe('MARKREAD Ephemeral (session-anchored)', () => {
+    it('accepts MARKREAD without authentication, anchored on session', { retry: 2 }, async () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
-      // Request standard-replies so server sends FAIL instead of NOTICE fallback
       await client.capReq(['draft/read-marker', 'standard-replies']);
       client.capEnd();
-      client.register('rmerr1');
+      client.register(uniqueNick('rmeph'));
       await client.waitForNumeric('001');
 
-      const channel = uniqueChannel('rmerr');
+      const channel = uniqueChannel('rmeph');
       client.send(`JOIN ${channel}`);
       await client.waitForJoin(channel);
 
       await new Promise(r => setTimeout(r, 200));
       client.clearRawBuffer();
 
-      // Try to set marker without authentication
+      // Set a marker without authentication — should now be accepted
+      // (resolved to the per-Client session_id anchor since Phase E).
       const timestamp = new Date().toISOString();
       client.send(`MARKREAD ${channel} timestamp=${timestamp}`);
 
-      // Should receive error - FAIL, NOTICE fallback, or error numeric
-      const response = await client.waitForParsedLine(
-        msg => msg.command === 'FAIL' ||
-               msg.command === '731' ||
-               /^4\d\d$/.test(msg.command) ||
-               msg.command === 'MARKREAD' ||
-               // NOTICE fallback if standard-replies wasn't enabled
-               (msg.command === 'NOTICE' && msg.raw.includes('ACCOUNT_REQUIRED')),
-        5000
-      );
+      // We should NOT receive a FAIL / ACCOUNT_REQUIRED response.
+      // The server may echo the marker back as MARKREAD, or stay
+      // silent — both are fine for the "accepted" verdict.
+      let rejected = false;
+      try {
+        await client.waitForParsedLine(
+          msg => msg.command === 'FAIL' ||
+                 (msg.command === 'NOTICE' && msg.raw.includes('ACCOUNT_REQUIRED')),
+          1500
+        );
+        rejected = true;
+      } catch {
+        // timeout — no rejection arrived, which is the success case
+      }
+      expect(rejected, 'Unauthenticated MARKREAD should no longer be rejected').toBe(false);
 
-      // If MARKREAD returned, it should be an error or empty marker
-      // If FAIL, NOTICE, or error numeric, that's expected
-      expect(response.command, 'Unauthenticated MARKREAD should get error response').toBeTruthy();
-      console.log('Unauthenticated MARKREAD response:', response.raw);
+      // GET should now return the timestamp we just set.
+      client.clearRawBuffer();
+      client.send(`MARKREAD ${channel}`);
+      const response = await client.waitForParsedLine(
+        msg => msg.command === 'MARKREAD' && msg.raw.includes(channel),
+        3000
+      );
+      expect(response.command).toBe('MARKREAD');
+      // The marker can be in ISO or Unix-fraction form depending on
+      // server config; just verify it's not the empty "*" sentinel.
+      expect(response.raw, 'GET should return previously-set value, not the empty marker')
+        .not.toMatch(/timestamp=\*/);
 
       client.send('QUIT');
     });
+
+    it('ephemeral markers are session-scoped (disappear on reconnect)', { retry: 2 }, async () => {
+      const channel = uniqueChannel('rmsess');
+
+      // Session 1: connect ephemerally, set a marker.
+      const first = trackClient(await createRawSocketClient());
+      await first.capLs();
+      await first.capReq(['draft/read-marker']);
+      first.capEnd();
+      first.register(uniqueNick('rms1'));
+      await first.waitForNumeric('001');
+      first.send(`JOIN ${channel}`);
+      await first.waitForJoin(channel);
+
+      const ts = new Date().toISOString();
+      first.send(`MARKREAD ${channel} timestamp=${ts}`);
+      await new Promise(r => setTimeout(r, 300));
+      first.close();
+
+      // Session 2: fresh connection, fresh session_id — should see no
+      // prior marker (would return "*").
+      const second = trackClient(await createRawSocketClient());
+      await second.capLs();
+      await second.capReq(['draft/read-marker']);
+      second.capEnd();
+      second.register(uniqueNick('rms2'));
+      await second.waitForNumeric('001');
+      second.send(`JOIN ${channel}`);
+      await second.waitForJoin(channel);
+      await new Promise(r => setTimeout(r, 200));
+      second.clearRawBuffer();
+
+      second.send(`MARKREAD ${channel}`);
+      const response = await second.waitForParsedLine(
+        msg => msg.command === 'MARKREAD' && msg.raw.includes(channel),
+        3000
+      );
+      expect(response.raw,
+        'A fresh ephemeral session must not see another session\'s markers'
+      ).toMatch(/timestamp=\*/);
+
+      second.send('QUIT');
+    });
+  });
+
+  describe('MARKREAD Errors', () => {
 
     it('rejects MARKREAD with invalid timestamp format', async () => {
       const client = trackClient(await createRawSocketClient());

@@ -117,32 +117,15 @@ describe('IRCv3 Standard Replies', () => {
   // messages. Neither has a standard operation that guarantees their emission.
 
   describe('Standard Reply Codes', () => {
-    it('ACCOUNT_REQUIRED for operations needing authentication', async () => {
-      const client = trackClient(await createRawSocketClient());
-
-      await client.capLs();
-      await client.capReq(['standard-replies', 'draft/chathistory']);
-      client.capEnd();
-      client.register('srauth1');
-      await client.waitForNumeric('001');
-
-      client.clearRawBuffer();
-
-      // Try to access chathistory without auth
-      client.send('CHATHISTORY LATEST #somechannel * 10');
-
-      try {
-        const response = await client.waitForParsedLine(
-          msg => msg.command === 'FAIL' || /^4\d\d$/.test(msg.command),
-          3000
-        );
-        console.log('Auth required response:', response.raw);
-      } catch {
-        console.log('No auth-required response');
-      }
-
-      client.send('QUIT');
-    });
+    /* Removed: 'ACCOUNT_REQUIRED for operations needing authentication'.
+     * It was meant to exercise CHATHISTORY's account gate, but
+     * FEAT_CHATHISTORY_REQUIRE_AUTH now defaults to 0 (since
+     * commit e623b9d — ephemeral clients can use chathistory by
+     * default).  The test had no negative-path assertion in either
+     * branch of its try/catch, so it would have passed regardless of
+     * server behavior.  Deployments that want the strict gate (e.g.
+     * Afternet) set CHATHISTORY_REQUIRE_AUTH=TRUE in ircd.conf and
+     * can test the rejection path with that override in place. */
 
     it('INVALID_TARGET for bad target specification', async () => {
       const client = trackClient(await createRawSocketClient());

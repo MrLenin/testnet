@@ -315,6 +315,80 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
     });
   });
 
+  describe('CHATHISTORY Ephemeral (no auth)', () => {
+    /* Phase F default-flag-flip coverage: CHATHISTORY_REQUIRE_AUTH
+     * defaults to 0 since e623b9d, so an unauthed client can query
+     * channel history they're a current member of.  Storage still
+     * requires at least one authed user present in the channel
+     * (chptr->authusers > 0 — the intentional consent gate at
+     * channel.c:116); the authed seed user provides that anchor. */
+
+    it('unauthed client can read channel CHATHISTORY when an authed user is present', async () => {
+      // Seed user: authed, joins the channel, sends a message so there's
+      // something to query.  Also keeps authusers > 0 so subsequent
+      // messages get stored.
+      const { client: seed, account, fromPool } = await createAuthedHistoryClient();
+      trackClient(seed);
+      if (fromPool) poolAccounts.push(account);
+
+      const channel = uniqueChannel('ephch');
+      seed.send(`JOIN ${channel}`);
+      await seed.waitForJoin(channel);
+
+      const seedMsg = `seed-${uniqueId().slice(0, 6)}`;
+      seed.send(`PRIVMSG ${channel} :${seedMsg}`);
+      await new Promise(r => setTimeout(r, 300));
+
+      // Ephemeral client: no SASL, no account.  Should still be able
+      // to join + query history per Phase F's relaxed default.
+      const eph = trackClient(await createRawSocketClient());
+      await eph.capLs();
+      await eph.capReq(['draft/chathistory', 'batch', 'standard-replies', 'server-time']);
+      eph.capEnd();
+      eph.register(`eph${uniqueId().slice(0, 6)}`);
+      await eph.waitForNumeric('001');
+      eph.send(`JOIN ${channel}`);
+      await eph.waitForJoin(channel);
+      await new Promise(r => setTimeout(r, 200));
+      eph.clearRawBuffer();
+
+      eph.send(`CHATHISTORY LATEST ${channel} * 20`);
+
+      // Collect lines until BATCH end (-id) or timeout.  We're looking
+      // for at least one PRIVMSG inside the batch carrying seedMsg.
+      let sawSeedMsg = false;
+      let sawAuthFail = false;
+      try {
+        await eph.waitForParsedLine(
+          msg => {
+            if (msg.command === 'FAIL' && /chathistory/i.test(msg.raw)) {
+              sawAuthFail = true;
+              return true;  // stop on failure
+            }
+            if (msg.command === 'PRIVMSG' && msg.trailing?.includes(seedMsg)) {
+              sawSeedMsg = true;
+            }
+            return msg.command === 'BATCH' && msg.raw.startsWith(':') === false &&
+                   /^-/.test(msg.params?.[0] || '');
+          },
+          5000
+        );
+      } catch {
+        // timeout — both flags remain as they were
+      }
+
+      expect(sawAuthFail,
+        'Ephemeral CHATHISTORY must not fail with auth-required after the Phase F flip'
+      ).toBe(false);
+      expect(sawSeedMsg,
+        'Ephemeral client should receive the seed message in CHATHISTORY LATEST batch'
+      ).toBe(true);
+
+      eph.send('QUIT');
+      seed.send('QUIT');
+    });
+  });
+
   describe('Chathistory Error Handling', () => {
     it('returns error for unauthorized channel history', async () => {
       const client = trackClient(await createRawSocketClient());
@@ -611,6 +685,80 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
    * Users opt out via: METADATA SET * chathistory.pm * :0 (or +y user mode)
    * If either party opts out, a HISTORY_GAP marker is stored instead.
    */
+  describe('PM Chathistory Ephemeral Mix', () => {
+    /* Phase C gate relaxation: should_store_pm now requires "at least
+     * one party authed" (was both).  An ephemeral↔authed conversation
+     * persists under the authed party's anchor and is queryable from
+     * the authed side via the canonical nick1:nick2 pair-key. */
+
+    it('PM history is stored when sender is authed and recipient ephemeral', async () => {
+      const { client: authed, account, fromPool, nick: authedNick }
+        = await createAuthedHistoryClient(['draft/metadata-2']);
+      trackClient(authed);
+      if (fromPool) poolAccounts.push(account);
+
+      const ephNick = `eph${uniqueId().slice(0, 6)}`;
+      const eph = trackClient(await createRawSocketClient());
+      await eph.capLs();
+      await eph.capReq(['draft/chathistory', 'server-time']);
+      eph.capEnd();
+      eph.register(ephNick);
+      await eph.waitForNumeric('001');
+      await new Promise(r => setTimeout(r, 200));
+
+      const testId = uniqueId();
+      const msg = `eph-recv test ${testId}`;
+      authed.send(`PRIVMSG ${ephNick} :${msg}`);
+      await new Promise(r => setTimeout(r, 300));
+
+      // Authed side queries — should find the message under the
+      // canonical pair-key.
+      const messages = await waitForChathistory(authed, ephNick, {
+        minMessages: 1,
+        timeoutMs: 10000,
+      });
+      expect(messages.length,
+        'authed→ephemeral PM must persist (sender anchored)'
+      ).toBeGreaterThanOrEqual(1);
+
+      authed.send('QUIT');
+      eph.send('QUIT');
+    });
+
+    it('PM history is stored when sender ephemeral and recipient authed', async () => {
+      const { client: authed, account, fromPool, nick: authedNick }
+        = await createAuthedHistoryClient(['draft/metadata-2']);
+      trackClient(authed);
+      if (fromPool) poolAccounts.push(account);
+
+      const ephNick = `eph${uniqueId().slice(0, 6)}`;
+      const eph = trackClient(await createRawSocketClient());
+      await eph.capLs();
+      await eph.capReq(['server-time']);
+      eph.capEnd();
+      eph.register(ephNick);
+      await eph.waitForNumeric('001');
+      await new Promise(r => setTimeout(r, 200));
+
+      const testId = uniqueId();
+      const msg = `eph-send test ${testId}`;
+      eph.send(`PRIVMSG ${authedNick} :${msg}`);
+      await new Promise(r => setTimeout(r, 300));
+
+      // Authed side queries — recipient is the anchor.
+      const messages = await waitForChathistory(authed, ephNick, {
+        minMessages: 1,
+        timeoutMs: 10000,
+      });
+      expect(messages.length,
+        'ephemeral→authed PM must persist (recipient anchored)'
+      ).toBeGreaterThanOrEqual(1);
+
+      authed.send('QUIT');
+      eph.send('QUIT');
+    });
+  });
+
   describe('PM Chathistory Opt-Out', () => {
     it('PM history stored by default for authenticated users', async () => {
       const { client: client1, account: account1, fromPool: fromPool1, nick: nick1 } = await createAuthedHistoryClient(['draft/metadata-2']);
