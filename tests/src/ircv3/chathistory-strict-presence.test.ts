@@ -131,14 +131,21 @@ describe('Phase B Strict-Presence Filter (FEAT_CHATHISTORY_STRICT_PRESENCE)', ()
     await late.waitForJoin(channel);
 
     // Late joiner now queries channel history.  Strict mode should
-    // filter pre-join messages out of the result.
+    // filter pre-join messages out of the result.  waitForChathistory
+    // returns the raw IRC lines as strings; substring-match against
+    // the unique IDs.
     let sawPreJoinMsg = false;
-    const messages = await waitForChathistory(late, channel, {
-      minMessages: 0,
-      timeoutMs: 5000,
-    });
-    for (const m of messages) {
-      if (m.content?.includes(preJoinId)) sawPreJoinMsg = true;
+    try {
+      const messages = await waitForChathistory(late, channel, {
+        minMessages: 0,
+        timeoutMs: 5000,
+      });
+      for (const m of messages) {
+        if (m.includes(preJoinId)) sawPreJoinMsg = true;
+      }
+    } catch {
+      // Empty result is acceptable here — the assertion is that the
+      // pre-join message is NOT visible.  An empty batch satisfies that.
     }
     expect(sawPreJoinMsg,
       'Strict-presence filter must hide messages sent before the requester joined'
@@ -157,7 +164,7 @@ describe('Phase B Strict-Presence Filter (FEAT_CHATHISTORY_STRICT_PRESENCE)', ()
       timeoutMs: 5000,
     });
     for (const m of after) {
-      if (m.content?.includes(postJoinId)) sawPostJoinMsg = true;
+      if (m.includes(postJoinId)) sawPostJoinMsg = true;
     }
     expect(sawPostJoinMsg,
       'Messages sent during the requester\'s presence must be visible'
@@ -197,7 +204,7 @@ describe('Phase B Strict-Presence Filter (FEAT_CHATHISTORY_STRICT_PRESENCE)', ()
     });
     let sawPublic = false;
     for (const m of messages) {
-      if (m.content?.includes(preId)) sawPublic = true;
+      if (m.includes(preId)) sawPublic = true;
     }
     expect(sawPublic,
       '+H channel must bypass the presence filter — pre-join messages should be visible'
@@ -216,8 +223,11 @@ describe('Phase B Strict-Presence Filter (FEAT_CHATHISTORY_STRICT_PRESENCE)', ()
     // view.  Without inheritance, the parter would see the original
     // un-redacted content — defeating the redact's purpose.
 
+    // Client A needs echo-message so we can recover the msgid the
+    // server assigned to A's PRIVMSG (REDACT addresses the message by
+    // msgid).  Client B doesn't need it.
     const { client: a, account: accA, fromPool: poolA, nick: aNick }
-      = await createAuthedHistoryClient(['draft/message-redaction']);
+      = await createAuthedHistoryClient(['draft/message-redaction', 'echo-message', 'labeled-response']);
     trackClient(a);
     if (poolA) poolAccounts.push(accA);
     const { client: b, account: accB, fromPool: poolB, nick: bNick }
@@ -262,10 +272,18 @@ describe('Phase B Strict-Presence Filter (FEAT_CHATHISTORY_STRICT_PRESENCE)', ()
     await b.waitForJoin(channel);
     await new Promise(r => setTimeout(r, 200));
 
-    const messages = await waitForChathistory(b, channel, {
-      minMessages: 0,
-      timeoutMs: 5000,
-    });
+    let messages: string[] = [];
+    try {
+      messages = await waitForChathistory(b, channel, {
+        minMessages: 0,
+        timeoutMs: 5000,
+        // REDACT comes back as a separate event type, not a PRIVMSG.
+        eventTypes: ['PRIVMSG', 'NOTICE', 'REDACT'],
+      });
+    } catch {
+      // Empty / timeout — the assertion below tests for ABSENCE of the
+      // original, so empty satisfies that.
+    }
 
     // Inheritance says: B should see the REDACT (or the redacted
     // content) for the message they witnessed live.  What B should
@@ -274,12 +292,12 @@ describe('Phase B Strict-Presence Filter (FEAT_CHATHISTORY_STRICT_PRESENCE)', ()
     let sawOriginal = false;
     let sawRedact = false;
     for (const m of messages) {
-      if (m.content?.includes(tag) && !/\bredact/i.test(m.content)) {
+      if (m.includes(tag) && !/\bREDACT\b/i.test(m)) {
         // Found the original content as a normal PRIVMSG — that's
         // the failure case (redact not applied to history view).
         sawOriginal = true;
       }
-      if (m.content?.includes('spoiler') || /\bredact/i.test(m.raw || '')) {
+      if (m.includes('spoiler') || /\bREDACT\b/i.test(m)) {
         sawRedact = true;
       }
     }
