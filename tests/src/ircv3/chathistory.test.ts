@@ -757,6 +757,113 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       authed.send('QUIT');
       eph.send('QUIT');
     });
+
+    it('ephemeral can query their own PM history within their session (Phase 5a)', async () => {
+      const { client: authed, account, fromPool, nick: authedNick }
+        = await createAuthedHistoryClient(['draft/metadata-2']);
+      trackClient(authed);
+      if (fromPool) poolAccounts.push(account);
+
+      // Ephemeral with chathistory cap so it can query.
+      const ephNick = `eph${uniqueId().slice(0, 6)}`;
+      const eph = trackClient(await createRawSocketClient());
+      await eph.capLs();
+      await eph.capReq(['draft/chathistory', 'batch', 'server-time']);
+      eph.capEnd();
+      eph.register(ephNick);
+      await eph.waitForNumeric('001');
+      await new Promise(r => setTimeout(r, 200));
+
+      const testId = uniqueId();
+      const msg = `eph-self-read ${testId}`;
+      eph.send(`PRIVMSG ${authedNick} :${msg}`);
+      await new Promise(r => setTimeout(r, 400));
+
+      // Ephemeral queries their own PM history.  Pre-Phase-5a this
+      // was rejected by the bare IsAccount gate at check_history_access
+      // PM branch; now it's authorized via the +afternet.org/sid tag
+      // stored on the record matching this ephemeral's cli_session_id.
+      const messages = await waitForChathistory(eph, authedNick, {
+        minMessages: 1,
+        timeoutMs: 10000,
+      });
+      expect(messages.length,
+        'ephemeral should see PM history from their current session'
+      ).toBeGreaterThanOrEqual(1);
+
+      authed.send('QUIT');
+      eph.send('QUIT');
+    });
+
+    it('a new ephemeral cannot query a previous ephemeral\'s PM history by nick-squat', async () => {
+      const { client: authed, account, fromPool, nick: authedNick }
+        = await createAuthedHistoryClient(['draft/metadata-2']);
+      trackClient(authed);
+      if (fromPool) poolAccounts.push(account);
+
+      // Ephemeral Alice — connects, messages Bob (the authed party),
+      // disconnects.  Her session_id dies with the connection.
+      const aliceNick = `alice${uniqueId().slice(0, 6)}`;
+      const alice = await createRawSocketClient();
+      await alice.capLs();
+      await alice.capReq(['server-time']);
+      alice.capEnd();
+      alice.register(aliceNick);
+      await alice.waitForNumeric('001');
+
+      const testId = uniqueId();
+      alice.send(`PRIVMSG ${authedNick} :secret ${testId}`);
+      await new Promise(r => setTimeout(r, 400));
+      alice.close();
+      await new Promise(r => setTimeout(r, 300));
+
+      // Mallory — a different ephemeral connection that takes Alice's
+      // (now-released) nick.  Different cli_session_id.  Tries to read
+      // Alice's PM history with Bob.  Pre-Phase-5a Mallory would have
+      // been rejected by the bare IsAccount gate anyway; post-5a
+      // Mallory IS account-checked-out but the sessid-tag check
+      // catches her: her cli_session_id doesn't match the stored tag
+      // from Alice's session.
+      const mallory = trackClient(await createRawSocketClient());
+      await mallory.capLs();
+      await mallory.capReq(['draft/chathistory', 'batch', 'standard-replies', 'server-time']);
+      mallory.capEnd();
+      mallory.register(aliceNick);   // same nick Alice used
+      await mallory.waitForNumeric('001');
+      await new Promise(r => setTimeout(r, 200));
+      mallory.clearRawBuffer();
+
+      mallory.send(`CHATHISTORY LATEST ${authedNick} * 20`);
+
+      let leaked = false;
+      let denied = false;
+      try {
+        await mallory.waitForParsedLine(
+          msg => {
+            if (msg.command === 'PRIVMSG' && msg.trailing?.includes(testId)) {
+              leaked = true;
+              return true;
+            }
+            if (msg.command === 'FAIL' && /chathistory/i.test(msg.raw)) {
+              denied = true;
+              return true;
+            }
+            return msg.command === 'BATCH' && msg.params?.[0]?.startsWith('-') === true;
+          },
+          5000
+        );
+      } catch { /* timeout — handled by !leaked check below */ }
+
+      expect(leaked,
+        'Nick-squat must not leak previous ephemeral\'s PM history (sessid mismatch)'
+      ).toBe(false);
+      // Either explicit denial or empty batch — both are acceptable
+      // outcomes.  What's NOT acceptable is the leaked content above.
+      console.log(`nick-squat outcome: denied=${denied}, leaked=${leaked}`);
+
+      authed.send('QUIT');
+      mallory.send('QUIT');
+    });
   });
 
   describe('PM Chathistory Opt-Out', () => {
