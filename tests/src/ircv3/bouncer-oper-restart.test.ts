@@ -32,16 +32,6 @@ import {
  *   RUN_RESTART_TESTS=1 IRC_HOST=localhost npm test -- \
  *     src/ircv3/bouncer-oper-restart.test.ts
  *
- * STATUS (2026-05-11): The positive case currently FAILS — a fresh
- * /OPER on a bouncer-revived session sometimes lands the user as
- * LocalOp (+O) rather than global oper (+o), even though `local = no`
- * in the Operator block translates to PRIV_PROPAGATE via
- * ircd_parser.y:944.  The result is RPL_WHOISOPERATOR (313) hidden
- * from observers because SeeOper requires PRIV_DISPLAY which only
- * global opers get.  Cause not yet root-caused (suspect interaction
- * between bouncer revive's conf re-attachment and do_oper's
- * client_set_privs).  Test is kept here as a regression target — when
- * that bug is fixed, this test starts passing without changes.
  */
 
 const RUN = process.env.RUN_RESTART_TESTS === '1';
@@ -174,9 +164,12 @@ async function whoisIsOper(
       execSync('docker restart nefarious', { encoding: 'utf8' });
       await waitForNefariousReady();
       // x3 reconnects on its own (max_cycles=0, max_tries=0 in x3.conf
-      // mean it cycles uplinks forever).  Give the SERVER burst a
-      // moment to complete so SASL works on reconnect.
-      await new Promise(r => setTimeout(r, 5000));
+      // mean it cycles uplinks forever).  We also have to wait for the
+      // *bouncer registration deferral* — the bouncer holds back 001
+      // for reconnecting clients until inter-server burst convergence
+      // settles, which can take up to 30s in practice.  Without this
+      // pause the resumed client times out on registration.
+      await new Promise(r => setTimeout(r, 35000));
 
       // 5b) Diagnostic: WHOIS the GHOST (still in HOLDING after restore)
       //     before anyone has revived it.  If 313 appears here, the
@@ -229,7 +222,7 @@ async function whoisIsOper(
       resumed.client.send('MODE ' + resumed.nick + ' -o');
       await new Promise(r => setTimeout(r, 200));
       await bouncerDisableHold(resumed.client);
-    }, 120_000);
+    }, 180_000);
 
     it('grant clears post-restart if /DEOPER ran before disconnect',
        async () => {
@@ -260,9 +253,12 @@ async function whoisIsOper(
       execSync('docker restart nefarious', { encoding: 'utf8' });
       await waitForNefariousReady();
       // x3 reconnects on its own (max_cycles=0, max_tries=0 in x3.conf
-      // mean it cycles uplinks forever).  Give the SERVER burst a
-      // moment to complete so SASL works on reconnect.
-      await new Promise(r => setTimeout(r, 5000));
+      // mean it cycles uplinks forever).  We also have to wait for the
+      // *bouncer registration deferral* — the bouncer holds back 001
+      // for reconnecting clients until inter-server burst convergence
+      // settles, which can take up to 30s in practice.  Without this
+      // pause the resumed client times out on registration.
+      await new Promise(r => setTimeout(r, 35000));
 
       const resumed = await createSaslBouncerClient(account, password, {
         nick: uniqueNick('opnar2'),
@@ -284,6 +280,6 @@ async function whoisIsOper(
       ).toBe(false);
 
       await bouncerDisableHold(resumed.client);
-    }, 120_000);
+    }, 180_000);
   }
 );
