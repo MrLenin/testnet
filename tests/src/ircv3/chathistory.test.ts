@@ -864,6 +864,119 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       authed.send('QUIT');
       mallory.send('QUIT');
     });
+
+    it('ephemeral↔ephemeral PMs are queryable from both sides within the session (Phase C)', async () => {
+      // Two unauthed clients, both with chathistory cap.  Neither
+      // party has an account anchor, so LMDB skips them; the
+      // per-Client in-memory ring is the only source.  Both ends must
+      // see the conversation when queried by either side.
+      const aNick = `eph${uniqueId().slice(0, 6)}`;
+      const bNick = `eph${uniqueId().slice(0, 6)}`;
+
+      const a = trackClient(await createRawSocketClient());
+      await a.capLs();
+      await a.capReq(['draft/chathistory', 'batch', 'server-time']);
+      a.capEnd();
+      a.register(aNick);
+      await a.waitForNumeric('001');
+
+      const b = trackClient(await createRawSocketClient());
+      await b.capLs();
+      await b.capReq(['draft/chathistory', 'batch', 'server-time']);
+      b.capEnd();
+      b.register(bNick);
+      await b.waitForNumeric('001');
+      await new Promise(r => setTimeout(r, 200));
+
+      const tag1 = `e2e-AtoB-${uniqueId()}`;
+      const tag2 = `e2e-BtoA-${uniqueId()}`;
+      a.send(`PRIVMSG ${bNick} :${tag1}`);
+      await new Promise(r => setTimeout(r, 200));
+      b.send(`PRIVMSG ${aNick} :${tag2}`);
+      await new Promise(r => setTimeout(r, 400));
+
+      // A queries history for the conversation with B.
+      const aMsgs = await waitForChathistory(a, bNick, {
+        minMessages: 2, timeoutMs: 10000,
+      });
+      const aSawBoth =
+          aMsgs.some(m => m.includes(tag1)) && aMsgs.some(m => m.includes(tag2));
+      expect(aSawBoth,
+        'A must see both directions of the ephemeral↔ephemeral conversation'
+      ).toBe(true);
+
+      // B queries from their side — same expectation.
+      const bMsgs = await waitForChathistory(b, aNick, {
+        minMessages: 2, timeoutMs: 10000,
+      });
+      const bSawBoth =
+          bMsgs.some(m => m.includes(tag1)) && bMsgs.some(m => m.includes(tag2));
+      expect(bSawBoth,
+        'B must see both directions of the ephemeral↔ephemeral conversation'
+      ).toBe(true);
+
+      a.send('QUIT');
+      b.send('QUIT');
+    });
+
+    it('ephemeral PM ring is wiped on disconnect (Phase C)', async () => {
+      // First ephemeral opens a conversation with a second ephemeral,
+      // then quits.  A fresh client connecting with the same nick
+      // gets a brand-new session and must NOT inherit the previous
+      // session's ring entries — the security property is identical
+      // to nick-squat-denial: ephemeral identity is per-connection,
+      // never per-nick.
+      const aNick = `eph${uniqueId().slice(0, 6)}`;
+      const bNick = `eph${uniqueId().slice(0, 6)}`;
+
+      const aFirst = trackClient(await createRawSocketClient());
+      await aFirst.capLs();
+      await aFirst.capReq(['draft/chathistory', 'batch', 'server-time']);
+      aFirst.capEnd();
+      aFirst.register(aNick);
+      await aFirst.waitForNumeric('001');
+
+      const b = trackClient(await createRawSocketClient());
+      await b.capLs();
+      await b.capReq(['draft/chathistory', 'batch', 'server-time']);
+      b.capEnd();
+      b.register(bNick);
+      await b.waitForNumeric('001');
+      await new Promise(r => setTimeout(r, 200));
+
+      const tag = `e2e-wipe-${uniqueId()}`;
+      aFirst.send(`PRIVMSG ${bNick} :${tag}`);
+      await new Promise(r => setTimeout(r, 300));
+
+      aFirst.send('QUIT');
+      await new Promise(r => setTimeout(r, 500));
+
+      // New connection re-uses the same nick (after the QUIT).  This
+      // is a fresh Client with a fresh session_id; the previous ring
+      // is gone and the new session must see nothing.
+      const aSecond = trackClient(await createRawSocketClient());
+      await aSecond.capLs();
+      await aSecond.capReq(['draft/chathistory', 'batch', 'server-time']);
+      aSecond.capEnd();
+      aSecond.register(aNick);
+      await aSecond.waitForNumeric('001');
+      await new Promise(r => setTimeout(r, 200));
+
+      let leaked = false;
+      try {
+        const msgs = await waitForChathistory(aSecond, bNick, {
+          minMessages: 0, timeoutMs: 3000,
+        });
+        if (msgs.some(m => m.includes(tag))) leaked = true;
+      } catch { /* empty result is expected and acceptable */ }
+      expect(leaked,
+        'Phase C ring must be wiped on disconnect — a fresh ephemeral on '
+        + 'the same nick must NOT see the previous session\'s PMs.'
+      ).toBe(false);
+
+      aSecond.send('QUIT');
+      b.send('QUIT');
+    });
   });
 
   describe('PM Chathistory Opt-Out', () => {
