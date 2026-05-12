@@ -58,6 +58,9 @@ features {{
     "MSGID" = "TRUE";
     "HOST_HIDING" = "FALSE";
     "NOIDENT" = "TRUE";
+    # Default NICKDELAY of 30s tank tests that rapid-fire NICK changes
+    # (e.g. MONITOR's testNickChange).  Disable for testing.
+    "NICKDELAY" = "0";
     "CONNEXIT_NOTICES" = "FALSE";
     "CAP_server_time" = "TRUE";
     "CAP_echo_message" = "TRUE";
@@ -82,7 +85,11 @@ features {{
     "CAP_draft_channel_rename" = "TRUE";
     "CAP_draft_metadata_2" = "TRUE";
     "EXCEPTS" = "TRUE";
-    "CHATHISTORY_DB" = "TRUE";
+    # CHATHISTORY_DB is a path string (default "history"), not a bool —
+    # explicitly point at a per-test directory so the RocksDB env opens
+    # cleanly without a leftover relative "history/" under whatever cwd
+    # ircd launched in.
+    "CHATHISTORY_DB" = "{chathistory_db}";
     "CHATHISTORY_STORE" = "TRUE";
     "CHATHISTORY_PRIVATE" = "TRUE";
     {ssl_features}
@@ -196,6 +203,7 @@ class NefariousController(BaseServerController, DirectoryBasedController):
                     pidfile=pidfile,
                     ssl_config=ssl_config,
                     ssl_features=ssl_features,
+                    chathistory_db=str(self.directory / "history"),
                 )
             )
 
