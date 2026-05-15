@@ -72,31 +72,27 @@ describe('Bouncer two-server alias attach', () => {
   });
 
   /**
-   * KNOWN-FAILING: this test surfaces a real bug rather than driving the
-   * happy path.  Running it against the current testnet (linked profile
-   * with nefarious-upstream present) reproduces this chain:
+   * Fix landed in nefarious2 commit 2a1cb97 ("bouncer/auto_resume:
+   * defer when peer has inbound bytes") — bounce_auto_resume now
+   * defers the no-session-found decision if any peer has unread
+   * inbound bytes, retrying once BS C has been processed.  Should
+   * make this test pass after the testnet stack is rebuilt with
+   * that commit.
    *
+   * Until verified post-rebuild, keep it.skip so the test suite
+   * stays green.  Unskip + re-run after `dc up -d --build` to
+   * confirm the alias attaches cleanly with no classical-collision
+   * cascade from upstream/x3.
+   *
+   * Earlier failure trace (pre-fix) for context:
    *   1. testnet has primary, leaf gets local primary on second SASL
    *   2. testnet's m_nick D.2 demotes testnet's primary to alias of
    *      leaf's (correct — same-session merge at-N-time)
-   *   3. upstream (BX-aware peer) sees both N tokens but does NOT have
-   *      a BS C replica for the freshly-created session yet, so its
-   *      m_nick D.2 doesn't fire (no `bsess->hs_client == acptr` match)
-   *      and it falls through to classic same-user@host collision
-   *   4. upstream kills the demoted-side primary with `nick collision
-   *      from same user@host`
-   *   5. KILL = whole session dies (per design intent invariant #12);
-   *      session is destroyed network-wide via BX X cascade, the alias
+   *   3. upstream/x3 (BX-aware but no BS C yet for fresh session)
+   *      runs classic same-user@host collision, kills the demoted
+   *      side's primary with "nick collision from same user@host"
+   *   4. KILL → BX X cascade → session destroyed network-wide; alias
    *      we were trying to assert on never lives long enough to query
-   *
-   * Root cause is the BS C burst / N introduction ordering for a fresh
-   * session: BS C must reach all BX-aware peers BEFORE the second
-   * primary's N for the session, so they can populate the session
-   * replica and run D.2 instead of classic collision.
-   *
-   * Mark as skipped until the BS C ordering is sorted.  When unskipped,
-   * the assertions below are the right shape — alias on leaf with
-   * primary on testnet, agreement on sessid.
    */
   it.skip('creates an alias on leaf when same account is already primary on testnet', async () => {
     if (!leafReachable) {
