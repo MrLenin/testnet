@@ -29,8 +29,10 @@ export interface BouncerInfo {
   hold: string;
   /** Hold preference source: "account" or "default" */
   holdSource: string;
-  /** Number of times resumed */
-  resumes?: number;
+  /** Cumulative connection count for this session (server reports as "connects=") */
+  connects?: number;
+  /** Live connection count (server reports as "live=") */
+  live?: number;
   /** Hold time (seconds or minutes depending on state) */
   holdTime?: number;
   /** Session ID */
@@ -206,18 +208,23 @@ function parseBouncerInfo(msg: IRCMessage): BouncerInfo {
   const raw = msg.raw;
   const text = msg.trailing || '';
 
-  // Parse key=value pairs from the response
+  // Parse key=value pairs from the response.  Field set varies with
+  // session state — connects/live present in active, absent in none.
   const stateMatch = text.match(/state=(\w+)/);
   const holdMatch = text.match(/hold=(\w+)\((\w+)\)/);
-  const resumesMatch = text.match(/resumes=(\d+)/);
+  const connectsMatch = text.match(/connects=(\d+)/);
+  const liveMatch = text.match(/live=(\d+)/);
   const holdTimeMatch = text.match(/hold_time=(\d+)[sm]?/);
-  const sessionMatch = text.match(/session=([A-Za-z0-9]+-\d+)/);
+  // Sessid is the modern base64-ish format (AZ…); fall back to legacy
+  // "AB-00001" form if encountered.
+  const sessionMatch = text.match(/session=([A-Za-z0-9+/=]+)/);
 
   return {
     state: stateMatch ? stateMatch[1] : 'unknown',
     hold: holdMatch ? holdMatch[1] : 'unknown',
     holdSource: holdMatch ? holdMatch[2] : 'unknown',
-    resumes: resumesMatch ? parseInt(resumesMatch[1], 10) : undefined,
+    connects: connectsMatch ? parseInt(connectsMatch[1], 10) : undefined,
+    live: liveMatch ? parseInt(liveMatch[1], 10) : undefined,
     holdTime: holdTimeMatch ? parseInt(holdTimeMatch[1], 10) : undefined,
     sessionId: sessionMatch ? sessionMatch[1] : undefined,
     raw,

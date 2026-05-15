@@ -45,12 +45,7 @@ describe('Bouncer HOLDING ghost visible to observer WHOIS', () => {
     poolAccounts.length = 0;
   });
 
-  // Skipped: blocked on the same pool-vs-Keycloak drift that affects
-  // bouncer-resume-counter.test.ts (see [[pool-ldap-keycloak-drift]]).
-  // The pool's SASL PLAIN currently fails KC_FORBIDDEN for an
-  // expanding set of accounts (neg-cache locks each failure in).
-  // Unskip after the pool↔Keycloak state is repaired.
-  it.skip('/WHOIS on a HOLDING ghost returns 311 + 318, not 401', async () => {
+  it('/WHOIS on a HOLDING ghost returns 311 + 318, not 401', async () => {
     const account = await getTestAccount();
     poolAccounts.push(account.account);
     const target = uniqueNick('wsh');
