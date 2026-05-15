@@ -250,3 +250,21 @@ export {
   type BouncerInfo,
   type BouncerClientResult,
 } from './bouncer.js';
+
+export {
+  // /CHECK -b parser + driver
+  parseCheckBouncerLine,
+  parseCheckBouncerOutput,
+  runCheck,
+  type BouncerPrimary,
+  type BouncerAlias,
+  type BouncerFace,
+  type CheckBouncerState,
+} from './check-parser.js';
+
+export {
+  // Multi-server orchestrator
+  snapshotLinks,
+  linkComplete,
+  type LinkState,
+} from './orchestrator.js';
