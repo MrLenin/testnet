@@ -88,6 +88,113 @@ describe('Bouncer single-server multi-attach', () => {
     expect(alias.nick).toBe(nick);
   });
 
+  it('three-client multi-attach reports primary + 2 aliases', async () => {
+    // Stacks an extra alias on top of the 2-client setup.  Validates that
+    // bounce_setup_local_alias handles N+1 cleanly: aliases stack up to
+    // the configured maximum without one squashing another.
+    const account = await getTestAccount();
+    poolAccounts.push(account.account);
+    const nick = uniqueNick('mt3');
+
+    const primary = await createSaslBouncerClient(
+      account.account, account.password, { nick },
+    );
+    clients.push(primary.client);
+    expect(await bouncerEnableHold(primary.client)).toBe(true);
+
+    const alias1 = await createSaslBouncerClient(
+      account.account, account.password,
+      { nick: uniqueNick('mt3') },
+    );
+    clients.push(alias1.client);
+
+    const alias2 = await createSaslBouncerClient(
+      account.account, account.password,
+      { nick: uniqueNick('mt3') },
+    );
+    clients.push(alias2.client);
+
+    // Settle.
+    await new Promise(r => setTimeout(r, 1000));
+
+    const oper = await createOperClient();
+    clients.push(oper);
+
+    const state = await runCheck(oper, nick, 10_000);
+
+    expect(state.primary).toBeDefined();
+    expect(state.primary?.nick).toBe(nick);
+    // Exactly two aliases.
+    expect(state.aliases.length).toBe(2);
+    // All three references agree on sessid.
+    expect(state.aliases[0].sessid).toBe(state.primary!.sessid);
+    expect(state.aliases[1].sessid).toBe(state.primary!.sessid);
+    // Both aliases point at the primary's numeric.
+    expect(state.aliases[0].primaryNumeric).toBe(state.primary!.numeric);
+    expect(state.aliases[1].primaryNumeric).toBe(state.primary!.numeric);
+    // Two distinct alias numerics — neither overwrote the other.
+    expect(state.aliases[0].numeric).not.toBe(state.aliases[1].numeric);
+    // All inherit primary's nick.
+    expect(state.aliases[0].nick).toBe(nick);
+    expect(state.aliases[1].nick).toBe(nick);
+  });
+
+  it('closing one alias cleanly drops it from /CHECK -b without disturbing primary', async () => {
+    // Validates the alias-detach path: a clean QUIT from an alias should
+    // decrement the alias count on /CHECK -b, leaving the primary and any
+    // other aliases untouched.
+    const account = await getTestAccount();
+    poolAccounts.push(account.account);
+    const nick = uniqueNick('mtd');
+
+    const primary = await createSaslBouncerClient(
+      account.account, account.password, { nick },
+    );
+    clients.push(primary.client);
+    expect(await bouncerEnableHold(primary.client)).toBe(true);
+
+    const alias1 = await createSaslBouncerClient(
+      account.account, account.password,
+      { nick: uniqueNick('mtd') },
+    );
+    clients.push(alias1.client);
+
+    const alias2 = await createSaslBouncerClient(
+      account.account, account.password,
+      { nick: uniqueNick('mtd') },
+    );
+    clients.push(alias2.client);
+
+    await new Promise(r => setTimeout(r, 1000));
+
+    const oper = await createOperClient();
+    clients.push(oper);
+
+    // Baseline: 2 aliases.
+    const before = await runCheck(oper, nick, 10_000);
+    expect(before.aliases.length).toBe(2);
+    const primaryNumericBefore = before.primary?.numeric;
+    const sessidBefore = before.primary?.sessid;
+
+    // Cleanly close alias1.  Drop from cleanup list since we closed it.
+    alias1.client.send('QUIT :see you');
+    alias1.client.close();
+    const idx = clients.indexOf(alias1.client);
+    if (idx >= 0) clients.splice(idx, 1);
+
+    // Settle: alias detach + (potentially) BX X propagation.
+    await new Promise(r => setTimeout(r, 1500));
+
+    const after = await runCheck(oper, nick, 10_000);
+    // Primary unchanged.
+    expect(after.primary?.numeric).toBe(primaryNumericBefore);
+    expect(after.primary?.sessid).toBe(sessidBefore);
+    // Exactly one alias remains.
+    expect(after.aliases.length).toBe(1);
+    // The remaining alias still agrees on sessid.
+    expect(after.aliases[0].sessid).toBe(sessidBefore);
+  });
+
   it('multi-attach preserves alias sessid + locality after primary keeps connection', async () => {
     // Re-runs the multi-attach setup and validates that, when the
     // primary stays connected, the alias remains in BouncerAlias listing
