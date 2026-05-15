@@ -201,8 +201,14 @@ export async function runCheck(
 
     client.send(`CHECK ${nick} -b`);
 
-    // Wait for RPL_ENDOFCHECK (291).
-    await client.waitForLine(/\s291\s/, timeoutMs);
+    // Wait for RPL_ENDOFCHECK (291) OR ERR_SEARCHNOMATCH (292).
+    // The latter means the nick isn't on this server / network — caller
+    // gets an explicit error instead of an opaque timeout.
+    const terminator = await client.waitForLine(/\s29[12]\s/, timeoutMs);
+    if (/\s292\s/.test(terminator)) {
+      throw new Error(`runCheck: /CHECK ${nick} returned ERR_SEARCHNOMATCH `
+        + `(292 — target not found).  Raw: ${terminator}`);
+    }
   } finally {
     const idx = listeners.indexOf(listener);
     if (idx >= 0) listeners.splice(idx, 1);
