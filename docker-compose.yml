@@ -149,6 +149,7 @@ services:
      - webpush_data2:/home/nefarious/ircd/webpush
      - gitsync_data:/home/nefarious/ircd/gitsync
      - ssl_data2:/home/nefarious/ircd/ssl
+     - ./nefcores2:/home/nefarious/ircd/cores  # Core dump directory
     ports:
       - 0.0.0.0:6668:6667
       - 0.0.0.0:6698:6697
@@ -353,6 +354,15 @@ services:
         additional_contexts:
           - data=./data
     user: "1234:1234"
+    # Match nefarious's ulimits — ircd boot calls os_set_fdlimit(MAXCONNECTIONS=4096)
+    # and bails if the hard nofile limit is below that.
+    ulimits:
+      core:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 8192
+        hard: 16384
     networks:
       irc_net:
         ipv4_address: 172.29.0.8
@@ -371,6 +381,7 @@ services:
     environment:
       - IRCD_GENERAL_NAME=upstream.fractalrealities.net
       - IRCD_GENERAL_NUMERIC=5
+      - NEFARIOUS_VALGRIND=0
     depends_on:
       nefarious-upstream-init:
         condition: service_completed_successfully
