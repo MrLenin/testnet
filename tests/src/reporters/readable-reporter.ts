@@ -10,6 +10,10 @@ export default class ReadableReporter implements Reporter {
   passCount = 0;
   failCount = 0;
   skipCount = 0;
+  // Vitest can emit the same final state for a task more than once (e.g. once
+  // when the test completes and again when the file aggregate flushes).  Track
+  // taskIds we've already counted to keep the summary honest.
+  private seenFinal = new Set<string>();
 
   onInit(ctx: Vitest) {
     this.ctx = ctx;
@@ -45,11 +49,16 @@ export default class ReadableReporter implements Reporter {
       const task = this.ctx.state.idMap.get(taskId);
       if (!task || task.type !== 'test') continue;
 
+      const finalStates = new Set(['pass', 'fail', 'skip']);
+      if (!result?.state || !finalStates.has(result.state)) continue;
+      if (this.seenFinal.has(taskId)) continue;
+      this.seenFinal.add(taskId);
+
       // Get the suite chain for context
       const suitePath = this.getSuitePath(task);
       const indent = '  '.repeat(Math.min(suitePath.length, 2));
 
-      if (result?.state === 'pass') {
+      if (result.state === 'pass') {
         this.passCount++;
         console.log(`${indent}\x1b[32m\u2713\x1b[0m ${task.name}`);
         // Show what this test proves
@@ -57,7 +66,7 @@ export default class ReadableReporter implements Reporter {
         if (purpose) {
           console.log(`${indent}  \x1b[90m\u2192 Proves: ${purpose}\x1b[0m`);
         }
-      } else if (result?.state === 'fail') {
+      } else if (result.state === 'fail') {
         this.failCount++;
         console.log(`${indent}\x1b[31m\u2717\x1b[0m ${task.name}`);
         if (result.errors) {
@@ -66,7 +75,7 @@ export default class ReadableReporter implements Reporter {
             console.log(`${indent}  \x1b[31m\u2514\u2500 ${msg}\x1b[0m`);
           }
         }
-      } else if (result?.state === 'skip') {
+      } else if (result.state === 'skip') {
         this.skipCount++;
         console.log(`${indent}\x1b[33m\u25CB\x1b[0m ${task.name} \x1b[90m(skipped)\x1b[0m`);
       }
