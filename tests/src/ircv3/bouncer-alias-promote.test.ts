@@ -108,7 +108,9 @@ describe('Bouncer immediate-promote on primary clean QUIT (local alias)', () => 
     expect(after.aliases.length).toBe(0);
     // Session state is ACTIVE — no HOLDING transition.
     expect(after.rawLines.some(l => /Session state:: ACTIVE/.test(l))).toBe(true);
-    // At least one live connection (the promoted alias).
-    expect(after.rawLines.some(l => /Connections:: \d+ \(active\)/.test(l))).toBe(true);
+    // One live connection (the promoted alias).  /CHECK -b output for
+    // session ACTIVE with primary and no aliases is "Connections:: 1
+    // (primary only)" — see m_check.c around line 741.
+    expect(after.rawLines.some(l => /Connections:: 1 \(primary only\)/.test(l))).toBe(true);
   });
 });
