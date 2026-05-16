@@ -12,30 +12,26 @@ import {
 import { runCheck } from '../helpers/check-parser.js';
 
 /**
- * Primary clean-QUIT path with an alias remaining.
+ * Immediate alias-promotion on primary clean QUIT (local alias).
  *
  * Design intent (bouncer-design-intent.md §Session lifecycle):
  *   "Primary disconnects (clean) with at least one alias remaining →
  *    an alias takes its place via BX P (numeric swap, original
  *    primary silently killed by the internal bouncer mechanism)."
  *
- * Current implementation (m_quit.c around line 125):
- *   "No immediate-promote shortcut: a primary QUIT with aliases attached
- *    holds first (same reasoning as s_bsd.c — promote and a concurrent
- *    BX X for the chosen alias race on the wire).  Promotion runs only
- *    from bounce_hold_expire after the network has settled."
+ * Implementation (nefarious e64d10c): m_quit.c now calls
+ * bounce_promote_alias(session, /* local_only *\/ 1) before
+ * bounce_hold_client.  When the session has a local-server alias,
+ * we promote it immediately via BX P — same-server alias state is
+ * synchronously authoritative, so the broadcast can't race a
+ * concurrent BX X from the alias's home server (we ARE that server).
  *
- * So the implementation chose to defer promotion to hold-expiry to
- * avoid the BX P / BX X race window.  Test captures the current
- * observed behavior: primary clean QUIT → session HOLDING with the
- * original primary as a ghost; alias remains in alias position;
- * promotion will happen later at hold-expiry.
- *
- * If the design is tightened to immediate promote (closing the race
- * some other way), update this test to assert the alias's numeric
- * swap into the primary slot.  [[bouncer-alias-promote-deferred]]
+ * Cross-server case (only remote alias) still falls through to
+ * bounce_hold_client; the hold-expire path promotes once the network
+ * settles.  That's a separate scenario tracked by future work — this
+ * test covers the local-alias case.
  */
-describe('Bouncer alias-on-primary-QUIT (deferred-promote semantics)', () => {
+describe('Bouncer immediate-promote on primary clean QUIT (local alias)', () => {
   const clients: RawSocketClient[] = [];
   const poolAccounts: string[] = [];
 
@@ -51,7 +47,7 @@ describe('Bouncer alias-on-primary-QUIT (deferred-promote semantics)', () => {
     poolAccounts.length = 0;
   });
 
-  it('primary clean QUIT with alias remaining: session HOLDING, ghost retained, alias intact', async () => {
+  it('local alias is promoted in place: numeric swap, no HOLDING, sessid stable', async () => {
     const account = await getTestAccount();
     poolAccounts.push(account.account);
     const nick = uniqueNick('prm');
@@ -86,33 +82,33 @@ describe('Bouncer alias-on-primary-QUIT (deferred-promote semantics)', () => {
     const idx = clients.indexOf(primary.client);
     if (idx >= 0) clients.splice(idx, 1);
 
-    // Settle: hold-client path + propagation.
-    await new Promise(r => setTimeout(r, 1500));
+    // Settle: bounce_promote_alias inline + BX P broadcast + channel
+    // strip on the old primary.  Sub-millisecond on the implementation
+    // side; give a comfortable wait for any S2S settling.
+    await new Promise(r => setTimeout(r, 1000));
 
-    // The alias's TCP connection is unaffected — confirm with a
-    // PING/PONG round-trip.
+    // Alias's TCP connection is unaffected.
     alias.client.send('PING :still-here');
     await alias.client.waitForLine(/\bPONG\b.*still-here/, 5000);
 
     const after = await runCheck(oper, nick, 10_000);
 
     expect(after.primary).toBeDefined();
-    // Sessid unchanged.
+    // Sessid is stable across promote — same session, just a different
+    // primary connection.
     expect(after.primary!.sessid).toBe(sessidBefore);
-    // The original primary numeric is retained on the ghost — peers
-    // continue to see the primary at the same numeric until hold-expiry
-    // promotes the alias and swaps its numeric in via BX P.
-    expect(after.primary!.numeric).toBe(primaryNumericBefore);
-    // Alias is still listed as an alias (no promote yet).
-    expect(after.aliases.length).toBe(1);
-    expect(after.aliases[0].numeric).toBe(aliasNumericBefore);
-    expect(after.aliases[0].sessid).toBe(sessidBefore);
-    // The /CHECK -b rawLines include "Session state:: HOLDING".
-    expect(after.rawLines.some(l => /Session state:: HOLDING/.test(l))).toBe(true);
-    // And "Connections:: 0 (holding)" — the bouncer counts the alias as
-    // a session connection only when promotion happens; until then the
-    // session is "holding" from the session's POV even though the alias
-    // socket is still live.
-    expect(after.rawLines.some(l => /Connections:: 0 \(holding\)/.test(l))).toBe(true);
+    // BX P swapped: the new primary's numeric is the OLD ALIAS's
+    // numeric.  Peers continue to see THIS session, but at the alias's
+    // numeric (now-primary's numeric).
+    expect(after.primary!.numeric).toBe(aliasNumericBefore);
+    // The old primary numeric is gone — released back to the local
+    // numeric pool when the old primary client exited.
+    expect(after.primary!.numeric).not.toBe(primaryNumericBefore);
+    // No aliases remain (only one existed, and it just became primary).
+    expect(after.aliases.length).toBe(0);
+    // Session state is ACTIVE — no HOLDING transition.
+    expect(after.rawLines.some(l => /Session state:: ACTIVE/.test(l))).toBe(true);
+    // At least one live connection (the promoted alias).
+    expect(after.rawLines.some(l => /Connections:: \d+ \(active\)/.test(l))).toBe(true);
   });
 });
