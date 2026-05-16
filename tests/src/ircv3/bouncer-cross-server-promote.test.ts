@@ -79,7 +79,25 @@ describe('Bouncer cross-server immediate-promote on primary clean QUIT', () => {
     poolAccounts.length = 0;
   });
 
-  // TEMPORARILY UN-SKIPPED for investigation.
+  // Re-skipped pending verification: nefarious e9b3b34 added the missing
+  // BS A broadcast from m_bouncer.c's create paths (root cause of why
+  // cross-server alias attach was silently falling through to regular-
+  // user welcome).  Couldn't get a clean end-to-end pass yet because the
+  // testnet pool↔Keycloak state is intermittently SASL-failing — when
+  // pool init falls back to fresh account creation, the new account is
+  // missing from Keycloak.
+  //
+  // Once the pool drift is stable, un-skip and verify the full chain:
+  //   1. Primary on testnet enables hold → BS A now broadcast (e9b3b34)
+  //   2. Leaf's BS A handler sets session->hs_client = primary
+  //   3. Leaf's local SASL'd client → bounce_auto_resume returns
+  //      BOUNCE_RESUME_ALIAS_REMOTE → bounce_setup_local_alias →
+  //      BX C broadcast back to testnet
+  //   4. testnet's hs_aliases[] populated; /CHECK -b shows 1 alias
+  //   5. Primary clean QUIT → bounce_promote_alias(local_only=1)
+  //      returns -1 → bounce_hold_client + bounce_schedule_cross_server_promote
+  //   6. 0-tick timer fires → bounce_promote_alias(0) → BX P → leaf
+  //      alias becomes primary
   // Skip: blocked on an upstream issue — cross-server alias attach isn't
   // landing in the running build despite the 2a1cb97 BS C race fix.
   // When a SASL'd client connects to leaf with the same account as
@@ -96,7 +114,7 @@ describe('Bouncer cross-server immediate-promote on primary clean QUIT', () => {
   // alias on testnet's hs_aliases[], primary QUIT will exercise
   // bounce_schedule_cross_server_promote → bounce_finish_cross_server_promote
   // and the test below should run end-to-end without further changes.
-  it('remote alias promoted via 0-tick deferred timer after primary QUIT', async () => {
+  it.skip('remote alias promoted via 0-tick deferred timer after primary QUIT', async () => {
     if (!leafReachable) {
       console.warn(`Skipping: leaf at ${leafHost}:${leafPort} not reachable. ` +
         'Run docker compose --profile linked up -d, or set IRC_HOST2/IRC_PORT2.');
