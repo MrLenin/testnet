@@ -215,16 +215,27 @@ describe('P10 Numeric Encoding', () => {
   });
 
   describe('Numeric Validity', () => {
-    it('should handle boundary values for server numeric', () => {
-      // Valid range: 0-4095
-      expect(encodeServerNumeric(0)).toBeDefined();
-      expect(encodeServerNumeric(4095)).toBeDefined();
+    it('encodes 0 and 4095 server numerics to the expected 2-char forms', () => {
+      // Valid range: 0-4095.  P10 base64 uses A-Z, a-z, 0-9, [, ] (64 chars).
+      // 0 → "AA", 4095 (== 63*64+63) → "]]".
+      expect(encodeServerNumeric(0)).toBe('AA');
+      expect(encodeServerNumeric(4095)).toBe(']]');
     });
 
-    it('should handle boundary values for user numeric', () => {
-      // Valid range: 0-262143
-      expect(encodeUserNumeric(0)).toBeDefined();
-      expect(encodeUserNumeric(262143)).toBeDefined();
+    it('encodes 0 and 262143 user numerics to the expected 3-char forms', () => {
+      // Valid range: 0-262143.  0 → "AAA", 262143 (== 63*64*64 + 63*64 + 63) → "]]]".
+      expect(encodeUserNumeric(0)).toBe('AAA');
+      expect(encodeUserNumeric(262143)).toBe(']]]');
+    });
+
+    it('rejects out-of-range server numerics', () => {
+      expect(() => encodeServerNumeric(-1)).toThrow();
+      expect(() => encodeServerNumeric(4096)).toThrow();
+    });
+
+    it('rejects out-of-range user numerics', () => {
+      expect(() => encodeUserNumeric(-1)).toThrow();
+      expect(() => encodeUserNumeric(262144)).toThrow();
     });
   });
 });
@@ -398,9 +409,14 @@ describe.skipIf(!secondaryAvailable)('Nick Change Propagation', () => {
     const idx = activeClients.indexOf(primary);
     if (idx > -1) activeClients.splice(idx, 1);
 
-    // Secondary should see the QUIT
+    // Secondary should see the QUIT.  Verify the source nick matches
+    // (not just "some QUIT happened") and the reason carries our
+    // explicit quit message — a regression where QUIT relay attributed
+    // the wrong source nick would still satisfy a bare toBeDefined.
     const quitMsg = await secondary.waitForQuit(nick1, 5000);
-    expect(quitMsg).toBeDefined();
+    expect(quitMsg.source).not.toBeNull();
+    expect(quitMsg.source!.nick.toLowerCase()).toBe(nick1.toLowerCase());
+    expect(quitMsg.trailing).toContain('Test quit');
 
     // User should no longer be in NAMES
     await new Promise(r => setTimeout(r, 200));

@@ -167,8 +167,8 @@ export async function bouncerDisableHold(
  * Query BOUNCER INFO and parse the response.
  *
  * Response format:
- *   :server RPL_BOUNCERSETTINGS nick :state=active hold=on(account) resumes=3 hold_time=14400s session=AB-00001
- *   :server RPL_BOUNCERSETTINGS nick :state=none hold=off(default)
+ *   :server 782 nick :state=active hold=on(account) connects=2 live=1 hold_time=21600s session=AZ4tXlSJcGOC5duroPhR2g
+ *   :server 782 nick :state=none hold=off(default)
  *
  * @param client - Authenticated client
  * @param timeout - Timeout for response

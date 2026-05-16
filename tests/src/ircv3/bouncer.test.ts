@@ -271,10 +271,14 @@ describe('Built-in Bouncer', () => {
       const info = await assertBouncerActive(conn2, 'resumed client');
       expect(info.state).toBe('active');
 
-      // Attach count should be >= 1 (resumed at least once)
-      if (info.resumes !== undefined) {
-        expect(info.resumes, 'Resume count should increment after resume').toBeGreaterThanOrEqual(1);
-      }
+      // Connect counter must be >= 2 — initial create + this revive.
+      // (Helper was renamed from "resumes" to "connects" when BOUNCER
+      // INFO's wire format changed; the field is REQUIRED on ACTIVE
+      // sessions, so an undefined value here is itself a regression.)
+      expect(info.connects, 'connects counter must be present on ACTIVE session').toBeDefined();
+      expect(info.connects!,
+             'connects must be >= 2 after one revive (1 initial + 1 resume)')
+        .toBeGreaterThanOrEqual(2);
 
       // Cleanup
       await bouncerDisableHold(conn2);
@@ -412,10 +416,13 @@ describe('Built-in Bouncer', () => {
 
       const info = await assertBouncerActive(client, 'new session');
 
-      // New session (0 resumes) should have base hold time (BOUNCER_SESSION_HOLD = 14400s = 4h)
-      if (info.holdTime !== undefined) {
-        expect(info.holdTime, 'New session should have base hold time (14400s)').toBe(14400);
-      }
+      // New session — connects should be 1 (just this connection), hold
+      // time should be the base value.  Both REQUIRED on ACTIVE sessions
+      // — undefined values would be parser/wire regressions.
+      expect(info.connects, 'connects must be present on ACTIVE session').toBeDefined();
+      expect(info.connects!, 'New session should report 1 connection').toBe(1);
+      expect(info.holdTime, 'holdTime must be present on ACTIVE session').toBeDefined();
+      expect(info.holdTime!, 'New session should have base hold time (14400s)').toBe(14400);
 
       // Cleanup
       await bouncerDisableHold(client);
@@ -439,11 +446,13 @@ describe('Built-in Bouncer', () => {
 
       const info = await assertBouncerActive(conn2, 'resumed session');
 
-      // After 1 resume, hold time should be base + 25% = 18000s
-      if (info.holdTime !== undefined && info.resumes !== undefined) {
-        expect(info.holdTime, 'Resumed session should have increased hold time')
-          .toBeGreaterThan(14400);
-      }
+      // After 1 resume, hold time should be base + 25% = 18000s.  Field
+      // is required on ACTIVE sessions; an undefined value would itself
+      // be a regression.
+      expect(info.holdTime, 'holdTime must be present on ACTIVE session').toBeDefined();
+      expect(info.connects, 'connects must be present on ACTIVE session').toBeDefined();
+      expect(info.holdTime!, 'Resumed session should have increased hold time')
+        .toBeGreaterThan(14400);
 
       // Cleanup
       await bouncerDisableHold(conn2);
