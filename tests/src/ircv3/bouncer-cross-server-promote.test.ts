@@ -79,6 +79,7 @@ describe('Bouncer cross-server immediate-promote on primary clean QUIT', () => {
     poolAccounts.length = 0;
   });
 
+  // TEMPORARILY UN-SKIPPED for investigation.
   // Skip: blocked on an upstream issue — cross-server alias attach isn't
   // landing in the running build despite the 2a1cb97 BS C race fix.
   // When a SASL'd client connects to leaf with the same account as
@@ -95,7 +96,7 @@ describe('Bouncer cross-server immediate-promote on primary clean QUIT', () => {
   // alias on testnet's hs_aliases[], primary QUIT will exercise
   // bounce_schedule_cross_server_promote → bounce_finish_cross_server_promote
   // and the test below should run end-to-end without further changes.
-  it.skip('remote alias promoted via 0-tick deferred timer after primary QUIT', async () => {
+  it('remote alias promoted via 0-tick deferred timer after primary QUIT', async () => {
     if (!leafReachable) {
       console.warn(`Skipping: leaf at ${leafHost}:${leafPort} not reachable. ` +
         'Run docker compose --profile linked up -d, or set IRC_HOST2/IRC_PORT2.');
