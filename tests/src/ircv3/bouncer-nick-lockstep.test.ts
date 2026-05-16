@@ -43,14 +43,7 @@ describe('Bouncer nick lockstep across primary + alias', () => {
     poolAccounts.length = 0;
   });
 
-  // Skipped: caught a gap in lockstep — local aliases do not receive a
-  // NICK echo on their own sockets when the primary renames, even though
-  // the server's cli_name(alias) is correctly updated.  Fix staged in the
-  // nefarious submodule (sendcmdto_one(sib_alias, CMD_NICK, ...) added
-  // to the local-alias loop in set_nick_name + a parallel fix in
-  // bounce_alias_nicksync for remote-primary cases).  Unskip after
-  // rebuilding the nefarious image.
-  it.skip('primary NICK change syncs to alias on the same server', async () => {
+  it('primary NICK change syncs to alias on the same server', async () => {
     const account = await getTestAccount();
     poolAccounts.push(account.account);
     const nick = uniqueNick('lks');
@@ -115,12 +108,7 @@ describe('Bouncer nick lockstep across primary + alias', () => {
     expect(after.aliases[0].sessid).toBe(sessid);
   });
 
-  // Skipped: same root cause — when an alias issues NICK, m_nick.c
-  // rewrites sptr to the primary and calls set_nick_name, which then
-  // updates the originating alias's cli_name in the local-alias loop.
-  // Without the fix above, no NICK echo is sent to the alias's socket,
-  // so the alias's IRC client never sees that its rename succeeded.
-  it.skip('alias NICK change syncs to primary on the same server', async () => {
+  it('alias NICK change syncs to primary on the same server', async () => {
     // Same as above but the rename originates from the alias side.  The
     // primary must follow into the new nick.  Both ends agree.
     const account = await getTestAccount();

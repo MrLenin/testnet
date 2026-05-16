@@ -46,32 +46,7 @@ describe('Bouncer KILL semantics: KILL ends the entire session', () => {
     poolAccounts.length = 0;
   });
 
-  // Skipped: this test fails on the current build, capturing a real
-  // design-vs-impl gap that needs scoping before a fix lands.
-  //
-  // Root cause: m_kill.c only sets FLAG_KILLED on the victim when the
-  // KILL needs S2S propagation — i.e. when `IsServer(cptr) ||
-  // !MyConnect(victim)`.  For a local oper killing a local user
-  // (this test's setup), FLAG_KILLED is NOT set, so the bouncer code
-  // in exit_one_client (s_misc.c) does not enter the
-  // "destroy@exit-active-killed" branch.  Instead it follows the
-  // ordinary disconnect path → bounce_hold_client → session enters
-  // HOLDING, alias keeps living, session is preserved.
-  //
-  // This contradicts bouncer-design-intent.md invariant #12 ("KILL on
-  // the primary should just kill the whole session").  Two ways to
-  // close the gap:
-  //   (a) m_kill always SetFlag(victim, FLAG_KILLED) — but that
-  //       changes the long-standing "local KILL becomes QUIT to peers"
-  //       semantics, needs S2S audit.
-  //   (b) m_kill explicitly calls bounce_destroy() if the victim has
-  //       a session, sidestepping FLAG_KILLED — cleaner, narrower
-  //       scope, but adds a new bouncer hook on m_kill.
-  //
-  // For now this test stays skipped (so the suite stays green) and
-  // serves as a captured-symptom for the eventual fix.  Saved in
-  // memory as [[bouncer-local-kill-no-destroy]].
-  it.skip('KILL on primary terminates alias and destroys session', async () => {
+  it('KILL on primary terminates alias and destroys session', async () => {
     const account = await getTestAccount();
     poolAccounts.push(account.account);
     const nick = uniqueNick('kil');
