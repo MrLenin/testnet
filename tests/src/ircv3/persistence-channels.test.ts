@@ -242,11 +242,19 @@ describe('draft/persistence — Phase 4 / M3 channels + view-only filter', () =>
     await new Promise(r => setTimeout(r, 300));
 
     // A reconnects attached to "filt" and joins both channels.
+    // Under M4 /JOIN auto-grows filt's list; explicitly remove
+    // hiddenChan afterwards so A is in #hidden at the network level
+    // but excluded from filt's visibility set.
     const a = await connectAttached(aAcc.account, aAcc.password, 'filt');
     clients.push(a);
     a.send(`JOIN ${visibleChan}`);
     a.send(`JOIN ${hiddenChan}`);
     await new Promise(r => setTimeout(r, 500));
+    a.send(`PERSISTENCE PROFILE SET filt channels -${hiddenChan}`);
+    await a.waitForParsedLine(
+      m => m.command === 'PERSISTENCE' && m.params[1] === 'filt'
+           && m.params[2] === 'channels', 5_000,
+    );
 
     // B joins both, sends to each.
     const b = await connectFull(bAcc.account, bAcc.password);
