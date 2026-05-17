@@ -143,18 +143,30 @@ describe('Built-in Bouncer', () => {
     });
 
     it('shows hold=off for accounts without hold preference', async () => {
+      // Pool accounts accumulate hold preferences across tests.  Before
+      // asserting the "no preference set" state, explicitly clear any
+      // residual bouncer/hold metadata via METADATA CLEAR.  Then
+      // reconnect to read the canonical default state.
       const { account, password, fromPool } = await getTestAccount();
       if (fromPool) poolAccounts.push(account);
 
+      // First connection: clear any residual bouncer/hold preference.
+      const { client: cleanup } = await createSaslBouncerClient(account, password);
+      cleanup.send('METADATA * SET bouncer/hold');  // delete by sending no value
+      await new Promise(r => setTimeout(r, 300));
+      cleanup.send('QUIT');
+      cleanup.close();
+      await new Promise(r => setTimeout(r, 500));
+
+      // Second connection: read the now-default state.
       const { client } = await createSaslBouncerClient(account, password);
       trackClient(client);
 
       const info = await bouncerInfo(client);
-      if (info) {
-        // Without explicit SET HOLD on, hold should be off (using default)
-        expect(info.hold).toBe('off');
-        expect(info.holdSource).toBe('default');
-      }
+      expect(info).not.toBeNull();
+      // Without explicit SET HOLD on, hold should be off (using default)
+      expect(info!.hold).toBe('off');
+      expect(info!.holdSource).toBe('default');
 
       client.send('QUIT');
     });
@@ -408,8 +420,19 @@ describe('Built-in Bouncer', () => {
 
   describe('Adaptive Hold Time', () => {
     it('new session has base hold time', async () => {
+      // Pool accounts may have an existing session with accumulated
+      // adaptive hold time from prior resumes.  Tear down any residual
+      // session first so the next createBouncerClient creates a truly
+      // FRESH session whose attach_count is 0 and hold_time is the
+      // configured base (14400s).
       const { account, password, fromPool } = await getTestAccount();
       if (fromPool) poolAccounts.push(account);
+
+      const { client: teardown } = await createSaslBouncerClient(account, password);
+      await bouncerDisableHold(teardown).catch(() => {});
+      teardown.send('QUIT');
+      teardown.close();
+      await new Promise(r => setTimeout(r, 500));
 
       const { client } = await createBouncerClient(account, password);
       trackClient(client);
@@ -471,8 +494,8 @@ describe('Built-in Bouncer', () => {
     });
   });
 
-  describe('Shadow Multi-Attach', () => {
-    it('second SASL connection to active session attaches as shadow', async () => {
+  describe('Alias Multi-Attach', () => {
+    it('second SASL connection to active session attaches as alias', async () => {
       const { account, password, fromPool } = await getTestAccount();
       if (fromPool) poolAccounts.push(account);
 
@@ -500,7 +523,7 @@ describe('Built-in Bouncer', () => {
       primary.send('QUIT');
     });
 
-    it('shadow gets same nick as primary (shared identity)', async () => {
+    it('alias gets same nick as primary (shared identity)', async () => {
       const { account, password, fromPool } = await getTestAccount();
       if (fromPool) poolAccounts.push(account);
 
@@ -555,8 +578,8 @@ describe('Built-in Bouncer', () => {
     });
   });
 
-  describe('Shadow Channel Traffic Duplication', () => {
-    it('both primary and shadow receive channel messages', async () => {
+  describe('Alias Channel Traffic Duplication', () => {
+    it('both primary and alias receive channel messages', async () => {
       const { account, password, fromPool } = await getTestAccount();
       if (fromPool) poolAccounts.push(account);
 
@@ -612,7 +635,7 @@ describe('Built-in Bouncer', () => {
       primary.send('QUIT');
     });
 
-    it('shadow inherits channel membership from primary', async () => {
+    it('alias inherits channel membership from primary', async () => {
       const { account, password, fromPool } = await getTestAccount();
       if (fromPool) poolAccounts.push(account);
 
@@ -652,7 +675,7 @@ describe('Built-in Bouncer', () => {
       primary.send('QUIT');
     });
 
-    it('shadow receives channel state replay (JOIN, TOPIC, NAMES) on attachment', async () => {
+    it('alias receives channel state replay (JOIN, TOPIC, NAMES) on attachment', async () => {
       const { account, password, fromPool } = await getTestAccount();
       if (fromPool) poolAccounts.push(account);
 
@@ -695,8 +718,8 @@ describe('Built-in Bouncer', () => {
     });
   });
 
-  describe('Shadow Command Forwarding', () => {
-    it('shadow PRIVMSG appears from session nick', async () => {
+  describe('Alias Command Forwarding', () => {
+    it('alias PRIVMSG appears from session nick', async () => {
       const { account, password, fromPool } = await getTestAccount();
       if (fromPool) poolAccounts.push(account);
 
@@ -742,7 +765,7 @@ describe('Built-in Bouncer', () => {
       primary.send('QUIT');
     });
 
-    it('shadow reply routing sends responses to originating shadow', async () => {
+    it('alias reply routing sends responses to originating alias', async () => {
       const { account, password, fromPool } = await getTestAccount();
       if (fromPool) poolAccounts.push(account);
 
@@ -789,7 +812,16 @@ describe('Built-in Bouncer', () => {
   });
 
   describe('Primary Promotion on Disconnect', () => {
-    it('shadow is promoted to primary when primary disconnects', async () => {
+    it('local alias is promoted when primary cleanly QUITs (v1 immediate-promote)', async () => {
+      // Renamed from the shadow-era test ("shadow is promoted to primary
+      // when primary disconnects").  The shadow subsystem was removed
+      // 2026-03-07; aliases are the modern replacement, and the
+      // disconnect semantics changed: clean QUIT with a local alias
+      // remaining triggers immediate BX P promote (nefarious e64d10c
+      // = v1 of the alias-promote race fix).  Abrupt disconnect still
+      // enters HOLDING — the v2 deferred-tick path handles the
+      // cross-server case (d8236f7).  This test pins the v1 path: a
+      // local-server clean QUIT with one local alias.
       const { account, password, fromPool } = await getTestAccount();
       if (fromPool) poolAccounts.push(account);
 
@@ -801,12 +833,12 @@ describe('Built-in Bouncer', () => {
       await primary.waitForJoin(channel);
       await new Promise(r => setTimeout(r, 300));
 
-      // Shadow attaches
-      const { client: shadow } = await createSaslBouncerClient(account, password);
-      trackClient(shadow);
+      // Alias attaches (same account, same server → local alias).
+      const { client: alias } = await createSaslBouncerClient(account, password);
+      trackClient(alias);
       await new Promise(r => setTimeout(r, 500));
 
-      // Observer to verify no QUIT happens
+      // Observer in the channel to watch wire-level QUIT events.
       const observer = trackClient(await createRawSocketClient());
       await observer.capLs();
       await observer.capReq(['away-notify']);
@@ -819,11 +851,14 @@ describe('Built-in Bouncer', () => {
 
       observer.clearRawBuffer();
 
-      // Primary disconnects abruptly — shadow should be promoted
-      disconnectAbruptly(primary);
-      await new Promise(r => setTimeout(r, 2000));
+      // Primary cleanly QUITs.  bounce_promote_alias(local_only=1)
+      // returns 0 → BX P numeric swap → no HOLDING transition.
+      primary.send('QUIT :clean-quit-immediate-promote');
+      await new Promise(r => setTimeout(r, 1500));
 
-      // Observer should NOT see a QUIT (shadow was promoted, session stays ACTIVE)
+      // Observer must NOT see a QUIT on the channel: bounce_promote_alias
+      // strip-channels the old primary BEFORE exit_client runs, so the
+      // QUIT message has no channels to broadcast to.
       let gotQuit = false;
       try {
         await observer.waitForParsedLine(
@@ -832,36 +867,38 @@ describe('Built-in Bouncer', () => {
         );
         gotQuit = true;
       } catch {
-        // Expected: no QUIT because shadow was promoted
+        // Expected.
       }
-      expect(gotQuit, 'No QUIT should occur when shadow is promoted to primary').toBe(false);
+      expect(gotQuit,
+             'Channel observer must not see QUIT — alias was immediately promoted ' +
+             'and old primary\'s channels were stripped first').toBe(false);
 
-      // Shadow (now promoted primary) should still be able to send to channel
-      shadow.clearRawBuffer();
+      // Promoted alias (now primary) sends a PRIVMSG to verify the
+      // channel route survived the swap.
+      alias.clearRawBuffer();
       observer.clearRawBuffer();
 
       const testMsg = `promoted-${Date.now()}`;
-      shadow.send(`PRIVMSG ${channel} :${testMsg}`);
+      alias.send(`PRIVMSG ${channel} :${testMsg}`);
 
       const observed = await observer.waitForParsedLine(
         msg => msg.command === 'PRIVMSG' && msg.trailing?.includes(testMsg) === true,
         5000,
       );
-      expect(observed.command, 'Promoted shadow should still send to channel').toBe('PRIVMSG');
       expect(observed.trailing).toContain(testMsg);
 
-      // Session should still be active
-      const info = await bouncerInfo(shadow);
-      expect(info, 'Promoted shadow should have bouncer info').not.toBeNull();
+      // Session must still be ACTIVE — promote ran inline, no HOLDING.
+      const info = await bouncerInfo(alias);
+      expect(info).not.toBeNull();
       expect(info!.state).toBe('active');
 
       // Cleanup
-      await bouncerDisableHold(shadow);
-      shadow.send('QUIT');
+      await bouncerDisableHold(alias);
+      alias.send('QUIT');
       observer.send('QUIT');
     });
 
-    it('session enters HOLDING when last connection (promoted shadow) disconnects', async () => {
+    it('session enters HOLDING when last connection (promoted alias) disconnects', async () => {
       const { account, password, fromPool } = await getTestAccount();
       if (fromPool) poolAccounts.push(account);
 
@@ -952,7 +989,12 @@ describe('Built-in Bouncer', () => {
       primary.send('QUIT');
     });
 
-    it('lists both primary and shadow connections', async () => {
+    it('lists both primary and alias connections', async () => {
+      // Renamed from the shadow-era test.  Aliases (modern replacement
+      // for shadows) emit "type=alias" rows; primary emits
+      // "type=primary".  Previous version filtered on `id=` which only
+      // appears on alias rows (per m_bouncer.c::bouncer_listclients),
+      // so primary was silently uncounted and the >=2 check off-by-one.
       const { account, password, fromPool } = await getTestAccount();
       if (fromPool) poolAccounts.push(account);
 
@@ -960,9 +1002,9 @@ describe('Built-in Bouncer', () => {
       trackClient(primary);
       await new Promise(r => setTimeout(r, 300));
 
-      // Shadow attaches
-      const { client: shadow } = await createSaslBouncerClient(account, password);
-      trackClient(shadow);
+      // Alias attaches
+      const { client: alias } = await createSaslBouncerClient(account, password);
+      trackClient(alias);
       await new Promise(r => setTimeout(r, 500));
 
       primary.clearRawBuffer();
@@ -986,12 +1028,12 @@ describe('Built-in Bouncer', () => {
         }
       }
 
-      // Should list at least 2 connections
-      const clientLines = lines.filter(l => l.includes('id='));
-      expect(
-        clientLines.length,
-        'LISTCLIENTS should show primary + shadow',
-      ).toBeGreaterThanOrEqual(2);
+      // Count primary + alias entries.  Both emit BOUNCER CLIENT NOTEs
+      // with type= field; only aliases carry id=.
+      const primaryLines = lines.filter(l => l.includes('type=primary'));
+      const aliasLines = lines.filter(l => l.includes('type=alias'));
+      expect(primaryLines.length, 'LISTCLIENTS should list one primary').toBe(1);
+      expect(aliasLines.length, 'LISTCLIENTS should list one alias').toBe(1);
 
       // Should show both primary and shadow types
       const hasPrimary = clientLines.some(l => l.includes('primary'));
@@ -1015,7 +1057,7 @@ describe('Built-in Bouncer', () => {
      * also recorded on the BouncerSession so promote/demote and
      * server restart preserve the oper state. */
 
-    it('/OPER on shadow propagates +o to primary (WHOIS observer view)', async () => {
+    it('/OPER on alias propagates +o to primary (WHOIS observer view)', async () => {
       const { account, password, fromPool } = await getTestAccount();
       if (fromPool) poolAccounts.push(account);
 
@@ -1149,7 +1191,7 @@ describe('Built-in Bouncer', () => {
       primary.send('QUIT');
     });
 
-    it('/OPER on primary propagates to shadow (shadow sees its own +o)', async () => {
+    it('/OPER on primary propagates to alias (alias sees its own +o)', async () => {
       const { account, password, fromPool } = await getTestAccount();
       if (fromPool) poolAccounts.push(account);
 
@@ -1197,7 +1239,7 @@ describe('Built-in Bouncer', () => {
   });
 
   describe('BOUNCER INFO Connection Count', () => {
-    it('BOUNCER INFO shows connection count with shadows', async () => {
+    it('BOUNCER INFO shows connection count with aliases', async () => {
       const { account, password, fromPool } = await getTestAccount();
       if (fromPool) poolAccounts.push(account);
 
