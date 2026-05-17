@@ -93,14 +93,50 @@ Same change at the BX C session-move site.
 - Otherwise: disconnect all aliases, mark session for destruction, reply `PERSISTENCE STATUS OFF OFF`, caller proceeds as a normal non-persistent client
 - If `<session-id>` is a different session owned by the same account: destroy that session without affecting the caller
 
-### Phase 4 — LIST + ATTACH (pre-CAP-END session pick)
+### Phase 4 — Configuration profiles + network-membership reconciler
 
-- `PERSISTENCE LIST` — enumerate held + active sessions for the authenticated account
-  - Format: `PERSISTENCE SESSION <session-id> <state> <nick> <channels> :<info>`
-  - Terminator: `PERSISTENCE ENDOFLIST`
-- `PERSISTENCE ATTACH <session-id>` — pin which session the registration flow resumes
-- Server-side: defer `bounce_find_best_held()` auto-select until either an explicit ATTACH lands OR CAP END fires without one
-- Auto-select fallback unchanged (current behavior is the default when no explicit ATTACH)
+**Design:** [resources/session-as-profile-design.md](../resources/session-as-profile-design.md).  All nine open questions resolved 2026-05-17.
+
+Replaces the prior "LIST sessions + ATTACH session" framing.  Sessions
+under the new model don't denote separate identities; they denote
+named configuration profiles over a single shared bouncer identity.
+Each profile owns its own channel list, and the bouncer reconciles
+network-level membership against the union of active profiles' lists
+(HOLD-sticky when a profile has no current aliases attached).
+
+Wire surface:
+
+```
+PERSISTENCE PROFILE LIST                       # enumerate
+:srv PERSISTENCE PROFILE <name> [k=v ...]
+:srv PERSISTENCE PROFILE ENDOFLIST
+
+PERSISTENCE PROFILE CREATE <name> [FROM <parent>]
+PERSISTENCE PROFILE DELETE <name>
+PERSISTENCE PROFILE RENAME <old> <new>
+PERSISTENCE PROFILE GET <name> <key>
+PERSISTENCE PROFILE SET <name> <key> <value>
+PERSISTENCE PROFILE SET <name> <key> DEFAULT   # clear override
+PERSISTENCE PROFILE SET <name> channels +#x    # set ops
+PERSISTENCE PROFILE SET <name> channels -#x
+
+PERSISTENCE ATTACH <profile>                   # pre-CAP-END only
+```
+
+Implementation milestones (each lands as a separate commit cycle):
+
+| M | Scope | Tests |
+|---|---|---|
+| **M1** | Profile metadata storage + CRUD subcommands (LIST/CREATE/DELETE/RENAME/GET/SET) + inheritance resolution + cycle detection.  No channels yet, no active-profile attachment. | profile CRUD roundtrip; inheritance walk; cycle refusal |
+| **M2** | `PERSISTENCE ATTACH` pre-CAP-END; active-profile state on Connection; STATUS/SET resolution chain through active profile + parent chain + account-global + FEAT_*. | ATTACH selects profile; unsolicited STATUS reflects active profile's resolved hold |
+| **M3** | Channel-list storage per profile + view-only filter at every channel send site (per-delivery profile-list check); no reconciler yet — channels are added/removed via explicit PROFILE SET only. | client on profile A doesn't see #x traffic when #x not in A's list |
+| **M4** | Full reconciler: `/JOIN`/`/PART` edit active profile's list and emit network-level JOIN/PART deltas against the union; attach/detach triggers re-reconciliation; HOLD-sticky for inactive profiles. | same-profile aliases share JOIN/PART; cross-profile aliases don't; HOLD-on keeps channels sticky; HOLD-off drops on last-detach |
+| **M5** | Inheritance for channel lists (set-merge semantics: parent's + own additions − own subtractions). | inherited channel list flattens correctly; explicit subtract overrides inherited add |
+
+Legacy surface: `BOUNCER SET HOLD` and `BOUNCER INFO` continue to work
+on the account-global key (Q2 — `PERSISTENCE SET` writes the same
+key).  The `BOUNCER LISTCLIENTS` surface is unaffected (per-connection
+info, not per-profile).
 
 ### Phase 5 — Legacy surface deprecation (later)
 
