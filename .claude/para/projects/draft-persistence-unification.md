@@ -50,7 +50,7 @@ Tests: STATUS unsolicited, GET, SET roundtrip, error handling, server-managed wr
 
 > After the `draft/persistence` batch closes and before live activity, servers MAY emit an `evilnet.github.io/bouncer-replay` batch containing missed-message replay.  Clients honoring `REPLAY OFF` will not receive this batch.  Within the batch, individual `chathistory` batches per conversation target follow normal IRCv3 chathistory semantics.  The outer batch boundary signals the complete replay block — useful for unread-marker rollup, do-not-disturb rules, and notification suppression.
 
-### Phase 3 — REPLAY trio + hs_enforced flag + DETACH
+### Phase 3 — REPLAY trio + hs_enforced flag + DETACH ✅ shipped
 
 REPLAY trio (mirrors HOLD):
 
