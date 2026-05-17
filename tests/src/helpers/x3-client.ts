@@ -23,7 +23,7 @@
 
 import { RawSocketClient, createRawSocketClient, PRIMARY_SERVER, IRCMessage, isFromService } from './ircv3-client.js';
 import { uniqueId, retryAsync, waitForCondition } from './cap-bundles.js';
-import { checkoutPoolAccount, checkinPoolAccount, isPoolInitialized, type PoolAccount } from './account-pool.js';
+import { checkoutPoolAccount, checkinPoolAccount, isPoolInitialized, wipePoolAccountMetadata, type PoolAccount } from './account-pool.js';
 import { authenticateSaslPlain } from './sasl.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -973,6 +973,11 @@ export async function getTestAccount(options?: { requireFresh?: boolean }): Prom
   // Try pool first
   const poolAccount = checkoutPoolAccount();
   if (poolAccount) {
+    // Wipe residual bouncer/* metadata so the next test starts with a
+    // clean account — see wipePoolAccountMetadata's docstring for the
+    // motivation.  Best-effort: failures here log a warning but don't
+    // block the checkout.
+    await wipePoolAccountMetadata(poolAccount.account);
     return {
       account: poolAccount.account,
       password: poolAccount.password,

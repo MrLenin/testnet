@@ -65,22 +65,25 @@ describe('Built-in Bouncer', () => {
       const { client } = await createSaslBouncerClient(account, password);
       trackClient(client);
 
-      // Before enabling hold, INFO should show no session
-      const infoBefore = await bouncerInfo(client);
-      // May be null or state=none before hold is enabled
-      if (infoBefore) {
-        expect(infoBefore.state).toBe('none');
-      }
+      // Note: we intentionally don't assert the "no session before
+      // BOUNCER SET HOLD" state.  FEAT_BOUNCER_DEFAULT_HOLD is TRUE on
+      // this testnet, so a SASL'd client may auto-create a session
+      // even without an explicit preference (see the "no preference +
+      // DEFAULT_HOLD=true" path in bounce_auto_resume).  That state
+      // is network-config-dependent; the meaningful assertion is the
+      // "after enable, state=active, source=account" part below.
 
-      // Enable hold → should create session
+      // Enable hold → should create session and pin source=account.
       const holdResult = await bouncerEnableHold(client);
       expect(holdResult, 'BOUNCER SET HOLD on should succeed').toBe(true);
 
-      // INFO should now show an active session
+      // INFO should now show an active session with source=account
+      // (explicit user preference, not the network default).
       const info = await bouncerInfo(client);
       expect(info, 'BOUNCER INFO should return data after hold enabled').not.toBeNull();
       expect(info!.state).toBe('active');
       expect(info!.hold).toBe('on');
+      expect(info!.holdSource).toBe('account');
 
       // Cleanup: disable hold
       await bouncerDisableHold(client);
@@ -165,18 +168,19 @@ describe('Built-in Bouncer', () => {
       client.send('QUIT');
     });
 
-    // Skipped: pool-state contamination.  Pool accounts accumulate
-    // bouncer/hold metadata across tests (almost every bouncer test
-    // sets it).  This test asserts hold=off with source=DEFAULT —
-    // i.e., the metadata key is ABSENT, not set to "0".  The
-    // `METADATA * SET <key>` deletion path didn't reliably clear
-    // the LMDB record in the brief window between cleanup and
-    // reconnect.  Reliable fix requires a pool-cleanup hook that
-    // wipes bouncer/hold metadata at checkin time — out of scope
-    // for this session.  The same-named "...for accounts without
-    // hold preference" assertion only makes sense on a TRULY clean
-    // account.
-    it.skip('shows hold=off for accounts without hold preference', async () => {
+    it('reports holdSource=default for accounts without explicit preference', async () => {
+      // Pool checkout now wipes bouncer/* metadata via the oper-only
+      // METADATA *<account> SET <key> path (see
+      // wipePoolAccountMetadata in account-pool.ts), so this test can
+      // assume a clean account state — bouncer/hold absent → BOUNCER
+      // INFO reports source=default.
+      //
+      // Renamed from "shows hold=off for accounts without hold
+      // preference": the actual hold VALUE in the "no preference"
+      // state depends on FEAT_BOUNCER_DEFAULT_HOLD (true on this
+      // testnet, so the value is "on(default)").  The MEANINGFUL
+      // signal — and what the test was always trying to verify — is
+      // that the source reads as "default", not "account".
       const { account, password, fromPool } = await getTestAccount();
       if (fromPool) poolAccounts.push(account);
 
@@ -185,9 +189,10 @@ describe('Built-in Bouncer', () => {
 
       const info = await bouncerInfo(client);
       expect(info).not.toBeNull();
-      expect(info!.hold).toBe('off');
       expect(info!.holdSource).toBe('default');
 
+      // Cleanup: this test left a session if DEFAULT_HOLD created one.
+      try { await bouncerDisableHold(client); } catch { /* ignore */ }
       client.send('QUIT');
     });
   });

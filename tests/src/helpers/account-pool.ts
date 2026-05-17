@@ -20,6 +20,7 @@
  */
 
 import { createX3Client, type X3Client } from './x3-client.js';
+import { createRawSocketClient, RawSocketClient } from './ircv3-client.js';
 
 export interface PoolAccount {
   account: string;
@@ -328,4 +329,110 @@ export function getPoolStats() {
 
 export function isPoolInitialized(): boolean {
   return accountPool.isInitialized();
+}
+
+/* ----------------------------------------------------------------
+ * Pool-level metadata cleanup
+ *
+ * Some bouncer tests assume a pool account starts with no
+ * `bouncer/hold` preference set.  But every test that calls
+ * `bouncerEnableHold` writes that key, and the metadata persists in
+ * LMDB across pool checkin/checkout.  Without explicit cleanup, the
+ * NEXT test that checks out the same account sees the residual
+ * preference — which silently invalidates assertions about "default"
+ * source.
+ *
+ * Fix: wipe `bouncer/hold` (and `bouncer/away`, etc. as needed) for a
+ * pool account at checkout time, before getTestAccount returns it.
+ * The wipe goes through a long-lived oper client that we keep around
+ * for the lifetime of the test process — set up lazily on first
+ * checkout that needs cleanup.
+ *
+ * The wipe uses `METADATA *<account> SET <key>` (no value = delete),
+ * an oper-targeted account form that writes directly to LMDB and
+ * works for offline accounts too (m_metadata.c around line 652).
+ * --------------------------------------------------------------- */
+
+const POOL_CLEANUP_KEYS = ['bouncer/hold', 'bouncer/away'] as const;
+
+let poolCleanupClient: RawSocketClient | null = null;
+let poolCleanupPromise: Promise<RawSocketClient> | null = null;
+
+async function getPoolCleanupClient(): Promise<RawSocketClient> {
+  if (poolCleanupClient) return poolCleanupClient;
+  if (poolCleanupPromise) return poolCleanupPromise;
+
+  // Avoid the static import + circular-dep cost by lazy-resolving
+  // IRC_OPER from the same helpers barrel.  IRC_OPER constants come
+  // from x3-client.ts and don't depend on this file.
+  const { IRC_OPER } = await import('./x3-client.js');
+
+  poolCleanupPromise = (async () => {
+    const c = await createRawSocketClient();
+    try {
+      await c.capLs();
+      // METADATA is a CAP-gated command (draft/metadata-2).  Without
+      // requesting the cap, the server rejects METADATA as "Unknown
+      // command" (421).  capReq before capEnd negotiates it for the
+      // session.
+      await c.capReq(['draft/metadata-2']);
+      c.capEnd();
+      const nick = `poolcln${Math.random().toString(36).slice(2, 7)}`;
+      c.register(nick);
+      await c.waitForNumeric('001', 5000);
+      // Settle so the welcome NOTICE bursts don't race the OPER ack.
+      await new Promise(r => setTimeout(r, 500));
+      c.send(`OPER ${IRC_OPER.name} ${IRC_OPER.password}`);
+      await c.waitForNumeric('381', 5000); // RPL_YOUREOPER
+      poolCleanupClient = c;
+      return c;
+    } catch (err) {
+      // If oper-up failed we can't do cleanup; null the client so a
+      // future call can retry, but propagate the error to the
+      // caller of getPoolCleanupClient so they can decide whether
+      // to fail or skip.
+      try { c.close(); } catch { /* ignore */ }
+      poolCleanupClient = null;
+      poolCleanupPromise = null;
+      throw err;
+    }
+  })();
+
+  return poolCleanupPromise;
+}
+
+/**
+ * Wipe bouncer/* metadata for a pool account.  Idempotent.
+ *
+ * Best-effort: if the oper-cleanup client can't be brought up
+ * (e.g., test environment doesn't have oper creds), this resolves
+ * with a warning but doesn't fail — tests then run with whatever
+ * residual state the account has, same as before this helper
+ * existed.
+ */
+export async function wipePoolAccountMetadata(account: string): Promise<void> {
+  let client: RawSocketClient;
+  try {
+    client = await getPoolCleanupClient();
+  } catch (err) {
+    // First-time setup failed — log once and bail.
+    console.warn(`[AccountPool] cleanup oper client unavailable; skipping wipe for ${account}: ${err}`);
+    return;
+  }
+  // Send the deletes.  No-value-after-key form → delete.
+  for (const key of POOL_CLEANUP_KEYS) {
+    client.send(`METADATA *${account} SET ${key}`);
+  }
+  // Brief settle so the operations land before getTestAccount returns
+  // and the next test connects with this account.
+  await new Promise(r => setTimeout(r, 100));
+}
+
+/** Test-only: tear down the cleanup client (e.g. in a global teardown). */
+export function closePoolCleanupClient(): void {
+  if (poolCleanupClient) {
+    try { poolCleanupClient.close(); } catch { /* ignore */ }
+    poolCleanupClient = null;
+  }
+  poolCleanupPromise = null;
 }
