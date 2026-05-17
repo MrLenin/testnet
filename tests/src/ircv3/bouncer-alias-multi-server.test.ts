@@ -94,7 +94,7 @@ describe('Bouncer two-server alias attach', () => {
    *   4. KILL → BX X cascade → session destroyed network-wide; alias
    *      we were trying to assert on never lives long enough to query
    */
-  it.skip('creates an alias on leaf when same account is already primary on testnet', async () => {
+  it('creates an alias on leaf when same account is already primary on testnet', async () => {
     if (!leafReachable) {
       console.warn(`Skipping: leaf at ${leafHost}:${leafPort} not reachable. ` +
         'Run docker compose --profile linked up -d, or set IRC_HOST2/IRC_PORT2.');
