@@ -131,8 +131,11 @@ describe('Built-in Bouncer', () => {
 
       const info = await assertBouncerActive(client, 'SASL+hold client');
 
-      // Session should have a valid ID format
-      expect(info.sessionId).toMatch(/^[A-Za-z0-9]+-\d+$/);
+      // Session should have a valid ID format.  Modern bouncer sessids
+      // are base64-ish (AZ4… ~22 chars); legacy was AB-00001 form.
+      // Either format is acceptable here — we just want a non-empty
+      // ID composed of URL-safe characters.
+      expect(info.sessionId).toMatch(/^[A-Za-z0-9+/=_-]+$/);
       expect(info.state).toBe('active');
       expect(info.hold).toBe('on');
       expect(info.holdSource).toBe('account');
@@ -1029,20 +1032,17 @@ describe('Built-in Bouncer', () => {
       }
 
       // Count primary + alias entries.  Both emit BOUNCER CLIENT NOTEs
-      // with type= field; only aliases carry id=.
+      // with type= field; only aliases carry id=.  Pre-rename this
+      // section had a second pair of assertions checking for the
+      // literal string "shadow" in the output — that's stale (shadow
+      // subsystem removed) and was always going to fail; dropped.
       const primaryLines = lines.filter(l => l.includes('type=primary'));
       const aliasLines = lines.filter(l => l.includes('type=alias'));
       expect(primaryLines.length, 'LISTCLIENTS should list one primary').toBe(1);
       expect(aliasLines.length, 'LISTCLIENTS should list one alias').toBe(1);
 
-      // Should show both primary and shadow types
-      const hasPrimary = clientLines.some(l => l.includes('primary'));
-      const hasShadow = clientLines.some(l => l.includes('shadow'));
-      expect(hasPrimary, 'LISTCLIENTS should show a primary connection').toBe(true);
-      expect(hasShadow, 'LISTCLIENTS should show a shadow connection').toBe(true);
-
       // Cleanup
-      shadow.send('QUIT');
+      alias.send('QUIT');
       await bouncerDisableHold(primary);
       primary.send('QUIT');
     });
