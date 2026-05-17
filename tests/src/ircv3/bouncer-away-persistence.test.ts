@@ -39,11 +39,11 @@ describe('Bouncer AWAY status persistence across HOLD / revive', () => {
   it('AWAY text survives abrupt disconnect + revive', async () => {
     const account = await getTestAccount();
     poolAccounts.push(account.account);
-    const target = uniqueNick('awy');
+    const requestedNick = uniqueNick('awy');
     const awayText = 'bouncer-hold persistence test';
 
-    const { client: first } = await createSaslBouncerClient(
-      account.account, account.password, { nick: target },
+    const { client: first, nick: target } = await createSaslBouncerClient(
+      account.account, account.password, { nick: requestedNick },
     );
     clients.push(first);
     expect(await bouncerEnableHold(first)).toBe(true);

@@ -96,12 +96,18 @@ export async function createSaslBouncerClient(
 
   client.capEnd();
   client.register(nick);
-  await client.waitForNumeric('001');
+  /* The actual nick we end up with may differ from `nick` if the server
+   * revived a HOLDING ghost for this account (the ghost's nick wins —
+   * the bouncer is what owns identity once the session exists).  Read
+   * the 001 line's target field to get the canonical nick we should
+   * use for the rest of the test. */
+  const welcome = await client.waitForNumeric('001');
+  const actualNick = welcome.params[0] || nick;
 
   // Brief settle for registration propagation
   await new Promise(r => setTimeout(r, 300));
 
-  return { client, account, password, nick };
+  return { client, account, password, nick: actualNick };
 }
 
 /**
