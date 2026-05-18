@@ -110,6 +110,8 @@ PERSISTENCE <subcommand> [<argument> ...]
 
 Subcommand names defined here are case-insensitive; clients SHOULD send them in upper case.  Servers MUST accept any case.
 
+The `draft/persistence` capability is a client opt-in signal: it advertises to the server that the client understands the unsolicited messages and batch envelopes defined by this specification.  Servers MUST NOT refuse `PERSISTENCE` commands from clients that have not negotiated the capability — the command surface remains available to any authenticated client.  Auto-replay and other server-side effects defined by this specification likewise apply regardless of capability negotiation.  Capability gating in this specification scopes only what the server emits *unprompted* (the registration-time `PERSISTENCE STATUS`) and the wire shapes (`draft/persistence` and `evilnet.github.io/bouncer-replay` batch envelopes) that depend on the client understanding the framing.
+
 Authentication is required for every subcommand defined in this specification.  When the calling connection has not authenticated, the server MUST reply:
 
 ```
