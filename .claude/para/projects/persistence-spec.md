@@ -28,7 +28,7 @@ The specification covers:
   2. A `PERSISTENCE` command for the client to inspect and adjust its session, organise per-connection configuration as named profiles, attach to a chosen profile at registration time, control auto-replay of missed messages, and detach from persistence entirely.
   3. A `draft/persistence` batch type wrapping the server's channel-state restoration burst.
   4. A `evilnet.github.io/bouncer-replay` batch type wrapping the server's optional missed-message replay.
-  5. A reserved metadata key prefix (`bouncer/`) for server-managed state related to persistence.
+  5. A reserved metadata key prefix (`draft/persistence/`) for server-managed state related to this specification.
   6. A network-membership reconciliation mechanism for clients that participate in profile-driven divergent channel sets across multiple concurrent connections.
 
 The server as mentioned in this document MAY be an IRC server or an IRC bouncer.
@@ -79,25 +79,26 @@ Defined optional tokens:
 
 Clients MUST tolerate unknown tokens in the value and MUST NOT assume the absence of a token implies the absence of a feature; the value is a hint, not an authoritative inventory.
 
-### Server-managed metadata reservation
+### Server-managed metadata keys
 
-This specification reserves the following metadata key prefixes for server-managed use:
+This specification stores per-account configuration as metadata keys under the prefix:
 
-  - `bouncer/`
-  - `session/`
-  - `system/`
+  - `draft/persistence/` while this document remains a work-in-progress draft.
+  - `persistence/` once this document is ratified.
 
-A "server-managed" key is one that is written exclusively by server-side logic in response to commands defined by this specification (or future related specifications), and never by a direct `METADATA SET` from a client.
+These keys are *server-managed*: their values are maintained by the server in response to the `PERSISTENCE` command defined below, and direct `METADATA SET` from a client is refused.
 
-When the `draft/metadata-2` capability is in use, servers MUST refuse client-initiated `METADATA SET` against any key that begins with a reserved prefix, replying with:
+When the `draft/metadata-2` capability is in use, servers MUST refuse client-initiated `METADATA SET` against any key that begins with this specification's prefix, replying with:
 
 ```
 FAIL METADATA KEY_NO_PERMISSION <target> <key> :Key is server-managed and cannot be set directly
 ```
 
-Server-managed keys MUST NOT count against the per-target `MAX_KEYS` budget advertised by the `draft/metadata-2` capability.  Servers MAY allow privileged paths (e.g. an oper-only administrative tool keyed on `*<account>`) to write to these keys; this is implementation-defined and not part of the wire protocol.
+Server-managed keys MUST NOT count against the per-target `MAX_KEYS` budget advertised by the `draft/metadata-2` capability.  Servers MAY allow privileged out-of-band paths (e.g. an oper-only administrative interface keyed on `*<account>`) to write to these keys; this is implementation-defined and not part of the wire protocol.
 
 Server-managed keys remain readable via `METADATA GET`, so clients MAY inspect them.
+
+Specifications and vendor extensions that introduce additional server-managed keys SHOULD use their own draft-namespaced or vendor-scoped prefix (e.g. `draft/my-extension/...` or `vendor.example/...`) rather than claiming generic unprefixed prefixes.  This avoids namespace conflicts and keeps the carve-out auditable per-specification.
 
 ## Commands
 
@@ -449,7 +450,7 @@ Servers SHOULD use the `<context>` field of `FAIL` to indicate the offending sub
 ## Security considerations
 
   - Persistence carries elevated risk of resource exhaustion.  Servers SHOULD limit the number of concurrent held sessions per account, enforce inactivity timeouts for held sessions, and require SASL authentication before creating a session.
-  - The per-account profile space (`bouncer/profile/...`) is metadata: it is replicated by the metadata distribution mechanism to peers that share the account.  Implementations MUST treat these keys as PRIVATE (visible only to the owning account) for purposes of `draft/metadata-2`'s visibility model.
+  - The per-account profile space (`draft/persistence/profile/...`) is metadata: it is replicated by the metadata distribution mechanism to peers that share the account.  Implementations MUST treat these keys as PRIVATE (visible only to the owning account) for purposes of `draft/metadata-2`'s visibility model.
   - The optional network-membership reconciliation creates a divergence between an account's per-channel network presence and the per-connection view of that presence.  Operators SHOULD audit channel-routed administrative tooling (KICK, BAN, MODE delivery) to confirm it behaves predictably under this divergence.
   - `PERSISTENCE LIST` and the listing of profile names can reveal that an account has multiple held sessions or multiple configured profiles.  Servers MUST only return data owned by the authenticated account.
 
@@ -531,10 +532,10 @@ S: FAIL PERSISTENCE CANNOT_DETACH DETACH :Connection class enforces persistence;
 ### Reading server-managed metadata
 
 ```
-C: METADATA * GET bouncer/hold
-S: :server 761 nick * bouncer/hold private :1
-C: METADATA * SET bouncer/hold :0
-S: FAIL METADATA KEY_NO_PERMISSION * bouncer/hold :Key is server-managed and cannot be set directly
+C: METADATA * GET draft/persistence/hold
+S: :server 761 nick * draft/persistence/hold private :1
+C: METADATA * SET draft/persistence/hold :0
+S: FAIL METADATA KEY_NO_PERMISSION * draft/persistence/hold :Key is server-managed and cannot be set directly
 C: PERSISTENCE SET OFF
 S: :server PERSISTENCE SET OFF
 S: :server PERSISTENCE STATUS OFF
