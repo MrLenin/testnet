@@ -527,26 +527,31 @@ async function cleanup(): Promise<void> {
       console.log(` Done (${stats.channelsDeleted})`);
     }
 
-    // Clear bouncer hold metadata on pool accounts
-    // This prevents stale bouncer/hold=1 in LMDB from auto-creating
+    // Clear persistence hold metadata on pool accounts.
+    // Prevents stale draft/persistence/hold=1 in LMDB from auto-creating
     // bouncer sessions on server restart after a crashed test run.
     // Uses METADATA SET *accountname (oper-only account target) to write
     // directly to LMDB without needing the account to be online.
-    console.log('\nClearing bouncer metadata on pool accounts...');
+    // Also wipes the legacy `bouncer/hold` key as a one-shot cleanup of
+    // pre-migration state on pool accounts.
+    console.log('\nClearing persistence metadata on pool accounts...');
     let bouncerCleared = 0;
     for (let i = 0; i < 10; i++) {
       const poolAccount = `pool${i.toString().padStart(2, '0')}`;
-      send(`METADATA SET *${poolAccount} bouncer/hold 0`);
-      try {
-        // Wait for 761 (RPL_KEYVALUE) or FAIL response for this account
-        await waitForLine(new RegExp(`\\*${poolAccount}.*bouncer/hold|FAIL METADATA`), 5000);
-        bouncerCleared++;
-        if (DEBUG) console.log(`  Cleared bouncer hold for ${poolAccount}`);
-      } catch {
-        if (DEBUG) console.log(`  No response for ${poolAccount}`);
+      for (const key of ['draft/persistence/hold', 'bouncer/hold']) {
+        send(`METADATA SET *${poolAccount} ${key}`);
+        try {
+          await waitForLine(
+            new RegExp(`\\*${poolAccount}.*${key.replace(/[/.]/g, '\\$&')}|FAIL METADATA`),
+            5000,
+          );
+        } catch {
+          if (DEBUG) console.log(`  No response for ${poolAccount} ${key}`);
+        }
       }
+      bouncerCleared++;
     }
-    console.log(`Cleared bouncer hold metadata on ${bouncerCleared} pool accounts`);
+    console.log(`Cleared persistence metadata on ${bouncerCleared} pool accounts`);
 
     // Write databases to disk so deletions persist across X3 restart
     if (stats.accountsDeleted > 0 || stats.channelsDeleted > 0 || bouncerCleared > 0) {

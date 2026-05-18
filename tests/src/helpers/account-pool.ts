@@ -353,7 +353,7 @@ export function isPoolInitialized(): boolean {
  * works for offline accounts too (m_metadata.c around line 652).
  * --------------------------------------------------------------- */
 
-const POOL_CLEANUP_KEYS = ['bouncer/hold', 'bouncer/away'] as const;
+const POOL_CLEANUP_KEYS = ['draft/persistence/hold'] as const;
 
 let poolCleanupClient: RawSocketClient | null = null;
 let poolCleanupPromise: Promise<RawSocketClient> | null = null;

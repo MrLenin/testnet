@@ -286,7 +286,7 @@ describe('draft/persistence — Phase 1', () => {
     clients.push(client);
 
     client.clearRawBuffer();
-    client.send(`METADATA * SET bouncer/hold :1`);
+    client.send(`METADATA * SET draft/persistence/hold :1`);
     const fail = await client.waitForParsedLine(
       m => m.command === 'FAIL' && m.params[0] === 'METADATA',
       5_000,
