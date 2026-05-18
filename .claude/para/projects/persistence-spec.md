@@ -110,7 +110,14 @@ PERSISTENCE <subcommand> [<argument> ...]
 
 Subcommand names defined here are case-insensitive; clients SHOULD send them in upper case.  Servers MUST accept any case.
 
-The `draft/persistence` capability is a client opt-in signal: it advertises to the server that the client understands the unsolicited messages and batch envelopes defined by this specification.  Servers MUST NOT refuse `PERSISTENCE` commands from clients that have not negotiated the capability — the command surface remains available to any authenticated client.  Auto-replay and other server-side effects defined by this specification likewise apply regardless of capability negotiation.  Capability gating in this specification scopes only what the server emits *unprompted* (the registration-time `PERSISTENCE STATUS`) and the wire shapes (`draft/persistence` and `evilnet.github.io/bouncer-replay` batch envelopes) that depend on the client understanding the framing.
+The `draft/persistence` capability is a client opt-in signal: it advertises to the server that the client understands the unsolicited `PERSISTENCE STATUS` line at registration and the *semantics* of the `draft/persistence`-typed batch (channel-state restoration vs. live activity).
+
+Servers MUST NOT refuse `PERSISTENCE` commands from clients that have not negotiated the capability — the command surface remains available to any authenticated client.  Auto-replay and other server-side effects defined by this specification likewise apply regardless of capability negotiation.
+
+Capability gating in this specification scopes:
+
+  - The registration-time unsolicited `PERSISTENCE STATUS` — gated on `draft/persistence`.
+  - The `draft/persistence` and `evilnet.github.io/bouncer-replay` batch *envelopes* — gated on `batch` only.  Per the `batch` extension, unknown batch types are tolerated, so a client that has `batch` without `draft/persistence` still receives the envelope and benefits from the grouping signal.  The `draft/persistence` capability adds *interpretation* (treat the batch contents as restoration, suppress join notifications, etc.); it is not a precondition for emitting the envelope.
 
 Authentication is required for every subcommand defined in this specification.  When the calling connection has not authenticated, the server MUST reply:
 
@@ -313,7 +320,7 @@ If `<session-id>` refers to a different session owned by the same account, the s
 
 ### `draft/persistence` batch
 
-When a client with both `draft/persistence` and `batch` resumes a session — whether by reconnecting to a held session or by attaching as an additional view onto an active session — the server MUST wrap the resulting channel-state restoration in a batch of type `draft/persistence`:
+When a client with the `batch` capability resumes a session — whether by reconnecting to a held session or by attaching as an additional view onto an active session — the server MUST wrap the resulting channel-state restoration in a batch of type `draft/persistence`:
 
 ```
 :server BATCH +<ref> draft/persistence
@@ -327,11 +334,11 @@ When a client with both `draft/persistence` and `batch` resumes a session — wh
 :server BATCH -<ref>
 ```
 
-The batch's contents represent the *current* state of the connection's view, not historical activity.  Clients MUST NOT treat these joins, mode messages, or topic messages as new events for the purpose of notifications, auto-join scripts, or analogous side effects.
+The batch's contents represent the *current* state of the connection's view, not historical activity.  Clients that have negotiated `draft/persistence` MUST NOT treat these joins, mode messages, or topic messages as new events for the purpose of notifications, auto-join scripts, or analogous side effects.  Clients that have `batch` but not `draft/persistence` MAY treat the batch contents as live activity (the spec extends them no semantic obligation beyond standard `batch` behaviour), but SHOULD use the grouping signal where useful.
 
 The batch boundary MUST encompass all channel-state restoration triggered by the resume.  After `BATCH -<ref>`, any subsequent JOINs, modes, or topics are live activity.
 
-When the client has negotiated `draft/persistence` but not `batch`, the server MUST still send the restoration burst but does so without the wrapping `BATCH` lines.  Clients SHOULD treat all JOINs received between the welcome (`001`) and the MOTD-end (`376`/`422`) as restoration; subsequent JOINs are live activity.
+When the client has not negotiated `batch`, the server MUST still send the restoration burst but does so without the wrapping `BATCH` lines.  Clients SHOULD treat all JOINs received between the welcome (`001`) and the MOTD-end (`376`/`422`) as restoration; subsequent JOINs are live activity.
 
 #### Empty restoration
 

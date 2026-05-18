@@ -108,7 +108,12 @@ describe('draft/persistence — Phase 2 batch wrapping', () => {
     await bouncerDisableHold(c2);
   });
 
-  it('does NOT wrap channel-state burst when draft/persistence not negotiated', async () => {
+  it('wraps channel-state burst with only batch (no draft/persistence cap needed)', async () => {
+    /* The batch envelope is gated on `batch` alone — clients that
+     * negotiate `batch` but not `draft/persistence` still receive
+     * the `BATCH +id draft/persistence` wrapper.  They observe the
+     * grouping signal even if they don't recognise the batch type
+     * (per the batch spec, unknown types are tolerated). */
     const account = await getTestAccount();
     if (account.fromPool) poolAccounts.push(account.account);
     const nick = uniqueNick('pbn');
@@ -142,7 +147,49 @@ describe('draft/persistence — Phase 2 batch wrapping', () => {
     );
     expect(
       persistenceStart,
-      `expected NO draft/persistence batch when cap not negotiated. Got: ${persistenceStart}`,
+      `expected a draft/persistence batch with only 'batch' negotiated. Last 15 lines:\n${raw.slice(-15).join('\n')}`,
+    ).toBeTruthy();
+
+    await bouncerDisableHold(c2);
+  });
+
+  it('does NOT wrap channel-state burst when batch capability is absent', async () => {
+    /* The cap gate is `batch` — without it, the server emits the
+     * channel-state restoration messages without the envelope. */
+    const account = await getTestAccount();
+    if (account.fromPool) poolAccounts.push(account.account);
+    const nick = uniqueNick('pbnb');
+    const channel = `#pbnb-${Date.now()}`;
+
+    const first = await createBouncerClient(account.account, account.password, {
+      nick,
+      extraCaps: ['message-tags', 'server-time', 'draft/persistence'],
+    });
+    track(first.client);
+    first.client.send(`JOIN ${channel}`);
+    await first.client.waitForParsedLine(
+      m => m.command === 'JOIN' && m.params[0] === channel,
+      5_000,
+    );
+    await new Promise(r => setTimeout(r, 300));
+
+    disconnectAbruptly(first.client);
+    await new Promise(r => setTimeout(r, 600));
+
+    const second = await reconnectBouncer(account.account, account.password, {
+      nick,
+      extraCaps: ['message-tags', 'server-time', 'draft/persistence'],
+    });
+    const c2 = track(second.client);
+    await new Promise(r => setTimeout(r, 1500));
+
+    const raw = c2.allLines;
+    const persistenceStart = raw.find(l =>
+      /BATCH \+\S+ draft\/persistence(\s|$)/.test(l),
+    );
+    expect(
+      persistenceStart,
+      `expected NO BATCH lines when 'batch' is absent. Got: ${persistenceStart}`,
     ).toBeFalsy();
 
     await bouncerDisableHold(c2);
