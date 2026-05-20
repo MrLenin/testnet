@@ -195,24 +195,31 @@ describe('IRCv3 SASL Authentication', () => {
   });
 
   describe('SASL EXTERNAL Flow', () => {
-    it('EXTERNAL requires TLS client certificate', async () => {
+    it('EXTERNAL without TLS cert: server refuses mechanism', async () => {
       const client = trackClient(await createRawSocketClient());
 
       await client.capLs();
       const result = await client.capReq(['sasl']);
       expect(result.ack).toContain('sasl');
 
-      // Try EXTERNAL without certificate
+      // Read the advertised mech list from CAP LS so we know what
+      // the server expects.  EXTERNAL is currently NOT in the local-
+      // SASL list (PLAIN,OAUTHBEARER), and the X3-relay path requires
+      // a client cert (mTLS).  On a plain TCP connection without
+      // TLS, EXTERNAL should be refused.
       client.send('AUTHENTICATE EXTERNAL');
 
-      // Server should respond - either with AUTHENTICATE continuation or error
-      // Without a client cert, we expect either 904/908 (failed) or AUTHENTICATE +
+      // Acceptable responses: 904 (ERR_SASLFAIL) or 908 (RPL_SASLMECHS).
+      // NOT acceptable: AUTHENTICATE + (would mean "continue with
+      // EXTERNAL" — but we have no TLS so the cert assertion can't
+      // happen) or 900 (RPL_LOGGEDIN — would be a security hole).
       const response = await client.waitForParsedLine(
         msg => msg.command === 'AUTHENTICATE' || ['900', '904', '908'].includes(msg.command),
-        5000
+        5000,
       );
-      expect(response.command === 'AUTHENTICATE' || ['900', '904', '908'].includes(response.command),
-        `Should get AUTHENTICATE or SASL response, got: ${response.command}`).toBe(true);
+      expect(['904', '908'],
+        `EXTERNAL on a plain (non-TLS) connection must be refused; got ${response.command}: ${response.raw}`,
+      ).toContain(response.command);
       client.send('QUIT');
     });
   });
@@ -362,17 +369,30 @@ describe('SASL Error Handling', () => {
     await client.capLs();
     await client.capReq(['sasl']);
 
-    // Try an unknown mechanism
+    // Try an unknown mechanism.
     client.send('AUTHENTICATE UNKNOWN_MECHANISM');
 
-    // Should receive 908 (RPL_SASLMECHS) or other error
+    // IRCv3 SASL spec: the server MUST NOT respond with `AUTHENTICATE +`
+    // (which means "ok, continue with this mech") to an unknown mech.
+    // It should send 908 (RPL_SASLMECHS) listing advertised mechs, or
+    // 904 (ERR_SASLFAIL) as a generic failure.  Anything else — and
+    // especially an AUTHENTICATE continuation — is a wire-protocol bug.
     const response = await client.waitForParsedLine(
       msg => msg.command === 'AUTHENTICATE' || ['904', '908'].includes(msg.command),
-      3000
+      3000,
     );
-    expect(response.command === 'AUTHENTICATE' || ['904', '908'].includes(response.command),
-      `Should get AUTHENTICATE or SASL error, got: ${response.command}`).toBe(true);
-    console.log('Unknown mechanism response:', response.raw);
+    expect(['904', '908']).toContain(response.command);
+    // 908 SHOULD include the list of available mechs — if we get 908,
+    // verify it actually carries them.
+    if (response.command === '908') {
+      // RPL_SASLMECHS format: 908 <nick> <mechs> :are available...
+      // Mechs are comma-separated, no spaces.
+      expect(response.params.length, '908 must carry the mech list as a param').toBeGreaterThanOrEqual(2);
+      const mechs = response.params[1];
+      expect(mechs,
+        `908 mech list "${mechs}" must include at least PLAIN (the canonical mech)`,
+      ).toMatch(/PLAIN/i);
+    }
     client.send('QUIT');
   });
 

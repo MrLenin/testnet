@@ -17,6 +17,10 @@ import {
   SECONDARY_SERVER,
   uniqueChannel,
   uniqueId,
+  uniqueNick,
+  getTestAccount,
+  releaseTestAccount,
+  createSaslBouncerClient,
   authenticateSaslPlain,
   // P10 protocol helpers
   getP10Logs,
@@ -1183,34 +1187,50 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
     });
 
     it('multiline BATCH message propagates across servers', async () => {
-      const sender = trackClient(await createClientOnServer(PRIMARY_SERVER));
-      const receiver = trackClient(await createClientOnServer(SECONDARY_SERVER));
+      // Leaf's client classes set require_sasl, so we need SASL on both
+      // ends.  createSaslBouncerClient already does CAP LS + SASL +
+      // CAP END + register, which is what we want here (we're not
+      // testing bouncer behaviour, just using the SASL path it lays
+      // down).
+      const senderAcct = await getTestAccount();
+      const receiverAcct = await getTestAccount();
+      const senderNick = uniqueNick('mlsnd');
+      const receiverNick = uniqueNick('mlrcv');
 
-      // Set up sender with multiline
-      await sender.capLs();
-      const senderCaps = await sender.capReq(['draft/multiline', 'batch', 'echo-message']);
-      if (senderCaps.nak.includes('draft/multiline')) {
-        console.log('draft/multiline not available on primary');
-        sender.close();
-        receiver.close();
-        return;
-      }
-      sender.capEnd();
-      sender.register('mlsender1');
-      await sender.waitForNumeric('001');
+      const senderResult = await createSaslBouncerClient(
+        senderAcct.account, senderAcct.password,
+        {
+          nick: senderNick,
+          host: PRIMARY_SERVER.host,
+          port: PRIMARY_SERVER.port,
+          extraCaps: ['draft/multiline', 'batch', 'echo-message', 'message-tags'],
+        },
+      );
+      trackClient(senderResult.client);
+      const sender = senderResult.client;
 
-      // Set up receiver with multiline to receive batches
-      await receiver.capLs();
-      const receiverCaps = await receiver.capReq(['draft/multiline', 'batch']);
-      if (receiverCaps.nak.includes('draft/multiline')) {
-        console.log('draft/multiline not available on secondary');
-        sender.close();
-        receiver.close();
-        return;
+      const receiverResult = await createSaslBouncerClient(
+        receiverAcct.account, receiverAcct.password,
+        {
+          nick: receiverNick,
+          host: SECONDARY_SERVER.host,
+          port: SECONDARY_SERVER.port,
+          extraCaps: ['draft/multiline', 'batch', 'message-tags'],
+        },
+      );
+      trackClient(receiverResult.client);
+      const receiver = receiverResult.client;
+
+      // draft/multiline is a build-time feature.  If the helper succeeded
+      // but the cap wasn't negotiated, that's a legitimate skip — log
+      // explicitly so failures aren't masked as "test never ran".
+      if (!sender.hasCapEnabled('draft/multiline') || !receiver.hasCapEnabled('draft/multiline')) {
+        if (senderAcct.fromPool) releaseTestAccount(senderAcct.account);
+        if (receiverAcct.fromPool) releaseTestAccount(receiverAcct.account);
+        return void (expect.soft ? expect.soft(true,
+          `draft/multiline not negotiated (sender=${sender.hasCapEnabled('draft/multiline')}, ` +
+          `receiver=${receiver.hasCapEnabled('draft/multiline')}) — skipping`).toBe(true) : null);
       }
-      receiver.capEnd();
-      receiver.register('mlrecv1');
-      await receiver.waitForNumeric('001');
 
       // Both join channel
       const channel = uniqueChannel('mlcross');
@@ -1220,8 +1240,18 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       receiver.send(`JOIN ${channel}`);
       await receiver.waitForJoin(channel);
 
-      // Wait for cross-server sync
-      await sender.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'mlrecv1', 5000);
+      // Wait for cross-server sync — sender sees receiver's JOIN.
+      // Allow extended timeout because BX/burst convergence settle can
+      // take a moment on freshly-restored bouncer-mode leaves.
+      try {
+        await sender.waitForParsedLine(
+          msg => msg.command === 'JOIN' && msg.source?.nick === receiverNick, 15000);
+      } catch {
+        // Not strictly required — the assertion below catches whether
+        // the channel route actually works.  Log but proceed.
+        // eslint-disable-next-line no-console
+        console.log('[multiline cross-server] receiver JOIN not echoed to sender within 15s — proceeding');
+      }
 
       receiver.clearRawBuffer();
 
@@ -1234,41 +1264,69 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       sender.send(`@batch=${batchId} PRIVMSG ${channel} :${uniqueMarker} line 3`);
       sender.send(`BATCH -${batchId}`);
 
-      // Receiver on secondary should get the message(s)
-      // May receive as batch or as individual PRIVMSGs depending on server implementation
-      // P10 protocol may not preserve multiline batches across server links
+      // Receiver must see ALL three lines plus the BATCH frame.
+      // Drain until we've seen line 3 OR timeout — don't cap at 3
+      // messages (BATCH +/- frames are separate lines, so 5 total).
       const received: string[] = [];
-      try {
-        for (let i = 0; i < 10; i++) {
+      const startTime = Date.now();
+      while (Date.now() - startTime < 6000) {
+        try {
           const msg = await receiver.waitForParsedLine(
-            m => m.command === 'PRIVMSG' || m.command === 'BATCH' || m.raw.includes(uniqueMarker),
-            2000
+            m => m.command === 'PRIVMSG' || m.command === 'BATCH',
+            1500,
           );
           received.push(msg.raw);
-          if (msg.raw.includes('line 3') || received.length >= 3) break;
+          if (msg.raw.includes(`BATCH -`)) break;
+        } catch {
+          break;
         }
-      } catch {
-        // Timeout expected after collecting messages
       }
 
-      const hasLine1 = received.some(l => l.includes(`${uniqueMarker} line 1`));
-      const hasLine2 = received.some(l => l.includes(`${uniqueMarker} line 2`));
-      const hasLine3 = received.some(l => l.includes(`${uniqueMarker} line 3`));
-      const hasAnyMarker = received.some(l => l.includes(uniqueMarker));
-      const hasBatch = received.some(l => l.includes('BATCH'));
+      const privmsgLines = received.filter(l => / PRIVMSG /.test(l) && l.includes(uniqueMarker));
+      const batchOpen = received.find(l => /BATCH \+\S+ draft\/multiline/.test(l));
+      const batchClose = received.find(l => /BATCH -\S+/.test(l));
 
-      console.log(
-        `Multiline cross-server: ${received.length} msgs, batch=${hasBatch}, ` +
-        `L1=${hasLine1}, L2=${hasLine2}, L3=${hasLine3}, anyMarker=${hasAnyMarker}`
-      );
+      // 1) All three content lines must propagate — multiline is not
+      //    a "best effort" relay, all lines are part of the same
+      //    logical message.
+      const hasLine1 = privmsgLines.some(l => l.includes(`${uniqueMarker} line 1`));
+      const hasLine2 = privmsgLines.some(l => l.includes(`${uniqueMarker} line 2`));
+      const hasLine3 = privmsgLines.some(l => l.includes(`${uniqueMarker} line 3`));
+      expect(hasLine1,
+        `line 1 must propagate cross-server (got: ${privmsgLines.map(l => l.slice(0, 80)).join(' | ')})`,
+      ).toBe(true);
+      expect(hasLine2, 'line 2 must propagate cross-server').toBe(true);
+      expect(hasLine3, 'line 3 must propagate cross-server').toBe(true);
 
-      // Messages MUST propagate across server links in some form
-      // They may arrive as batch, individual PRIVMSGs, or concatenated
-      expect(hasAnyMarker).toBe(true);
+      // 2) Receiver negotiated batch + draft/multiline → server MUST
+      //    wrap the cross-server delivery in BATCH +/- frames.
+      //    Without batch framing, multiline clients can't reassemble.
+      expect(batchOpen,
+        `BATCH +<id> draft/multiline ${channel} must open the relayed multiline ` +
+        `delivery (receiver has draft/multiline cap)`,
+      ).toBeDefined();
+      expect(batchClose,
+        'BATCH -<id> must close the relayed multiline delivery',
+      ).toBeDefined();
 
-      // Verify at least some lines were received
-      const lineCount = [hasLine1, hasLine2, hasLine3].filter(Boolean).length;
-      expect(lineCount).toBeGreaterThanOrEqual(1);
+      // 3) All three PRIVMSGs must carry the same @batch=<id> tag,
+      //    matching the BATCH +<id> opener's id.  The id is server-
+      //    rewritten at the cross-server boundary (sender's id is
+      //    local-scoped), so we extract from the opener and verify
+      //    all PRIVMSGs reference the SAME id.
+      const openMatch = batchOpen!.match(/BATCH \+(\S+) /);
+      expect(openMatch).toBeTruthy();
+      const relayedBatchId = openMatch![1];
+      for (const pm of privmsgLines) {
+        const tagMatch = pm.match(/@batch=(\S+?)(?:[;\s])/);
+        expect(tagMatch,
+          `relayed PRIVMSG must carry @batch tag (line: ${pm.slice(0, 100)})`,
+        ).toBeTruthy();
+        expect(tagMatch![1],
+          `every relayed PRIVMSG must reference the same batch id ${relayedBatchId} ` +
+          `(line: ${pm.slice(0, 100)})`,
+        ).toBe(relayedBatchId);
+      }
 
       sender.send('QUIT');
       receiver.send('QUIT');

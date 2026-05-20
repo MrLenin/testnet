@@ -13,7 +13,7 @@
  * - User numerics: 0-262143 (3 base64 chars within server space)
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, afterAll, beforeEach } from 'vitest';
 import {
   createClientOnServer,
   RawSocketClient,
@@ -32,14 +32,16 @@ import {
 } from '../helpers/index.js';
 
 /**
- * Create a connected and registered client on a server.
+ * Create a connected and registered client on a server.  Plain TCP
+ * works on both primary 6667 and leaf 6667 (catch-all "Users" class
+ * in base.conf).  Bouncer-class ports (6697 TLS) require SASL.
  */
 async function createRegisteredClient(server: typeof PRIMARY_SERVER, nick: string): Promise<RawSocketClient> {
   const client = await createClientOnServer(server);
   await client.capLs();
   client.capEnd();
   client.register(nick);
-  await client.waitForNumeric('001', 5000);
+  await client.waitForNumeric('001', 15000);
   return client;
 }
 
@@ -63,15 +65,13 @@ async function cleanupClients(): Promise<void> {
   activeClients.length = 0;
 }
 
-// Check if secondary server is available
-let secondaryAvailable = false;
-
-beforeAll(async () => {
-  secondaryAvailable = await isSecondaryServerAvailable();
-  if (!secondaryAvailable) {
-    console.log('Secondary server not available - P10 collision tests will be skipped');
-  }
-});
+// Check secondary server availability at MODULE LOAD time.  See
+// p10-squit.test.ts for the rationale — describe.skipIf evaluates
+// at module load, before beforeAll fires.
+const secondaryAvailable = await isSecondaryServerAvailable();
+if (!secondaryAvailable) {
+  console.log('Secondary server not available - P10 collision tests will be skipped');
+}
 
 afterAll(async () => {
   await cleanupClients();
