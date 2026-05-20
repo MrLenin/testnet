@@ -780,23 +780,29 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       const observer = trackClient(await createClientOnServer(SECONDARY_SERVER));
 
       await sender.capLs();
-      await sender.capReq(['draft/message-redaction', 'echo-message']);
+      // message-tags + server-time are needed for the @msgid= tag on
+      // the echo — without them the server emits a plain PRIVMSG
+      // back, the msgid regex below misses, and the test fails at
+      // 0ms with "expected null not to be null".
+      await sender.capReq(['draft/message-redaction', 'echo-message', 'message-tags', 'server-time', 'batch']);
       sender.capEnd();
       sender.register('redactsend1');
       await sender.waitForNumeric('001');
 
       await observer.capLs();
-      await observer.capReq(['draft/message-redaction']);
+      await observer.capReq(['draft/message-redaction', 'message-tags', 'server-time']);
       observer.capEnd();
       observer.register('redactobs1');
       await observer.waitForNumeric('001');
 
+      // Observer joins FIRST so sender's later JOIN propagates as a
+      // wire event to observer (cross-server settle signal).
       const channel = uniqueChannel('redactcross');
-      sender.send(`JOIN ${channel}`);
-      await sender.waitForJoin(channel);
-
       observer.send(`JOIN ${channel}`);
       await observer.waitForJoin(channel);
+
+      sender.send(`JOIN ${channel}`);
+      await sender.waitForJoin(channel);
 
       // Wait for cross-server sync
       await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
@@ -2316,11 +2322,21 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       const whois2 = await client2.waitForNumeric('311', 15000);
       expect(whois2.raw).toContain(nick1);
 
-      // Users should be visible to each other via NAMES
+      // Users should be visible to each other via NAMES.  Drain to
+      // 366 because the reply can be split across multiple 353 lines.
+      client1.clearRawBuffer();
       client1.send(`NAMES ${channel}`);
-      const names = await client1.waitForNumeric('353', 15000);
-      expect(names.raw).toContain(nick1);
-      expect(names.raw).toContain(nick2);
+      const nameLines: string[] = [];
+      while (true) {
+        const msg = await client1.waitForParsedLine(
+          m => m.command === '353' || m.command === '366', 15000,
+        );
+        if (msg.command === '353') nameLines.push(msg.raw);
+        else break;
+      }
+      const combined = nameLines.join(' ');
+      expect(combined, `NAMES missing ${nick1}: ${nameLines.join(' | ')}`).toContain(nick1);
+      expect(combined, `NAMES missing ${nick2}: ${nameLines.join(' | ')}`).toContain(nick2);
 
       client1.send('QUIT');
       client2.send('QUIT');
