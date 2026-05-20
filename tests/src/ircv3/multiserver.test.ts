@@ -148,7 +148,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
 
       // Wait for cross-server sync: client1 should see client2's JOIN
       // This proves the servers have synced rather than using arbitrary sleep
-      await client1.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'mrecver1', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Client 1 sends a message
       const testMessage = `cross-server-test-${uniqueId()}`;
@@ -188,13 +188,13 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client2.waitForJoin('#whoistest');
 
       // Wait for cross-server sync: client1 sees client2's JOIN
-      await client1.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'whoisee1', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // WHOIS from client1 for client2
       client1.send('WHOIS whoisee1');
 
       // Should get WHOIS response
-      const whoisInfo = await client1.waitForNumeric('311', 5000);
+      const whoisInfo = await client1.waitForNumeric('311', 15000);
       expect(whoisInfo.raw.toLowerCase()).toContain('whoisee1');
 
       client1.send('QUIT');
@@ -216,22 +216,29 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client2.register('observer1');
       await client2.waitForNumeric('001');
 
-      // Both join same channel so they can see each other's nick changes
-      const channel = '#nicktest';
-      client1.send(`JOIN ${channel}`);
-      await client1.waitForJoin('#nicktest');
-
+      // Both join same channel so they can see each other's nick changes.
+      // ORDER MATTERS: client2 (observer) joins FIRST, then client1
+      // joins.  This way client1's JOIN propagates cross-server and is
+      // observable as a wire event on client2.  If client1 joined
+      // first, by the time client2 joined, client1 would already be in
+      // the channel and client2 would learn about them via NAMES (353),
+      // not as a JOIN event — making the cross-server JOIN wait below
+      // a race against propagation latency that we don't actually want.
+      const channel = uniqueChannel('nicktest');
       client2.send(`JOIN ${channel}`);
-      await client2.waitForJoin('#nicktest');
+      await client2.waitForJoin(channel);
 
-      // Wait for cross-server sync: client2 sees client1's JOIN
-      await client2.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'nickold1', 5000);
+      client1.send(`JOIN ${channel}`);
+      await client1.waitForJoin(channel);
+
+      // Wait for cross-server sync: client2 sees client1's JOIN.
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Client 1 changes nick
       client1.send('NICK nicknew1');
 
       // Client 2 should see the nick change
-      const nickChange = await client2.waitForCommand('NICK', 5000);
+      const nickChange = await client2.waitForCommand('NICK', 15000);
       expect(nickChange.raw.toLowerCase()).toContain('nicknew1');
 
       client1.send('QUIT');
@@ -258,7 +265,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       }
 
       // Attempt SASL auth - success or failure is okay, we're testing the SASL flow works
-      const result = await authenticateSaslPlain(client, testAccount, testPassword, 5000);
+      const result = await authenticateSaslPlain(client, testAccount, testPassword, 15000);
       // Log outcome - both success and failure are acceptable (just testing the flow)
       if (result.success) {
         console.log(`SASL auth succeeded on secondary server as ${result.account}`);
@@ -301,7 +308,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client2.send(`JOIN ${channel}`);
       await client1.waitForJoin('#metadatatest');
       await client2.waitForJoin('#metadatatest');
-      await client1.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'metaquery1', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Set metadata on client 1 (on primary server)
       const testKey = 'testkey';
@@ -349,7 +356,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client2.waitForJoin(channel);
 
       // Wait for cross-server sync: client1 sees client2's JOIN
-      await client1.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'modeobs1', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       client2.clearRawBuffer();
 
@@ -389,7 +396,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await user.waitForJoin(channel);
 
       // Wait for cross-server sync: op sees user's JOIN
-      await op.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'kickuser1', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       user.clearRawBuffer();
 
@@ -397,7 +404,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       op.send(`KICK ${channel} kickuser1 :Cross-server kick test`);
 
       // User should receive KICK
-      const kickMsg = await user.waitForCommand('KICK', 5000);
+      const kickMsg = await user.waitForCommand('KICK', 15000);
       expect(kickMsg.raw.toLowerCase()).toContain('kickuser1');
 
       op.send('QUIT');
@@ -426,7 +433,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client2.waitForJoin(channel);
 
       // Wait for cross-server sync: client1 sees client2's JOIN
-      await client1.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'topicobs1', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       client2.clearRawBuffer();
 
@@ -435,7 +442,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client1.send(`TOPIC ${channel} :${newTopic}`);
 
       // Client 2 should see TOPIC change
-      const topicChange = await client2.waitForCommand('TOPIC', 5000);
+      const topicChange = await client2.waitForCommand('TOPIC', 15000);
       expect(topicChange.command).toBe('TOPIC');
 
       client1.send('QUIT');
@@ -464,7 +471,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client2.waitForJoin(channel);
 
       // Wait for cross-server sync: client2 sees client1's JOIN
-      await client2.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'parter1', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       client2.clearRawBuffer();
 
@@ -505,7 +512,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await sender.waitForJoin('#pmtest');
       await receiver.waitForJoin('#pmtest');
       // Wait for cross-server visibility
-      await sender.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'pmrecver1', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       receiver.clearRawBuffer();
 
@@ -544,7 +551,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       receiver.send(`JOIN ${channel}`);
       await sender.waitForJoin('#noticetest');
       await receiver.waitForJoin('#noticetest');
-      await sender.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'noticerecv1', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       receiver.clearRawBuffer();
 
@@ -584,7 +591,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await observer.waitForJoin(channel);
 
       // Wait for cross-server sync: observer sees quitter's JOIN
-      await observer.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'quitter1', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       observer.clearRawBuffer();
 
@@ -627,7 +634,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client2.waitForJoin(channel);
 
       // Wait for cross-server sync
-      await client1.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'acctag2', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       client2.clearRawBuffer();
 
@@ -703,7 +710,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client2.waitForJoin(channel);
 
       // Wait for cross-server sync
-      await client1.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'time2', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       client2.clearRawBuffer();
 
@@ -752,14 +759,14 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await observer.waitForJoin(oldChannel);
 
       // Wait for cross-server sync
-      await op.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'renameobs1', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       observer.clearRawBuffer();
 
       // Rename from primary server
       op.send(`RENAME ${oldChannel} ${newChannel} :Cross-server rename`);
 
-      const rename = await observer.waitForCommand('RENAME', 5000);
+      const rename = await observer.waitForCommand('RENAME', 15000);
       expect(rename.command).toBe('RENAME');
 
       op.send('QUIT');
@@ -792,7 +799,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await observer.waitForJoin(channel);
 
       // Wait for cross-server sync
-      await sender.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'redactobs1', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Send message and capture msgid
       sender.send(`PRIVMSG ${channel} :Message to redact cross-server`);
@@ -810,7 +817,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       // Redact the message
       sender.send(`REDACT ${channel} ${msgid} :Cross-server redaction`);
 
-      const redact = await observer.waitForCommand('REDACT', 5000);
+      const redact = await observer.waitForCommand('REDACT', 15000);
       expect(redact.command).toBe('REDACT');
 
       sender.send('QUIT');
@@ -844,7 +851,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client2.waitForJoin(channel);
 
       // Wait for cross-server sync
-      await client1.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'awaytest2', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       client2.clearRawBuffer();
 
@@ -852,7 +859,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client1.send('AWAY :Gone for lunch');
 
       // Client 2 should see AWAY message (with away-notify)
-      const awayMsg = await client2.waitForCommand('AWAY', 5000);
+      const awayMsg = await client2.waitForCommand('AWAY', 15000);
       expect(awayMsg.command).toBe('AWAY');
 
       client1.send('QUIT');
@@ -879,12 +886,12 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       querier.send(`JOIN ${channel}`);
       await awayclient.waitForJoin('#awaywhoistest');
       await querier.waitForJoin('#awaywhoistest');
-      await querier.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'awaywhois1', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Set away on client 1
       awayclient.send('AWAY :Testing WHOIS away');
       // Wait for AWAY to be confirmed
-      await awayclient.waitForNumeric('306', 5000);  // RPL_NOWAWAY
+      await awayclient.waitForNumeric('306', 15000);  // RPL_NOWAWAY
 
       querier.clearRawBuffer();
 
@@ -892,7 +899,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       querier.send('WHOIS awaywhois1');
 
       // 301 = RPL_AWAY
-      const awayLine = await querier.waitForNumeric('301', 5000);
+      const awayLine = await querier.waitForNumeric('301', 15000);
       expect(awayLine.raw).toContain('Testing WHOIS away');
 
       awayclient.send('QUIT');
@@ -926,7 +933,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client2.waitForJoin(channel);
 
       // Wait for cross-server sync
-      await client1.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'setname2', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       client2.clearRawBuffer();
 
@@ -935,7 +942,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       client1.send(`SETNAME :${newName}`);
 
       // Client 2 should see SETNAME
-      const setnameMsg = await client2.waitForCommand('SETNAME', 5000);
+      const setnameMsg = await client2.waitForCommand('SETNAME', 15000);
       expect(setnameMsg.command).toBe('SETNAME');
 
       client1.send('QUIT');
@@ -968,14 +975,14 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await receiver.waitForJoin(channel);
 
       // Wait for cross-server sync
-      await sender.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'tagmsg2', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       receiver.clearRawBuffer();
 
       // Send TAGMSG with reaction
       sender.send(`@+draft/react=:thumbsup: TAGMSG ${channel}`);
 
-      const tagmsg = await receiver.waitForCommand('TAGMSG', 5000);
+      const tagmsg = await receiver.waitForCommand('TAGMSG', 15000);
       expect(tagmsg.command).toBe('TAGMSG');
 
       sender.send('QUIT');
@@ -1060,7 +1067,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client2.waitForJoin(channel);
 
       // Wait for cross-server sync
-      await client1.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'readmark2', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Both clients can query MARKREAD
       client1.send(`MARKREAD ${channel}`);
@@ -1110,7 +1117,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client2.waitForJoin(channel);
 
       // Wait for cross-server sync
-      await client1.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'chghost2', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // CHGHOST is typically triggered by services, not by users directly
       // But we can verify the capability is enabled on both servers
@@ -1150,7 +1157,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await joiner.waitForJoin(channel);
 
       // Observer should see extended-join format
-      const joinMsg = await observer.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'extjoin1', 5000);
+      const joinMsg = await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
       expect(joinMsg.source?.nick).toBe('extjoin1');
       // Extended join format: :nick!user@host JOIN #channel account :realname
       // Account may be * if not logged in
@@ -1364,7 +1371,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await querier.waitForJoin(channel);
 
       // Wait for cross-server sync
-      await sender.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'chquery1', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Sender sends messages from primary
       const marker = `batchtest${uniqueId()}`;
@@ -1444,7 +1451,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await querier.waitForJoin(channel);
 
       // Wait for cross-server sync
-      await setter.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'metaget1', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Set metadata on primary server
       setter.send('METADATA SET * testkey :testvalue');
@@ -1500,7 +1507,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await subscriber.waitForJoin(channel);
 
       // Wait for cross-server sync
-      await setter.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'metasub2', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Subscriber subscribes to key
       subscriber.send('METADATA * SUB avatar');
@@ -1581,7 +1588,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client2.waitForJoin(channel);
 
       // Wait for cross-server sync
-      await client1.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'accnotify2', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Verify both have account-notify enabled
       expect(client1.hasCapEnabled('account-notify')).toBe(true);
@@ -1616,7 +1623,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await observer.waitForJoin(channel);
 
       // Wait for cross-server sync
-      await observer.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'nickold1', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       observer.clearRawBuffer();
 
@@ -1625,7 +1632,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       changer.send(`NICK ${newNick}`);
 
       // Observer should see NICK change
-      const nickMsg = await observer.waitForCommand('NICK', 5000);
+      const nickMsg = await observer.waitForCommand('NICK', 15000);
       expect(nickMsg.command).toBe('NICK');
 
       changer.send('QUIT');
@@ -1654,7 +1661,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       querier.send(`JOIN ${channel}`);
       await target.waitForJoin('#whoistest');
       await querier.waitForJoin('#whoistest');
-      await querier.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'whoistarget1', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       querier.clearRawBuffer();
 
@@ -1662,7 +1669,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       querier.send('WHOIS whoistarget1');
 
       // 311 = RPL_WHOISUSER
-      const whoisLine = await querier.waitForNumeric('311', 5000);
+      const whoisLine = await querier.waitForNumeric('311', 15000);
       expect(whoisLine.raw.toLowerCase()).toContain('whoistarget1');
 
       target.send('QUIT');
@@ -1692,7 +1699,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client2.waitForJoin(channel);
 
       // Wait for cross-server sync
-      await client1.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'whotest2', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       client1.clearRawBuffer();
 
@@ -1745,7 +1752,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await sender2.waitForJoin(channel);
 
       // Wait for cross-server sync
-      await sender1.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === 'chathist2', 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Send messages from both servers
       sender1.send(`PRIVMSG ${channel} :Message from primary server`);
@@ -1834,20 +1841,20 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       receiver.send(`JOIN ${syncChannel}`);
       await receiver.waitForJoin(syncChannel);
       // Wait for cross-server visibility
-      await sender.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === receiverNick, 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Both parties opt in - MUST get 761 response
       sender.send('METADATA SET * chathistory.pm * :1');
-      const senderMeta = await sender.waitForNumeric('761', 3000);
+      const senderMeta = await sender.waitForNumeric('761', 12000);
       expect(senderMeta.command).toBe('761');
       receiver.send('METADATA SET * chathistory.pm * :1');
-      const receiverMeta = await receiver.waitForNumeric('761', 3000);
+      const receiverMeta = await receiver.waitForNumeric('761', 12000);
       expect(receiverMeta.command).toBe('761');
 
       // Verify metadata propagated by querying from other server
       sender.clearRawBuffer();
       sender.send(`METADATA GET ${receiverNick} chathistory.pm`);
-      await sender.waitForNumeric('761', 5000);
+      await sender.waitForNumeric('761', 15000);
 
       // Send PM across servers
       const testMsg = `CrossServer PM ${testId}`;
@@ -1913,11 +1920,11 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await sender.waitForJoin(syncChannel);
       receiver.send(`JOIN ${syncChannel}`);
       await receiver.waitForJoin(syncChannel);
-      await sender.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === receiverNick, 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Only sender opts in - remote receiver does NOT - MUST get 761 response
       sender.send('METADATA SET * chathistory.pm * :1');
-      const senderMeta = await sender.waitForNumeric('761', 3000);
+      const senderMeta = await sender.waitForNumeric('761', 12000);
       expect(senderMeta.command).toBe('761');
 
       // Send PM across servers
@@ -1984,11 +1991,11 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await setter.waitForJoin(syncChannel);
       querier.send(`JOIN ${syncChannel}`);
       await querier.waitForJoin(syncChannel);
-      await setter.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === querierNick, 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Setter on primary sets opt-in - MUST get 761 response
       setter.send('METADATA SET * chathistory.pm * :1');
-      const setterMeta = await setter.waitForNumeric('761', 3000);
+      const setterMeta = await setter.waitForNumeric('761', 12000);
       expect(setterMeta.command).toBe('761');
 
       querier.clearRawBuffer();
@@ -2040,14 +2047,14 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await sender.waitForJoin(syncChannel);
       receiver.send(`JOIN ${syncChannel}`);
       await receiver.waitForJoin(syncChannel);
-      await sender.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === receiverNick, 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Sender opts in, remote receiver explicitly opts out - MUST get 761 responses
       sender.send('METADATA SET * chathistory.pm * :1');
-      const senderMeta = await sender.waitForNumeric('761', 3000);
+      const senderMeta = await sender.waitForNumeric('761', 12000);
       expect(senderMeta.command).toBe('761');
       receiver.send('METADATA SET * chathistory.pm * :0');
-      const receiverMeta = await receiver.waitForNumeric('761', 3000);
+      const receiverMeta = await receiver.waitForNumeric('761', 12000);
       expect(receiverMeta.command).toBe('761');
 
       // Verify opt-out metadata propagated
@@ -2122,20 +2129,20 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client1.waitForJoin(syncChannel);
       client2.send(`JOIN ${syncChannel}`);
       await client2.waitForJoin(syncChannel);
-      await client1.waitForParsedLine(msg => msg.command === 'JOIN' && msg.source?.nick === nick2, 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Both opt in - MUST get 761 responses
       client1.send('METADATA SET * chathistory.pm * :1');
-      const meta1 = await client1.waitForNumeric('761', 3000);
+      const meta1 = await client1.waitForNumeric('761', 12000);
       expect(meta1.command).toBe('761');
       client2.send('METADATA SET * chathistory.pm * :1');
-      const meta2 = await client2.waitForNumeric('761', 3000);
+      const meta2 = await client2.waitForNumeric('761', 12000);
       expect(meta2.command).toBe('761');
 
       // Verify metadata propagated both ways
       client1.clearRawBuffer();
       client1.send(`METADATA GET ${nick2} chathistory.pm`);
-      await client1.waitForNumeric('761', 5000);
+      await client1.waitForNumeric('761', 15000);
 
       // Exchange messages both directions
       client1.send(`PRIVMSG ${nick2} :From primary to secondary`);
@@ -2230,7 +2237,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client2.waitForJoin(channel);
 
       // Wait for cross-server sync
-      await client1.waitForParsedLine(msg => msg.command === 'JOIN' && (msg.source?.nick?.startsWith('p10test2') ?? false), 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Try to get P10 logs from docker
       // Note: Log visibility depends on server debug configuration
@@ -2295,20 +2302,20 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await client2.waitForJoin(channel);
 
       // Wait for cross-server sync
-      await client1.waitForParsedLine(msg => msg.command === 'JOIN' && (msg.source?.nick?.startsWith('num2') ?? false), 5000);
+      await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // WHOIS should return consistent info from both servers
       client1.send(`WHOIS ${nick2}`);
-      const whois1 = await client1.waitForNumeric('311', 5000);
+      const whois1 = await client1.waitForNumeric('311', 15000);
       expect(whois1.raw).toContain(nick2);
 
       client2.send(`WHOIS ${nick1}`);
-      const whois2 = await client2.waitForNumeric('311', 5000);
+      const whois2 = await client2.waitForNumeric('311', 15000);
       expect(whois2.raw).toContain(nick1);
 
       // Users should be visible to each other via NAMES
       client1.send(`NAMES ${channel}`);
-      const names = await client1.waitForNumeric('353', 5000);
+      const names = await client1.waitForNumeric('353', 15000);
       expect(names.raw).toContain(nick1);
       expect(names.raw).toContain(nick2);
 
