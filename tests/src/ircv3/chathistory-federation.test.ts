@@ -259,7 +259,7 @@ describe('IRCv3 Chathistory Federation', () => {
 
       const client1 = trackClient(await createRawSocketClient(PRIMARY_SERVER.host, PRIMARY_SERVER.port));
       await client1.capLs();
-      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'echo-message']);
+      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'echo-message', 'message-tags']);
       client1.capEnd();
       client1.register('dedup1');
       await client1.waitForNumeric('001');
@@ -278,7 +278,7 @@ describe('IRCv3 Chathistory Federation', () => {
       // Query from secondary - should get each message only once
       const client2 = trackClient(await createRawSocketClient(SECONDARY_SERVER.host, SECONDARY_SERVER.port));
       await client2.capLs();
-      await client2.capReq(['draft/chathistory', 'batch', 'server-time']);
+      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'message-tags']);
       client2.capEnd();
       client2.register('dedup2');
       await client2.waitForNumeric('001');
@@ -322,7 +322,7 @@ describe('IRCv3 Chathistory Federation', () => {
       // Create channel and send messages from primary
       const client1 = trackClient(await createRawSocketClient(PRIMARY_SERVER.host, PRIMARY_SERVER.port));
       await client1.capLs();
-      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'echo-message']);
+      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'echo-message', 'message-tags']);
       client1.capEnd();
       client1.register('consist1');
       await client1.waitForNumeric('001');
@@ -368,7 +368,7 @@ describe('IRCv3 Chathistory Federation', () => {
       // Now query from secondary
       const client2 = trackClient(await createRawSocketClient(SECONDARY_SERVER.host, SECONDARY_SERVER.port));
       await client2.capLs();
-      await client2.capReq(['draft/chathistory', 'batch', 'server-time']);
+      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'message-tags']);
       client2.capEnd();
       client2.register('consist2');
       await client2.waitForNumeric('001');
@@ -415,7 +415,7 @@ describe('IRCv3 Chathistory Federation', () => {
 
       const client1 = trackClient(await createRawSocketClient(PRIMARY_SERVER.host, PRIMARY_SERVER.port));
       await client1.capLs();
-      await client1.capReq(['draft/chathistory', 'batch', 'server-time']);
+      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'message-tags']);
       client1.capEnd();
       client1.register('order1');
       await client1.waitForNumeric('001');
@@ -451,7 +451,7 @@ describe('IRCv3 Chathistory Federation', () => {
       // Query from secondary
       const client2 = trackClient(await createRawSocketClient(SECONDARY_SERVER.host, SECONDARY_SERVER.port));
       await client2.capLs();
-      await client2.capReq(['draft/chathistory', 'batch', 'server-time']);
+      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'message-tags']);
       client2.capEnd();
       client2.register('order2');
       await client2.waitForNumeric('001');
@@ -494,13 +494,13 @@ describe('IRCv3 Chathistory Federation', () => {
       const client2 = trackClient(await createRawSocketClient(SECONDARY_SERVER.host, SECONDARY_SERVER.port));
 
       await client1.capLs();
-      await client1.capReq(['draft/chathistory', 'batch', 'server-time']);
+      await client1.capReq(['draft/chathistory', 'batch', 'server-time', 'message-tags']);
       client1.capEnd();
       client1.register('mixed1');
       await client1.waitForNumeric('001');
 
       await client2.capLs();
-      await client2.capReq(['draft/chathistory', 'batch', 'server-time']);
+      await client2.capReq(['draft/chathistory', 'batch', 'server-time', 'message-tags']);
       client2.capEnd();
       client2.register('mixed2');
       await client2.waitForNumeric('001');
@@ -559,7 +559,7 @@ describe('IRCv3 Chathistory Federation', () => {
       // Connect as oper to control server links
       const operClient = trackClient(await createRawSocketClient(PRIMARY_SERVER.host, PRIMARY_SERVER.port));
       await operClient.capLs();
-      await operClient.capReq(['draft/chathistory', 'batch', 'server-time']);
+      await operClient.capReq(['draft/chathistory', 'batch', 'server-time', 'message-tags']);
       operClient.capEnd();
       operClient.register('netsplit1');
       await operClient.waitForNumeric('001');
@@ -674,7 +674,7 @@ describe('IRCv3 Chathistory Federation', () => {
 
       const operClient = trackClient(await createRawSocketClient(PRIMARY_SERVER.host, PRIMARY_SERVER.port));
       await operClient.capLs();
-      await operClient.capReq(['draft/chathistory', 'batch', 'server-time']);
+      await operClient.capReq(['draft/chathistory', 'batch', 'server-time', 'message-tags']);
       operClient.capEnd();
       operClient.register('catchup1');
       await operClient.waitForNumeric('001');
@@ -742,7 +742,7 @@ describe('IRCv3 Chathistory Federation', () => {
       // Query from secondary - should get all messages via federation
       const secondaryClient = trackClient(await createRawSocketClient(SECONDARY_SERVER.host, SECONDARY_SERVER.port));
       await secondaryClient.capLs();
-      await secondaryClient.capReq(['draft/chathistory', 'batch', 'server-time']);
+      await secondaryClient.capReq(['draft/chathistory', 'batch', 'server-time', 'message-tags']);
       secondaryClient.capEnd();
       secondaryClient.register('catchup2');
       await secondaryClient.waitForNumeric('001');
