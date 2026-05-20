@@ -117,15 +117,24 @@ describe.skipIf(!secondaryAvailable)('Server Topology', () => {
       }
     }
 
+    const sawTerminator = linksLines.some(l => l.includes(' 365 ')) || noprivs;
+    const serverCount = linksLines.filter(l => l.includes(' 364 ')).length;
     if (noprivs) {
-      // HIS_LINKS-restricted — that's the privacy default for this
-      // network, not a bug.  Document and pass.
+      // HIS_LINKS hides via 481 NOPRIVS.
       expect(noprivs).toBe(true);
+    } else if (serverCount === 0) {
+      // HIS_LINKS hides via empty 365 terminator (no 364 lines).  That's
+      // the testnet default — non-opers get just an end-of-list without
+      // any server entries.
+      expect(
+        sawTerminator,
+        'LINKS visible-but-empty (HIS_LINKS) must still terminate with 365',
+      ).toBe(true);
     } else {
-      const serverCount = linksLines.filter(l => l.includes(' 364 ')).length;
+      // LINKS is fully visible (HIS_LINKS off or oper view).
       expect(
         serverCount,
-        'When LINKS is visible (HIS_LINKS off or oper view), at least primary + secondary must appear',
+        'When LINKS is fully visible, at least primary + secondary must appear',
       ).toBeGreaterThanOrEqual(2);
     }
   });
@@ -192,11 +201,16 @@ describe.skipIf(!secondaryAvailable)('Cross-Server User Visibility', () => {
     // Create user on primary (local)
     const local = trackClient(await createRegisteredClient(PRIMARY_SERVER, localNick));
 
+    // Settle for cross-server N broadcast — `remoteNick` was registered
+    // on the leaf; it must reach primary's nick hash before WHOIS can
+    // resolve it locally (WHOIS doesn't S2S-forward unfound nicks).
+    await new Promise(r => setTimeout(r, 1500));
+
     // WHOIS the remote user from local
     local.send(`WHOIS ${remoteNick}`);
     const whoisResponse = await local.waitForParsedLine(
       msg => msg.command === '311' && msg.raw.toLowerCase().includes(remoteNick.toLowerCase()),
-      5000
+      15000
     );
 
     expect(whoisResponse.raw).toContain(remoteNick);
@@ -212,6 +226,9 @@ describe.skipIf(!secondaryAvailable)('Cross-Server User Visibility', () => {
 
     // Create user on primary
     const local = trackClient(await createRegisteredClient(PRIMARY_SERVER, localNick));
+
+    // Settle for cross-server N broadcast.
+    await new Promise(r => setTimeout(r, 1500));
 
     // WHOIS shows server in 312 numeric
     local.send(`WHOIS ${remoteNick}`);
@@ -267,22 +284,32 @@ describe.skipIf(!secondaryAvailable)('Disconnect Detection', () => {
     const remoteNick = `splitter${testId.slice(0, 3)}`;
     const localNick = `watcher${testId.slice(0, 4)}`;
 
-    // Setup: both users in same channel
-    const remote = trackClient(await createRegisteredClient(SECONDARY_SERVER, remoteNick));
+    // Setup: both users in same channel.
+    // ORDER MATTERS: local joins FIRST, then remote.  This ensures
+    // remote's cross-server JOIN propagates as a wire event TO local,
+    // giving us a deterministic sync signal.  If we'd reversed this,
+    // local would learn about remote via NAMES on its own JOIN —
+    // racy because NAMES requires the membership to have propagated
+    // by the time local issues JOIN.
     const local = trackClient(await createRegisteredClient(PRIMARY_SERVER, localNick));
-
-    // Join channel
-    remote.send(`JOIN ${channel}`);
-    await remote.waitForJoin(channel, undefined, 5000);
-
     local.send(`JOIN ${channel}`);
     await local.waitForJoin(channel, undefined, 5000);
 
-    // Verify visibility
+    const remote = trackClient(await createRegisteredClient(SECONDARY_SERVER, remoteNick));
+    remote.send(`JOIN ${channel}`);
+    await remote.waitForJoin(channel, undefined, 5000);
+
+    // Wait for remote's JOIN to arrive on local (cross-server).
+    await local.waitForParsedLine(
+      m => m.command === 'JOIN' && m.source?.nick === remoteNick,
+      15000,
+    );
+
+    // Verify visibility via NAMES.
     local.send(`NAMES ${channel}`);
     await local.waitForParsedLine(
       msg => msg.command === '353' && msg.raw.toLowerCase().includes(remoteNick.toLowerCase()),
-      5000
+      15000
     );
 
     // Simulate disconnect by closing remote connection abruptly
@@ -335,11 +362,24 @@ describe.skipIf(!secondaryAvailable)('Disconnect Detection', () => {
       remoteClients.push(client);
     }
 
-    // Verify all visible
+    // Verify all visible.  NAMES replies can be split across multiple
+    // 353 lines for large channels — drain to 366 (end-of-names) and
+    // concatenate so we don't false-fail on a partial line.
+    local.clearRawBuffer();
     local.send(`NAMES ${channel}`);
-    const initialNames = await local.waitForNumeric('353', 5000);
+    const namesLines: string[] = [];
+    while (true) {
+      const msg = await local.waitForParsedLine(
+        m => m.command === '353' || m.command === '366',
+        15000,
+      );
+      if (msg.command === '353') namesLines.push(msg.raw);
+      else break;
+    }
+    const combinedNames = namesLines.join(' ').toLowerCase();
     for (const nick of remoteNicks) {
-      expect(initialNames.raw.toLowerCase()).toContain(nick.toLowerCase());
+      expect(combinedNames, `NAMES ${channel} missing ${nick}: ${namesLines.join(' | ')}`)
+        .toContain(nick.toLowerCase());
     }
 
     // Disconnect both remote clients

@@ -299,10 +299,23 @@ describe.skipIf(!secondaryAvailable)('Nick Collision Handling', () => {
     secondary.send(`JOIN ${channel}`);
     await secondary.waitForJoin(channel, undefined, 5000);
 
+    // Settle for cross-server JOIN propagation.
+    await new Promise(r => setTimeout(r, 1500));
+
+    // Drain NAMES (may be split across multiple 353 lines).
+    primary.clearRawBuffer();
     primary.send(`NAMES ${channel}`);
-    const names = await primary.waitForNumeric('353', 5000);
-    expect(names.raw).toContain(nick1);
-    expect(names.raw).toContain(nick2);
+    const nameLines: string[] = [];
+    while (true) {
+      const msg = await primary.waitForParsedLine(
+        m => m.command === '353' || m.command === '366', 15000,
+      );
+      if (msg.command === '353') nameLines.push(msg.raw);
+      else break;
+    }
+    const combined = nameLines.join(' ');
+    expect(combined, `NAMES missing ${nick1}: ${nameLines.join(' | ')}`).toContain(nick1);
+    expect(combined, `NAMES missing ${nick2}: ${nameLines.join(' | ')}`).toContain(nick2);
   });
 
   it('should handle rapid nick changes without collision', async () => {
@@ -339,43 +352,50 @@ describe.skipIf(!secondaryAvailable)('Nick Change Propagation', () => {
     const nick1New = `newname${testId.slice(0, 3)}`;
     const nick2 = `nickp2${testId.slice(0, 4)}`;
 
-    // Setup: two users in same channel on different servers
-    const primary = trackClient(await createRegisteredClient(PRIMARY_SERVER, nick1));
+    // Setup: secondary joins FIRST so primary's later JOIN propagates
+    // cross-server as a wire event observable on secondary.  (See
+    // p10-squit ordering note.)
     const secondary = trackClient(await createRegisteredClient(SECONDARY_SERVER, nick2));
-
-    // Join channel on both
-    primary.send(`JOIN ${channel}`);
-    await primary.waitForJoin(channel, undefined, 5000);
-
     secondary.send(`JOIN ${channel}`);
     await secondary.waitForJoin(channel, undefined, 5000);
 
-    // Wait for visibility
-    secondary.send(`NAMES ${channel}`);
+    const primary = trackClient(await createRegisteredClient(PRIMARY_SERVER, nick1));
+    primary.send(`JOIN ${channel}`);
+    await primary.waitForJoin(channel, undefined, 5000);
+
+    // Wait for primary's JOIN to arrive on secondary.
     await secondary.waitForParsedLine(
-      msg => msg.command === '353' && msg.raw.toLowerCase().includes(nick1.toLowerCase()),
-      5000
+      m => m.command === 'JOIN' && m.source?.nick === nick1, 15000,
     );
 
     // Primary changes nick
     primary.send(`NICK ${nick1New}`);
     await primary.waitForParsedLine(
       msg => msg.command === 'NICK' && msg.raw.toLowerCase().includes(nick1New.toLowerCase()),
-      5000
+      15000
     );
 
     // Secondary should see the nick change
     const nickChange = await secondary.waitForParsedLine(
       msg => msg.command === 'NICK' && msg.raw.toLowerCase().includes(nick1New.toLowerCase()),
-      5000
+      15000
     );
     expect(nickChange.raw.toLowerCase()).toContain(nick1New.toLowerCase());
 
-    // Verify in NAMES
+    // Verify in NAMES (drain to 366).
+    secondary.clearRawBuffer();
     secondary.send(`NAMES ${channel}`);
-    const names = await secondary.waitForNumeric('353', 5000);
-    expect(names.raw.toLowerCase()).toContain(nick1New.toLowerCase());
-    expect(names.raw.toLowerCase()).not.toContain(nick1.toLowerCase());
+    const nameLines: string[] = [];
+    while (true) {
+      const msg = await secondary.waitForParsedLine(
+        m => m.command === '353' || m.command === '366', 15000,
+      );
+      if (msg.command === '353') nameLines.push(msg.raw);
+      else break;
+    }
+    const combined = nameLines.join(' ').toLowerCase();
+    expect(combined, `NAMES missing ${nick1New}: ${nameLines.join(' | ')}`).toContain(nick1New.toLowerCase());
+    expect(combined, `NAMES still has old nick ${nick1}`).not.toContain(nick1.toLowerCase());
   });
 
   it('should propagate QUIT to other server', async () => {

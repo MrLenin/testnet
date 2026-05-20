@@ -458,21 +458,34 @@ describe.skipIf(!secondaryAvailable)('P10 BURST Integration', () => {
         secondaryClients.push(client);
       }
 
-      // Check NAMES from primary server
-      primaryClients[0].send(`NAMES ${channel}`);
-      const primaryNames = await primaryClients[0].waitForNumeric('353', 5000);
+      // Settle for cross-server JOIN propagation.
+      await new Promise(r => setTimeout(r, 1500));
 
-      // All nicks should be visible
+      // Drain NAMES output (may be split across multiple 353 lines).
+      async function getNames(client: RawSocketClient): Promise<string> {
+        client.clearRawBuffer();
+        client.send(`NAMES ${channel}`);
+        const lines: string[] = [];
+        while (true) {
+          const msg = await client.waitForParsedLine(
+            m => m.command === '353' || m.command === '366', 15000,
+          );
+          if (msg.command === '353') lines.push(msg.raw);
+          else break;
+        }
+        return lines.join(' ').toLowerCase();
+      }
+
+      // Check NAMES from primary server
+      const primaryNames = await getNames(primaryClients[0]);
       for (const nick of [...primaryNicks, ...secondaryNicks]) {
-        expect(primaryNames.raw.toLowerCase()).toContain(nick.toLowerCase());
+        expect(primaryNames, `primary NAMES missing ${nick}`).toContain(nick.toLowerCase());
       }
 
       // Check NAMES from secondary server
-      secondaryClients[0].send(`NAMES ${channel}`);
-      const secondaryNames = await secondaryClients[0].waitForNumeric('353', 5000);
-
+      const secondaryNames = await getNames(secondaryClients[0]);
       for (const nick of [...primaryNicks, ...secondaryNicks]) {
-        expect(secondaryNames.raw.toLowerCase()).toContain(nick.toLowerCase());
+        expect(secondaryNames, `secondary NAMES missing ${nick}`).toContain(nick.toLowerCase());
       }
     });
 

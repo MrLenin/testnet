@@ -313,7 +313,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       // Set metadata on client 1 (on primary server)
       const testKey = 'testkey';
       const testValue = `testvalue-${uniqueId()}`;
-      client1.send(`METADATA SET * ${testKey} :${testValue}`);
+      client1.send(`METADATA * SET ${testKey} :${testValue}`);
       // Wait for confirmation the metadata was set
       await client1.waitForParsedLine(
         msg => (msg.command === 'METADATA' || msg.command === '761'),
@@ -321,7 +321,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       );
 
       // Query metadata from client 2 (on secondary server)
-      client2.send(`METADATA GET metauser1 ${testKey}`);
+      client2.send(`METADATA metauser1 GET ${testKey}`);
       // Wait for metadata response
       await client2.waitForParsedLine(
         msg => (msg.command === 'METADATA' || msg.command === '761'),
@@ -1457,7 +1457,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Set metadata on primary server
-      setter.send('METADATA SET * testkey :testvalue');
+      setter.send('METADATA * SET testkey :testvalue');
       // Wait for confirmation
       await setter.waitForParsedLine(
         msg => msg.command === 'METADATA' || msg.command === '761',
@@ -1467,7 +1467,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       querier.clearRawBuffer();
 
       // Query metadata from secondary server
-      querier.send('METADATA GET metaset1 testkey');
+      querier.send('METADATA metaset1 GET testkey');
 
       const response = await querier.waitForParsedLine(
         msg => msg.command === 'METADATA' && msg.raw.toLowerCase().includes('testkey'),
@@ -1523,7 +1523,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       subscriber.clearRawBuffer();
 
       // Setter sets the key
-      setter.send('METADATA SET * avatar :https://example.com/avatar.png');
+      setter.send('METADATA * SET avatar :https://example.com/avatar.png');
 
       // Subscriber should receive notification
       const notification = await subscriber.waitForParsedLine(
@@ -1847,16 +1847,16 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Both parties opt in - MUST get 761 response
-      sender.send('METADATA SET * chathistory.pm * :1');
+      sender.send('METADATA * SET chathistory.pm * :1');
       const senderMeta = await sender.waitForNumeric('761', 12000);
       expect(senderMeta.command).toBe('761');
-      receiver.send('METADATA SET * chathistory.pm * :1');
+      receiver.send('METADATA * SET chathistory.pm * :1');
       const receiverMeta = await receiver.waitForNumeric('761', 12000);
       expect(receiverMeta.command).toBe('761');
 
       // Verify metadata propagated by querying from other server
       sender.clearRawBuffer();
-      sender.send(`METADATA GET ${receiverNick} chathistory.pm`);
+      sender.send(`METADATA ${receiverNick} GET chathistory.pm`);
       await sender.waitForNumeric('761', 15000);
 
       // Send PM across servers
@@ -1926,7 +1926,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Only sender opts in - remote receiver does NOT - MUST get 761 response
-      sender.send('METADATA SET * chathistory.pm * :1');
+      sender.send('METADATA * SET chathistory.pm * :1');
       const senderMeta = await sender.waitForNumeric('761', 12000);
       expect(senderMeta.command).toBe('761');
 
@@ -1997,7 +1997,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Setter on primary sets opt-in - MUST get 761 response
-      setter.send('METADATA SET * chathistory.pm * :1');
+      setter.send('METADATA * SET chathistory.pm * :1');
       const setterMeta = await setter.waitForNumeric('761', 12000);
       expect(setterMeta.command).toBe('761');
 
@@ -2006,7 +2006,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       // Querier on secondary checks setter's metadata - poll until propagated
       let response: { raw: string; command: string } | null = null;
       for (let attempt = 0; attempt < 5; attempt++) {
-        querier.send(`METADATA GET ${setterNick} chathistory.pm`);
+        querier.send(`METADATA ${setterNick} GET chathistory.pm`);
         try {
           response = await querier.waitForParsedLine(
             m => m.command === '761' && m.raw.toLowerCase().includes('chathistory.pm'),
@@ -2053,16 +2053,16 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Sender opts in, remote receiver explicitly opts out - MUST get 761 responses
-      sender.send('METADATA SET * chathistory.pm * :1');
+      sender.send('METADATA * SET chathistory.pm * :1');
       const senderMeta = await sender.waitForNumeric('761', 12000);
       expect(senderMeta.command).toBe('761');
-      receiver.send('METADATA SET * chathistory.pm * :0');
+      receiver.send('METADATA * SET chathistory.pm * :0');
       const receiverMeta = await receiver.waitForNumeric('761', 12000);
       expect(receiverMeta.command).toBe('761');
 
       // Verify opt-out metadata propagated
       sender.clearRawBuffer();
-      sender.send(`METADATA GET ${receiverNick} chathistory.pm`);
+      sender.send(`METADATA ${receiverNick} GET chathistory.pm`);
       await sender.waitForParsedLine(
         m => m.command === '761' && m.raw.toLowerCase().includes('chathistory.pm') && m.raw.includes(':0'),
         5000
@@ -2135,16 +2135,16 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
 
       // Both opt in - MUST get 761 responses
-      client1.send('METADATA SET * chathistory.pm * :1');
+      client1.send('METADATA * SET chathistory.pm * :1');
       const meta1 = await client1.waitForNumeric('761', 12000);
       expect(meta1.command).toBe('761');
-      client2.send('METADATA SET * chathistory.pm * :1');
+      client2.send('METADATA * SET chathistory.pm * :1');
       const meta2 = await client2.waitForNumeric('761', 12000);
       expect(meta2.command).toBe('761');
 
       // Verify metadata propagated both ways
       client1.clearRawBuffer();
-      client1.send(`METADATA GET ${nick2} chathistory.pm`);
+      client1.send(`METADATA ${nick2} GET chathistory.pm`);
       await client1.waitForNumeric('761', 15000);
 
       // Exchange messages both directions
