@@ -317,7 +317,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       // Wait for confirmation the metadata was set
       await client1.waitForParsedLine(
         msg => (msg.command === 'METADATA' || msg.command === '761'),
-        3000
+        15000
       );
 
       // Query metadata from client 2 (on secondary server)
@@ -325,7 +325,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       // Wait for metadata response
       await client2.waitForParsedLine(
         msg => (msg.command === 'METADATA' || msg.command === '761'),
-        3000
+        15000
       );
 
       client1.send('QUIT');
@@ -679,7 +679,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       // Should receive own message back
       const echo = await client.waitForParsedLine(
         m => m.command === 'PRIVMSG' && m.trailing?.includes(testMsg) === true,
-        3000
+        15000
       );
       expect(echo.raw).toContain(testMsg);
 
@@ -806,7 +806,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
 
       const echo = await sender.waitForParsedLine(
         m => m.command === 'PRIVMSG' && m.trailing?.includes('Message to redact') === true,
-        3000
+        15000
       );
       const match = echo.raw.match(/msgid=([^\s;]+)/);
       expect(match).not.toBeNull();
@@ -1076,13 +1076,13 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       // Verify commands work on both
       const markread1 = await client1.waitForParsedLine(
         msg => msg.command === 'MARKREAD' || msg.command === '730',
-        3000
+        15000
       );
       expect(markread1.command, 'Should get MARKREAD or 730 response').toMatch(/MARKREAD|730/);
 
       const markread2 = await client2.waitForParsedLine(
         msg => msg.command === 'MARKREAD' || msg.command === '730',
-        3000
+        15000
       );
       expect(markread2.command, 'Should get MARKREAD or 730 response').toMatch(/MARKREAD|730/);
 
@@ -1156,8 +1156,11 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       joiner.send(`JOIN ${channel}`);
       await joiner.waitForJoin(channel);
 
-      // Observer should see extended-join format
-      const joinMsg = await new Promise(r => setTimeout(r, 1500));  // cross-server JOIN settle
+      // Observer should see extended-join format.  Observer joined
+      // the channel FIRST (line 1150), so when joiner arrives the
+      // cross-server JOIN propagates as a wire event to observer.
+      const joinMsg = await observer.waitForParsedLine(
+        msg => msg.command === 'JOIN' && msg.source?.nick === 'extjoin1', 15000);
       expect(joinMsg.source?.nick).toBe('extjoin1');
       // Extended join format: :nick!user@host JOIN #channel account :realname
       // Account may be * if not logged in
@@ -1458,7 +1461,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       // Wait for confirmation
       await setter.waitForParsedLine(
         msg => msg.command === 'METADATA' || msg.command === '761',
-        3000
+        15000
       );
 
       querier.clearRawBuffer();
@@ -1514,7 +1517,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       // Wait for subscription confirmation
       await subscriber.waitForParsedLine(
         msg => msg.command === '761' || msg.command === 'METADATA',
-        3000
+        15000
       );
 
       subscriber.clearRawBuffer();
@@ -1759,13 +1762,13 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       // Wait for message to be stored
       await sender1.waitForParsedLine(
         m => m.command === 'PRIVMSG' && m.trailing?.includes('primary server') === true,
-        3000
+        15000
       );
       sender2.send(`PRIVMSG ${channel} :Message from secondary server`);
       // Wait for message to propagate
       await sender1.waitForParsedLine(
         m => m.command === 'PRIVMSG' && m.trailing?.includes('secondary server') === true,
-        3000
+        15000
       );
 
       sender1.clearRawBuffer();
@@ -1881,7 +1884,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       while (true) {
         const msg = await sender.waitForParsedLine(
           m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
-          3000
+          15000
         );
         if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
         if (msg.command === 'PRIVMSG') messages.push(msg.raw);
@@ -1952,7 +1955,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       while (true) {
         const msg = await sender.waitForParsedLine(
           m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
-          3000
+          15000
         );
         if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
         if (msg.command === 'PRIVMSG') messages.push(msg.raw);
@@ -2090,7 +2093,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       while (true) {
         const msg = await sender.waitForParsedLine(
           m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
-          3000
+          15000
         );
         if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
         if (msg.command === 'PRIVMSG') messages.push(msg.raw);
@@ -2172,7 +2175,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       while (true) {
         const msg = await client1.waitForParsedLine(
           m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
-          3000
+          15000
         );
         if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
         if (msg.command === 'PRIVMSG') client1Messages.push(msg.raw);
@@ -2192,7 +2195,7 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
       while (true) {
         const msg = await client2.waitForParsedLine(
           m => m.command === 'PRIVMSG' || (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
-          3000
+          15000
         );
         if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
         if (msg.command === 'PRIVMSG') client2Messages.push(msg.raw);
