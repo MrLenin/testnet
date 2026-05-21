@@ -4,6 +4,7 @@ import {
   RawSocketClient,
   uniqueChannel,
   uniqueId,
+  uniqueNick,
   waitForChathistory,
   getCaps,
   X3Client,
@@ -682,7 +683,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
    *
    * Tests the per-user PM history opt-out system.
    * Server stores PM history for authenticated users by default.
-   * Users opt out via: METADATA SET * chathistory.pm * :0 (or +y user mode)
+   * Users opt out via: METADATA * SET chathistory.pm * :0 (or +y user mode)
    * If either party opts out, a HISTORY_GAP marker is stored instead.
    */
   describe('PM Chathistory Ephemeral Mix', () => {
@@ -1048,7 +1049,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       if (fromPool2) poolAccounts.push(account2);
 
       // Sender opts out — MUST get 761 response
-      client1.send('METADATA SET * chathistory.pm * :0');
+      client1.send('METADATA * SET chathistory.pm * :0');
       const metaResponse = await client1.waitForNumeric('761', 3000);
       expect(metaResponse.command).toBe('761');
       await new Promise(r => setTimeout(r, 300));
@@ -1097,7 +1098,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       if (fromPool2) poolAccounts.push(account2);
 
       // Recipient opts out — MUST get 761 response
-      client2.send('METADATA SET * chathistory.pm * :0');
+      client2.send('METADATA * SET chathistory.pm * :0');
       const metaResponse = await client2.waitForNumeric('761', 3000);
       expect(metaResponse.command).toBe('761');
       await new Promise(r => setTimeout(r, 300));
@@ -1145,7 +1146,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       if (fromPool2) poolAccounts.push(account2);
 
       // Client2 opts out — MUST get 761 response
-      client2.send('METADATA SET * chathistory.pm * :0');
+      client2.send('METADATA * SET chathistory.pm * :0');
       const metaResponse = await client2.waitForNumeric('761', 3000);
       expect(metaResponse.command).toBe('761');
       await new Promise(r => setTimeout(r, 300));
@@ -1199,7 +1200,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       await new Promise(r => setTimeout(r, 500));
 
       // Client2 opts out — MUST get 761 response
-      client2.send('METADATA SET * chathistory.pm * :0');
+      client2.send('METADATA * SET chathistory.pm * :0');
       const revokeResponse = await client2.waitForNumeric('761', 3000);
       expect(revokeResponse.command).toBe('761');
       await new Promise(r => setTimeout(r, 300));
@@ -1248,7 +1249,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       if (fromPool) poolAccounts.push(account);
 
       // Set opt-out — MUST get 761 response
-      client.send('METADATA SET * chathistory.pm * :0');
+      client.send('METADATA * SET chathistory.pm * :0');
       const setResponse = await client.waitForNumeric('761', 3000);
       expect(setResponse.command).toBe('761');
       await new Promise(r => setTimeout(r, 200));
@@ -1256,7 +1257,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client.clearRawBuffer();
 
       // Query own status — MUST get 761 response with value
-      client.send('METADATA GET * chathistory.pm');
+      client.send('METADATA * GET chathistory.pm');
       const getResponse = await client.waitForNumeric('761', 3000);
       expect(getResponse.raw).toContain('chathistory.pm');
       // Value should be '0' — verify the opt-out value is returned
@@ -1275,7 +1276,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       if (fromPool2) poolAccounts.push(account2);
 
       // Client2 sets opt-out — MUST get 761 response
-      client2.send('METADATA SET * chathistory.pm * :0');
+      client2.send('METADATA * SET chathistory.pm * :0');
       const setResponse = await client2.waitForNumeric('761', 3000);
       expect(setResponse.command).toBe('761');
       await new Promise(r => setTimeout(r, 300));
@@ -1283,7 +1284,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       client1.clearRawBuffer();
 
       // Client1 queries Client2's status — MUST get 761 response
-      client1.send(`METADATA GET ${nick2} chathistory.pm`);
+      client1.send(`METADATA ${nick2} GET chathistory.pm`);
       const getResponse = await client1.waitForNumeric('761', 3000);
       expect(getResponse.raw).toContain('chathistory.pm');
       // Verify other user's opt-out value is visible
@@ -1295,30 +1296,48 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
   });
 
   describe('PM Chathistory Capability Advertisement', () => {
-    it('draft/chathistory capability includes limit parameter', async () => {
+    it('draft/chathistory capability value is a positive integer (message limit)', async () => {
+      // The server advertises `draft/chathistory=<integer>` for client
+      // compatibility (goguma does int.parse on the value).  Extended
+      // info (retention, pm) lives in ISUPPORT CHATHISTORY=<n> and
+      // related ISUPPORT tokens, not in the cap value.
+      // See m_cap.c: "Bare integer for compatibility".
       const client = trackClient(await createRawSocketClient());
 
       const caps = await client.capLs();
       const chathistoryValue = caps.get('draft/chathistory');
 
       expect(chathistoryValue).toBeDefined();
-      expect(chathistoryValue).toContain('limit=');
+      expect(chathistoryValue, `cap value should be a positive integer, got ${chathistoryValue}`)
+        .toMatch(/^\d+$/);
+      expect(parseInt(chathistoryValue!, 10)).toBeGreaterThan(0);
 
       client.send('QUIT');
     });
 
-    it('capability value includes pm token when CHATHISTORY_PRIVATE enabled', async () => {
+    it('CHATHISTORY ISUPPORT token advertises the message limit', async () => {
+      // Extended chathistory metadata moved from the cap value to
+      // ISUPPORT.  Verify the CHATHISTORY=<n> token appears in 005.
       const client = trackClient(await createRawSocketClient());
+      await client.capLs();
+      client.capEnd();
+      client.register(uniqueNick('chsupport'));
+      await client.waitForNumeric('001');
+      // 005 RPL_ISUPPORT can span multiple lines and the server emits
+      // them in a burst after 001.  Wait for the end-of-MOTD-style
+      // marker (376 or 422) to ensure they're all in our buffer.
+      await client.waitForParsedLine(
+        m => m.command === '376' || m.command === '422' || m.command === '396',
+        5000,
+      );
 
-      const caps = await client.capLs();
-      const chathistoryValue = caps.get('draft/chathistory');
-
-      expect(chathistoryValue).toBeDefined();
-
-      // New format: "limit=1000,retention=7d,pm" (pm has no value, just a token)
-      const tokens = chathistoryValue!.split(',').map(t => t.trim());
-      const hasPm = tokens.some(t => t === 'pm');
-      expect(hasPm, `Expected 'pm' token in capability value: ${chathistoryValue}`).toBe(true);
+      const lines = (client as RawSocketClient & { allLines?: string[] }).allLines
+        ?? client.getUnconsumedLines();
+      const supportLine = lines.find(l => / 005 [^ ]+ .*CHATHISTORY=/.test(l));
+      expect(supportLine, `expected CHATHISTORY=<n> token in 005 ISUPPORT; saw ${lines.filter(l => / 005 /.test(l)).length} 005 lines`).toBeDefined();
+      const m = supportLine!.match(/CHATHISTORY=(\d+)/);
+      expect(m, `CHATHISTORY ISUPPORT token should have a positive integer value: ${supportLine}`).not.toBeNull();
+      expect(parseInt(m![1], 10)).toBeGreaterThan(0);
 
       client.send('QUIT');
     });
