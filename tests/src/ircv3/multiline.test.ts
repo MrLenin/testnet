@@ -101,8 +101,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP REQ :draft/multiline batch');
       await client1.waitForCap('ACK');
       client1.send('CAP END');
-      client1.send('NICK mlsend1');
-      client1.send('USER mlsend1 0 * :mlsend1');
+      client1.register(uniqueNick('mlsend1'));
       await client1.waitForNumeric('001');
 
       // Set up client2 with draft/multiline AND batch to receive multiline batches
@@ -112,8 +111,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send('CAP REQ :draft/multiline batch');
       await client2.waitForCap('ACK');
       client2.send('CAP END');
-      client2.send('NICK mlrecv1');
-      client2.send('USER mlrecv1 0 * :mlrecv1');
+      client2.register(uniqueNick('mlrecv1'));
       await client2.waitForNumeric('001');
 
       // Both join channel
@@ -168,8 +166,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client.send('CAP REQ :draft/multiline batch echo-message');
       await client.waitForCap('ACK');
       client.send('CAP END');
-      client.send('NICK mlcont1');
-      client.send('USER mlcont1 0 * :mlcont1');
+      client.register(uniqueNick('mlcont1'));
       await client.waitForNumeric('001');
 
       const channelName = uniqueChannel('mlcont');
@@ -276,8 +273,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client.send('CAP REQ :draft/multiline batch standard-replies');
       await client.waitForCap('ACK');
       client.send('CAP END');
-      client.send('NICK mlover1');
-      client.send('USER mlover1 0 * :mlover1');
+      client.register(uniqueNick('mlover1'));
       await client.waitForNumeric('001');
 
       const channelName = uniqueChannel('mlover');
@@ -326,8 +322,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client.send('CAP REQ :draft/multiline batch labeled-response echo-message');
       await client.waitForCap('ACK');
       client.send('CAP END');
-      client.send('NICK mllabel1');
-      client.send('USER mllabel1 0 * :mllabel1');
+      client.register(uniqueNick('mllabel1'));
       await client.waitForNumeric('001');
 
       const channelName = uniqueChannel('mllabel');
@@ -387,8 +382,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP REQ :draft/multiline batch');
       await client1.waitForCap('ACK');
       client1.send('CAP END');
-      client1.send('NICK mlmsgid1');
-      client1.send('USER mlmsgid1 0 * :mlmsgid1');
+      client1.register(uniqueNick('mlmsgid1'));
       await client1.waitForNumeric('001');
 
       // Client2 needs draft/multiline, batch AND message-tags to receive msgid
@@ -397,8 +391,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client2.send('CAP REQ :draft/multiline batch message-tags');
       await client2.waitForCap('ACK');
       client2.send('CAP END');
-      client2.send('NICK mlmsgid2');
-      client2.send('USER mlmsgid2 0 * :mlmsgid2');
+      client2.register(uniqueNick('mlmsgid2'));
       await client2.waitForNumeric('001');
 
       const channelName = uniqueChannel('mlmsgid');
@@ -426,29 +419,36 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       console.log('Multiline batch start:', batchStartMsg.raw);
       expect(batchStartMsg.params[1]).toMatch(/multiline/i);
 
+      // Per IRCv3 multiline spec, the whole batch is ONE logical message
+      // with ONE msgid carried on the BATCH +<id> opener (not on each
+      // inner PRIVMSG).  Server confirmed via wire trace: opener line
+      // has @msgid=...;time=... tags; inner @batch=<id>-only PRIVMSGs
+      // do not (and should not — that'd be redundant per-line msgids
+      // for what is semantically a single message).
+      expect(batchStartMsg.tags?.msgid,
+        `BATCH +<id> opener must carry @msgid tag (the multiline message's id): ${batchStartMsg.raw}`,
+      ).toBeDefined();
+      expect(batchStartMsg.tags?.msgid).toMatch(/^\S+$/);
+
       // Extract server-assigned batch ID
       const serverBatchId = batchStartMsg.params[0].replace('+', '');
 
-      // Collect messages until BATCH - (only messages tagged with this batch ID)
-      const messages: string[] = [];
+      // Collect inner PRIVMSGs (must all carry @batch=<serverBatchId>)
+      // until BATCH -<serverBatchId>.
+      const inner: string[] = [];
       while (true) {
         const msg = await client2.waitForParsedLine(
           m => (m.command === 'PRIVMSG' && m.tags?.batch === serverBatchId) ||
                (m.command === 'BATCH' && m.params[0] === `-${serverBatchId}`),
           2000
         );
-        messages.push(msg.raw);
         if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+        if (msg.command === 'PRIVMSG') inner.push(msg.raw);
       }
-      console.log('Multiline messages:', messages);
+      console.log('Multiline inner PRIVMSGs:', inner);
 
-      // Should have at least one PRIVMSG and BATCH -
-      expect(messages.length).toBeGreaterThanOrEqual(2);
-
-      // Check if any message has msgid (server should add msgid to batched messages)
-      const hasMsgid = messages.some(m => m.includes('msgid='));
-      expect(hasMsgid).toBe(true);
-      console.log('Found msgid in multiline messages');
+      // The original send was one PRIVMSG inside the batch.
+      expect(inner.length, 'should receive at least one inner PRIVMSG').toBeGreaterThanOrEqual(1);
 
       client1.send('QUIT');
       client2.send('QUIT');
@@ -468,16 +468,14 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP REQ :draft/multiline batch standard-replies');
       await client1.waitForCap('ACK');
       client1.send('CAP END');
-      client1.send('NICK mlfallback1');
-      client1.send('USER mlfallback1 0 * :mlfallback1');
+      client1.register(uniqueNick('mlfallback1'));
       await client1.waitForNumeric('001');
 
       // Client2: NO multiline cap - only basic IRC
       client2.send('CAP LS 302');
       await client2.waitForCap('LS');
       client2.send('CAP END');
-      client2.send('NICK mlfallback2');
-      client2.send('USER mlfallback2 0 * :mlfallback2');
+      client2.register(uniqueNick('mlfallback2'));
       await client2.waitForNumeric('001');
 
       const channelName = uniqueChannel('mlfallback');
@@ -537,16 +535,14 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP REQ :draft/multiline batch labeled-response standard-replies');
       await client1.waitForCap('ACK');
       client1.send('CAP END');
-      client1.send('NICK mllabel1');
-      client1.send('USER mllabel1 0 * :mllabel1');
+      client1.register(uniqueNick('mllabel1'));
       await client1.waitForNumeric('001');
 
       // Client2: NO multiline
       client2.send('CAP LS 302');
       await client2.waitForCap('LS');
       client2.send('CAP END');
-      client2.send('NICK mllabel2');
-      client2.send('USER mllabel2 0 * :mllabel2');
+      client2.register(uniqueNick('mllabel2'));
       await client2.waitForNumeric('001');
 
       const channelName = uniqueChannel('mllabel');
@@ -597,16 +593,14 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP REQ :draft/multiline batch');
       await client1.waitForCap('ACK');
       client1.send('CAP END');
-      client1.send('NICK mltrunc1');
-      client1.send('USER mltrunc1 0 * :mltrunc1');
+      client1.register(uniqueNick('mltrunc1'));
       await client1.waitForNumeric('001');
 
       // Client2: NO multiline (will receive truncated fallback)
       client2.send('CAP LS 302');
       await client2.waitForCap('LS');
       client2.send('CAP END');
-      client2.send('NICK mltrunc2');
-      client2.send('USER mltrunc2 0 * :mltrunc2');
+      client2.register(uniqueNick('mltrunc2'));
       await client2.waitForNumeric('001');
 
       const channelName = uniqueChannel('mltrunc');
@@ -670,16 +664,14 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP REQ :draft/multiline batch message-tags');
       await client1.waitForCap('ACK');
       client1.send('CAP END');
-      client1.send('NICK mlhint1');
-      client1.send('USER mlhint1 0 * :mlhint1');
+      client1.register(uniqueNick('mlhint1'));
       await client1.waitForNumeric('001');
 
       // Client2: NO multiline, NOT authenticated — should get &ml- (not HistServ)
       client2.send('CAP LS 302');
       await client2.waitForCap('LS');
       client2.send('CAP END');
-      client2.send('NICK mlhint2');
-      client2.send('USER mlhint2 0 * :mlhint2');
+      client2.register(uniqueNick('mlhint2'));
       await client2.waitForNumeric('001');
 
       const channelName = uniqueChannel('mlhint');
@@ -750,8 +742,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP REQ :draft/multiline batch message-tags');
       await client1.waitForCap('ACK');
       client1.send('CAP END');
-      client1.send('NICK mlahint1');
-      client1.send('USER mlahint1 0 * :mlahint1');
+      client1.register(uniqueNick('mlahint1'));
       await client1.waitForNumeric('001');
 
       // Client2: SASL-authenticated, NO multiline — should get HistServ hint (tier 3)
@@ -828,16 +819,14 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP REQ :draft/multiline batch');
       await client1.waitForCap('ACK');
       client1.send('CAP END');
-      client1.send('NICK mlmode1');
-      client1.send('USER mlmode1 0 * :mlmode1');
+      client1.register(uniqueNick('mlmode1'));
       await client1.waitForNumeric('001');
 
       // Client2: NO multiline but will set +M to receive full content
       client2.send('CAP LS 302');
       await client2.waitForCap('LS');
       client2.send('CAP END');
-      client2.send('NICK mlmode2');
-      client2.send('USER mlmode2 0 * :mlmode2');
+      client2.register(uniqueNick('mlmode2'));
       await client2.waitForNumeric('001');
 
       // Client2 sets +M mode (multiline receive mode)
@@ -904,8 +893,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP REQ :draft/multiline batch message-tags');
       await client1.waitForParsedLine(msg => msg.command === 'CAP' && msg.params.includes('ACK'));
       client1.send('CAP END');
-      client1.send('NICK mlchhist1');
-      client1.send('USER mlchhist1 0 * :mlchhist1');
+      client1.register(uniqueNick('mlchhist1'));
       await client1.waitForNumeric('001');
 
       // Client2: has chathistory but NOT multiline, SASL-authenticated
@@ -1087,8 +1075,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP REQ :draft/multiline batch');
       await client1.waitForCap('ACK');
       client1.send('CAP END');
-      client1.send('NICK mlhserv1');
-      client1.send('USER mlhserv1 0 * :mlhserv1');
+      client1.register(uniqueNick('mlhserv1'));
       await client1.waitForNumeric('001');
 
       // Client2: SASL-authenticated, message-tags ONLY - no batch, chathistory, or multiline
@@ -1240,8 +1227,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP REQ :draft/multiline batch message-tags echo-message');
       await client1.waitForCap('ACK');
       client1.send('CAP END');
-      client1.send('NICK mlvirt1');
-      client1.send('USER mlvirt1 0 * :mlvirt1');
+      client1.register(uniqueNick('mlvirt1'));
       await client1.waitForNumeric('001');
 
       // Client2: SASL-authenticated, NO multiline, NO chathistory
@@ -1431,8 +1417,7 @@ describe('IRCv3 Multiline Messages (draft/multiline)', () => {
       client1.send('CAP REQ :draft/multiline batch message-tags echo-message');
       await client1.waitForCap('ACK');
       client1.send('CAP END');
-      client1.send('NICK mlmatch1');
-      client1.send('USER mlmatch1 0 * :mlmatch1');
+      client1.register(uniqueNick('mlmatch1'));
       await client1.waitForNumeric('001');
 
       // Client2: SASL-authenticated, message-tags but NO multiline
