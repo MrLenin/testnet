@@ -2119,40 +2119,48 @@ describe.skipIf(!secondaryAvailable)('Multi-Server IRC', () => {
 
       sender.clearRawBuffer();
 
-      // Request PM history.  Two valid empty-result wire shapes:
-      //  1. BATCH +<id> chathistory <target> immediately followed by
-      //     BATCH -<id> (empty batch).
-      //  2. No BATCH at all — server emits nothing for empty replay
-      //     and the query completes silently.
-      // Either way the count of PRIVMSG lines must be 0.
+      // Request PM history.  Either of these is a valid "no stored
+      // messages" wire shape:
+      //   1. BATCH +<id> chathistory <target> ... BATCH -<id>
+      //      (empty batch — replay path; carries the draft/
+      //      chathistory-end tag on the opener).
+      //   2. FAIL CHATHISTORY INVALID_TARGET <target> :No access
+      //      (server refuses the query because the opted-out party
+      //      has no queryable history pair — privacy-preserving;
+      //      the storage-key lookup fails because nothing was
+      //      written).
+      // Both prove "opt-out blocked storage".  What's NOT acceptable:
+      // any actual PRIVMSG line carrying the marker — that would be
+      // a stored message we were supposed to block.
       sender.send(`CHATHISTORY LATEST ${receiverNick} * 10`);
 
       const messages: string[] = [];
+      let sawTerminalResponse = false;
       const startTime = Date.now();
-      let sawBatchStart = false;
       while (Date.now() - startTime < 5000) {
         try {
           const msg = await sender.waitForParsedLine(
-            m => (m.command === 'BATCH' && m.params[0]?.startsWith('+')) ||
+            m => (m.command === 'BATCH' && m.params[0]?.startsWith('-')) ||
                  m.command === 'PRIVMSG' ||
-                 (m.command === 'BATCH' && m.params[0]?.startsWith('-')),
-            1000,
+                 m.command === 'FAIL',
+            1500,
           );
-          if (msg.command === 'BATCH' && msg.params[0]?.startsWith('+')) {
-            sawBatchStart = true;
-            continue;
+          if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) {
+            sawTerminalResponse = true; break;
           }
-          if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
+          if (msg.command === 'FAIL' && msg.raw.includes('CHATHISTORY')) {
+            sawTerminalResponse = true; break;
+          }
           if (msg.command === 'PRIVMSG') messages.push(msg.raw);
-        } catch {
-          break; // No more activity — empty-result silent completion is fine
-        }
+        } catch { break; }
       }
 
-      // Opt-out: zero PRIVMSGs in the replay, regardless of batch shape.
+      expect(sawTerminalResponse,
+        'server must emit either an empty BATCH (BATCH -<id>) or a FAIL CHATHISTORY for opt-out',
+      ).toBe(true);
       expect(messages.length,
-        `opt-out should block storage; got ${messages.length} messages, ` +
-        `batchStart=${sawBatchStart}`,
+        `opt-out should block storage; got ${messages.length} messages: ` +
+        messages.map(m => m.slice(0, 80)).join(' | '),
       ).toBe(0);
 
       sender.send('QUIT');
