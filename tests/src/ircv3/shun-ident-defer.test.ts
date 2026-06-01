@@ -172,4 +172,75 @@ describe('Shun ident matching at add-time (do_shun)', () => {
       await unshun(oper, shunMask);
     }
   }, 30_000);
+
+  /**
+   * Non-bare-star mask edge cases per Rubin's review:
+   *
+   *   - `*foo` is "ends with foo" — NOT match-everything.
+   *   - `?bob` is "any single char then bob" — NOT match-everything.
+   *
+   * Both must defer pre-USER (the naive `sh_user[0] != '*'` check
+   * would let the first through; the correct "literal bare * only"
+   * shortcut must not).
+   *
+   * The complementary "DOES still apply for literal `*@host`" case
+   * (Jobe's original intent) can't be cleanly tested in this docker
+   * topology because the oper and the pre-USER victim share the
+   * 172.29.0.1 bridge IP — a `*@172.29.0.1` shun would silence the
+   * oper too, breaking the cleanup phase.  Verified instead by
+   * inspection: the code at shun.c only exempts
+   * `sh_user[0] == '*' && sh_user[1] == '\0'`, and tests below
+   * confirm anything that doesn't match that exact shape defers.
+   */
+
+  it('does NOT emit "Shun active for" for a pre-USER client when the shun ident starts with * but is not bare (e.g. *foo@*)', async () => {
+    const oper = track(await createOperClient());
+    const victimNick = uniqueNick('preusst');
+
+    const victim = track(await createRawSocketClient());
+    victim.send(`NICK ${victimNick}`);
+    await new Promise(r => setTimeout(r, 500));
+
+    // `*foo` is "ends with foo" — NOT match-everything.  Pre-USER
+    // client must be deferred even though the mask leads with `*`.
+    const shunIdent = `*f${uniqueNick('').slice(0, 4).toLowerCase()}`;
+    const shunMask = `${shunIdent}@*`;
+
+    try {
+      await addShun(oper, shunMask, '5m', 'star-prefix non-bare test');
+      await new Promise(r => setTimeout(r, 1500));
+      expect(
+        operSawShunActiveFor(oper, victimNick),
+        `Pre-USER client ${victimNick} must not be matched when shun ident ${shunIdent} starts with * but is not bare (it is "ends with ${shunIdent.slice(1)}")`,
+      ).toBeUndefined();
+    } finally {
+      await unshun(oper, shunMask);
+    }
+  }, 30_000);
+
+  it('does NOT emit "Shun active for" for a pre-USER client when the shun ident uses a single-char wildcard (?bob@*)', async () => {
+    const oper = track(await createOperClient());
+    const victimNick = uniqueNick('preuqm');
+
+    const victim = track(await createRawSocketClient());
+    victim.send(`NICK ${victimNick}`);
+    await new Promise(r => setTimeout(r, 500));
+
+    // `?bob` is "any single char then bob" — NOT match-everything.
+    // The naive `sh_user[0] != '*'` check would let this through;
+    // the correct "bare * shortcut only" check must not.
+    const shunIdent = `?b${uniqueNick('').slice(0, 4).toLowerCase()}`;
+    const shunMask = `${shunIdent}@*`;
+
+    try {
+      await addShun(oper, shunMask, '5m', 'single-char wildcard ident test');
+      await new Promise(r => setTimeout(r, 1500));
+      expect(
+        operSawShunActiveFor(oper, victimNick),
+        `Pre-USER client ${victimNick} must not be matched when shun ident ${shunIdent} uses single-char wildcard (the bare-* shortcut must not apply here)`,
+      ).toBeUndefined();
+    } finally {
+      await unshun(oper, shunMask);
+    }
+  }, 30_000);
 });
