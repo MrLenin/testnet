@@ -422,9 +422,10 @@ All tokens below have server-to-server handlers (ms_* functions in parse.c).
 | `MR` | MARKREAD | Both | Read marker sync |
 | `RN` | RENAME | Both | Channel rename |
 | `MD` | METADATA | Both | User/channel metadata |
-| `MDQ` | METADATAQUERY | Both | Metadata query to services **(deprecated)** |
+| `MDQ` | METADATAQUERY | Both | Metadata query to services **(stub only — handler registered, no emitter or X3-side receiver)** |
 | `WP` | WEBPUSH | Both | Web push notifications |
 | `ML` | MULTILINE | Both | S2S multiline batch propagation |
+| `CI` | CACHEINVAL | Nef↔Nef | SASL auth-cache invalidation (Keycloak webhook fan-out; legacy peers silently ignore) |
 
 #### Bouncer
 
@@ -654,10 +655,12 @@ Example: `AB1703334400` (server AB, timestamp-based)
 
 **IRCv3 Spec**: https://ircv3.net/specs/extensions/chathistory
 
+> **Future work — tag-driven wire form**: The S2S CH subcmds documented below (L / B / A / R / W / T / X / Q / E and the Z compression flag) were designed before S2S message tags were available in P10. They cram msgid / timestamp / batch-id / compression-sentinel into the fixed-512b body, leaving less room for actual payload. Now that tag bytes don't count against the body cap, those fields are candidates to migrate into **compact single-letter tags** (same convention as the HLC msgid's `@A` form — no vendor prefixes). Since CHATHISTORY is a fork-exclusive IRCv3 extension (evilnet/nefarious2 upstream doesn't implement it at all, so every CH-speaking peer is a Nefarious fork build we control), the migration is just rewrite the wire format in place — no parallel scheme, no dual-emit, no fallback path. Guiding principle: minimal wire. Design captured in `.claude/para/projects/chathistory-s2s-tag-migration.md` and the `project_chathistory_s2s_tag_migration` memory entry. Not currently in flight; the compact body form below is what's on the wire today.
+
 #### Architecture
 
 Chathistory uses a **federated query** model:
-- Each server stores all channel messages in local LMDB (messages are relayed S2S)
+- Each server stores all channel messages in local RocksDB (messages are relayed S2S)
 - Clients query their connected server via the `CHATHISTORY` client command
 - When local results are incomplete, servers query peers for additional messages
 - Results are merged and deduplicated by msgid before returning to client
@@ -798,9 +801,9 @@ EF CH E AB1735300000 0
 #### Federation Flow
 
 1. Client sends `CHATHISTORY LATEST #channel * 50`
-2. Server queries local LMDB, gets N messages
+2. Server queries local RocksDB, gets N messages
 3. If N < limit or gaps detected, broadcast `CH Q` (with efficient format) to all servers
-4. Each server queries its LMDB and responds with `CH R` messages
+4. Each server queries its RocksDB and responds with `CH R` messages
 5. Requester collects responses until timeout or all `CH E` received
 6. Merge all messages, deduplicate by msgid, sort by timestamp
 7. Send final result batch to client
@@ -834,7 +837,7 @@ When a REDACT command targets a message not stored locally, the server uses the 
 
 **Flow:**
 1. Client sends `REDACT #channel AB-1703334400-123 :reason`
-2. Server checks local LMDB — message not found locally
+2. Server checks local RocksDB — message not found locally
 3. Server sends `CH Q #channel X MAB-1703334400-123 1 <reqid>` to all storage servers
 4. Storage server finds message, responds with `CH R` + `CH E <reqid> 1`
 5. Originating server verifies sender authorization from the response
@@ -940,12 +943,12 @@ B4 CH WB #channel abc123 :cyBtdWx0aWxpbmU=
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `FEAT_CHATHISTORY_MAX` | 100 | Maximum messages per request |
-| `FEAT_CHATHISTORY_DB` | "history" | LMDB database directory |
+| `FEAT_CHATHISTORY_DB` | "history" | RocksDB directory (chathistory + ml_content + presence CFs) |
 | `FEAT_CHATHISTORY_RETENTION` | 7 | Days to keep messages (0 = forever) |
 | `FEAT_CHATHISTORY_PRIVATE` | FALSE | Enable private message history |
 | `FEAT_CHATHISTORY_FEDERATION` | TRUE | Enable S2S chathistory queries |
 | `FEAT_CHATHISTORY_TIMEOUT` | 5 | Seconds to wait for S2S responses |
-| `FEAT_CHATHISTORY_STORE` | TRUE | Store messages locally to LMDB |
+| `FEAT_CHATHISTORY_STORE` | TRUE | Store messages locally to RocksDB |
 | `FEAT_CHATHISTORY_WRITE_FORWARD` | TRUE | Forward writes to storage servers |
 | `FEAT_CHATHISTORY_STORE_REGISTERED` | TRUE | Store for registered channels (+r) |
 | `FEAT_CHATHISTORY_HIGH_WATERMARK` | 90 | Storage usage % to trigger eviction |
@@ -973,7 +976,7 @@ ABAAB RD #channel AB-1703334400-123 :Removing inappropriate content
 
 #### Federation
 
-When the target message is not in the local server's LMDB store, the server uses the CHATHISTORY `X` (EXACT) subcmd to locate the message on remote storage servers before propagating the REDACT. See [Federated REDACT Lookup (CH Q X)](#federated-redact-lookup-ch-q-x) in the CHATHISTORY section for the full wire protocol.
+When the target message is not in the local server's RocksDB store, the server uses the CHATHISTORY `X` (EXACT) subcmd to locate the message on remote storage servers before propagating the REDACT. See [Federated REDACT Lookup (CH Q X)](#federated-redact-lookup-ch-q-x) in the CHATHISTORY section for the full wire protocol.
 
 ---
 
@@ -1143,7 +1146,7 @@ Each intermediate server:
 1. Client sends `MARKREAD #channel timestamp=...`
 2. Find services server
 3. Send `MR S <numeric> #channel <timestamp>` to X3
-4. Also store locally in LMDB cache (if available)
+4. Also store locally in the RocksDB readmarkers CF (if available)
 5. Notify local clients with same account
 
 **Nefarious (ms_markread - server handler)**:
@@ -1218,7 +1221,7 @@ The optional `Z` flag indicates:
 - Value is base64-encoded (for safe P10 transmission)
 - Receiver should decode + store directly without recompression
 
-This enables compressed data passthrough between X3 and Nefarious LMDB caches, eliminating unnecessary decompress/recompress cycles.
+This enables compressed data passthrough between X3 (LMDB cache) and Nefarious (RocksDB metadata CF), eliminating unnecessary decompress/recompress cycles. Nefarious's RocksDB CFs are configured `compress=0` (see [db_rocksdb.c:make_cf_options](nefarious/ircd/db_rocksdb.c#L216)), so the Z-flagged blobs survive round-trip byte-for-byte.
 
 #### Examples
 
@@ -1244,7 +1247,7 @@ ABAAB MD ABAAB avatar
 **Sender (Nefarious)**:
 1. Client sends `METADATA * SET key [visibility] :value`
 2. Parse visibility (`*` or `private`) - defaults to public
-3. Store in in-memory metadata + LMDB for logged-in users
+3. Store in in-memory metadata + RocksDB metadata CF for logged-in users
 4. Send `MD target key visibility :value` to servers
 
 **Receiver (X3)**:
@@ -1288,9 +1291,9 @@ X3 pushes these metadata keys via MD tokens when a user authenticates or changes
 
 ---
 
-### METADATAQUERY (MDQ) - Phase 29 (DEPRECATED)
+### METADATAQUERY (MDQ) - Phase 29 (NEVER WIRED)
 
-> **Never Implemented**: MDQ was designed but never went live. Nefarious's LMDB-backed metadata cache handles offline metadata lookups locally, eliminating the need for S2S queries to X3. X3 has no incoming MDQ handler registered. This section is retained for historical reference only.
+> **Stub Only**: MDQ was designed but never wired end-to-end. Nefarious's RocksDB-backed metadata cache handles offline metadata lookups locally, eliminating the need for S2S queries to X3. The receive-side stub `ms_metadataquery` is registered in `parse.c` (so an MDQ from a peer wouldn't crash), but no code path emits MDQ outbound, and X3 has no incoming MDQ handler. This section is retained for historical reference + as documentation of the reserved token slot.
 
 **Original Purpose**: Query metadata for offline users or cached data from X3 services.
 
@@ -1349,13 +1352,13 @@ Client → ServerA → ServerB → X3
 Each intermediate server:
 1. Checks if X3 is available (via heartbeat detection)
 2. If X3 available: forwards MDQ toward X3
-3. If X3 unavailable: answers from local LMDB cache (graceful degradation)
+3. If X3 unavailable: answers from local RocksDB cache (graceful degradation)
 
 #### Processing
 
 **Sender (Nefarious)**:
 1. Client sends `METADATA * GET account key`
-2. User not online - check local LMDB cache
+2. User not online - check local RocksDB metadata CF
 3. Cache miss - send `MDQ account key` toward X3
 4. Track pending request with timeout (30 seconds)
 
@@ -1363,7 +1366,7 @@ Each intermediate server:
 1. Receive MDQ from another server
 2. If from services: process as response, deliver to waiting clients
 3. If X3 available: forward toward X3 (services server)
-4. If X3 unavailable: answer from local LMDB cache
+4. If X3 unavailable: answer from local RocksDB cache
 
 **Receiver (X3)**:
 1. Parse MDQ command
@@ -1373,7 +1376,7 @@ Each intermediate server:
 
 **Response Handling (Nefarious)**:
 1. Receive MD tokens from X3 (IsService check)
-2. Cache in local LMDB for future queries
+2. Cache in local RocksDB metadata CF for future queries
 3. Find pending MDQ requests for this target/key
 4. Forward METADATA response to waiting clients
 5. Clean up request tracking
@@ -1829,11 +1832,45 @@ ABAAB ML -ABAAB1735308001 BBAAC :
 
 ---
 
+### CACHEINVAL (CI) - SASL Cache Coherence
+
+**Purpose**: Cross-server invalidation of SASL auth caches (negative + positive) when a user's credentials change at the IdP. Sent by the server that received the webhook event so peers drop their stale entries; legacy peers without a `CI` handler silently ignore the token.
+
+#### P10 Format
+
+```
+[SERVER] CI <username>
+```
+
+| Field | Type | Description |
+|---|---|---|
+| username | String | The account whose cached auth entries should be invalidated on the receiver |
+
+#### Processing
+
+Receiver (`ms_cacheinval` in `ircd/sasl_webhook.c`):
+1. Validates that the message has a username param.
+2. Calls `sasl_cache_invalidate_user(username)` — drops the user from both the negative-cache (failures) and positive-cache (successful auths).
+3. Logs the invalidation.
+
+The receive handler is registered for SERVER messages only — direct propagation, no reply.
+
+#### When it's emitted
+
+- **Webhook arrival**: when Nefarious's libkc webhook handler receives a Keycloak `LOGOUT_ERROR`, `RESET_PASSWORD_ERROR`, `DELETE_ACCOUNT`, or admin-side `USER_DELETE` / `USER_DISABLED` event, it invalidates locally *and* emits `CI` to every peer so the rest of the network drops their cached entries.
+- See `sasl_webhook.c:nef_webhook_handle_event` for the dispatch table; CACHEINVAL coverage matches the SASL auth-cache shape (currently username-keyed; account-rename events do not need CI since the auth path is keyed on the credential).
+
+#### Legacy interop
+
+Legacy P10 servers don't know `CI`. They'll either treat the unknown token as a no-op (matching `m_ignore` registration) or drop the line entirely. Either is correct — they don't have the libkc cache to invalidate. The `sasl` capability advertisement that pre-dates CACHEINVAL stays consistent because CI invalidation is silently lossy on those peers; in a mixed network, expect occasional "stale auth from legacy leaf" symptoms only when an event would have invalidated and the user is connected through a legacy node.
+
+---
+
 ### GITSYNC (GS) - Native Git Configuration Distribution
 
 **Purpose**: Centralized distribution of network configuration (K-lines, G-lines, quarantines) via git, with optional TLS certificate synchronization.
 
-**Branch**: `feature/native-dnsbl-gitsync` (not yet merged to main)
+**Status**: Standard in `ircv3.2-upgrade`. The original development branch `feature/native-dnsbl-gitsync` has been merged.
 
 #### P10 Format
 
@@ -2030,35 +2067,187 @@ AB BS U alice sess1 name=Work Session
 
 ### BOUNCER_TRANSFER (BX)
 
-**Purpose**: Transfer channel memberships from a ghost client to a new client during cross-server bouncer session resume.
+**Purpose**: Per-alias and per-event signalling tied to a bouncer session — alias introduction, destruction, primary promotion (cross-server seamless session move), and per-alias state sync (nick changes, identity updates, snomask, visibility, message echo).
+
+BX is the granular per-client counterpart to the session-level `BS`. Where `BS` carries session lifecycle (create / attach / detach / destroy / update), BX carries everything that varies *per alias-connection* within a session — and the cross-server seamless-move handshake.
+
+**Authoritative reference for the design model and invariants is** `nefarious/.claude/skills/bouncer-architecture/SKILL.md`. Read it first when touching any `bounce_alias_*` handler or the BX dispatch path; the invariants there (e.g. "hs_state = BOUNCE_ACTIVE must be set in both `bounce_promote_alias()` AND the BX P receive handler", or "the reconcile yield must broadcast Q, not suppress via FLAG_KILLED") are load-bearing.
+
+Dispatched by the BX top-level handler at [bouncer_session.c:6831](../testnet/nefarious/ircd/bouncer_session.c#L6831). Unknown subcommands are forwarded peer-to-peer rather than dropped, so a future BX subcommand introduced on one node propagates through older intermediates to a target that does understand it.
 
 #### P10 Format
 
 ```
-[SERVER] BX [OLD_NUMERIC] [NEW_NUMERIC] [SESSION_ID]
+[SERVER] BX [SUBCMD] [PARAMS...]
 ```
+
+#### Subcmds
+
+| Subcmd | Direction | Handler | Description |
+|---|---|---|---|
+| `C` | Broadcast | `bounce_alias_create` | Introduce an alias — used INSTEAD of N for aliases so legacy peers silently drop rather than create a real client |
+| `X` | Broadcast | `bounce_alias_destroy` | Silently destroy an alias (no Q propagation). Sent on alias exit |
+| `P` | Broadcast | `bounce_alias_promote` | Promote an alias to primary (cross-server seamless session move) |
+| `N` | Broadcast | `bounce_alias_nicksync` | Sync a nick change on the alias |
+| `U` | Broadcast | `bounce_alias_update` | Update per-alias mutable identity state (away, caps, last-active, etc.) |
+| `E` | Targeted | `bounce_alias_echo` | Deliver a single-line PM echo to a session member on another server |
+| `M` | Targeted | `bounce_alias_multiline_echo` | Deliver a `BATCH +multiline` PM echo (chunked) to a session member on another server |
+| `K` | Broadcast | `bounce_alias_snomask` | Sync the snomask to an oper-status alias |
+| `V` | Broadcast | `bounce_alias_visibility` | Sync per-alias channel-membership visibility (M4b alias channel-roster sync) |
+
+#### Wire Formats
+
+**Create (C)** — introduce a new alias for an existing session:
+```
+[SERVER] BX C [PRIMARY_NUMERIC] [ALIAS_NUMERIC] [ACCOUNT] [SESSID] :[CHANNELS]
+```
+Emitted by the alias's home server when the client completes registration and is recognised as an additional connection to an existing session. Receivers create a `Client` flagged `IsBouncerAlias`, with `cli_user->alias_primary` set to PRIMARY_NUMERIC's client. The alias does *not* go through the normal N path — legacy peers without a BX handler drop the message and never know the alias exists, which is the intended behavior.
+
+**Destroy (X)** — silently remove an alias:
+```
+[SERVER] BX X [ALIAS_NUMERIC]
+```
+Emitted from `exit_client()` for an `IsBouncerAlias` client. No Q follows on the wire for BX-aware peers (the alias was never on the network as a primary; legacy peers have nothing to clean up).
+
+**Promote (P)** — cross-server seamless primary swap:
+```
+[SERVER] BX P [OLD_NUMERIC] [NEW_NUMERIC] [SESSID] [NICK]
+```
+Emitted when an alias is promoted to primary on its server (e.g. the previous primary exits and a local alias is the best successor). The receive handler is dual-mode:
+- If the local NEW_NUMERIC is already an alias (CHFL_ALIAS in its channels), it clears CHFL_ALIAS and applies mode flags from OLD_NUMERIC's memberships.
+- If the local NEW_NUMERIC has no channel memberships (legacy or sequential-swap case), it transfers memberships from OLD_NUMERIC to NEW_NUMERIC and renames NEW_NUMERIC to NICK.
+
+In both modes the receiver must also set the session's `hs_state = BOUNCE_ACTIVE` to mirror the sending side; missing this destroys the session on disconnect (bouncer-architecture invariant #1).
+
+**Nick Sync (N)** — alias nick change:
+```
+[SERVER] BX N [PRIMARY_NUMERIC] [NEW_NICK] [TS]
+```
+Emitted when the primary changes nick; aliases on other servers must adopt the new nick. Carries the primary's numeric (not the alias's) because the nick is a session-wide property.
+
+**Identity Update (U)** — per-alias mutable state:
+```
+[SERVER] BX U [ALIAS_NUMERIC] [FIELD]=[VALUE]
+```
+Mutable fields piggybacked through this token include AWAY, capability advertisements, `last_active`, and similar per-alias bookkeeping. Format mirrors `BS U` for consistency (`field=value`).
+
+**Echo (E)** — PM echo delivery to a remote session member:
+```
+[SERVER] BX E [TARGET_NUMERIC] [FROM_NUMERIC] [TOK] [PM_TARGET] [MSGID] :[TEXT]
+```
+When a session has two connections on different servers and one of them sends a PM, `echo-message` requires the *other* client to also see it. BX E is the wire encoding of that cross-server delivery: TARGET_NUMERIC is the session member that should receive the echo, FROM_NUMERIC is the sender's alias, TOK is the IRC verb (PRIVMSG/NOTICE), PM_TARGET is the original recipient nick, MSGID is the IRCv3 msgid to ensure dedup.
+
+**Multiline Echo (M)** — chunked PM echo for `BATCH +multiline`:
+```
+[SERVER] BX M+[BID] [ALIAS_NUM] [FROM_NUM][TOK] [TARGET_NICK] [MSGID] [@CTAGS] :[LINE]   (batch start + first line)
+[SERVER] BX M  [BID] [ALIAS_NUM] :[LINE]                                                 (interior line)
+[SERVER] BX Mc [BID] [ALIAS_NUM] :[LINE]                                                 (concat continuation)
+[SERVER] BX M- [BID] [ALIAS_NUM] :[PASTE_URL]                                            (end of batch, optional paste URL)
+```
+Same delivery semantics as BX E but for multi-line batches; BID is the batch id so concurrent multiline batches on the same link don't collide. The `c` flag on M marks a continuation line that should be concatenated with the preceding line client-side (per the `draft/multiline` `concat` semantics).
+
+**Snomask Sync (K)** — sync snomask to oper aliases:
+```
+[SERVER] BX K [ALIAS_NUMERIC] [SNOMASK_DECIMAL]
+```
+Emitted by the primary's home server (which holds authoritative oper state) so an alias on another server gets added to the opsarray and receives the right server notices (oper notices, glines, connection notices, etc.). Decimal-encoded for readability and bit-flag round-trip safety.
+
+**Visibility (V)** — alias channel-roster membership sync (M4b):
+```
+[SERVER] BX V [ALIAS_NUMERIC] [SIGN][CHANNEL]
+```
+SIGN is `+` to add an alias's CHFL_ALIAS membership to a channel, `-` to remove. Used so an alias's channel set converges with the primary's even when the alias never JOINed directly on its server.
 
 #### Fields
 
 | Field | Type | Description |
-|-------|------|-------------|
-| OLD_NUMERIC | String(5) | P10 numeric of the ghost client (being transferred from) |
-| NEW_NUMERIC | String(5) | P10 numeric of the new client (being transferred to) |
-| SESSION_ID | String | Bouncer session ID being resumed |
+|---|---|---|
+| PRIMARY_NUMERIC / ALIAS_NUMERIC / TARGET_NUMERIC / FROM_NUMERIC / OLD_NUMERIC / NEW_NUMERIC | String(5) | 5-character P10 user numerics |
+| ACCOUNT | String | Account name owning the session |
+| SESSID | String | Bouncer session identifier (matches `BS` SESSID) |
+| NICK | String(NICKLEN) | IRC nickname |
+| NEW_NICK | String(NICKLEN) | New nick on a BX N nick-sync |
+| TS | Number | Unix timestamp (used by N for nick-change ordering) |
+| FIELD=VALUE | String | Identity-update key/value (BX U). Currently `away`, `caps`, `last_active` |
+| TOK | String | IRC verb (`PRIVMSG`, `NOTICE`) on echo paths |
+| MSGID | String | IRCv3 message id for echo dedup |
+| PM_TARGET / TARGET_NICK | String | Original PM destination nick on the echo path |
+| BID | String | Multiline batch id (uniqueness keyed on (link, BID)) |
+| SNOMASK_DECIMAL | Number | Decimal-encoded snomask bit flags |
+| SIGN+CHANNEL | String | `+#chan` or `-#chan` for BX V visibility deltas |
+| CHANNELS | String | Space-separated channel list (BX C only) |
 
-#### Processing
+#### Retired (Phase 5)
 
-1. Look up both clients by numeric
-2. Transfer all channel memberships from old client to new client
-3. KILL the old client with reason "Session transferred"
+`BX R`, `BX J`, `BX F` are explicitly accepted at the dispatcher and **silently dropped** at [bouncer_session.c:6850-6853](../testnet/nefarious/ircd/bouncer_session.c#L6850). They were the burst-handshake coordination tokens from the earlier cluster-B convergence protocol (redesign D.3 superseded that with deterministic convergence via `bounce_convergence_pending()` / `bounce_release_idle_gates()`). The capability flag `FLAG_BXF_AWARE` is still announced on link for backward compatibility but the handler is a no-op. Do not reuse these letters for new subcommands.
 
-This occurs when a user resumes a bouncer session on a different server than where the ghost client exists. The ghost client holds the channel memberships; the transfer moves them to the resuming client.
+#### Burst & Convergence
 
-#### Example
+During link burst, alias state is reconstructed by re-emitting `BX C` for each alias the local server owns (mirroring how `BS C` re-emits sessions). The burst-tail gating that the retired R/J/F tokens used to provide is now event-driven via `bounce_release_idle_gates()` at convergence-completion sites, with a 1-second fallback timer.
+
+A subtle race: an alias's `BX C` and a subsequent `BX U`/`BX K`/`BX V` for the same alias may arrive on a receiver before the receiver has finished processing the BX C (during burst). The receiver maintains a pending-BX queue keyed on `(alias_numeric, subcmd)`; if the alias isn't in `clientTable` yet, the subcommand is deferred and replayed after the BX C lands. This is the `bx_drain_in_progress` machinery in the handlers (`is_replay` checks).
+
+#### Legacy Interop
+
+Peers without BX awareness silently drop alias `C`/`X` because they don't recognise the token — *this is intentional*, and is why aliases are introduced via **BX C, not N**. If we used N for aliases:
+- Legacy peers would see an N and create a real `Client` for the alias.
+- On a later alias exit, BX X has no Q counterpart on the legacy side, so the legacy peer's now-orphaned client would be left behind permanently.
+
+Audit rule (bouncer-architecture invariant #10): any S2S egress sourced from an alias client toward a legacy peer must rewrite the source to the alias's primary via `cli_user(sptr)->alias_primary`. The pre-existing omission in `relay_directed_message` / `relay_directed_notice` (`ircd_relay.c`) caused `X3 ping`-style pseudo-command pings to silently fail for users currently in alias status; the fix is the four-site rewrite-block mirror of `relay_private_message`'s pattern.
+
+#### Examples
+
+**Alias attach and clean exit:**
 
 ```
-# Transfer ghost ABAAB's channels to new client CDAAC for session sess1
-AB BX ABAAB CDAAC sess1
+# Alice's existing session is sess1, primary lives on AB as ABAAB.
+# She opens a second connection to CD; that connection registers as
+# an alias.
+CD BX C ABAAB CDAAB alice sess1 :#general #dev
+
+# The second connection /QUIT's.  CD emits the silent destroy:
+CD BX X CDAAB
+# No Q is propagated.  AB removes the alias from its session, no
+# orphan left behind.
+```
+
+**Cross-server primary promote (seamless session move):**
+
+```
+# Alice's primary on AB exits.  Her alias on CD is the best successor;
+# CD promotes it locally and broadcasts:
+CD BX P ABAAB CDAAB sess1 alice
+
+# AB and any other peers:
+#   1. Look up CDAAB locally, find the alias-state Client.
+#   2. Clear CHFL_ALIAS and apply OLD's membership modes (dual-mode A).
+#   3. Set the session's hs_state = BOUNCE_ACTIVE.
+#   4. Rebind hs_client to CDAAB so subsequent BS / BX targets resolve.
+```
+
+**Per-alias snomask + visibility sync:**
+
+```
+# Primary on AB receives oper; aliases on CD and EF must also see
+# server notices.
+AB BX K CDAAB 8388607
+AB BX K EFAAB 8388607
+
+# Primary joins #ops; aliases get alias-membership in the channel:
+AB BX V CDAAB +#ops
+AB BX V EFAAB +#ops
+```
+
+**Echo-message across a session:**
+
+```
+# Alice's primary on AB sends `PRIVMSG bob :hi`.  Her alias on CD
+# must see the echo too.  AB emits:
+AB BX E CDAAB ABAAB PRIVMSG bob 7Z3pK1ABCDEFGHJKL :hi
+
+# CD locates CDAAB locally, formats the echo per echo-message rules,
+# and writes it to her alias's socket — with the same msgid so the
+# client dedups against the original.
 ```
 
 ---
@@ -2304,7 +2493,7 @@ In a network with mixed old/new servers:
 | `MR` | `[SOURCE] MR [subcmd] [params...]` | Read marker (S, G, R, broadcast) |
 | `RN` | `[NUMERIC] RN [old] [new] :[reason]` | Channel rename |
 | `MD` | `[SOURCE] MD [target] [key] [vis] :[value]` | Metadata (vis: `*`, `P`, or `!`) |
-| `MDQ` | `[SOURCE] MDQ [target] [key\|*]` | Metadata query to X3 **(deprecated)** |
+| `MDQ` | `[SOURCE] MDQ [target] [key\|*]` | Metadata query to X3 **(stub only — see MDQ section)** |
 | `WP` | `[SOURCE] WP [subcmd] [params...]` | Web push |
 | `ML` | `[NUMERIC] ML [+\|-\|c]batchid target :[text]` | S2S multiline batch |
 | `GS` | `[SOURCE] GS [subcmd] [params...]` | GitSync remote control |
@@ -2428,6 +2617,7 @@ In a network with mixed old/new servers:
 | 2.0 | February 2026 | Comprehensive update: Fixed token errors (WHO=H not X, SASL not SA), documented SE/BT token collisions, replaced 22-entry token table with complete ~80-token categorized reference, added ACCOUNT (AC) subcmd protocol, MARK (MK) subtypes, BOUNCER_SESSION (BS), BOUNCER_TRANSFER (BX) sections, corrected REGREPLY result codes (S/V/F) and wire format, updated CHATHISTORY X3 participation, added MD visibility `!` token and X3 metadata keys, noted MR implementation gap in X3, added SASL chunking details, marked MDQ as never implemented, updated compatibility matrix and implementation files |
 | 2.1 | February 2026 | Added CH X (EXACT) subcmd for federated REDACT message lookup, documented W/T subcmds as local-only (not federated), added M-prefix reference format, added federated REDACT flow to RD section |
 | 2.2 | February 2026 | Resolved token collisions: SETNAME SE→SR (was colliding with SETTIME), BOUNCER_TRANSFER BT→BX (was colliding with BATCH) |
+| 2.3 | June 2026 | Audit pass against current `ircv3.2-upgrade`: rewrote BOUNCER_TRANSFER (BX) section to reflect the 9 live subcommands (C/X/P/N/U/E/M/K/V) + the Phase-5-retired R/J/F silent-drop; added CACHEINVAL (CI) section; corrected MDQ from "deprecated" to "never wired" (handler stub registered, no emitter, no X3 receiver); swept Nefarious-side LMDB references to RocksDB (chathistory + metadata storage migrated); fleshed out compression-passthrough note with the `db_cf_opts.compress=0` rationale; removed stale `feature/native-dnsbl-gitsync` branch annotation. X3-side LMDB refs preserved (X3 still uses libmdbx). |
 
 ---
 

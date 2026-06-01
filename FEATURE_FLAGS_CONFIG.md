@@ -84,9 +84,6 @@ The multiline batch system includes comprehensive flood protection to prevent ab
 | `FEAT_MULTILINE_LEGACY_THRESHOLD` | 3 | Line count to trigger legacy fallback preview |
 | `FEAT_MULTILINE_LEGACY_MAX_LINES` | 5 | Max preview lines for legacy clients |
 | `FEAT_MULTILINE_FALLBACK_NOTIFY` | TRUE | Send NOTICE explaining truncation to legacy recipients |
-| `FEAT_MULTILINE_STORAGE_ENABLED` | FALSE | Enable S2S multiline batch storage for replay |
-| `FEAT_MULTILINE_STORAGE_TTL` | 3600 | Seconds to keep multiline batches in memory |
-| `FEAT_MULTILINE_STORAGE_MAX` | 10000 | Maximum stored multiline batches |
 
 **Discount Values**:
 - `100` = Full lag (no benefit to multiline, like regular messages)
@@ -103,7 +100,7 @@ The multiline batch system includes comprehensive flood protection to prevent ab
 - `LEGACY_MAX_LINES`: Max preview lines sent to legacy clients (default: 5)
 - `FALLBACK_NOTIFY`: If enabled, sends a NOTICE explaining the truncation
 
-**Multiline Storage**: When `MULTILINE_STORAGE_ENABLED` is true, the server stores multiline batches in memory for replay to other servers. This enables late-joining servers to receive complete multiline messages via the ML token.
+**Multiline Storage**: Multiline batches are persisted via the unified RocksDB `ml_content` column family (see `ircd/ml_content.c`), shared with the chathistory storage backend. The old `MULTILINE_STORAGE_ENABLED/TTL/MAX` features have been retired in favour of the chathistory storage's retention controls.
 
 ### WebSocket Configuration
 
@@ -159,7 +156,7 @@ AB MK <numeric> SSLCLIEXP :<timestamp>
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `FEAT_CHATHISTORY_MAX` | 100 | Maximum messages returned per request |
-| `FEAT_CHATHISTORY_DB` | "history" | LMDB database directory path |
+| `FEAT_CHATHISTORY_DB` | "history" | RocksDB directory path (chathistory + ml_content + presence CFs) |
 | `FEAT_CHATHISTORY_RETENTION` | 7 | Days to keep messages (0 = disable purge) |
 | `FEAT_CHATHISTORY_PRIVATE` | FALSE | Enable private message (DM) history |
 | `FEAT_CHATHISTORY_PRIVATE_CONSENT` | 2 | PM consent mode (0=global, 1=single-party, 2=multi-party) |
@@ -167,7 +164,7 @@ AB MK <numeric> SSLCLIEXP :<timestamp>
 | `FEAT_CHATHISTORY_PM_NOTICE` | FALSE | Send policy notice on connect |
 | `FEAT_CHATHISTORY_FEDERATION` | TRUE | Enable S2S chathistory queries to other servers |
 | `FEAT_CHATHISTORY_TIMEOUT` | 5 | Seconds to wait for S2S federation responses |
-| `FEAT_CHATHISTORY_STORE` | TRUE | Actually store messages locally to LMDB |
+| `FEAT_CHATHISTORY_STORE` | TRUE | Actually store messages locally to RocksDB |
 | `FEAT_CHATHISTORY_WRITE_FORWARD` | TRUE | Forward writes to storage servers (Phase 4 federation) |
 | `FEAT_CHATHISTORY_STORE_REGISTERED` | TRUE | Store history for registered channels even on non-storage servers |
 | `FEAT_CHATHISTORY_STRICT_TIMESTAMPS` | FALSE | Reject messages with timestamps older than retention period |
@@ -175,23 +172,21 @@ AB MK <numeric> SSLCLIEXP :<timestamp>
 | `FEAT_CHATHISTORY_LOW_WATERMARK` | 75 | Storage usage % target after eviction |
 | `FEAT_CHATHISTORY_MAINTENANCE_INTERVAL` | 300 | Seconds between maintenance cycles |
 | `FEAT_CHATHISTORY_EVICT_BATCH_SIZE` | 1000 | Max entries to evict per maintenance cycle |
-| `FEAT_CHATHISTORY_DB_AUTOGROW` | TRUE | Enable auto-growing database geometry |
-| `FEAT_CHATHISTORY_DB_GROWTH_STEP` | 16777216 | Growth increment in bytes (16MB default) |
-| `FEAT_CHATHISTORY_DB_NOSYNC` | TRUE | Use MDBX_SAFE_NOSYNC for reduced fsync overhead |
-| `FEAT_CHATHISTORY_DB_SYNC_INTERVAL` | 10 | Seconds between periodic syncs when nosync enabled |
-| `FEAT_CHATHISTORY_DB_PARK_INTERVAL` | 50 | Park read txn every N messages during queries (0 = disable) |
+| `FEAT_CHATHISTORY_DB_AUTOGROW` | TRUE | Legacy libmdbx-era flag; ignored under RocksDB (kept for config compatibility) |
+| `FEAT_CHATHISTORY_DB_NOSYNC` | TRUE | Defer fsync on the chathistory CF; flushes happen via the periodic sync interval below |
+| `FEAT_CHATHISTORY_DB_SYNC_INTERVAL` | 10 | Seconds between periodic WAL syncs when nosync is enabled |
 
 **Storage vs CAP Decoupling**: `FEAT_CAP_draft_chathistory` controls whether the server advertises and handles the `draft/chathistory` capability for clients. `FEAT_CHATHISTORY_STORE` controls whether the server actually stores messages locally. Setting `STORE=FALSE` with `CAP=TRUE` creates a "relay server" that can handle chathistory queries by forwarding them to storage servers via federation, without storing messages itself. This is useful for leaf servers that want to offer chathistory to clients without the storage overhead.
 
 **Retention Purge**: Messages older than `CHATHISTORY_RETENTION` days are automatically deleted via an hourly timer (`history_purge_callback`). Set to 0 to disable automatic purging.
 
-**Federation**: When enabled, if local LMDB results are incomplete (fewer messages than requested or gaps detected), the server will query all other servers for additional messages. Results are merged and deduplicated by msgid before returning to the client. This allows clients to access history even if their connected server was down when messages were sent.
+**Federation**: When enabled, if local RocksDB results are incomplete (fewer messages than requested or gaps detected), the server will query all other servers for additional messages. Results are merged and deduplicated by msgid before returning to the client. This allows clients to access history even if their connected server was down when messages were sent.
 
 **Write Forwarding (Phase 4)**: When `CHATHISTORY_WRITE_FORWARD` is enabled and `CHATHISTORY_STORE` is disabled, non-storage servers forward incoming messages to storage servers via CH W/WB tokens. This creates a hub-and-spoke architecture where leaf servers relay to hub storage servers.
 
-**MDBX NOSYNC Mode**: When `CHATHISTORY_DB_NOSYNC` is enabled (default), the chathistory database uses `MDBX_SAFE_NOSYNC` to skip fsync on every commit. Instead, libmdbx's built-in periodic sync flushes data at the interval specified by `CHATHISTORY_DB_SYNC_INTERVAL`. This significantly reduces I/O overhead on the write-hot chathistory path (every PRIVMSG triggers 3 mdbx_put calls). On clean shutdown, a forced sync ensures all pending data is flushed. Safe for chathistory — losing a few seconds of messages on crash is acceptable.
+**NOSYNC Mode**: When `CHATHISTORY_DB_NOSYNC` is enabled (default), the chathistory CF skips per-commit `fsync` on the WAL. A background flush runs at `CHATHISTORY_DB_SYNC_INTERVAL` seconds. This significantly reduces I/O overhead on the write-hot chathistory path (every PRIVMSG triggers a put). On clean shutdown the WAL is flushed; on crash a few seconds of trailing messages may be lost — acceptable for chathistory.
 
-**Read Transaction Parking**: Large `CHATHISTORY BEFORE/AFTER` queries hold a read transaction open while iterating, which pins the read snapshot and prevents page reclamation by writers. When `CHATHISTORY_DB_PARK_INTERVAL` is non-zero, the read transaction is periodically parked (releasing the snapshot) and unparked (acquiring a fresh snapshot) every N messages. The cursor is saved and re-positioned after each park cycle. Set to 0 to disable. Lower values release snapshots more frequently but add overhead from cursor re-positioning.
+(Under libmdbx this was wired through `MDBX_SAFE_NOSYNC` + a periodic sync timer; under RocksDB the equivalent is `Options::manual_wal_flush + bytes_per_sync` driven by our own timer. Same observable behaviour from a deployment standpoint.)
 
 **Storage Watermarks**: The watermark system prevents unbounded storage growth:
 - When storage exceeds `HIGH_WATERMARK` (85%), eviction starts
@@ -223,23 +218,21 @@ draft/chathistory=limit=100,pm=global
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `FEAT_METADATA_CACHE_ENABLED` | TRUE | Enable LMDB metadata caching |
+| `FEAT_METADATA_CACHE_ENABLED` | TRUE | Enable RocksDB metadata caching |
 | `FEAT_METADATA_X3_TIMEOUT` | 60 | Seconds to wait for X3 before using cache-only mode |
 | `FEAT_METADATA_QUEUE_SIZE` | 1000 | Maximum pending writes when X3 is unavailable |
 | `FEAT_METADATA_BURST` | TRUE | Send metadata during netburst to linking servers |
-| `FEAT_METADATA_DB` | "metadata" | LMDB database directory path for metadata storage |
+| `FEAT_METADATA_DB` | "metadata" | RocksDB directory path for the metadata CF |
 | `FEAT_METADATA_CACHE_TTL` | 14400 | Seconds before cached metadata expires (4 hours) |
 | `FEAT_METADATA_PURGE_FREQUENCY` | 3600 | Seconds between cache purge runs (1 hour) |
-| `FEAT_METADATA_DB_AUTOGROW` | TRUE | Enable auto-growing database geometry |
-| `FEAT_METADATA_DB_NORDAHEAD` | TRUE | Disable OS readahead for random-access pattern |
+| `FEAT_METADATA_DB_AUTOGROW` | TRUE | Legacy libmdbx-era flag; ignored under RocksDB (kept for config compatibility) |
+| `FEAT_METADATA_DB_NORDAHEAD` | TRUE | Legacy libmdbx-era flag; under RocksDB the random-access pattern is handled by per-CF block-cache tuning |
 
-**MDBX NORDAHEAD**: When `METADATA_DB_NORDAHEAD` is enabled (default), the metadata database opens with `MDBX_NORDAHEAD` to disable OS readahead. Metadata access is random by account/channel key, so sequential readahead wastes I/O prefetching pages that won't be used. This flag is NOT applied to chathistory, whose range-scan access pattern benefits from readahead.
-
-**Cache-Aware Metadata**: When enabled, Nefarious maintains an LMDB-backed cache for metadata:
+**Cache-Aware Metadata**: When enabled, Nefarious maintains a RocksDB-backed cache for metadata:
 - **X3 Detection**: Automatically detects X3 availability via heartbeat on METADATA updates
 - **Write Queue**: Queues writes when X3 is unavailable, replays when reconnected
 - **Netburst**: Sends user/channel metadata to linking servers during netburst
-- **LMDB Path**: Configurable via `METADATA_DB` feature (default: `metadata/` relative to ircd dir)
+- **Store Path**: Configurable via `METADATA_DB` feature (default: `metadata/` relative to ircd dir)
 
 ### Compression Configuration (Nefarious)
 
@@ -248,7 +241,7 @@ draft/chathistory=limit=100,pm=global
 | `FEAT_COMPRESS_THRESHOLD` | 256 | Minimum value size (bytes) to trigger zstd compression |
 | `FEAT_COMPRESS_LEVEL` | 3 | zstd compression level (1-22, higher = better ratio, slower) |
 
-**Compression**: When built with `--with-zstd`, Nefarious automatically compresses LMDB-stored values (metadata, chathistory) that exceed the threshold.
+**Compression**: When built with `--with-zstd`, Nefarious automatically compresses RocksDB-stored values (metadata, chathistory, multiline `ml_content`) that exceed the threshold.
 
 **Compression Levels:**
 - Level 1: Fastest, ~60% of max compression
@@ -261,6 +254,10 @@ draft/chathistory=limit=100,pm=global
 Az MD ABAAB avatar * Z :KLUv/QBYpQEAaHR0cHM6Ly9...
 ```
 This eliminates unnecessary decompress/recompress cycles between services.
+
+**RocksDB CF compression is intentionally OFF** for the CFs that hold these blobs — chathistory (`messages`, `msgid_index`, `targets`, `quotas`, `reply_index`), metadata (`metadata`, `readmarkers`, `bouncer_sessions`), and `ml_content` / `ml_paste_secrets`. All callers pass `compress=0` to `db_cf_open`, so the RocksDB adapter (`ircd/db_rocksdb.c:make_cf_options`) skips `rocksdb_options_set_compression`. Application-level zstd (above) and the Z-flag passthrough own the bytes end-to-end; RocksDB stores them byte-for-byte. The `db_cf_opts.compress` plumbing is kept for future CFs that hold *never*-app-compressed data and could benefit from RocksDB-level compression.
+
+(Future work — getting both application-level passthrough *and* RocksDB-level compression: RocksDB supports `bottommost_compression` to compress only the deepest LSM level. Hot tiers stay uncompressed so passthrough and reads are fast; cold blobs at the bottom level get compressed during major compaction. The trade-off is that pre-compressed blobs would also be re-compressed when they reach the bottom level — wasting CPU briefly per compaction. Worth considering when storage size starts mattering more than write latency.)
 
 ### Presence Aggregation Configuration
 
@@ -279,7 +276,7 @@ This eliminates unnecessary decompress/recompress cycles between services.
 
 **Away Throttle**: When `AWAY_THROTTLE` is set to a value > 0, users are rate-limited on how frequently they can change their away status. This prevents abuse and reduces network traffic from clients that rapidly toggle away state. The value represents the minimum seconds between AWAY command changes.
 
-**LMDB Persistence**: The `last_present` timestamp for each account is persisted via the METADATA LMDB backend using the reserved key `last_present`.
+**Persistence**: The `last_present` timestamp for each account is persisted via the metadata RocksDB CF using the reserved key `last_present`.
 
 ### P10 Protocol Features
 
@@ -289,20 +286,21 @@ This eliminates unnecessary decompress/recompress cycles between services.
 
 **P10 Message Tags**: When enabled, Nefarious includes IRCv3 message tags (msgid, time, etc.) in P10 server-to-server messages. This allows services like X3 to receive and process message metadata. Disabled by default for compatibility with older P10 implementations.
 
-### GitSync Configuration (native-dnsbl-gitsync branch)
+### GitSync Configuration
 
-Native git-based configuration distribution using libgit2, replacing the shell-based `gitsync.sh` script.
+Native git-based configuration distribution using libgit2, replacing the shell-based `gitsync.sh` script. Now standard in `ircv3.2-upgrade`.
 
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `FEAT_GITSYNC_ENABLE` | FALSE | Enable native GitSync functionality |
-| `FEAT_GITSYNC_INTERVAL` | 3600 | Sync interval in seconds |
+| `FEAT_GITSYNC_INTERVAL` | 300 | Sync interval in seconds (`ircd_features.c:F_I(GITSYNC_INTERVAL, 0, 300, 0)`) |
 | `FEAT_GITSYNC_REPOSITORY` | "" | Git repository URL (SSH format) |
 | `FEAT_GITSYNC_BRANCH` | "master" | Git branch to track |
 | `FEAT_GITSYNC_SSH_KEY` | "" | Path to SSH private key for authentication |
 | `FEAT_GITSYNC_LOCAL_PATH` | "linesync" | Local directory for git repository |
 | `FEAT_GITSYNC_CONF_FILE` | "linesync.data" | Config file name in repository |
 | `FEAT_GITSYNC_CERT_TAG` | "" | Git tag containing SSL certificate |
+| `FEAT_GITSYNC_CERT_PATH` | "" | Path to cert file within the repo (alternative to a blob tag) |
 | `FEAT_GITSYNC_CERT_FILE` | "" | Override for certificate output path (defaults to SSL_CERTFILE) |
 | `FEAT_GITSYNC_HOST_FINGERPRINT` | "" | Known host key fingerprint (TOFU) |
 
@@ -315,7 +313,7 @@ Native git-based configuration distribution using libgit2, replacing the shell-b
 
 **P10 Token**: The `GS` token enables remote GitSync control between servers.
 
-### Native DNSBL Configuration (native-dnsbl-gitsync branch)
+### Native DNSBL Configuration
 
 Built-in DNS-based blocklist checking without external scripts.
 
@@ -373,7 +371,7 @@ features {
     "CHATHISTORY_STORE" = "TRUE";      # Store messages locally (FALSE = relay-only)
 
     # Metadata caching
-    "METADATA_DB" = "metadata";        # LMDB database directory
+    "METADATA_DB" = "metadata";        # RocksDB directory (metadata CF lives here)
     "METADATA_BURST" = "TRUE";         # Send metadata during netburst
 
     # Compression (requires --with-zstd)
@@ -1020,7 +1018,7 @@ When responding to MDQ queries from Nefarious, X3 uses `irc_metadata_raw()` to s
 ```
 Az MD ABAAB avatar * Z :KLUv/QBYpQEAaHR0cHM6Ly9...
 ```
-This allows Nefarious to store pre-compressed data directly in its LMDB cache without recompression, eliminating CPU overhead on both sides.
+This allows Nefarious to store pre-compressed data directly in its RocksDB cache without recompression, eliminating CPU overhead on both sides.
 
 **Build Requirement:**
 
@@ -1098,7 +1096,7 @@ AB MDQ #channel url        → Query specific key for channel
 
 **Use Cases:**
 - Retrieving metadata for offline users from X3's storage
-- On-demand sync when IRCd's LMDB cache doesn't have the data
+- On-demand sync when the IRCd's RocksDB cache doesn't have the data
 - Channel metadata queries for registered channels
 
 **Flow:**
@@ -1121,7 +1119,7 @@ The MR token enables read marker synchronization through X3 as the authoritative
 
 **Architecture:**
 - X3 is the authoritative storage for read markers (LMDB + Keycloak)
-- Nefarious maintains a local LMDB cache for fast lookups
+- Nefarious maintains a local RocksDB cache for fast lookups
 - All SET operations are routed to X3, which validates and broadcasts
 - Multi-device sync is natural: X3 broadcasts to all servers with matching accounts
 
@@ -1134,7 +1132,7 @@ The MR token enables read marker synchronization through X3 as the authoritative
 
 **Flow (Get):**
 1. Client sends `MARKREAD #channel` (no timestamp)
-2. Nefarious checks local LMDB cache first
+2. Nefarious checks local RocksDB cache first
 3. If not found, forwards `MR G <numeric> #channel` to X3
 4. X3 responds with `MR R <server> <numeric> #channel <ts>`
 5. Response is routed back to client
@@ -1188,7 +1186,7 @@ In networks with multiple servers between client and X3, each intermediate serve
 | 2.5 | January 2025 | Added chathistory Phase 4 flags (WRITE_FORWARD, STORE_REGISTERED, watermarks, maintenance) |
 | 2.6 | January 2025 | Added multiline extensions (echo protection, legacy fallback, storage) |
 | 2.7 | January 2025 | Added metadata cache TTL, P10_MESSAGE_TAGS, CAP_tls |
-| 2.8 | January 2025 | Added GitSync and Native DNSBL configuration (native-dnsbl-gitsync branch) |
+| 2.8 | January 2025 | Added GitSync and Native DNSBL configuration |
 | 2.9 | January 2025 | Added X3 LMDB extensions (nosync, snapshots, purge, async logging) |
 | 3.0 | January 2025 | Added Keycloak webhook and cert_autoregister options |
 
