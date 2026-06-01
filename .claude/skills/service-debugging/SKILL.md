@@ -1,6 +1,48 @@
+---
+name: service-debugging
+description: How to debug the testnet runtime (X3, Nefarious, Keycloak) — check logs across all three services since issues often span service boundaries, plus common failure modes. Use when diagnosing testnet service problems (auth failures, link issues, services not responding).
+---
+
 # Service Debugging Skill
 
 When debugging issues in the testnet environment, always check logs from ALL three services: X3, Nefarious, and Keycloak. Issues often span multiple services.
+
+## Container Topology (network `irc_net`, 172.29.0.0/24)
+
+| Container | IP | Profile | Server name / role |
+|---|---|---|---|
+| nefarious | 172.29.0.2 | default | testnet.fractalrealities.net (primary IRCd) |
+| x3 | 172.29.0.3 | default | x3.fractalrealities.services |
+| nefarious2 | 172.29.0.5 | linked | leaf.fractalrealities.net |
+| nefarious3 | 172.29.0.6 | multi | hub2.fractalrealities.net |
+| nefarious4 | 172.29.0.7 | multi | leaf2.fractalrealities.net |
+| nefarious-upstream | 172.29.0.8 | upstream | unmodified evilnet/nefarious2 master for legacy-vs-fork comparison |
+| keycloak | 172.29.0.10 | default | Keycloak IdP (admin UI on host port 8080) |
+| keycloak-setup | 172.29.0.11 | default | one-shot realm/client/user provisioning |
+| keycloak-db-indexes | 172.29.0.12 | default | one-shot Postgres index install (when `KC_DB=postgres`) |
+| pdns-recursor | 172.29.0.20 | default | Consul DNS forwarder — Keycloak resolves `*.service.consul` through this |
+
+**Operational consequence**: `pdns-recursor` is load-bearing. If `KC_DB=postgres` and `KC_DB_URL` uses a `*.service.consul` host (the prod config), Keycloak's JDBC pool times out at startup when pdns-recursor is missing. Bring it up first or use `KC_DB=dev-file` for self-contained local dev (`.env` default).
+
+## Host-Exposed Ports (localhost only)
+
+| Port | Container | Description |
+|---|---|---|
+| 6667 | nefarious | IRC plaintext |
+| 6697 | nefarious | IRC SSL/TLS |
+| 4497 | nefarious | IRC SSL (legacy) |
+| 8443 | nefarious | WebSocket SSL |
+| 9998 | nefarious | Services link (P10) |
+| 6668 | nefarious2 | IRC plaintext (linked profile) |
+| 6669 | nefarious3 | IRC plaintext (multi profile) |
+| 6670 | nefarious4 | IRC plaintext (multi profile) |
+| 8080 | keycloak | Keycloak admin UI |
+
+## Connection environment
+
+- Tests use `IRC_HOST=localhost` to connect via the exposed port.
+- Containers use `IRC_HOST=nefarious` (the container name) to reach the IRCd on the docker bridge.
+- IRC servers won't complete registration until the client responds to `PING` with `PONG` — any handshake script must handle the PING that arrives during connection.
 
 ## Quick Service Status
 

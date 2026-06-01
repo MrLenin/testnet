@@ -40,6 +40,7 @@ Read-only LDAP federation short-term (no X3 changes); Keycloak as authority long
 
 - Keycloak is **not** slow — test timeouts are usually test infrastructure, not Keycloak latency (avg ~45ms; rare ~1s outlier). Use generous timeouts (10s+ for SASL flows) and `retry: 2` for KC-dependent tests.
 - Keycloak `PUT` requires the FULL user representation; omitted fields get cleared. GET → merge → PUT, and update the `kc_user_repr_cache` AFTER merging (not before). Strip `credentials` from cached reprs — including them in a PUT ADDS a credential rather than replacing, causing duplicate passwords.
+- **Async race on concurrent user updates**: when two async ops update the same user (e.g. email + attribute), the second op can read a cache populated by the first op's GET before the first op's PUT lands — its merge is against stale state, and its PUT overwrites the first op's changes. Mitigation: update the cache **immediately after merging** your changes (so the next op sees the new state), not after the PUT returns.
 
 ## Open Blocker (kept in memory, not here)
 

@@ -12,6 +12,7 @@ node_modules/
 
 # Core dumps
 nefcores/
+nefcores2/
 x3cores/
 *.core
 

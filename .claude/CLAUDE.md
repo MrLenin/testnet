@@ -1,318 +1,107 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Always-loaded guidance for Claude sessions in this repo. Reference material lives in `.claude/skills/` (see inventory below); per-incident project knowledge lives in personal memory; durable plans/areas/resources/archives live in `.claude/para/` (`.claude/plans` is a symlink to `para/projects`).
 
-## Guiding Principle
+## Guiding principle
 
 **Simpler isn't always better. Think it through. Aim for correct.**
 
-Don't reach for quick fixes (adding timeouts, delays, retries) when the real problem is architectural. If a plan exists, finish implementing it properly rather than patching symptoms. Ask clarifying questions instead of making assumptions.
+Don't reach for quick fixes (timeouts, delays, retries) when the real problem is architectural. If a plan exists, finish implementing it properly rather than patching symptoms. Ask clarifying questions instead of making assumptions.
 
-Delegate for large/complex/difficult tasks: use agents
+Delegate large/complex/difficult tasks to the right agent (see inventory below). When you learn something durable about the project, add it to the appropriate skill — or create one.
 
-Whenever you learn something particularly relevant or useful for the project, add it to an appropriate skill file, or create one
+## Project overview
 
-## Project Overview
+Afternet Testnet — Docker-orchestrated IRC test environment running Nefarious IRCd + X3 services + Keycloak. Supports single-server, 2-server (linked) and 4-server (multi) topologies plus an unmodified-upstream comparison slot. Used for IRCv3.2+ fork development against evilnet/nefarious2 with Keycloak-backed SASL.
 
-Afternet Testnet is a Docker-based IRC test environment running:
-- **Nefarious IRCd** - IRC server daemon with IRCv3.2+ extensions (git submodule from evilnet/nefarious2)
-- **X3 Services** - Channel/nick services with SASL/Keycloak support (git submodule from evilnet/x3)
-- **Keycloak** - OAuth/OIDC identity provider for SASL authentication
+## Submodules
 
-Supports single-server, 2-server linked, and 4-server multi topology for testing.
+| Path | Upstream | Purpose |
+|---|---|---|
+| `nefarious` | evilnet/nefarious2 (fork on MrLenin/nefarious2) | The IRCd we develop. Ships from MrLenin → upstream |
+| `nefarious-upstream` | evilnet/nefarious2 master | Unmodified upstream for legacy-vs-fork comparison testing |
+| `x3` | evilnet/x3 | Services (AuthServ / ChanServ / OpServ) with Keycloak/SASL/LDAP additions |
+| `libkc` | evilnet/libkc | Hand-rolled Keycloak adapter library (HTTP server + REST client + ops abstraction) |
+| `keycloak-webhook-spi` | evilnet/keycloak-webhook-spi | Java SPI bundled into Keycloak for outbound webhook events |
+| `linesync-data` | MrLenin/gitsync-test | Test data for the gitsync (libgit2-based config distribution) feature |
+| `nefarious-rs` | MrLenin/nefarious-rs | Rust IRCd rewrite (parallel exploration, not part of the production path) |
 
-## Build & Run Commands
+Submodule basics:
 
 ```bash
-# Basic (nefarious + x3 + keycloak)
-docker compose up -d
+git submodule update --init --recursive          # initial checkout
+git submodule update --remote --merge            # update one or all to latest remote
+cd nefarious && git checkout -b feature-branch   # work in a submodule
+# commit + push inside the submodule
+cd .. && git add nefarious && git commit         # parent records the new submodule pointer
+```
+
+## Build & run
+
+```bash
+# Basic (nefarious + x3 + keycloak), default profile
+scripts/dc.sh up -d
 
 # Linked (adds nefarious2 for 2-server testing)
-docker compose --profile linked up -d
+scripts/dc.sh -l up -d
 
-# Multi (4 servers: nefarious, nefarious2, nefarious3, nefarious4)
-docker compose --profile linked --profile multi up -d
+# Multi (linked + nefarious3 + nefarious4)
+scripts/dc.sh -l --profile multi up -d
 
 # View logs
-docker compose logs -f nefarious
-docker compose logs x3
+scripts/dc.sh logs -f nefarious
+scripts/dc.sh logs x3
 
 # Stop all
-docker compose --profile linked --profile multi down
+scripts/dc.sh -l --profile multi down
 ```
 
-**Note for Claude sessions**: Rebuilding IS allowed — use `scripts/dc.sh` (or `dc`/`dcl` aliases), which sources `.env`/`.env.local`. Batch changes before rebuilding rather than rebuilding per edit. Avoid raw `docker compose build` (it skips `.env.local` and breaks the libkc overlay).
+**Rebuilding IS allowed** — use `scripts/dc.sh` (or your `dc`/`dcl` shell aliases), which sources `.env` and `.env.local`. Batch edits before rebuilding rather than rebuilding per change. **Avoid raw `docker compose build`** — it skips `.env.local` and breaks the libkc overlay. See the `service-debugging` skill for the container topology that the rebuild has to wake up cleanly (esp. `pdns-recursor`, which several services depend on transitively).
 
-## Submodule Management
+## Testing rules
 
-```bash
-# Initialize (if cloned without --recurse-submodules)
-git submodule update --init --recursive
+Tests live in `tests/` and run under Vitest.
 
-# Update to latest remote
-git submodule update --remote --merge
+- **DO NOT run the full test suite** (`npm test` with no filter) — takes 5+ minutes and produces noise that drowns the signal.
+- Targeted runs are cheap and free to use: `IRC_HOST=localhost npm test -- src/path/to/test.ts`. Prefer background mode for interactivity.
+- For quick command-line IRC pokes that aren't full tests, `scripts/irc-test.sh` is fine.
+- Writing tests — see the `test-writing` skill for Vitest patterns, the X3 client helpers (`createOperClient` / `createX3Client`), CMocka conventions, and the divergent-behavior documentation pattern.
 
-# Work on a submodule
-cd nefarious  # or x3
-git checkout -b feature-branch
-# make changes, commit, push
-cd ..
-git add nefarious
-git commit -m "Update nefarious submodule"
-```
+## Skills & agents inventory
 
-## Architecture
+Always reach for these before re-deriving from scratch:
 
-### Configuration System
-Config files are mounted directly from `data/` directory:
-- `data/ircd.conf` - Primary Nefarious IRCd config
-- `data/ircd2.conf`, `ircd3.conf`, `ircd4.conf` - Multi-server configs
-- `data/x3.conf` - X3 services config
-- `.env` / `.env.local` - Environment variables for containers
+### Skills (`.claude/skills/`)
+- **bouncer-architecture** — session/alias model, hard invariants, burst/convergence, hold/revive paths. Read before any `bounce_*` change.
+- **nefarious-codebase** — Client/Connection accessors, `ircd_strncpy` strlcpy semantics + audit rule, libkc/curl_multi event adapter, config block ordering, build/test workflow.
+- **p10-protocol** — full P10 token reference (TOK_NICK, TOK_BURST, MD/MDQ, MR, TG, SASL, BS/BX, CI), message format, IP encoding (IPv4 6-char base64 / IPv6 with `_` zero compression), numeric format.
+- **sasl-keycloak** — local SASL via Keycloak ROPC through libkc, three-tier AUTHENTICATE dispatch, mechanism support matrix, cross-server cache coherence (CI token), Keycloak REST gotchas.
+- **service-debugging** — runtime topology (container IPs/ports, who depends on whom), log correlation across services, common failure modes.
+- **test-writing** — Vitest patterns, X3 client helpers, CMocka conventions, retry/timeout norms.
+- **x3-services** — service-bot reference (AuthServ/ChanServ/OpServ), olevel + channel-access scales, common commands.
 
-Init containers handle permissions and SSL cert generation before services start.
+The submodules carry their own per-repo `.claude/`:
+- `nefarious/.claude/` — bouncer-architecture, nefarious-codebase, sasl-keycloak, p10-protocol skills + bouncer-analyst, c-auditor, p10-log-tracer agents.
+- `x3/.claude/` — p10-protocol skill (only). X3-internal architecture references are sparser; the testnet `x3-services` skill is the practical reference for now.
 
-### Docker Structure
-- Containers built on Debian 12 using GNU Autotools
-- Run as non-root user (UID/GID 1234)
-- Docker bridge network: `irc_net` (172.29.0.0/24)
-- Named volumes for persistent data (history, metadata, x3_data, keycloak_data)
+### Agents (`.claude/agents/`)
+- **bouncer-analyst** — read-only bouncer race/invariant analysis. Use for hard bouncer bugs, design questions, or auditing a proposed bouncer change against the invariants.
+- **c-auditor** — codebase-wide C pattern sweeps. Use for "find every call site that does X wrong" audits (e.g. the `ircd_strncpy` truncation sweep, accessor-misuse sweep, `hs_client` sweep coverage audit).
+- **p10-log-tracer** — parse P10 wire logs and reconstruct command flow across servers/clients.
+- **test-triage** — diagnose a failing/flaky test without running the suite; reads test + relevant server code + logs and reports root cause + fix.
 
-### Ports (localhost only)
-| Port | Service | Description |
-|------|---------|-------------|
-| 6667 | nefarious | IRC plaintext |
-| 6697 | nefarious | IRC SSL/TLS |
-| 4497 | nefarious | IRC SSL (legacy) |
-| 8443 | nefarious | WebSocket SSL |
-| 9998 | nefarious | Services link (P10) |
-| 6668 | nefarious2 | IRC plaintext (linked profile) |
-| 6669 | nefarious3 | IRC plaintext (multi profile) |
-| 6670 | nefarious4 | IRC plaintext (multi profile) |
-| 8080 | keycloak | Keycloak admin UI |
+## Reference documentation
 
-## Testing
+- `P10_PROTOCOL_REFERENCE.md` — comprehensive P10 S2S protocol reference (longer-form than the skill).
+- `FEATURE_FLAGS_CONFIG.md` — all IRCv3 feature flags, capability enums, X3 config options, Keycloak integration, metadata/compression settings.
+- `docs/investigations/` — IRCv3 capability investigation results.
+- `.claude/para/projects/` — durable per-project plans (`.claude/plans/` is a symlink here).
 
-Tests are in `tests/` directory using Vitest.
+## Active development context
 
-```bash
-cd tests
-IRC_HOST=localhost npm test -- src/path/to/test.ts  # Run specific test
-```
+The fork's `ircv3.2-upgrade` branch is where current IRCv3 work lands. Both submodules track custom forks with enhancements:
 
-**Important for Claude sessions:**
-- DO NOT run the *full* test suite (`npm test` with no filter) - it takes 5+ minutes
-- Running individual tests or isolated groups IS fine. Prefer background mode so the session stays interactive: `IRC_HOST=localhost npm test -- src/path/to/test.ts`
-- Keep it manageable: cheap, targeted runs are free; only the full sweep is off-limits
-- For quick IRC testing, use `scripts/irc-test.sh`
+- **Nefarious** — full IRCv3.2+ stack (CAP, SASL, chathistory, metadata, multiline, redaction, read-marker, etc.), RocksDB-backed storage (chathistory, metadata, bouncer-session, multiline), libkc/Keycloak SASL.
+- **X3** — Keycloak/SASL integration, LDAP federation, saxdb persistence, P10 protocol extensions.
 
-### X3 Services Testing
-- `createOperClient()` - Use for tests needing privileged O3 access (uses X3_ADMIN olevel 1000)
-- `createX3Client()` - Use for regular non-privileged tests
-- X3 interprets names as nicks by default; prefix with `*` for account names (e.g., `*accountname`)
-
-### Admin Account
-- `x3-admin-init` container auto-creates testadmin account on fresh starts
-- First oper to register gets olevel 1000 (root access to O3)
-- Credentials: X3_ADMIN=testadmin, X3_ADMIN_PASS=testadmin123
-
-## Development Guidelines
-
-### Plan File Maintenance
-When implementing features from a plan file (`.claude/plans/*.md`):
-- Keep the plan file updated with progress as work is completed
-- Mark completed items with ✅
-- Add notes about implementation decisions or deviations
-- Update "Future Work" sections as new issues are discovered
-
-### Divergent Behavior Documentation
-When testing reveals behavior that differs from specifications:
-- Document the divergence in the plan file's "Divergent Behaviors" section
-- Include: location, expected behavior, actual behavior, root cause (if known)
-- Note whether it's a bug to fix or intentional design
-- Add workarounds used in tests
-
-Example format:
-```
-### X.X Issue Title
-**Location**: `tests/src/path/to/test.ts:line`
-**Expected**: Description of spec behavior
-**Actual**: What actually happens
-**Root Cause**: Why (if known)
-**Workaround**: How tests handle it
-```
-
-## X3 Services Architecture
-
-### Service Bots
-- **AuthServ** - Account registration/authentication
-- **ChanServ** - Channel registration/management
-- **OpServ (O3)** - Network operator commands (requires olevel)
-
-### Communication Pattern
-```
-Client → Service:  PRIVMSG <Service> :<command>
-Service → Client:  NOTICE <nick> :<response>
-```
-
-### OpServ Access Levels (olevel)
-- 0-99: No oper access
-- 100-199: Helper
-- 200-399: Oper
-- 400-599: Admin
-- 600-899: Network Admin
-- 900-999: Support
-- 1000: Root (full access)
-
-### ChanServ Access Levels
-- 1-99: Peon/Voice
-- 100-199: HalfOp
-- 200-299: Op
-- 300-399: Manager
-- 400-499: Co-Owner
-- 500+: Owner
-
-### Common X3 Commands
-```bash
-# AuthServ
-PRIVMSG AuthServ :REGISTER <account> <password> <email>
-PRIVMSG AuthServ :AUTH <account> <password>
-PRIVMSG AuthServ :COOKIE <account> <cookie>  # Activate account
-
-# ChanServ
-PRIVMSG ChanServ :REGISTER #channel
-PRIVMSG ChanServ :ADDUSER #channel *account 200
-
-# OpServ (requires olevel)
-PRIVMSG O3 :ACCESS                    # Check your olevel
-PRIVMSG O3 :GLINE *!*@host 1h reason  # Network ban
-PRIVMSG O3 :REHASH                    # Reload config
-```
-
-## Docker Network
-
-### Container IPs (irc_net: 172.29.0.0/24)
-| Container | IP | Profile | Server Name |
-|-----------|-----|---------|-------------|
-| nefarious | 172.29.0.2 | default | testnet.fractalrealities.net |
-| x3 | 172.29.0.3 | default | x3.fractalrealities.services |
-| nefarious2 | 172.29.0.5 | linked | leaf.fractalrealities.net |
-| nefarious3 | 172.29.0.6 | multi | hub2.fractalrealities.net |
-| nefarious4 | 172.29.0.7 | multi | leaf2.fractalrealities.net |
-| keycloak | 172.29.0.10 | default | - |
-
-## P10 Protocol
-
-Server-to-server protocol between Nefarious and X3. See `P10_PROTOCOL_REFERENCE.md` for comprehensive documentation.
-
-Key points:
-- Uses 2-char server numerics and 5-char user numerics (base64: A-Z, a-z, 0-9, [, ])
-- Token-based commands (N=NICK, B=BURST, AC=ACCOUNT, P=PRIVMSG, etc.)
-- SASL flows through P10 with subcmds: S(start), H(host), C(continue), D(done), L(login)
-
-### P10 Extensions for IRCv3
-- **MD/MDQ** - Metadata sync between IRCd and services
-- **MR** - Read marker synchronization with X3 as authoritative store
-- **TG** - TAGMSG for sending message tags without content
-- **SASL** - Full SASL authentication flow with mechanism negotiation
-
-### IP Encoding
-IPv4: 6 base64 chars, IPv6: variable length with `_` for zero compression
-```
-192.0.2.1  → AAAAAA (6 chars)
-::1        → _AAB (compressed)
-```
-
-## IRCv3 Feature Flags
-
-See `FEATURE_FLAGS_CONFIG.md` for comprehensive feature flag and configuration reference.
-
-### Nefarious Features (in features {} block)
-- **Core**: `MSGID`, `SERVERTIME`
-- **Capabilities**: `CAP_setname`, `CAP_batch`, `CAP_labeled_response`, `CAP_echo_message`
-- **Draft Extensions**: `CAP_chathistory`, `CAP_multiline`, `CAP_metadata`, `CAP_webpush`, `CAP_read_marker`
-- **Chat History**: `CHATHISTORY_MAX`, `CHATHISTORY_DB`, `CHATHISTORY_RETENTION`, `CHATHISTORY_FEDERATION`
-- **Metadata**: `METADATA_DB`, `METADATA_BURST`, `METADATA_X3_TIMEOUT`
-- **Compression**: `COMPRESS_THRESHOLD`, `COMPRESS_LEVEL` (requires --with-zstd)
-
-### X3 Configuration
-- **Keycloak**: `keycloak_enable`, `keycloak_url`, `keycloak_realm`, `keycloak_client_id`
-- **SASL**: `sasl_enable`, `sasl_timeout`
-- **Metadata TTL**: `metadata_ttl_enabled`, `metadata_default_ttl`, `metadata_immutable_keys`
-- **Compression**: `metadata_compress_threshold`, `metadata_compress_level`
-- **ChanServ Group Sync**: `keycloak_access_sync`, `keycloak_bidirectional_sync`
-
-## Key Files
-
-### Test Helpers (`tests/src/helpers/`)
-- `x3-client.ts` - X3 service client with `createOperClient()`, `createX3Client()`
-- `ircv3-client.ts` - Low-level IRC client with CAP negotiation
-- `p10-protocol.ts` - P10 message parsing for BURST/SQUIT testing
-- `multiserver.ts` - Multi-server test coordination
-
-### Scripts
-- `scripts/irc-test.sh` - Quick IRC testing from command line
-- `scripts/x3-ensure-admin.sh` - Auto-create admin account on startup
-
-### Reference Documentation
-- `P10_PROTOCOL_REFERENCE.md` - Comprehensive P10 S2S protocol reference (message format, tokens, IP encoding, SASL, IRCv3 extensions)
-- `FEATURE_FLAGS_CONFIG.md` - All IRCv3 feature flags, capability enums, X3 config options, Keycloak integration, metadata/compression settings
-- `.claude/skills/p10-protocol/SKILL.md` - P10 quick reference for Claude sessions
-
-### Investigation/Planning Docs
-- `docs/investigations/` - IRCv3 capability investigation results
-- `docs/plans/` - Implementation plans
-
-## Common Issues
-
-### X3 Account Activation
-- Email verification is enabled (`email_enabled=1` in data/x3.conf)
-- x3-admin-init handles this by temporarily disabling, registering, re-enabling
-- For manual activation: get cookie from `docker logs x3`, use `COOKIE <account> <cookie>`
-
-### PING/PONG
-- IRC server requires PONG response before registration completes
-- All scripts must handle PING during connection
-
-### IRC_HOST
-- Tests use `IRC_HOST=localhost` to connect to exposed port
-- Docker containers use `IRC_HOST=nefarious` (container name)
-
-### Keycloak Performance
-**Keycloak is NOT slow** - test timeouts are usually due to test infrastructure, not Keycloak latency.
-
-Typical Keycloak HTTP stats from X3 (`/msg O3 KEYCLOAK`):
-- **Average latency**: 45ms
-- **Min/Max**: 2ms - 1092ms (max is the outlier causing test flakiness)
-- **User cache hit rate**: ~91% (900 hits / 87 misses)
-- **Error rate**: <0.5% (5 errors / 1431 requests)
-
-When debugging test timeouts:
-1. Check if the test timeout is generous enough (10s+ for SASL flows)
-2. The 1-second max latency outlier can cause failures with tight timeouts
-3. Use `retry: 2` for Keycloak-dependent tests
-4. Cache is effective - repeated lookups are fast
-
-### Keycloak REST API Gotchas
-
-**PUT requires full user representation**: Keycloak's `PUT /admin/realms/{realm}/users/{id}` officially requires the FULL user representation. Any fields omitted in the request payload may be cleared or deleted. This means:
-- Always GET the user first, then merge your changes, then PUT the full object
-- X3 maintains a user representation cache (`kc_user_repr_cache`) to avoid repeated GETs
-- Cache must be updated AFTER merging changes (not before) to keep it current
-
-**Credentials in PUT adds, doesn't replace**: Including a `credentials` array in the user PUT body ADDS new credentials rather than replacing existing ones. This can cause duplicate passwords. Always strip `credentials` from cached user representations to prevent stale credentials being re-sent in subsequent PUTs.
-
-**Async race conditions**: When multiple async operations update the same user (e.g., email update + attribute update), the order matters:
-1. First operation GETs user, caches it
-2. Second operation uses stale cache (missing first operation's changes)
-3. Second operation's PUT overwrites first operation's changes
-
-Solution: Update the cache immediately after merging your changes, before the PUT completes.
-
-## Project Status
-
-Active development - IRCv3.2+ upgrade project with comprehensive test suite. Nefarious and X3 are git submodules tracking custom forks with enhancements:
-- Nefarious: Full IRCv3.2+ support (CAP, SASL, chathistory, metadata, multiline, etc.); RocksDB storage backend (migrated off libmdbx); libkc/Keycloak SASL. Per-repo Claude skills/agents live in `nefarious/.claude/`.
-- X3: Keycloak/SASL integration, LDAP federation, saxdb persistence, P10 protocol extensions. Per-repo Claude skills/agents live in `x3/.claude/`.
-
-**For Claude sessions**: Rebuilding via `scripts/dc.sh` is fine (batch changes first); don't raw-`docker compose build`. See the Testing/Build notes above.
+Per-incident project knowledge — the live state of "what bug bit us yesterday, what's deferred, what's an open blocker" — lives in personal memory at `~/.claude/projects/-home-ibutsu-testnet/memory/MEMORY.md`. Cross-reference it when assumptions stale.

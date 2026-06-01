@@ -1,3 +1,8 @@
+---
+name: test-writing
+description: Guide for writing tests in the Afternet testnet — TypeScript integration tests (Vitest) and C unit tests (CMocka), the test helpers, and conventions (oper vs regular X3 clients, account-name prefixing, timeouts/retries). Use when adding or modifying tests.
+---
+
 # Test Writing Skill
 
 Comprehensive guide for writing tests in the Afternet testnet project. Covers TypeScript integration tests (Vitest) and C unit tests (CMocka).
@@ -509,3 +514,74 @@ my_new_cmocka: my_new_cmocka.c test_stub.o
 - **Empty serviceCmd response**: Check `serviceCmd()` filtering - only x3.services responses are captured
 - **Account activation fails**: Email verification enabled - use `registerAndActivate()`
 - **CMocka build fails**: Install `libcmocka-dev` and ensure headers are in path
+
+---
+
+## Part 3: irctest Conformance Harness
+
+[`irctest`](https://github.com/progval/irctest) is a Python protocol conformance suite for IRCds — spins up our server in temp dirs and verifies responses match Modern / RFC / IRCv3 specs. Complements the Vitest integration tests on the protocol-correctness axis.
+
+The Nefarious-flavoured fork is at **[evilnet/irctest](https://github.com/evilnet/irctest)** and lives as a submodule **inside `nefarious/`**, not testnet — irctest is conformance for the IRCd, so it belongs in the IRCd's repo.
+
+### Layout
+
+| Path | What it is |
+|---|---|
+| `nefarious/.irctest/` | Submodule pointing at `evilnet/irctest`; the actual test suite + our patches |
+| `nefarious/tools/irctest/nefarious.py` | Our IRCv3-aware `BaseServerController` subclass (NOT `Ircu2Controller` — the IRCu2 stub does no IRCv3 customization) |
+| `nefarious/.github/irctest.yml` | The CI workflow that runs the harness — source of truth |
+| `testnet/scripts/run-irctest.sh` | Driver for host execution; auto-inits the submodule, copies the controller into the harness's module path, runs pytest |
+| `testnet/scripts/run-irctest-docker.sh` | Same but inside a one-shot container based on `testnet-nefarious` |
+| `testnet/.irctest-venv/` | Python venv (host-local, not in git; recreated as needed by `run-irctest.sh`) |
+
+### Running it
+
+```bash
+# Host execution (needs python3 + venv on the host):
+./scripts/run-irctest.sh                          # default: all (filtered) tests
+./scripts/run-irctest.sh -k name_of_test          # filter
+./scripts/run-irctest.sh -x                       # stop on first failure
+
+# Docker (no host Python deps required):
+./scripts/run-irctest-docker.sh
+```
+
+Both scripts initialise `nefarious/.irctest` via `git submodule update --init` on first run.
+
+### Adding a capability declaration or config knob
+
+Edit `nefarious/tools/irctest/nefarious.py`:
+
+- **`TEMPLATE_CONFIG`** at the top — the conf template fed to the spun-up server. If a new feature needs a Features-block entry to be on by default for conformance, add it here.
+- **`SUPPORTED_FEATURES`** / **`SUPPORTED_CAPABILITIES`** / **`SUPPORTED_OPTIONAL_BEHAVIOURS`** sets — what irctest considers in-scope. Advertising a CAP without listing it here means matching tests get skipped.
+
+### Adding a Nefarious-specific *test case*
+
+Goes in `nefarious/.irctest/irctest/server_tests/` (inside the submodule), then commit + push to `evilnet/irctest` and bump the submodule pointer in nefarious:
+
+```bash
+cd nefarious/.irctest
+# author the test, commit, push
+cd ..
+git add .irctest
+git commit -m "irctest: bump for <test name>"
+```
+
+### Rolling the fork forward
+
+```bash
+cd nefarious/.irctest
+git fetch origin
+git merge origin/master      # or merge from progval/irctest upstream if syncing with it
+cd ..
+git add .irctest
+git commit -m "irctest: bump submodule"
+```
+
+Then bump the nefarious pointer in testnet via `git add nefarious && git commit` in the testnet superproject.
+
+### When tests fail
+
+1. Run a single test with `-v` (already on by default) — the raw IRC dialog goes to stderr / pytest output.
+2. The harness writes `pytest.xml` in `nefarious/.irctest/`; CI uploads that as an artifact.
+3. Compare against a known-good run via the `nefarious-upstream` submodule (`dc up nefarious-upstream` — unmodified upstream master); if both fail, it's spec ambiguity or upstream behaviour, not us.

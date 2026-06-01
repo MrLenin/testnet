@@ -52,4 +52,15 @@ if [[ $LINKED -eq 1 ]]; then
   export COMPOSE_FILE="docker-compose.yml:docker-compose.libkc-dev.yml"
 fi
 
+# BuildKit collapses successful build output by default, so compiler warnings
+# scroll past unreachably.  When a build is happening this turn (either a
+# bare `build` subcommand or `--build` passed to `up`), switch to plain
+# progress so the full log stays on screen and can be piped/teed.
+for arg in "$@"; do
+  if [[ "$arg" == "build" || "$arg" == "--build" ]]; then
+    export BUILDKIT_PROGRESS=plain
+    break
+  fi
+done
+
 exec docker compose "$@"

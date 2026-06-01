@@ -1,8 +1,8 @@
 #!/bin/bash
-# Run irctest conformance tests against the fresh nefarious build by
-# launching a one-shot container based on the testnet-nefarious image.
-# The image already has ircd + all runtime libs; we install python +
-# pytest + irctest's deps on the fly inside the throwaway container.
+# Run irctest conformance tests against the fresh nefarious build inside
+# a throwaway container based on the testnet-nefarious image.  The image
+# has ircd + runtime libs; we install python + pytest + irctest deps on
+# the fly inside the throwaway container.
 #
 # Usage:
 #   ./scripts/run-irctest-docker.sh                 # all (filtered) tests
@@ -14,42 +14,49 @@
 #     spawns its own ircd subprocesses inside the throwaway container.
 #   - Marker filter matches scripts/run-irctest.sh: skips services,
 #     implementation-specific, deprecated, strict.
+#
+# Layout (post-reorg):
+#   - nefarious/.irctest/                       irctest fork (submodule of nefarious, evilnet/irctest)
+#   - nefarious/tools/irctest/nefarious.py      our IRCv3-aware controller override
+#
+# We stage a clean copy of the fork in a host tmp dir, drop our
+# controller on top, then bind-mount the tmp dir into the container.
+# The submodule's working tree is never written through the mount.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TESTNET_DIR="$(dirname "$SCRIPT_DIR")"
-IRCTEST_REPO="https://github.com/MrLenin/irctest.git"
-IRCTEST_DIR="${TESTNET_DIR}/.irctest"
+IRCTEST_SRC="${TESTNET_DIR}/nefarious/.irctest"
+NEFARIOUS_CONTROLLER="${TESTNET_DIR}/nefarious/tools/irctest/nefarious.py"
 
-# Clone or refresh irctest checkout on the host so the container sees
-# the latest controller patches.
-if [ ! -d "$IRCTEST_DIR" ]; then
-    echo "Cloning irctest..."
-    git clone "$IRCTEST_REPO" "$IRCTEST_DIR"
-else
-    echo "Updating irctest..."
-    git -C "$IRCTEST_DIR" pull --ff-only 2>/dev/null || true
+# Ensure the irctest submodule is checked out on the host.
+if [ ! -f "${IRCTEST_SRC}/requirements.txt" ]; then
+    echo "Initialising irctest submodule inside nefarious/..."
+    git -C "${TESTNET_DIR}/nefarious" submodule update --init .irctest
 fi
 
-# Verify the testnet-nefarious image is present (built by the main
-# docker compose flow).
+# Verify the testnet-nefarious image is present.
 if ! docker image inspect testnet-nefarious >/dev/null 2>&1; then
     echo "Error: testnet-nefarious image missing.  Run dcl --build first."
     exit 1
 fi
 
+# Stage a clean tmp copy with the controller overlay applied, so the
+# container's bind-mount points at an already-overlayed tree and the
+# submodule working tree never gets written.
+IRCTEST_TMP="$(mktemp -d -t irctest-run-XXXXXX)"
+trap 'rm -rf "$IRCTEST_TMP"' EXIT
+cp -a "${IRCTEST_SRC}/." "$IRCTEST_TMP/"
+cp "$NEFARIOUS_CONTROLLER" "$IRCTEST_TMP/irctest/controllers/nefarious.py"
+
 echo "Running irctest inside testnet-nefarious container..."
 
-# Mount the irctest checkout writable (pytest writes __pycache__) and
-# the project-local controller override read-only.  Run as root so apt
-# / pip have permissions; the throwaway container is discarded on exit.
-# Setup phase runs as root (apt + venv install), then we drop to the
+# Setup phase runs as root (apt + venv install); then we drop to the
 # nefarious user before invoking pytest.  ircd hard-refuses to run as
 # root, so the test subprocess MUST come up as nefarious.
 docker run --rm -i \
-    -v "$IRCTEST_DIR:/irctest" \
-    -v "$TESTNET_DIR/irctest:/local-irctest:ro" \
+    -v "$IRCTEST_TMP:/irctest" \
     -w /irctest \
     --user root \
     --entrypoint /bin/bash \
@@ -62,9 +69,8 @@ docker run --rm -i \
         python3 -m venv /tmp/venv
         . /tmp/venv/bin/activate
         pip install --quiet -r requirements.txt pytest-xdist pytest-timeout
-        # The repo ships a nefarious controller override that exercises
-        # IRCv3 caps; the upstream stub doesn't.  Drop it in place.
-        cp /local-irctest/nefarious.py irctest/controllers/nefarious.py
+        # The tmp dir already has our controller overlay applied on the
+        # host before the bind-mount, so no in-container cp is needed.
         # nefarious owns the venv + cwd so the pytest user can write
         # __pycache__ and bind listener ports.
         chown -R nefarious:nefarious /tmp/venv /irctest
@@ -79,6 +85,8 @@ docker run --rm -i \
                     -m \"not services and not implementation-specific and not deprecated and not strict\" \\
                     --timeout=300 \\
                     -n 4 \\
+                    \\
+                    \\
                     -v \\
                     $*
             '
