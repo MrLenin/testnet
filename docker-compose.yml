@@ -211,6 +211,15 @@ services:
         args:
           LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "1234:1234"
+    cap_add:
+      - SYS_PTRACE
+    ulimits:
+      core:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 8192
+        hard: 16384
     networks:
       irc_net:
         ipv4_address: 172.29.0.6
@@ -286,6 +295,15 @@ services:
         args:
           LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "1234:1234"
+    cap_add:
+      - SYS_PTRACE
+    ulimits:
+      core:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 8192
+        hard: 16384
     networks:
       irc_net:
         ipv4_address: 172.29.0.7
