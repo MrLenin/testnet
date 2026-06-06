@@ -66,6 +66,7 @@ Tests live in `tests/` and run under Vitest.
 - Targeted runs are cheap and free to use: `IRC_HOST=localhost npm test -- src/path/to/test.ts`. Prefer background mode for interactivity.
 - For quick command-line IRC pokes that aren't full tests, `scripts/irc-test.sh` is fine.
 - Writing tests — see the `test-writing` skill for Vitest patterns, the X3 client helpers (`createOperClient` / `createX3Client`), CMocka conventions, and the divergent-behavior documentation pattern.
+- **Test-first (TDD) for new subsystems.** When building a new component or fixing a reproducible bug, write the failing test/spec **first** (red), implement to green, then refactor — let the spec's assertions define the behavior before the code exists. Especially for self-contained C logic (e.g. CRDT primitives), encode the success criteria as a CMocka suite up front so it runs in the build and gates the image. This is a default, not a mandate: skip it for trivial edits, docs, or where a behavioral test can't be constructed (note that in the plan/memory per `feedback_no_silent_defer`).
 
 ## Skills & agents inventory
 

@@ -176,7 +176,7 @@ services:
   nefarious3-init:
     container_name: nefarious3-init
     build:
-        context: ./nefarious
+        context: ./nefarious-crdt
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
@@ -204,7 +204,7 @@ services:
   nefarious3:
     container_name: nefarious3
     build:
-        context: ./nefarious
+        context: ./nefarious-crdt
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
@@ -251,7 +251,7 @@ services:
   nefarious4-init:
     container_name: nefarious4-init
     build:
-        context: ./nefarious
+        context: ./nefarious-crdt
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
@@ -279,7 +279,7 @@ services:
   nefarious4:
     container_name: nefarious4
     build:
-        context: ./nefarious
+        context: ./nefarious-crdt
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data

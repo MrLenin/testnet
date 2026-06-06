@@ -21,3 +21,7 @@
 [submodule "nefarious-rs"]
 	path = nefarious-rs
 	url = git@github.com:MrLenin/nefarious-rs.git
+[submodule "nefarious-crdt"]
+	path = nefarious-crdt
+	url = git@github.com:MrLenin/nefarious2.git
+	branch = crdt-mesh
