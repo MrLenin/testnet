@@ -261,6 +261,32 @@ Integration test additions to `tests/src/ircv3/lusers-announced-count.test.ts`
   for those peers.  Capability detection covers this automatically
   (peer is "BX-aware" → only gets BX C).  No deprecation churn.
 
+- **Client-side ghost on in-place conversion (open follow-up):** on
+  the receive side, when `bounce_alias_create`'s convert-in-place
+  branch fires (the burst-ordering case — peer received `N` for the
+  would-be-alias before its `BX C`), the conversion is silent on
+  the wire — no `QUIT`, `NICK`, or `PART` is emitted to the alias's
+  common channels.  Clients on those channels keep the alias's
+  pre-conversion nick ("OldNick") in their cached state forever:
+  the eventual `IsBouncerAlias` exit branch in
+  `s_misc.c:347-398` does `remove_user_from_all_channels` silently,
+  so the ghost is never cleaned up from the client's POV.
+
+  Mitigation when this manifests: at the convert-branch entry
+  (before `hRemClient(alias)`), walk `cli_user(alias)->channel` and
+  `sendcmdto_common_channels_butone(alias, CMD_QUIT, ...)` with a
+  reason like `"Session converging"`.  Server-local; each peer
+  handles its own clients' state the same way when it processes
+  the BX C.  Pairs with the existing silent teardown — the QUIT
+  we emit at conversion is what makes the silent destroy
+  consistent for clients later.
+
+  Not implemented yet — the burst-ordering edge case is rare
+  enough that we'd rather see it in prod-test logs (look for
+  channel members whose WHO output includes a nick that doesn't
+  have a server-side Client struct anymore) before adding more
+  wire.
+
 ## Not blocking
 
 The announced-count plan is what's exposing the drift bugs and is
