@@ -18,8 +18,8 @@ WORKDIR /src
 
 # Only the files the engine + suite need (keeps the layer small and the
 # dependency surface explicit).
-COPY include/crdt_hlc.h include/crdt_types.h include/crdt_state.h include/crdt_wire.h /src/include/
-COPY ircd/crdt_hlc.c ircd/crdt_types.c ircd/crdt_state.c ircd/crdt_wire.c ircd/crdt_sim.c /src/ircd/
+COPY include/crdt_hlc.h include/crdt_types.h include/crdt_state.h include/crdt_wire.h include/s2s_chunk.h /src/include/
+COPY ircd/crdt_hlc.c ircd/crdt_types.c ircd/crdt_state.c ircd/crdt_wire.c ircd/s2s_chunk.c ircd/crdt_sim.c /src/ircd/
 COPY ircd/test/crdt_cmocka.c /src/ircd/test/
 
 # Minimal shims so crdt_hlc.c (whose only ircd deps are config.h + ircd_log.h's
@@ -35,7 +35,7 @@ RUN gcc -O0 -g -Wall -Wextra -Wno-unused-parameter \
         -I/src/include -I/src/shims \
         /src/ircd/test/crdt_cmocka.c \
         /src/ircd/crdt_hlc.c /src/ircd/crdt_types.c /src/ircd/crdt_state.c \
-        /src/ircd/crdt_wire.c \
+        /src/ircd/crdt_wire.c /src/ircd/s2s_chunk.c \
         /src/shims/log_stub.c \
         -lcmocka -o /src/crdt_cmocka
 
