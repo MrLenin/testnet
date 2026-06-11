@@ -96,6 +96,18 @@ Legacy peers stay on pure P10 at every step (gated by `IsCrdtAware`/`IsCrdtSyncT
   "≥1 mesh-only member" to "≥1 member on a CRDT peer", with R3 msgid-dedup gating exactly-once at the
   client) and R4b (UNICAST stays hybrid — tree-primary + targeted overlay failover, NOT a full flood,
   since flood cost ≈ 2·E). Path-vector rejected empirically. Do R4a first.**
+  **R4a DONE for PRIVMSG 2026-06-11 (submodule 88eb8aa, testnet aa9878d) — THE PRIZE ACHIEVED: live channel PRIVMSG
+  rides the CR-M mesh + survives a tree-edge cut with ZERO interruption, exactly-once (validated r4achan steady 40/40 +
+  cut 40/40, 0 dup, 0 crash). New per-server per-msgid local-delivery dedup (crdt_shadow_chan_local_check_add) separate
+  from the flood dedup; widened trigger to all-CRDT-peer members; server-relay floods only at the CRDT entry point. See
+  `crdt-mesh-r4a-channel-flood.md` + memory. FOLLOW-UP: NOTICE + TAGMSG parity (same pattern, separate fns), then R4b
+  (unicast hybrid: tree-primary + targeted failover, NOT full flood).**
+  **R4b RESOLVED 2026-06-11 (decision, no code): ACCEPT THE R3 HYBRID as the unicast answer — tree-primary + mesh-only
+  CR-M failover (already shipped in R3, validated 60/60 0-dup). The only loss across a cut is the single
+  in-flight-at-cut-instant PM (irreducible IRC netsplit semantics). Pure-flooding unicast was rejected (the spike measured
+  it pays broadcast-cost for a 1-recipient message, ~2·E); the overlay-only pre-emptive-copy optimization is noted as a
+  future option if a use case ever needs zero-interruption unicast, but it isn't worth the complexity now. **R4 COMPLETE
+  (R4a channel flood + R4b unicast hybrid).** Next: R5.**
 - **R5 — gateway becomes the live-traffic legacy bridge** · L. Make §17.7 bridge live CR M ↔ legacy
   P10 PRIVMSG/NOTICE/TAGMSG + removals/QUIT/KICK/SQUIT (close crdt_shadow.c:1267/1456 "stays on P10"
   gaps), so legacy interop no longer needs the tree as primary. Demo: legacy nef1 + CRDT peers, a
