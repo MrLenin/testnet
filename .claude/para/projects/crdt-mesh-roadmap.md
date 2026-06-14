@@ -21,14 +21,29 @@ failover for partitioned/mesh-only destinations.** Retiring that primary role is
 ## Track A — near-term polish / correctness (independent; do in any order)
 Low-risk, each self-contained, none blocks Track B. Rough order by value:
 
-1. **#4 — mesh-only nick/umode-change legacy gate** (correctness completion). A mesh-only user
-   changing nick/umode mid-partition leaks a NICK/MODE to legacy peers via `set_nick_name`/
-   `set_user_mode`'s bundled relay. Fix: gate the legacy relay for mesh-only users (or skip the
-   reconcile-update, accepting a stale shadow until relink). MEDIUM (shared-handler, apply-vs-relay).
-2. **#3 — CR H beacon carries the server NAME + right-size the anchor mask** (cleanup). Anchors show
-   `mesh-<num>.crdt` and reserve a MAX client mask (~2MB/anchor). Append-only beacon param `H <yxx>
-   <ts> :<name>`; `crdt_beacon[]` gains a name; `crdt_shadow_make_anchor` uses it. Small. Minor synergy
-   with R7 (anchor-as-normal-identity wants a real name).
+1. ~~**#4 — mesh-only nick/umode-change legacy gate**~~ **DONE 2026-06-12 (submodule `a59b21d`,
+   testnet `b08b516`).** Exported `crdt_user_is_mesh_only` (was static) and gated both legacy relays
+   on `!crdt_user_is_mesh_only(sptr)`: the `set_nick_name` FEAT_CRDT_PRIMARY NICK relay (s_user.c) +
+   `send_umode_out` (fold the mesh-only subject into the per-server skip → ALL legacy peers skipped
+   for a mesh-only subject). Mirrors the proven channel JOIN gateway gate (crdt_shadow.c:1893) +
+   `crdt_gateway_user_intro`'s IsMeshStub skip. Wire-verified non-vacuous on the 5-node bed
+   (tcpdump nef3↔legacy S2S): after a nef3↔nef4 cut, a mesh-only user's rename DEMONSTRABLY APPLIED
+   on nef3 (set_nick_name ran) yet 0 legacy crossings, while a normal CRDT rename still crossed
+   (gateway intact). cmocka green, 0 crashes. **QUIT follow-up also DONE 2026-06-12 (submodule `9d3054a`, testnet
+   `460b0db`): the actual QUIT leak is exit_client's §17.7 QUIT gateway loop (s_misc.c:1049, NOT the
+   local-only `sendcmdto_common_channels_butone` at :505) — gated by folding `crdt_user_is_mesh_only(
+   victim)` into the FEAT_CRDT_PRIMARY skip, same one-liner pattern. Wire-verified non-vacuous (numeric
+   AEAAA re-materialized + reconcile-exited on nef3, 0 QUIT for it on the legacy link; the only Q's seen
+   were unrelated background AD* "EOF from client"). With this, the FULL mesh-only user lifecycle no
+   longer leaks to legacy: intro / JOIN-PART-KICK / nick-umode / QUIT.**
+2. ~~**#3 — CR H beacon carries the server NAME + right-size the anchor mask**~~ **DONE 2026-06-12
+   (submodule `1f14ece`, testnet `9d1a483`).** Beacon extended append-only to `H <yxx> <ts>
+   <nn_capacity> :<name>`; `crdt_beacon[]` gained name + base64 capacity; `crdt_shadow_make_anchor`
+   uses the real name (was `mesh-<num>.crdt`) and right-sizes `client_list` to the owning server's real
+   capacity (the server assigns client numerics within its own nn_mask, so a matching anchor mask fits
+   every user, no collision) — ~32KB vs ~2MB/anchor (64×). Mixed-version safe (old-form parc==4 →
+   placeholder name + MAX mask). Wire-verified on the 5-node bed (26 named beacons e.g. `H AI <ts> A]]
+   :leaf5.fractalrealities.net`, cap A]]=4095, 0 old-form), cmocka green, 0 crashes.
 3. **Cosmetic batch** (low ROI, anytime): legacy displayed-host cloak (host-rep parity for +x/sethost/
    account-cloak — ~300B doc fields); QUIT comment not carried (generic "Quit").
 4. **AUTOCHANMODES** auto-modes→doc snapshot — dormant/untested; verify when the feature is enabled.
@@ -58,11 +73,25 @@ are also CRDT keys). Full wire replacement is endgame/out-of-scope.
 To route live traffic over the mesh, something replaces single-next-hop `cli_from`. **Recommendation:
 stage the gossip FLOOD (CR M + `crdt_relay_delta` + msgid-dedup + overlay edges — all shipped and
 proven), widened incrementally; do NOT build path-vector/link-state** unless steady-state bandwidth
-proves intolerable. Rationale: path-vector needs a convergent replicated TOPOLOGY table — exactly the
-per-viewpoint reachability state the fork already ABANDONED as un-convergeable shared CRDT state
-(the Phase-4a `servers`-map retirement, crdt_shadow.c:325 "no amount of patching makes a per-viewpoint
-value robust as shared state"). Building it = re-litigating that failure, harder. If R4 bandwidth
-forces it, that is its own spike (and a deliberate re-entry into the abandoned-4a problem space).
+proves intolerable.
+
+**RATIONALE CORRECTED (2026-06-13 — the mesh-map work refutes the old "impossible" framing).** The
+original argument here was: path-vector needs a convergent replicated TOPOLOGY table = exactly the
+per-viewpoint reachability state the fork ABANDONED (the Phase-4a `servers`-map; crdt_shadow.c "no
+amount of patching makes a per-viewpoint value robust as shared state") → building it = re-litigating
+that failure. **That conflated TOPOLOGY with REACHABILITY.** Reachability ("can I reach X") is
+per-viewpoint and genuinely un-shareable — still true, never replicate it. But TOPOLOGY ("X's own
+direct links") is per-OWNER, single-writer per key — and the [observability mesh-map](#observability--mesh-map--crdt-command-2026-06-13-done)
+just proved it converges live (out of the digest, digest stable across a partition). That is the
+link-state model: flood per-owner adjacency, derive reachability LOCALLY. So the convergent topology
+table the rationale said couldn't exist DOES — the "impossible" blocker is gone. What remains for
+routing-grade use is ordinary routing discipline ON TOP of it (tighter liveness than the 90s
+beacon-stale for forwarding, loop-freedom DURING convergence via seq-numbers/hold-downs/the
+path-vector path, next-hop computation) — standard problems (OSPF/BGP), NOT a convergence
+impossibility. **Tier-2 risk downgrades: "re-litigate an un-convergeable failure" → "apply known
+routing discipline on a proven convergent topology substrate."** Flood-first still stands as the
+cheaper R4 delivery path (it sidesteps routing entirely); path-vector is now an option-not-a-wall if
+unicast efficiency later demands it.
 **Corollary — reframe T2-e:** do NOT relax `check_loop_and_lh` for P10 links (rejected Option A —
 multi-path over a cyclic graph breaks the tree's single-path + sentalong dedup). Instead do multi-path
 on the **CR plane via overlays-as-gossip-edges** (overlays are ALREADY first-class CR routing edges via
@@ -77,9 +106,19 @@ Legacy peers stay on pure P10 at every step (gated by `IsCrdtAware`/`IsCrdtSyncT
   false-positive trap the agent flagged); staleness sweep retires stubs on full partition (verified
   partial-keeps / full-retires). This was the twice-deferred prerequisite — now solid. Routing can
   trust per-server reachability.
-- **R2 — recursive-subtree keep-alive** · M · prerequisite. Generalize T2-a beyond leaf-only
-  (s_misc.c:1075) so multi-hop partitioned subtrees survive as mesh-reachable. Risk: UAF/ghost in
-  recursive teardown (run --enable-debug). Demo: 3-deep partition, all subtree users survive + heal.
+- **R2 — recursive-subtree keep-alive** · M · prerequisite · **VERIFIED 2026-06-12 (already
+  implemented; confirmed working — no code change).** Test (`/tmp/crdt4c/r2test.sh`, throwaway): P10
+  tree nef3(hub2)→nef4(leaf2)→nef6(leaf4, **depth-2**) + a CR overlay nef6↔nef3; a user `r2deep` on
+  nef6. Cut nef3↔nef4 (severs nef6 from the P10 tree; its overlay to nef3 survives). Result: nef4 →
+  Case-A stub (`leaf2 tree-split but mesh-reachable`); **nef6 (depth-2, RELAYED via nef4) →
+  Case-B synthetic anchor** (`synthetic anchor for server AH = leaf4.fractalrealities.net` — the R2
+  recursive re-materialize, AND #3's real-name path confirmed LIVE, which the dense-mesh #3 test
+  couldn't trigger). `r2deep` survived continuously on nef3 (WHOIS 311 throughout, 8/8 users,
+  0 mismatch — no flicker-out), **0 crashes** (recursive-teardown UAF risk clean), no ghost dupe
+  cut→heal. Caveats (both known testbed-infra, not R2): WHOIS 312 is HIS-masked (`*.network`) so the
+  real anchor name was confirmed via nef3's log; and the P10 relink didn't re-form in 112s post-heal
+  (recurring autoconnect-wedge after iptables cut) — but the doc held 0 mismatch with no dupe the
+  whole time, and a clean recreate-5 reconverges. **R2 done.**
 - **R3 — dup/order hardening at scale (T2-d)** · M · prerequisite. Grow `crdt_m_seen` (256-ring,
   m_crdt.c:197) to an HLC-windowed/LRU dedup; harden steady↔failover↔heal so no message double-delivers
   or drops across tree+mesh. Key already available (HLC-seeded msgid). Demo: flap the tree edge under
@@ -112,14 +151,66 @@ Legacy peers stay on pure P10 at every step (gated by `IsCrdtAware`/`IsCrdtSyncT
   P10 PRIVMSG/NOTICE/TAGMSG + removals/QUIT/KICK/SQUIT (close crdt_shadow.c:1267/1456 "stays on P10"
   gaps), so legacy interop no longer needs the tree as primary. Demo: legacy nef1 + CRDT peers, a
   legacy user messages a CRDT user across a partition, bridged.
-- **R6 — demote the P10 tree to legacy-only** · M. Among all-CRDT peers, stop routing live traffic over
-  the tree (CR plane authoritative). NO check_loop_and_lh change (per the key decision). Gate on a
-  network-wide "all CRDT-aware" check. Risk: split-belief transition (one peer tree, one mesh).
-- **R7 — retire BURST + SERVER tree (all-CRDT networks)** · XL · **endgame, gated.** Stop emitting P10
-  BURST (already conditional) + retire SERVER-tree introduction; synthetic-anchor identity becomes the
-  normal path. Gate: ALL peers CRDT-aware AND **services folded into the IRCd** (X3-in-nefarious — the
-  `project_x3_nefarious_merge` track; **do NOT plan X3-as-CRDT-peer**, explicitly wasted effort). §17.7
-  gateway is the last P10 surface for any residual legacy peer.
+- **R6 — demote the P10 tree to legacy-only** · **CORE DONE 2026-06-12 (R6a+R6b, PRIVMSG+NOTICE;
+  submodule `a99bffb`, testnet `2555385`).** Among CRDT-aware peers, channel PRIVMSG/NOTICE now rides
+  CR-M as authoritative; the tree carries it only to legacy via the gateway bridge. NO check_loop_and_lh
+  change (that's R7). **The roadmap's "network-wide all-CRDT gate" was SUPERSEDED** by a per-direction
+  `IsCrdtAware(cli_from(member))` gate (incrementally deployable; no split-belief issue). Two coupled
+  parts: **R6a** (one-shot `skip_crdt_servers_once`, mirror of R4a's skip_local; the 4 channel relay
+  fns set it before the relay when the CR-M flood covers a directly-connected CRDT-aware peer;
+  sendcmdto_channel_butone[_with_client_tags] skip those server directions) + **R6b** (gateway CR-M→
+  legacy bridge in ms_crdt 'M', inside the dup-local block, skip mesh-only sources). **KEY EMPIRICAL
+  FINDING: R6a ALONE STARVES LEGACY** (legacy GOT 0/12, CRDT 12/12) — the plan's + design-review's
+  "tree still reaches legacy" assumption is FALSE when legacy sits behind CRDT hops (the tree is
+  suppressed at every CRDT hop, so a CRDT-origin msg reaches the gateway only via CR-M → must be
+  bridged). R6b is REQUIRED, and double-free (R6a ensures the tree never carries CRDT-origin to the
+  gateway → bridge is the sole legacy path; legacy-origin arrives via tree, dedup-marked, skips the
+  bridge). Verified 5-node + legacy: CRDT 12/12 (CR-M) + legacy 12/12 (bridge), tree demoted (0 tree
+  copies on the CRDT S2S link), exactly-once, tree-cut failover 10/10, 0 crashes. No cmocka
+  (integration-layer routing; wire/delivery-verified). **TAGMSG also DONE 2026-06-12 (submodule `cdfd449`, testnet `34f300b`):** demoted its
+  tree leg (`sendcmdto_serv_butone_v3` consumes the same one-shot skip_crdt flag, skips CRDT-aware
+  downlinks; BATCH callers unaffected) + the gateway bridges CR-M TAGMSG to legacy IRCv3 peers via the
+  v3 `@tags` form (skip mesh-only). Both-or-neither (demote alone would starve legacy). Verified
+  5-node + legacy (message-tags clients): CRDT 8/8 via CR-M + legacy 8/8 via bridge, tree `TM`=0 on the
+  CRDT link, exactly-once, 0 crashes. **R6 CHANNEL COVERAGE COMPLETE (PRIVMSG/NOTICE/TAGMSG).**
+  Remaining: **unicast** stays tree-primary + mesh failover (R4b, deliberately not in R6).
+- **R6c — partition faithful legacy bridge** · **DONE 2026-06-12 (submodule `aa8dc98`, testnet
+  `80bf15a`).** Unblocks the R5 wall: a gateway PRESENTS a partitioned-but-mesh-reachable stub to
+  legacy as a P10 subtree (new FLAG_CRDT_PRESENTED flips `crdt_user_is_mesh_only` → all §17.7 gates
+  emit for its users, zero call-site edits), retire-SQUITs cleanly on relink (before the real SERVER →
+  no duplicate-server collision). Verified 5-node + legacy: legacy WHOIS sees partition-side `alice`
+  post-cut (R5 wall gave nothing) + bob (legacy) receives alice's channel PRIVMSGs FAITHFULLY (8/8,
+  `:alice … PRIVMSG`), no nick-collision, exactly-once; forced relink → clean handoff (0 ghost, 0
+  duplicate-server, 0 collision); 0 crashes. **KEY FIX during impl: present() must NOT run the reconcile
+  suite (it is called from inside a reconcile via make_anchor → nested reconcile double-introduced users
+  → numeric-collision ghost-kill); the ambient reconcile emits them once now that the stub is PRESENTED.**
+  **All-legacy-channel edge — FIXED 2026-06-12 (flood-on-partition, submodule `ebf375e`, testnet
+  `2892522`):** a partition-aware node (holds ≥1 STAT_MESH_SERVER stub) now floods channel traffic
+  unconditionally (`crdt_have_mesh_stub()`, O(1) counter; inert in steady state), so a partitioned
+  user's channel msgs reach legacy via the gateway even with NO other CRDT channel member. Verified:
+  isolate nef6, alice+bob(legacy) only → bob got all 8 (was 0). Caveat: triggers once the node DETECTS
+  the partition (holds stubs) — a node behind a one-sided cut detects via its uplink's ping-timeout
+  SQUIT; until then it floods nothing extra (its tree relay is dead anyway, no regression); a real
+  symmetric split detects promptly. **Remaining limitations (accepted):** reverse unicast PM
+  legacy→stub-user still drops (R4b); multi-gateway presenting the same stub to the same legacy server
+  out of scope (single-gateway topo).
+- **R7a — retire P10 SQUIT among CRDT peers** · M · **DONE 2026-06-14 (testnet `data/ircd*.conf` flag,
+  default-off; submodule pending commit).** Among CRDT-aware-both-ends peers a server departure rides the
+  CR H beacon set (stale beacon → S3 keep-gate + sweep retire it) instead of an up-front P10 SQUIT.
+  `FEAT_CRDT_MESHMAP_PRESENCE` (shared with the S3 precise keep-gate). Pure `crdt_should_suppress_tree`
+  (cmocka) + `crdt_tree_presence_suppress` + Q-1/Q-2 guards (s_misc.c). Validated: 5-node bringup 5/5/0,
+  all leaves 7/7, R7-shadow=0 (real), 0 crashes, commanded /SQUIT clean. Detail: [[project_crdt_r7a_squit_only]].
+- **R7b — retire BURST + SERVER tree** · XL · **endgame, INFEASIBLE as prefix-hiding (2026-06-14).** Live
+  attempt (full SERVER suppression) **broke leaf user-materialization**: P10 is a flat namespace with
+  HIERARCHICAL delivery — a relayed SERVER carries a source-prefix every downstream server must already
+  know, so suppressing a CRDT server's SERVER intro orphans everything sourced through it (legacy DH=x3/
+  services, Bj relayed behind hub2 → a leaf with no direct P10 link to the suppressed introducer drops
+  them → 7/0; legacy servers don't beacon → no anchor fallback). **You cannot hide an intermediate P10
+  SERVER; SERVER retirement needs MESH-NATIVE routing (flat presentation) or an all-CRDT-aware network
+  with NO legacy relayed through the mesh — NOT suppression.** (BURST is already conditional/CR-F-replaced;
+  retiring it standalone is moot without SERVER retirement.) Synthetic-anchor identity already works for
+  CRDT-origin servers. Gate: ALL peers CRDT-aware AND services folded into the IRCd (`project_x3_
+  nefarious_merge`; **do NOT plan X3-as-CRDT-peer**). §17.7 gateway is the last P10 surface for legacy.
 
 ### Two spikes the arc needs
 1. ~~**R4 bandwidth measurement**~~ — **DONE 2026-06-11** (`crdt-mesh-r4-bandwidth-spike.md`). Measured
@@ -131,10 +222,12 @@ Legacy peers stay on pure P10 at every step (gated by `IsCrdtAware`/`IsCrdtSyncT
 2. ~~R1 liveness oracle~~ — DONE (CR H beacon). No longer a spike.
 
 ### Dependencies / gates
-Fix A (post-heal convergence) — DONE, the foundation. R1 liveness — DONE. R2 + R3 are the remaining
-prerequisites before R4. R4 is the headline. R5/R6 follow. R7 is gated on all-CRDT + services-fold
-(out of this arc's control — separate project). Per-op scoped reconcile (deferred) becomes relevant at
-R4+ scale, not before.
+Fix A (post-heal convergence) — DONE, the foundation. R1 liveness — DONE. R2 — VERIFIED 2026-06-12.
+R3 — DONE. R4 (headline) — DONE (R4a channel flood + R4b unicast hybrid). R5 — BLOCKED-by-design,
+folded into R6. **Critical path now resumes at R6** (demote tree to legacy-only; absorbs R5). R7 is
+gated on all-CRDT + services-fold (out of this arc's control — separate project). Per-op scoped
+reconcile (deferred) becomes relevant at R4+ scale, not before. Track A #3/#4/#4-QUIT all DONE
+2026-06-12; remaining Track A = cosmetic batch + AUTOCHANMODES verify.
 
 ## Recommended overall order
 Track A (#4, #3) can land anytime, independent. Track B critical path: **R2 → R3 → R4 (headline) → R5 →
@@ -142,6 +235,43 @@ R6 → R7(endgame)**. R1 + Fix A already clear the foundation. The first big dem
 **R4** (live traffic survives a tree cut with zero interruption) — that's the visible payoff of "P10
 routing retired." Everything before R4 (R2/R3) is prerequisite hardening; everything after (R5/R6/R7)
 is widening + endgame.
+
+## Observability — mesh-map + /CRDT command (2026-06-13, DONE)
+On-demand oper introspection: `/CRDT [map|peers|status]` (`mo_crdt` in `m_crdtinfo.c`, reusing the
+existing `MSG_CRDT_REPLICATION` msgtab OPER slot; CLIENT=`m_not_oper`, SERVER=`ms_crdt` unchanged).
+Renders the gossiped mesh topology as a `/MAP`-style ASCII tree (roles + beacon age + x-links + legacy
+peers), an adjacency list, and an on-demand `crdt_shadow_verify` summary + role census + partition state.
+
+**The modeling fix that makes global mesh-state safe** (revives the abandoned Phase-4a servers-map
+correctly): replicate **adjacency** (each node declares only its OWN direct-peer set → single-writer per
+key → converges), **derive reachability LOCALLY** (BFS over the union, prune beacon-stale). This is
+link-state flooding, not the per-viewpoint reachability value that diverged. Adjacency rides the existing
+**CR H beacon** (append-only `peers` field: `H <srv> <ts> <cap> <peers> :<name>`, back-compat because
+`name` stays trailing/`parv[parc-1]`), which is **OUTSIDE `crdt_state_digest`** → physically cannot move
+the digest. New pure module `crdt_meshmap.c/.h` (BFS/spanning/cross-edges, cmocka `crdt_meshmap_cmocka`
+10/10 gates the image). Verified live on the 5-node mesh: global topology from one node, partition prunes
+reachability while the digest holds steady + stays equal across nodes, reconverged on heal, 0 crashes.
+
+**HARD SCOPE — observability-only.** The mesh-map feeds the command, NOT materialization/routing (those
+keep the local `FindNServer` check). Promoting the gossiped map to a routing input ("SPLIT iff
+unreachable via all transports") is the deliberate **Tier-2** step — that is where R7/endgame risk lives;
+do NOT let it ride along with observability.
+
+## Direction correction (2026-06-13): CRDT does NOT gate on services-fold — it enables it
+R7 above is phrased "gated on all-CRDT-aware AND services-folded-into-nefarious," which mis-reads as the
+services-fold gating CRDT. **Inverted:** a CRDT doc is precisely the "reliable reconciliation without a
+central DB" a clean services-fold needs, so CRDT work proceeds INDEPENDENTLY and must not block on the
+(long-term) X3→nefarious merge. The all-CRDT-aware prerequisite for retiring the BURST/SERVER tree stands;
+the services-fold is a *consumer* of the CRDT substrate, not a gate on it.
+
+## Not-yet-on-CRDT — transport gaps (low initial priority, the next expansion class)
+The doc is CRDT-authoritative for **structural** state only (users/nicks/channels/members/modes/topics/
+bans/kick/quit — Phase 3 complete). These IRCv3 stateful subsystems are **still pure P10, no CRDT
+transport**, and are the natural follow-on once Tier-2 routing matures (they're also what makes a
+folded-in services durable without re-adding a DB):
+- **chathistory federation** (CH tokens) — only a cherry-picked per-link cleanup bugfix touched it, not transport.
+- **metadata** (MD/MDQ), **read-marker** (MR), **redaction**, **event-playback**.
+- **bouncer session state** (BS/BX), away, silence, invite list, per-member join time, monitor, webpush.
 
 ## Constraints
 Standing CRDT-mesh rules: submodule push to `origin crdt-mesh`, testnet pointer staged as ONLY
