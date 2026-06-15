@@ -212,6 +212,23 @@ Legacy peers stay on pure P10 at every step (gated by `IsCrdtAware`/`IsCrdtSyncT
   CRDT-origin servers. Gate: ALL peers CRDT-aware AND services folded into the IRCd (`project_x3_
   nefarious_merge`; **do NOT plan X3-as-CRDT-peer**). §17.7 gateway is the last P10 surface for legacy.
 
+### Mesh-native routing (the R7b enabler) — scope: `crdt-mesh-native-routing-scope.md`
+The routing layer R7b actually needs. **Primary track = pure-CRDT (MR-0/1/2 + TTL + dedup, no
+legacy gateway).** Phases MR-0…MR-5 (plan per phase: `crdt-mesh-mr0-routing-table.md`, …).
+- **MR-0 — routing table (observability)** · S · **DONE 2026-06-15 (submodule pending commit).**
+  Two net-new pure primitives (cmocka 20/20): `crdt_meshmap_nexthop` (per-viewpoint unicast
+  shortest-path first-hop, the MR-1 input) + `crdt_meshmap_canon_tree` (root-free Kruskal-lex
+  canonical broadcast tree — viewpoint-independent, the MR-2 input; today's `_spanning` is
+  self-rooted). Integration: `/CRDT route` oper view + `crdt_shadow_route_diff` oracle (mesh
+  next-hop vs P10 `cli_from`, in the verify timer). **Observability-only — derives/measures,
+  routes nothing.** Live 5-node: converged identical mdigest, **canonical tree byte-identical on
+  every node**, valid next-hops, **`p10Only==0`** (the real gate; no adjacency gap), 0 crashes;
+  cut/heal tracked the topology change + re-converged. **KEY finding: the original `mismatch==0`
+  exit criterion was WRONG** — the CRDT adjacency is intentionally richer than the P10 tree
+  (cross-links + CRDTMESH overlay), so `mismatch>0` is the normal/correct state; `p10Only==0` is
+  the gate, `meshOnly>0` = overlay/stub wins, both transient `p10Only`/`meshOnly` spikes on
+  cut/heal = the convergence-lag the oracle exists to measure. Next: MR-1 (mesh-native unicast).
+
 ### Two spikes the arc needs
 1. ~~**R4 bandwidth measurement**~~ — **DONE 2026-06-11** (`crdt-mesh-r4-bandwidth-spike.md`). Measured
    the CR-delta flood fan-out on the 5-node bed: **10 crossings/op no-batch (2.5× the N−1 optimum),
