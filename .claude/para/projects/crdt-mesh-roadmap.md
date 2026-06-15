@@ -227,7 +227,20 @@ legacy gateway).** Phases MR-0…MR-5 (plan per phase: `crdt-mesh-mr0-routing-ta
   exit criterion was WRONG** — the CRDT adjacency is intentionally richer than the P10 tree
   (cross-links + CRDTMESH overlay), so `mismatch>0` is the normal/correct state; `p10Only==0` is
   the gate, `meshOnly>0` = overlay/stub wins, both transient `p10Only`/`meshOnly` spikes on
-  cut/heal = the convergence-lag the oracle exists to measure. Next: MR-1 (mesh-native unicast).
+  cut/heal = the convergence-lag the oracle exists to measure.
+- **MR-1 — mesh-native unicast (CRDT↔CRDT)** · M · **DONE 2026-06-15 (submodule `2ca81ba..`;
+  flag default-off, enabled in testbed `data/ircd*.conf`).** Routes user-unicast (PRIVMSG/NOTICE/
+  TAGMSG) over CR to CRDT-aware destinations via the MR-0 next-hop table, TTL-bounded, P10
+  fallback. Pieces: `crdt_route_action` pure decision (cmocka, deliver/drop/next-hop/flood);
+  TTL on the CR M wire (`M … <tgt> <ttl> :<text>`, parc-compatible, default 32 = storm-backstop);
+  `crdt_route_unicast_try` (the one trigger helper at all 6 sites: ircd_relay ×4 + m_tagmsg ×2);
+  receiver relay split (channel=flood, unicast=next-hop); flag `FEAT_CRDT_ROUTE_UNICAST`.
+  **Default-off = today's behavior exactly** (mesh-stub→flood, live→P10). Validated: cmocka 21/21;
+  inert PM exactly-once over P10 (no regression); flag-on PM travels as a `CRDT M` next-hop frame
+  (TTL=32), P10 tree fully bypassed, delivered exactly-once, 0 crashes. Crash bug caught+fixed by
+  live test (next-hop format string dropped the target placeholder → TTL int read as char* →
+  SIGSEGV). Tree-disconnect met by-construction (never touches the tree) + R6c. Next: MR-2
+  (mesh-native broadcast).
 
 ### Two spikes the arc needs
 1. ~~**R4 bandwidth measurement**~~ — **DONE 2026-06-11** (`crdt-mesh-r4-bandwidth-spike.md`). Measured
