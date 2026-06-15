@@ -239,8 +239,21 @@ legacy gateway).** Phases MR-0…MR-5 (plan per phase: `crdt-mesh-mr0-routing-ta
   inert PM exactly-once over P10 (no regression); flag-on PM travels as a `CRDT M` next-hop frame
   (TTL=32), P10 tree fully bypassed, delivered exactly-once, 0 crashes. Crash bug caught+fixed by
   live test (next-hop format string dropped the target placeholder → TTL int read as char* →
-  SIGSEGV). Tree-disconnect met by-construction (never touches the tree) + R6c. Next: MR-2
-  (mesh-native broadcast).
+  SIGSEGV). Tree-disconnect met by-construction (never touches the tree) + R6c.
+- **MR-2 — mesh-native broadcast (channel, over the canonical shared tree)** · M · **DONE
+  2026-06-15 (submodule `551521e..`; flag default-off, enabled in testbed `data/ircd*.conf`).**
+  Generalizes the R4a channel CR-M flood (~2·E) to forward over the MR-0 canonical tree (N−1)
+  when the mesh is stable, flood-fallback during flux. Pieces: `crdt_meshmap_tree_neighbors`
+  + `crdt_meshmap_row_changed` (pure, cmocka 23/23); `g_mesh_changed_ts` +
+  `crdt_shadow_mesh_bcast_stable` (35 s settle gate — tree only once adjacency converged, flood
+  during the lag = gap-safe); `crdt_tree_forward_chan` (origin + relay) hardened to
+  flood-fallback if any tree edge isn't a directly-sendable link; `FEAT_CRDT_ROUTE_BCAST`.
+  **all-server broadcast (WALLOPS/GLINE/…) = MR-2b, deferred** (those P10 tokens carry no msgid
+  yet). Validated: inert flood (no regression); flag-on stable = N−1 star (CR-M parses
+  origin=0/each-leaf=1/total=4), exactly-once; flux (stop a leaf, send) = flood-fallback,
+  exactly-once, no gap; 0 crashes. NB the "gap" scare was a `CR M` (P10-server token) vs
+  `CRDT M` (overlay token) grep artifact — instrumentation proved full N−1 coverage. Next: MR-3
+  (legacy presence into the doc) or MR-2b.
 
 ### Two spikes the arc needs
 1. ~~**R4 bandwidth measurement**~~ — **DONE 2026-06-11** (`crdt-mesh-r4-bandwidth-spike.md`). Measured
