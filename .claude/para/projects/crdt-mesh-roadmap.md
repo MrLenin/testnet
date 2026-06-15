@@ -252,8 +252,21 @@ legacy gateway).** Phases MR-0…MR-5 (plan per phase: `crdt-mesh-mr0-routing-ta
   yet). Validated: inert flood (no regression); flag-on stable = N−1 star (CR-M parses
   origin=0/each-leaf=1/total=4), exactly-once; flux (stop a leaf, send) = flood-fallback,
   exactly-once, no gap; 0 crashes. NB the "gap" scare was a `CR M` (P10-server token) vs
-  `CRDT M` (overlay token) grep artifact — instrumentation proved full N−1 coverage. Next: MR-3
-  (legacy presence into the doc) or MR-2b.
+  `CRDT M` (overlay token) grep artifact — instrumentation proved full N−1 coverage.
+- **MR-2b — all-server broadcast (WALLOPS class) over the mesh** · S · **DONE 2026-06-15
+  (submodule `2ca310b..`; flag default-off = `FEAT_CRDT_ROUTE_BCAST`, shared with MR-2).**
+  Ephemeral all-server notifications (WALLOPS) ride CR M as `cmd='W'` target `*`, tree-forwarded
+  over the canonical tree (reuses MR-2 carrier), each node delivers to its local +w opers.
+  `sendwallto_group_butone` (user-sourced WALLOPS only) skips CRDT-aware downlinks + emits one
+  `crdt_gossip_message('W','*',msgid,text)`; new `sendwallto_local` does the receiver +w delivery;
+  ms_crdt `cmd='W'` branch + `'*'` added to the broadcast relay. **Architectural split
+  (user-confirmed): ephemeral notifications tunnelled; persistent network state (GLINE/SHUN/JUPE/
+  ZLINE bans, SETTIME) is NOT — it belongs in the CRDT doc as collections (the Phase-3i channel-ban
+  precedent) = a separate future "global-state-into-doc" track.** Deferred this phase:
+  server-sourced WALLOPS (cli_user==NULL → P10), WALLUSERS/DESYNCH (trivial follow-ons). Validated:
+  flag-on WALLOPS reaches +w opers on all 4 CRDT leaves exactly-once, carried as `CRDT M … W … *`
+  (P10 suppressed toward CRDT peers, legacy still P10), 0 crashes. Next: the global-state-into-doc
+  track (GLINE) or MR-3 (legacy presence into the doc) or MR-5 (retire the tree).
 
 ### Two spikes the arc needs
 1. ~~**R4 bandwidth measurement**~~ — **DONE 2026-06-11** (`crdt-mesh-r4-bandwidth-spike.md`). Measured
