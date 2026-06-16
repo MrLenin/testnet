@@ -305,8 +305,17 @@ collections (the Phase-3i channel-ban precedent), not ephemeral broadcasts. Plan
   the doc — each logs `gline-reconcile: drove 1 … from doc` (P10 GL suppressed ⇒ not echo-guarded to 0); live
   on leaf nef7 via `STATS g` with the carried lastmod; `/REMOVE` → all four `removed 1`, gone via STATS g;
   converges; 0 crashes/restarts. The doc is now the transport for global G-lines among CRDT peers. Gateway-to-
-  legacy witness (non-CRDT/x3 peer) is a follow-on (current bed is all-CRDT). Next on this track: SHUN/JUPE/
-  ZLINE/SETTIME as CRDT collections (same pattern).
+  legacy witness (non-CRDT/x3 peer) is a follow-on (current bed is all-CRDT).
+- **SHUN as CRDT doc state (engine + shadow-write + cutover)** · M · **DONE 2026-06-16 (submodule `a153076..8a3912d`).**
+  The GLINE template applied 1:1 to SHUN (silence ban, P10 SU token, no badchan, single `GlobalShunList`) —
+  landed as ONE commit (mechanical mirror + flag `FEAT_CRDT_SHUN_CUTOVER` default-off ⇒ behavior-neutral).
+  Engine: SHUNS LWW-map + `CrdtShunRecord` (digest salt 13) + `crdt_shun_set/_del/_is_explicitly_removed` +
+  cmocka `test_shun_op_replicates`. Shadow-write: `crdt_shadow_shun_add/_remove` at the 5 shun.c sites.
+  Cutover: `crdt_shadow_reconcile_shuns()` (+ `g_shun_reconciling` guard) + suppress P10 SU. **Validated live
+  (5-node mesh):** global SHUN on nef3 → all four leaves `shun-reconcile: drove 1 … from doc`, live on leaf
+  nef7 via `STATS S` (uppercase! lowercase s=spoofhosts) with carried lastmod; `/REMOVE` → all four `removed 1`;
+  0 crashes. Next on this track: **ZLINE / JUPE / SETTIME** (same template; ZLINE is IP-ban gline-like, JUPE
+  is server-name-keyed, SETTIME is a single value not a ban).
 
 ### Two spikes the arc needs
 1. ~~**R4 bandwidth measurement**~~ — **DONE 2026-06-11** (`crdt-mesh-r4-bandwidth-spike.md`). Measured
