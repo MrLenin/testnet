@@ -322,8 +322,18 @@ collections (the Phase-3i channel-ban precedent), not ephemeral broadcasts. Plan
   `crdt_zline_*` + cmocka `test_zline_op_replicates`; `crdt_shadow_zline_add/_remove` (5 sites);
   `crdt_shadow_reconcile_zlines()` (+ `g_zline_reconciling`) + suppress P10 ZL. **Validated live:** global
   ZLINE on nef3 → all four leaves `zline-reconcile: drove 1`, live on leaf nef7 via `STATS Z` (uppercase;
-  lowercase z=memory) with carried lastmod; `/REMOVE` → all four `removed 1`; 0 crashes. Next on this track:
-  **JUPE** (server-name-keyed — structurally different, no expire/host) / **SETTIME** (single value, not a ban).
+  lowercase z=memory) with carried lastmod; `/REMOVE` → all four `removed 1`; 0 crashes.
+- **JUPE as CRDT doc state** · M · **DONE 2026-06-16 (submodule `ebeaa8f..349f511`).** Fourth collection, first
+  NON-ban (juped server name, P10 JU). **Adapted** template: keyed by server name; no lifetime/addr; jupe has
+  no modify/force-remove → a global jupe is "removed" by DEACTIVATION (SET-inactive, never tombstone), drift
+  handled by RECREATE (jupe_free+jupe_add); expire is a DURATION from CurrentTime (not absolute/TStime);
+  do_jupe SQUITs a matching local server; `GlobalJupeList` made non-static. One commit (flag
+  `FEAT_CRDT_JUPE_CUTOVER` default-off). JUPES LWW-map + `CrdtJupeRecord` (**salt 15**) + `crdt_jupe_*` +
+  cmocka `test_jupe_op_replicates`; reconcile + suppress P10 JU. **Validated live:** global JUPE on nef3 → all
+  four leaves `jupe-reconcile: drove 1`; `JUPE -server` deactivate → all four `drove 1` (recreate-inactive
+  drift path); converges (uniq=1 mdigest); 0 crashes. (STATS J HIS-masked by default — materialization proven
+  by reconcile logs.) Remaining: **SETTIME** (a single network-time value, not a record collection — a
+  genuinely different shape; likely the end of this track or a small special case).
 
 ### Two spikes the arc needs
 1. ~~**R4 bandwidth measurement**~~ — **DONE 2026-06-11** (`crdt-mesh-r4-bandwidth-spike.md`). Measured
