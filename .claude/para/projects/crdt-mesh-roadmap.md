@@ -314,8 +314,16 @@ collections (the Phase-3i channel-ban precedent), not ephemeral broadcasts. Plan
   Cutover: `crdt_shadow_reconcile_shuns()` (+ `g_shun_reconciling` guard) + suppress P10 SU. **Validated live
   (5-node mesh):** global SHUN on nef3 → all four leaves `shun-reconcile: drove 1 … from doc`, live on leaf
   nef7 via `STATS S` (uppercase! lowercase s=spoofhosts) with carried lastmod; `/REMOVE` → all four `removed 1`;
-  0 crashes. Next on this track: **ZLINE / JUPE / SETTIME** (same template; ZLINE is IP-ban gline-like, JUPE
-  is server-name-keyed, SETTIME is a single value not a ban).
+  0 crashes.
+- **ZLINE as CRDT doc state** · S · **DONE 2026-06-16 (submodule `8a3912d..ebeaa8f`).** Third template
+  application (IP-ban sibling, P10 ZL token). One structural simplification: a SINGLE `zl_mask` field (no
+  user@host split, no realname/version/badchan) → doc key = `zl_mask`. ONE commit (mirror + flag
+  `FEAT_CRDT_ZLINE_CUTOVER` default-off). ZLINES LWW-map + `CrdtZlineRecord` (digest **salt 14**) +
+  `crdt_zline_*` + cmocka `test_zline_op_replicates`; `crdt_shadow_zline_add/_remove` (5 sites);
+  `crdt_shadow_reconcile_zlines()` (+ `g_zline_reconciling`) + suppress P10 ZL. **Validated live:** global
+  ZLINE on nef3 → all four leaves `zline-reconcile: drove 1`, live on leaf nef7 via `STATS Z` (uppercase;
+  lowercase z=memory) with carried lastmod; `/REMOVE` → all four `removed 1`; 0 crashes. Next on this track:
+  **JUPE** (server-name-keyed — structurally different, no expire/host) / **SETTIME** (single value, not a ban).
 
 ### Two spikes the arc needs
 1. ~~**R4 bandwidth measurement**~~ — **DONE 2026-06-11** (`crdt-mesh-r4-bandwidth-spike.md`). Measured
