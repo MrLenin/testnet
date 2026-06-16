@@ -265,8 +265,21 @@ legacy gateway).** Phases MR-0…MR-5 (plan per phase: `crdt-mesh-mr0-routing-ta
   precedent) = a separate future "global-state-into-doc" track.** Deferred this phase:
   server-sourced WALLOPS (cli_user==NULL → P10), WALLUSERS/DESYNCH (trivial follow-ons). Validated:
   flag-on WALLOPS reaches +w opers on all 4 CRDT leaves exactly-once, carried as `CRDT M … W … *`
-  (P10 suppressed toward CRDT peers, legacy still P10), 0 crashes. Next: the global-state-into-doc
-  track (GLINE) or MR-3 (legacy presence into the doc) or MR-5 (retire the tree).
+  (P10 suppressed toward CRDT peers, legacy still P10), 0 crashes.
+
+### Global-state-into-doc track (persistent network state as CRDT collections, NOT tunnelled)
+The MR-2b counterpart: GLINE/SHUN/JUPE/ZLINE bans + SETTIME are network STATE → CRDT doc
+collections (the Phase-3i channel-ban precedent), not ephemeral broadcasts. Plan:
+`crdt-mesh-glines-doc.md`.
+- **GLINE step 1 — CRDT engine collection** · S · **DONE 2026-06-15 (submodule `07a82b2..`).**
+  New `GLINES` LWW-map keyed by ban mask → `CrdtGlineRecord` (expire/lastmod/lifetime/flags/addr/
+  bits/reason), mirroring `chanmeta`: enum + map + `lww_for` + both digests (salt 9) + snapshot
+  serialize + op-recording `crdt_gline_set`/`crdt_gline_del` (GC + snapshot-deserialize generic via
+  `lww_for`). cmocka `test_gline_op_replicates` (set/update/delete via delta + digest converge +
+  snapshot roundtrip). **Inert** (no caller yet — empty collection doesn't perturb the digest);
+  cmocka gates the image; 5-node bringup still single-mdigest, 0 crashes. Next: step 2 shadow-write
+  (hook gline.c → doc, observe convergence), then step 3 cutover (reconcile from doc + suppress P10
+  GL among CRDT peers).
 
 ### Two spikes the arc needs
 1. ~~**R4 bandwidth measurement**~~ — **DONE 2026-06-11** (`crdt-mesh-r4-bandwidth-spike.md`). Measured
