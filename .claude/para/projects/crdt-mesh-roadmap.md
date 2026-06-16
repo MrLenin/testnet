@@ -332,8 +332,18 @@ collections (the Phase-3i channel-ban precedent), not ephemeral broadcasts. Plan
   cmocka `test_jupe_op_replicates`; reconcile + suppress P10 JU. **Validated live:** global JUPE on nef3 → all
   four leaves `jupe-reconcile: drove 1`; `JUPE -server` deactivate → all four `drove 1` (recreate-inactive
   drift path); converges (uniq=1 mdigest); 0 crashes. (STATS J HIS-masked by default — materialization proven
-  by reconcile logs.) Remaining: **SETTIME** (a single network-time value, not a record collection — a
-  genuinely different shape; likely the end of this track or a small special case).
+  by reconcile logs.)
+- **SETTIME — SCOPED OUT (user-confirmed 2026-06-16), track CLOSED.** SETTIME is NOT doc state: `ms_settime`/
+  `mo_settime` do exactly `TSoffset -= dt` (a one-shot per-server clock-offset adjustment — no record, no key,
+  no list), priority-routed (`hunt_server_prio_cmd`/`sendcmdto_prio_one`), and skipped entirely under
+  `FEAT_RELIABLE_CLOCK`. Modeling it as a CRDT collection is a **layering inversion** — the doc's whole
+  ordering model (HLC + LWW) *depends on* the clock, so making clock-adjustment into doc content makes the
+  transport's correctness depend on the very thing transported. It's a control-plane primitive, neither a ban
+  record (doc) nor a user notification (the MR-2b tunnel). **At MR-5** (P10 retirement) SETTIME would ride the
+  mesh as a **priority control-message** (a TTL'd CR tunnel, like WALLOPS but priority-routed), NOT doc state —
+  deferred to that track. **The global-state-into-doc track is COMPLETE: GLINE + SHUN + ZLINE + JUPE** are all
+  CRDT-native (doc transport among CRDT peers, P10 token suppressed, §17.7 gateway to legacy); persistent
+  network ban/jupe state now lives in the CRDT doc.
 
 ### Two spikes the arc needs
 1. ~~**R4 bandwidth measurement**~~ — **DONE 2026-06-11** (`crdt-mesh-r4-bandwidth-spike.md`). Measured
