@@ -277,9 +277,19 @@ collections (the Phase-3i channel-ban precedent), not ephemeral broadcasts. Plan
   serialize + op-recording `crdt_gline_set`/`crdt_gline_del` (GC + snapshot-deserialize generic via
   `lww_for`). cmocka `test_gline_op_replicates` (set/update/delete via delta + digest converge +
   snapshot roundtrip). **Inert** (no caller yet — empty collection doesn't perturb the digest);
-  cmocka gates the image; 5-node bringup still single-mdigest, 0 crashes. Next: step 2 shadow-write
-  (hook gline.c → doc, observe convergence), then step 3 cutover (reconcile from doc + suppress P10
-  GL among CRDT peers).
+  cmocka gates the image; 5-node bringup still single-mdigest, 0 crashes.
+- **GLINE step 2 — shadow-write** · S · **DONE 2026-06-15 (submodule `d235c28..7b9c6ab`).** Hook the
+  canonical gline.c state-change points (`gline_add`/`activate`/`deactivate`/`modify`/`remove`) to
+  `crdt_shadow_gline_add`/`_remove` — key = ban mask, record = expire/lastmod/lifetime/flags/addr/bits/
+  reason. **Single-writer** via `from_crdt_peer(from)` (the mesh ENTRY server writes once; CRDT-aware
+  peers receiving the P10 GL relay skip + get it via CR sync → single-origin, no clock-skew amplification;
+  same gate as the channel/user hooks). Local G-lines self-skip; expiry leaves the lifetime-bearing
+  record. **SHADOW-ONLY** (gated `shadow_on()`/FEAT_CRDT_ENABLED, doc plane only — live G-lines still
+  P10-propagate; no behavior change). Validated live on the 5-node mesh: global GLINE → written once at
+  nef3 → all 5 converge to a new common mdigest; /REMOVE → tombstone → all 5 converge back to the exact
+  pre-gline baseline mdigest; a local GLINE left the doc untouched; 0 mismatches, 0 crashes. No new engine
+  logic → no new cmocka (step 1's `test_gline_op_replicates` still gates). Next: step 3 cutover (reconcile
+  from doc + §17.7 gateway + suppress P10 GL among CRDT peers, flag-gated).
 
 ### Two spikes the arc needs
 1. ~~**R4 bandwidth measurement**~~ — **DONE 2026-06-11** (`crdt-mesh-r4-bandwidth-spike.md`). Measured

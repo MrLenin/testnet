@@ -45,10 +45,21 @@ Key = the mask (like chanmeta keys by channel name — not stored in the record)
 ## Phasing (this increment = step 1)
 1. **Engine collection (this commit):** the above + cmocka. Inert (no caller yet); cmocka gates
    the image. Correct, self-contained — the foundation.
-2. **Shadow-write (next):** hook the canonical gline state-change points in `gline.c`
-   (`gline_add`/`gline_modify`/`gline_remove`/expire) to `crdt_gline_set`/`_del` — the doc now
-   tracks live G-lines; observe it **converges across the mesh** (digest) with no behavior change.
-3. **Cutover (later):** reconcile live G-lines *from* the doc (+ gateway to legacy), suppress the
+2. **Shadow-write (DONE 2026-06-15, submodule `d235c28..7b9c6ab`):** `crdt_shadow_gline_add`/`_remove`
+   (crdt_shadow.c) hooked at the canonical gline.c points — `gline_add` (SET), `gline_activate` (SET),
+   `gline_deactivate` (DELETE if freed / SET if just deactivated), `gline_modify` (SET), `gline_remove`
+   (DELETE). Key = ban mask (`gl_user[@gl_host]`, mirroring `gline_propagate`'s wire); record carries
+   expire/lastmod/lifetime/flags/addr/bits/reason for cutover-faithful materialize. **Single-writer**
+   via `from_crdt_peer(from)` (same gate as channel/user hooks): the mesh ENTRY server (local oper or a
+   services/legacy GL relay) writes once; CRDT-aware peers receiving the P10 GL relay skip and get the
+   record via CR sync → single-origin, no clock-skew amplification. Local G-lines self-skip; expiry
+   leaves the lifetime-bearing record (materializer ignores expired → no doc op). Gated `shadow_on()`
+   (FEAT_CRDT_ENABLED), doc-plane only — live G-lines still P10-propagate, **no behavior change**.
+   **Validated live (5-node mesh):** global GLINE on nef3 → written once at the entry server → all 5
+   converge to a new common mdigest; `/REMOVE` → tombstone → all 5 converge back to the exact pre-gline
+   baseline mdigest; a local GLINE left the doc untouched. 0 mismatches, 0 crashes. (No new engine logic
+   → no new cmocka; step 1's `test_gline_op_replicates` still gates the image.)
+3. **Cutover (next):** reconcile live G-lines *from* the doc (+ §17.7 gateway to legacy), suppress the
    P10 `GL` token among CRDT peers (flag-gated), like the Phase-3 reconciles.
 
 ## Validation (this increment)
