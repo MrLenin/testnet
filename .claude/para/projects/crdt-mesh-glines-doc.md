@@ -59,8 +59,28 @@ Key = the mask (like chanmeta keys by channel name — not stored in the record)
    converge to a new common mdigest; `/REMOVE` → tombstone → all 5 converge back to the exact pre-gline
    baseline mdigest; a local GLINE left the doc untouched. 0 mismatches, 0 crashes. (No new engine logic
    → no new cmocka; step 1's `test_gline_op_replicates` still gates the image.)
-3. **Cutover (next):** reconcile live G-lines *from* the doc (+ §17.7 gateway to legacy), suppress the
-   P10 `GL` token among CRDT peers (flag-gated), like the Phase-3 reconciles.
+3. **Cutover (DONE 2026-06-16, submodule `7b9c6ab..a153076`):** flag `FEAT_CRDT_GLINE_CUTOVER` (default off).
+   Split 3a/3b per the inert→flip discipline.
+   - **3a (`..1045381`) reconcile-from-doc + §17.7 gateway:** `crdt_shadow_reconcile_glines()` (verify timer +
+     CR delta path). ADD/heal/drift via `gline_add`/`gline_modify` (field echo guard not lastmod → no churn;
+     carries `rec->lastmod` → no legacy ping-pong; `do_gline` kicks; expired skipped); REMOVE via the new
+     engine gate `crdt_gline_is_explicitly_removed` (doc-tombstone, never absence) + `-mask` gateway. The #1
+     hazard (re-mint loop) closed by the `g_gline_reconciling` re-entrancy guard — gline shadow hooks self-skip
+     during the pass (the analog of `reconcile_topic_cb` writing `chptr->topic` directly). cmocka extended.
+   - **3b (`..a153076`) suppress P10 GL among CRDT peers:** `gline_propagate`/`gline_modify` → legacy-only
+     (`sendcmdto_flag_serv_butone` forbid FLAG_CRDT_AWARE; off ⇒ no filter ⇒ byte-identical); `gline_burst`/
+     `gline_resend` skip CRDT-aware targets. Makes 3a the transport.
+
+   **Validated live (5-node all-CRDT mesh):** global GLINE on nef3 → all four leaves materialize FROM the doc
+   (`gline-reconcile: drove 1`), live on leaf nef7 via `STATS g` with the origin's carried lastmod; `/REMOVE`
+   → all four `removed 1`, gone via STATS g; converges; 0 crashes. **The doc is now the transport for global
+   G-lines among CRDT peers.** Gateway-to-legacy (non-CRDT/x3 witness) deferred (bed is all-CRDT). NB the
+   oper/Opers class has `gline=no` in container base.conf → grant via sed+REHASH+fresh-oper; global GLINE needs
+   target `*` (`GLINE +mask * <exp> :reason`).
+
+## Track continuation
+Same "global-state-into-doc" pattern next applies to **SHUN / JUPE / ZLINE / SETTIME** (each: engine LWW
+collection → shadow-write → cutover reconcile + suppress its P10 token). GLINE is the proven template.
 
 ## Validation (this increment)
 cmocka green (gates the image; verify the `ircd.YYYYMMDDHHMM` symlink advances). No live behavior

@@ -288,8 +288,25 @@ collections (the Phase-3i channel-ban precedent), not ephemeral broadcasts. Plan
   P10-propagate; no behavior change). Validated live on the 5-node mesh: global GLINE → written once at
   nef3 → all 5 converge to a new common mdigest; /REMOVE → tombstone → all 5 converge back to the exact
   pre-gline baseline mdigest; a local GLINE left the doc untouched; 0 mismatches, 0 crashes. No new engine
-  logic → no new cmocka (step 1's `test_gline_op_replicates` still gates). Next: step 3 cutover (reconcile
-  from doc + §17.7 gateway + suppress P10 GL among CRDT peers, flag-gated).
+  logic → no new cmocka (step 1's `test_gline_op_replicates` still gates).
+- **GLINE step 3a — reconcile-from-doc + §17.7 gateway** · M · **DONE 2026-06-16 (submodule `7b9c6ab..1045381`).**
+  Flag `FEAT_CRDT_GLINE_CUTOVER` (default off). `crdt_shadow_reconcile_glines()` (wired into the verify timer +
+  CR delta-apply path) drives live global G-lines FROM the doc: ADD/heal/drift via `gline_add`/`gline_modify`
+  (field echo guard, NOT lastmod → no churn; carries `rec->lastmod` → no legacy ping-pong; `do_gline` kicks
+  locals; expired never materialized), REMOVE via the new engine gate `crdt_gline_is_explicitly_removed`
+  (doc-tombstone, never mere absence) + a `-mask` gateway. Re-entrancy guard `g_gline_reconciling` → the gline
+  shadow hooks self-skip so a doc-driven materialize never re-mints (the #1 hazard). cmocka extended. Safe
+  no-op while P10 still flows (the inert-then-flip discipline).
+- **GLINE step 3b — suppress P10 GL among CRDT peers** · S · **DONE 2026-06-16 (submodule `..a153076`).**
+  Under the flag, `gline_propagate`/`gline_modify` demote to legacy-only (`sendcmdto_flag_serv_butone` forbid
+  FLAG_CRDT_AWARE; forbid=FLAG_LAST_FLAG when off ⇒ byte-identical to the old path), and `gline_burst`/
+  `gline_resend` skip CRDT-aware targets. Makes 3a's reconcile the transport + the legacy-only emits the §17.7
+  gateway. **Validated live (5-node all-CRDT mesh):** global GLINE on nef3 reaches all four leaves ONLY via
+  the doc — each logs `gline-reconcile: drove 1 … from doc` (P10 GL suppressed ⇒ not echo-guarded to 0); live
+  on leaf nef7 via `STATS g` with the carried lastmod; `/REMOVE` → all four `removed 1`, gone via STATS g;
+  converges; 0 crashes/restarts. The doc is now the transport for global G-lines among CRDT peers. Gateway-to-
+  legacy witness (non-CRDT/x3 peer) is a follow-on (current bed is all-CRDT). Next on this track: SHUN/JUPE/
+  ZLINE/SETTIME as CRDT collections (same pattern).
 
 ### Two spikes the arc needs
 1. ~~**R4 bandwidth measurement**~~ — **DONE 2026-06-11** (`crdt-mesh-r4-bandwidth-spike.md`). Measured
