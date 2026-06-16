@@ -299,10 +299,15 @@ Mirrors how R4→R6→R7a landed: build inert, measure in shadow, enable behind 
 - **MR-2 — Mesh-native broadcast.** Channel + all-server broadcast over the shared tree (absorbs/
   generalizes R4a/R6b). *Exit: WALLOPS/GLINE/channel reach every CRDT server + legacy via the gateway,
   exactly-once, N−1 cost.*
-- **MR-3 — Legacy presence into the doc.** Gateway mirrors legacy **servers** into the `servers`
-  collection (+ liveness); CRDT leaves anchor legacy servers from the doc; stop relaying legacy SERVER
-  intros across the mesh. *Exit: a CRDT leaf with no direct P10 link sees all legacy servers+users via
-  the doc (the exact R7b failure case now passes).*
+- **MR-3 — Legacy presence into the mesh (via the BEACON, not the doc).** ⚠ The "into the `servers`
+  collection" wording here was the pre-§0 framing and is **WRONG** (the `servers` map is the proven-non-
+  convergent Phase-4a path, `crdt_shadow.c:512-542`). **Corrected + fully scoped in the standalone doc
+  `crdt-mesh-mr3-legacy-presence.md`:** the gateway **proxy-beacons** each legacy server it fronts
+  (single-writer); CRDT leaves **anchor** it from that beacon (Case-B `crdt_shadow_make_anchor`); the
+  legacy SERVER intro toward CRDT peers is suppressed (`crdt_should_suppress_intro`). Flag
+  `FEAT_CRDT_LEGACY_PRESENCE`; lease (`CRDT_BEACON_STALE_PROXY`) for the gateway-partition case;
+  single-gateway prerequisite. *Exit: a CRDT leaf with no direct P10 link sees all legacy servers+users
+  via the beacon-anchored path (the exact R7b failure case now passes).*
 - **MR-4 — Gateway as the mesh's legacy face.** Formalize P10↔CR translation for all traffic classes;
   define the single/designated-gateway model (§7). *Exit: legacy interop matrix green across cut/relink
   with the gateway as sole P10 face.*

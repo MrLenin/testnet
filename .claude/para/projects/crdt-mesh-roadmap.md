@@ -214,7 +214,9 @@ Legacy peers stay on pure P10 at every step (gated by `IsCrdtAware`/`IsCrdtSyncT
 
 ### Mesh-native routing (the R7b enabler) — scope: `crdt-mesh-native-routing-scope.md`
 The routing layer R7b actually needs. **Primary track = pure-CRDT (MR-0/1/2 + TTL + dedup, no
-legacy gateway).** Phases MR-0…MR-5 (plan per phase: `crdt-mesh-mr0-routing-table.md`, …).
+legacy gateway) — MR-0/1/2 DONE this session.** Phases MR-0…MR-5 (plan per phase:
+`crdt-mesh-mr0-routing-table.md`, …; **MR-3 fully scoped: `crdt-mesh-mr3-legacy-presence.md`** — the
+legacy-gateway track, beacon-proxied presence NOT the doc servers-map; not scheduled).
 - **MR-0 — routing table (observability)** · S · **DONE 2026-06-15 (submodule pending commit).**
   Two net-new pure primitives (cmocka 20/20): `crdt_meshmap_nexthop` (per-viewpoint unicast
   shortest-path first-hop, the MR-1 input) + `crdt_meshmap_canon_tree` (root-free Kruskal-lex
