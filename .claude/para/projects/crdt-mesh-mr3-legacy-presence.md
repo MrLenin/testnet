@@ -112,17 +112,26 @@ assumption).
     `ms_nick`-hook hypothesis was wrong; some existing path mints them; empirically confirmed by survival).
   - **⇒ MR-3a's value is PROVEN:** without the proxy-beacon, legacy servers could not re-anchor on
     partition (the R7b gap); with it, they do — and their users follow via the doc.
-- **MR-3c — suppress the legacy SERVER intro toward CRDT peers (FLAG-ENABLE). DE-RISKED — the end-state is
-  proven (above).** Wire `crdt_should_suppress_intro` at the SERVER-relay sites (`ms_server` `m_server.c:950`,
-  `server_estab` `s_serv.c:204,281`) so CRDT peers learn the legacy server only via the beacon-anchor.
-  **Remaining detail (the partial-suppression wrinkle the full cut sidestepped):** under surgical
-  suppression a direct CRDT peer of the gateway still has a P10 link, so the gateway must NOT relay the
-  legacy server's user NICKs (and other sourced P10 traffic) toward CRDT peers either, or they arrive with
-  an unknown (suppressed) server prefix. Two options: (a) also suppress legacy-sourced NICK/traffic toward
-  CRDT peers (the gateway P10→CR boundary, MR-4-ish), or (b) confirm the leaf simply drops the orphan NICK
-  harmlessly and the doc delivers anyway (the cut shows the doc path works; verify the drop is benign, no
-  protocol_violation/squit). Resolve (a)-vs-(b) empirically, then flip the flag. Reversible; the
-  `crdt_shadow_server_add` no-op / servers-map is never touched.
+- **MR-3c — suppress the legacy SERVER intro toward CRDT peers. DONE + LIVE-VALIDATED 2026-06-17 (submodule
+  `38afa65`).** `crdt_intro_presence_suppress(peer,subject)` (integration wrapper mirroring
+  `crdt_tree_presence_suppress`) wired at the 3 SERVER-relay sites: `ms_server` relay (`m_server.c`),
+  `server_estab` broadcast-new + introduce-existing (`s_serv.c`). Suppress IFF legacy subject → CRDT peer,
+  primary, flag on; never a CRDT subject (R7b-infeasible) or toward a legacy peer.
+  - **KEY: the feared orphan-NICK does NOT manifest — no MR-3c-2 needed.** The beacon-anchor (MR-3a) makes
+    `FindNServer(<legacy>)` SUCCEED on a CRDT peer, so a relayed legacy-user NICK lands on the anchor rather
+    than orphaning; legacy users also materialize via the doc (reconcile_users) onto the anchor.
+  - **Validated (hybrid bed, flag on, legacy relinked under suppression):** nef4 (direct CRDT peer) AND nef7
+    (far leaf) both show NO testnet/x3 in P10 LINKS (suppressed), x3 present as a `CRDT mesh anchor`, and
+    AuthServ on it via the doc; 0 mismatch, 0 crashes, no orphan-NICK/protocol-violation. The R7b failure
+    case now passes via SUPPRESSION (not just a network cut). Reversible; `crdt_shadow_server_add` no-op /
+    servers-map never touched.
+  - **Deferred (pre-existing, MR-4):** messaging TO a legacy user materialized as an anchor on a far leaf
+    (dead-sink reverse PM, R6c/R4b) — presence works; full traffic translation is the gateway P10↔CR boundary.
+
+**⇒ MR-3 (legacy presence into the mesh) is COMPLETE: a CRDT leaf with no direct P10 link to a legacy
+server sees it (beacon-anchor) + its users (doc), with the legacy SERVER intro suppressed among CRDT peers.
+This is the legacy half of R7b. The remaining R7b half (suppress CRDT-server intros among CRDT-both-ends
+peers) is MR-5.**
 
 ## 5. Validation (5-node hybrid bed: nef3–7 + legacy `testnet`/`x3.services`)
 

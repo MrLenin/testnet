@@ -232,6 +232,14 @@ legacy-gateway track, beacon-proxied presence NOT the doc servers-map).
   proven (legacy servers re-anchor on partition only because of the proxy-beacon). MR-3c is now de-risked —
   remaining detail: under surgical suppression, ensure legacy-user NICKs toward CRDT peers don't orphan
   (suppress them too, or confirm the leaf drops them benignly + the doc delivers). Details: `crdt-mesh-mr3-legacy-presence.md` §4.
+- **MR-3c — suppress legacy SERVER intro toward CRDT peers (CUTOVER). DONE 2026-06-17 (submodule `38afa65`).**
+  `crdt_intro_presence_suppress` wired at the 3 SERVER-relay sites (ms_server, server_estab x2). **KEY: no
+  orphan-NICK, no MR-3c-2 needed** — the beacon-anchor makes `FindNServer(<legacy>)` succeed so a relayed
+  legacy NICK lands on the anchor; legacy users also materialize via the doc. Validated (flag on, legacy
+  relinked under suppression): nef4 (direct peer) + nef7 (far leaf) both show legacy servers ABSENT from P10
+  LINKS but present as `CRDT mesh anchor` with AuthServ on them via the doc; 0 mismatch/crash. **⇒ MR-3
+  COMPLETE = the legacy half of R7b.** Remaining R7b half = MR-5 (suppress CRDT-server intros among
+  CRDT-both-ends peers). Deferred (MR-4): reverse-PM to an anchor-materialized legacy user (R6c dead-sink).
 - **MR-0 — routing table (observability)** · S · **DONE 2026-06-15 (submodule pending commit).**
   Two net-new pure primitives (cmocka 20/20): `crdt_meshmap_nexthop` (per-viewpoint unicast
   shortest-path first-hop, the MR-1 input) + `crdt_meshmap_canon_tree` (root-free Kruskal-lex
