@@ -1,6 +1,6 @@
 # CRDT-Mesh MR-4 — Gateway as the mesh's legacy face: P10↔CR traffic translation (scope)
 
-> Status: **scoping + MR-4a in progress.** Source-grounded (Plan-agent pass, submodule `38afa65`).
+> Status: **MR-4a DONE + live-validated (submodule `f7d35f5`); MR-4b (the bridge) next.** Source-grounded (Plan-agent pass).
 > Builds on MR-3 (legacy PRESENCE, done — `crdt-mesh-mr3-legacy-presence.md`). MR-4 = legacy TRAFFIC.
 > Read first: `crdt-mesh-native-routing-scope.md` (§0 corrections, the MR-0…MR-5 arc).
 
@@ -90,11 +90,16 @@ No new transport, no doc change, no new file.
 
 ## 6. Phasing. Flags: `FEAT_CRDT_GATEWAY_BRIDGE` (bridge), `FEAT_CRDT_GATEWAY_GATING` (multi-gw), default off
 
-- **MR-4a — shadow oracle + dead-sink instrumentation (INERT). FIRST INCREMENT.** Add the `fronted_by`
-  beacon field (recorded, not yet routed-on) + bridge counters; instrument the `m_crdt.c:646` drop so
-  `dead_sink_dropped` increments when a CR-M unicast resolves a non-`MyConnect` legacy user we front;
-  expose `/CRDT gateway`. No behavior change. *Proves the dead-sink is real + counts (nef7→AuthServ bumps
-  it on nef3), fronted_by propagates mesh-wide, digest unaffected.*
+- **MR-4a — dead-sink instrumentation (INERT). DONE + LIVE-VALIDATED 2026-06-17 (submodule `f7d35f5`).**
+  `crdt_dead_sink_dropped` static counter + `log_write` "MR-4 dead-sink: CR-M %s for legacy user %s (on
+  %s) dropped" at a new else-branch on the `m_crdt.c` 'M' unicast handler — detection of "a real legacy
+  user we front" = `tgt && !MyConnect(tgt) && IsServer(tsrv) && !IsCrdtAware(tsrv) && cli_from(tsrv) &&
+  !IsCrdtAware(cli_from(tsrv))` (`!IsCrdtAware(tsrv)` excludes anchors = SetCrdtAware). Lands at MR-4b's
+  exact re-emit spot; no behavior change. **Validated:** two nef7-client PMs to AuthServ → exactly two
+  drops on the gateway nef3 (`CR-M PRIVMSG for legacy user AuthServ (on x3.services) dropped`), fires only
+  on the gateway, digest unaffected, 0 crashes. *Scope trim vs the original plan: the `fronted_by` beacon
+  field + `/CRDT gateway` oracle moved to MR-4b — `fronted_by` is only USED there (route-to-gateway), so a
+  beacon wire change now would propagate an unread field; the log line is sufficient for the 4a proof.*
 - **MR-4b — the CR→P10 unicast bridge (SHADOW→FLAG). HEADLINE.** §3(b) route-to-gateway + §3(c) re-emit,
   gated `FEAT_CRDT_GATEWAY_BRIDGE`. *Proves nef7→AuthServ DELIVERS + reply returns; `cr_to_p10_bridged`
   up, `dead_sink_dropped`→0; exactly-once.*
