@@ -249,8 +249,13 @@ legacy-gateway track, beacon-proxied presence NOT the doc servers-map).
   AuthServ → full reply returns (x3 a synthetic anchor on nef7 ⇒ no P10 path ⇒ genuinely the bridge);
   wire-traced inbound CR-M → P10 re-emit w/ source preserved; dead-sink 0, 0 crash. `fronted_by`/route-to-
   gateway proven UNNECESSARY for single-gateway correctness (flood reaches gw + only gw fronts + crdt_m_seen
-  dedup ⇒ exactly-once), deferred to MR-4d. → **MR-4c (INVITE/KILL)** → MR-4d (multi-gateway gating +
-  `legacy_net_id`). All other traffic classes already work.
+  dedup ⇒ exactly-once), deferred to MR-4d. **MR-4c-1 KILL DONE 2026-06-17 (`696ba93`)** — INVITE/KILL aren't
+  on the CR-M carrier (they P10-route to the anchor dead-sink); ride them over CR-M as `'K'`/`'I'` (relay arm
+  forwards any cmd verbatim, reuse `crdt_route_unicast_try`). KILL: do_kill routes `'K'` + SKIPS the local
+  exit (fixes a ghost-kill divergence — the doc QUIT-tombstone teardown is the sole authority); gateway
+  re-emits P10 KILL; validated nef7-oper KILLs a real legacy user on .2 → killed, source preserved, gone on
+  all CRDT nodes w/ 0 mismatch, 0 crash. → **MR-4c-2 INVITE** (`'I'`, channel `%Tu` reconstructed at gateway)
+  → MR-4d (multi-gateway gating + `legacy_net_id`). All other traffic classes already work.
 - **MR-0 — routing table (observability)** · S · **DONE 2026-06-15 (submodule pending commit).**
   Two net-new pure primitives (cmocka 20/20): `crdt_meshmap_nexthop` (per-viewpoint unicast
   shortest-path first-hop, the MR-1 input) + `crdt_meshmap_canon_tree` (root-free Kruskal-lex

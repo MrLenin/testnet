@@ -150,3 +150,44 @@ truth table for the fronted-by next-hop re-target.
   legacy-only re-emit — MR-4 only ensures the legacy *server* still gets the -line (it does).
 - §7 item 7 ("reuse servers ACTIVE/SPLIT") = the proven-non-convergent path; MR-4 lease rides the beacon
   `fronted_by`, never the servers map.
+
+## 10. MR-4c — INVITE/KILL CR→legacy bridge (source-grounded, Plan-agent pass 2026-06-17)
+
+Same shape as MR-4b but INVITE/KILL are NOT on the CR-M carrier — they P10-route toward the anchor (a
+STAT_MESH_SERVER dead sink) and die on the originating leaf. Fix: ride them over CR-M to the gateway, re-emit
+as P10 there. The CR-M relay arm forwards ANY `<cmd>` verbatim + `crdt_m_seen` dedups by msgid, so new cmd
+codes `'I'`/`'K'` need NO relay change — only new gateway re-emit branches. **`crdt_route_unicast_try` is
+reused directly** (it already takes `cmd` and is purely mechanical — no need for a separate helper). Reuse
+`FEAT_CRDT_GATEWAY_BRIDGE` (no new flag). **Predicate for "victim/target is a fronted legacy anchor user" =
+`crdt_user_is_mesh_only(x)`** (= `IsMeshStub(srv) && !IsPresented(srv)`).
+
+**Dead-sinks (confirmed):** INVITE `m_invite.c:213` (`sendcmdto_one(...CMD_INVITE...)` → anchor dead-sink);
+KILL `m_kill.c:135` (`sendcmdto_serv_butone` → anchor not in `cli_serv(&me)->down`) PLUS a ghost-kill bug at
+`m_kill.c:176` (`exit_client_msg` removes only the LOCAL copy → diverges till reconcile re-materializes).
+Reverse (legacy-origin → CRDT target) already WORKS via P10 on the gateway — MR-4c is forward-only.
+
+**MR-4c-1 KILL — DONE + VALIDATED 2026-06-17 (FIRST, fixes the ghost-kill divergence):** hook in `do_kill`
+after `log_write_kill`: `if (!MyConnect(victim) && FEAT_CRDT_GATEWAY_BRIDGE && crdt_user_is_mesh_only(victim))
+{ generate_msgid(kmid); crdt_route_unicast_try(sptr,'K',victim,kmid,msg); return 0; }` — routes over CR-M +
+SKIPS the local exit (the doc-driven teardown is the SOLE authority). Gateway re-emit (`m_crdt.c` MR-4b
+branch, new `'K'` dispatch): `sendcmdto_one(srcc, CMD_KILL, tgt, "%C :%s!%s %s", tgt, cli_name(&me),
+cli_name(srcc), m_text)` (path mirrors do_kill's relay). **Teardown (traced):** gateway re-emits → legacy
+removes user + QUITs back over the legacy link → gateway `exit_one_client`→`crdt_shadow_user_remove`:
+`from_crdt_peer(cli_from)` is FALSE (legacy uplink) → writes `crdt_user_remove` tombstone → floods → far
+leaves `reconcile_user_removes` `exit_client` the anchor copy. Inert until the flag (flag off = today's
+behaviour incl. the latent ghost-kill). KILL hazards: ordering benign (document), no mass-kill (single
+findNUser, no wildcard), no doc write on forward (pure transport), msgid via `generate_msgid` (NOT `"*"` —
+distinct KILLs must not dedup).
+
+**MR-4c-2 INVITE — TODO (purely additive notification):** hook the remote-target relay `m_invite.c:213`
+(`if (!crdt_route_unicast_try(sptr,'I',acptr,inv_msgid,chptr->chname)) sendcmdto_one(...)`); gateway re-emit
+`'I'`: `chptr=FindChannel(m_text)`; if live `sendcmdto_one(srcc, CMD_INVITE, tgt, "%s %H %Tu", cli_name(tgt),
+chptr, chptr->creationtime)` (reconstruct `%Tu` from the gateway's OWN channel, NOT the wire) else fall back
+to `"%C :%s"` (non-existent-channel form, `ms_invite.c:324`). invite-list write belongs on legacy (its
+`ms_invite` runs `add_invite` since the target is local there) — CRDT side never calls add_invite for a
+remote target. `RPL_INVITING`/invite-notify to the inviter stay local.
+
+**Validation:** connect a real legacy user to `nefarious`(.2, port 6667). nef7 oper `KILL legacyguy :x` →
+wire: nef7 CR-M `K`, gateway L_INFO "MR-4 bridge: CR-M KILL …", nef3↔legacy P10 KILL, legacyguy disconnects,
+anchor copy vanishes on all CRDT nodes via tombstone, 0 crash. Negative (flag off): "dead-sink … KILL …
+dropped (bridge off)", legacyguy survives.
