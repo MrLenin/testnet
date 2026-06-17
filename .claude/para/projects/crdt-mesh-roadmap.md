@@ -215,8 +215,14 @@ Legacy peers stay on pure P10 at every step (gated by `IsCrdtAware`/`IsCrdtSyncT
 ### Mesh-native routing (the R7b enabler) — scope: `crdt-mesh-native-routing-scope.md`
 The routing layer R7b actually needs. **Primary track = pure-CRDT (MR-0/1/2 + TTL + dedup, no
 legacy gateway) — MR-0/1/2 DONE this session.** Phases MR-0…MR-5 (plan per phase:
-`crdt-mesh-mr0-routing-table.md`, …; **MR-3 fully scoped: `crdt-mesh-mr3-legacy-presence.md`** — the
-legacy-gateway track, beacon-proxied presence NOT the doc servers-map; not scheduled).
+`crdt-mesh-mr0-routing-table.md`, …; **MR-3 scoped + 3a DONE: `crdt-mesh-mr3-legacy-presence.md`** — the
+legacy-gateway track, beacon-proxied presence NOT the doc servers-map).
+- **MR-3a — proxy-beacon legacy presence (inert/shadow)** · M · **DONE 2026-06-17 (submodule `31311cb`).**
+  Gateway proxy-beacons its legacy subtree (single-writer via `!IsCrdtAware(cli_from)`); `crdt_should_suppress_intro`
+  pure fn + cmocka (for 3c); shadow oracle `crdt_shadow_legacy_presence_diff`. Flag `FEAT_CRDT_LEGACY_PRESENCE`
+  (default off). Validated on the hybrid bed (nef3↔legacy testnet↔x3): far leaf nef7 shows testnet+x3
+  `beacon=FRESH`, gateway `ABSENT` (single-writer), inert (SERVER relay still wins), 0 crash. Next: MR-3b
+  (anchor-from-beacon on a cut leaf) → MR-3c (suppress legacy SERVER intro toward CRDT peers, flag-enable).
 - **MR-0 — routing table (observability)** · S · **DONE 2026-06-15 (submodule pending commit).**
   Two net-new pure primitives (cmocka 20/20): `crdt_meshmap_nexthop` (per-viewpoint unicast
   shortest-path first-hop, the MR-1 input) + `crdt_meshmap_canon_tree` (root-free Kruskal-lex

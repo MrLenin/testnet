@@ -87,12 +87,16 @@ assumption).
 
 ## 4. Phasing (inert → shadow → flag-enable). Flag: `FEAT_CRDT_LEGACY_PRESENCE` (default off)
 
-- **MR-3a — proxy-beacon emit + shadow oracle (INERT).** Extend `crdt_gossip_beacon`; do NOT suppress
-  the SERVER relay. Leaves get the legacy server both via P10 (priority — `FindNServer` succeeds, Case-B
-  never fires) and via the proxy-beacon (recorded, harmless). Add a shadow oracle (analog of
-  `crdt_shadow_route_diff` `crdt_shadow.c:1713`, run from the verify timer): per leaf log "legacy server
-  X: P10-present, beacon-fresh, would-anchor-via-beacon." *Proves the beacon reaches every leaf fresh +
-  names/sizes the anchor correctly, zero behavior change.*
+- **MR-3a — proxy-beacon emit + shadow oracle (INERT). DONE 2026-06-17 (submodule `31311cb`).** Extended
+  `crdt_gossip_beacon` (`crdt_proxy_beacon_legacy`): the gateway beacons each legacy server in its subtree,
+  SINGLE-WRITER via `!IsCrdtAware(cli_from(L))` (only the node reaching it via a legacy link beacons it;
+  covers multi-hop — x3 behind testnet). `crdt_should_suppress_intro` pure fn + exhaustive cmocka (for 3c,
+  not wired). Shadow oracle `crdt_shadow_legacy_presence_diff` (verify timer). **Validated on the hybrid
+  bed:** flag on → far leaf nef7 shows BOTH legacy servers (testnet + x3) `beacon=FRESH` (proxy-beacon
+  propagated mesh-wide → Case-B anchorable); gateway shows them `ABSENT` (it emits = single-writer); SERVER
+  relay still wins so no anchor fires (inert); 0 crashes. **Bed note:** after a CRDT-node recreate the
+  legacy `.2`/x3 hold stale links and reject (`All connections in use`) until ping-timeout — restart `.2`
+  (or wait) then `/CONNECT testnet… 4496` to re-form the gateway link.
 - **MR-3b — anchor-from-beacon validated (still no suppress).** On a test leaf, cut the direct P10 path
   to the legacy SERVER (so `FindNServer` fails) with the CR mesh up; confirm Case-B
   `crdt_shadow_make_anchor` fires from the proxy-beacon and materializes the legacy users. *De-risks the
