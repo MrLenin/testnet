@@ -19,3 +19,6 @@ x3cores/
 # Performance profiling
 perf.data*
 perf-*.txt
+
+# leak-soak harness JSONL snapshots (per-run output, not source)
+tests/leak-soak-results/
