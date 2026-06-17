@@ -310,7 +310,14 @@ Mirrors how R4→R6→R7a landed: build inert, measure in shadow, enable behind 
   via the beacon-anchored path (the exact R7b failure case now passes).*
 - **MR-4 — Gateway as the mesh's legacy face.** Formalize P10↔CR translation for all traffic classes;
   define the single/designated-gateway model (§7). *Exit: legacy interop matrix green across cut/relink
-  with the gateway as sole P10 face.*
+  with the gateway as sole P10 face.* **Fully scoped + source-grounded: `crdt-mesh-mr4-gateway-traffic.md`.**
+  Key correction to the bullets above: only **CR→legacy UNICAST** is a real gap (a confirmed dead-sink at
+  `m_crdt.c:646` — floods then drops, because the 'M' handler only does `MyConnect` delivery); channel /
+  all-server / P10→CR-unicast / doc-native bans already work. Fix = a `fronted_by` append-only beacon field
+  + route-to-gateway + a CR→P10 re-emit branch (reusing the R6b channel-bridge idiom). MR-4a (inert oracle +
+  fronted_by) → MR-4b (the bridge, `FEAT_CRDT_GATEWAY_BRIDGE`) → MR-4c (INVITE/KILL) → MR-4d (multi-gateway
+  gating, `legacy_net_id`). NB the §5 "Unicast user" row is WRONG that MR-1 covers it (a legacy anchor has
+  `peers="*"` → unroutable; `fronted_by` is REQUIRED) — see that doc §9.
 - **MR-5 — Retire SERVER/SQUIT/BURST among CRDT peers (= R7b).** With routing + legacy presence fully
   mesh-native, suppress SERVER intros among CRDT-aware-both-ends peers (the thing R7b couldn't do), and
   drop BURST entirely (CR-F already replaces it). One flag, atomic with the rest. *Exit: a pure-CRDT

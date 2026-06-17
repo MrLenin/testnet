@@ -240,6 +240,12 @@ legacy-gateway track, beacon-proxied presence NOT the doc servers-map).
   LINKS but present as `CRDT mesh anchor` with AuthServ on them via the doc; 0 mismatch/crash. **⇒ MR-3
   COMPLETE = the legacy half of R7b.** Remaining R7b half = MR-5 (suppress CRDT-server intros among
   CRDT-both-ends peers). Deferred (MR-4): reverse-PM to an anchor-materialized legacy user (R6c dead-sink).
+- **MR-4 — gateway P10↔CR traffic translation** · L · **SCOPED 2026-06-17: `crdt-mesh-mr4-gateway-traffic.md`.**
+  Only gap = **CR→legacy UNICAST** (dead-sink CONFIRMED at `m_crdt.c:646`: floods then silently drops — the
+  'M' handler only does `MyConnect` delivery; flag-independent). Fix = `fronted_by` append-only beacon field
+  + route-to-gateway + CR→P10 re-emit (R6b idiom). Phasing: MR-4a (inert oracle + fronted_by + dead-sink
+  counter) → MR-4b (the bridge, `FEAT_CRDT_GATEWAY_BRIDGE`; headline = nef7 PMs AuthServ → delivers + reply)
+  → MR-4c (INVITE/KILL) → MR-4d (multi-gateway gating + `legacy_net_id`). All other classes already work.
 - **MR-0 — routing table (observability)** · S · **DONE 2026-06-15 (submodule pending commit).**
   Two net-new pure primitives (cmocka 20/20): `crdt_meshmap_nexthop` (per-viewpoint unicast
   shortest-path first-hop, the MR-1 input) + `crdt_meshmap_canon_tree` (root-free Kruskal-lex
