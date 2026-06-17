@@ -1,7 +1,7 @@
 # CRDT-Mesh MR-4 — Gateway as the mesh's legacy face: P10↔CR traffic translation (scope)
 
-> Status: **MR-4a + MR-4b DONE + live-validated (submodule `f7d35f5`, `93bd33d`); MR-4c (INVITE/KILL) next.** Source-grounded (Plan-agent pass).
-> HEADLINE ACHIEVED: a CRDT user on a leaf with no direct P10 link to legacy PMs a legacy service user and gets a reply.
+> Status: **MR-4a/4b/4c DONE + live-validated; MR-4d (multi-gateway gating) is the only remaining piece.** Source-grounded (Plan-agent passes).
+> HEADLINE ACHIEVED: a CRDT user on a leaf with NO direct P10 link to legacy can PM / KILL / INVITE a legacy user across the §17.7 gateway (PM gets a reply; KILL kills + converges via the doc tombstone; INVITE delivers with the channel). Submodules `f7d35f5`/`93bd33d`/`4ef1a97`/`696ba93`/`a7cb3f5`.
 > Builds on MR-3 (legacy PRESENCE, done — `crdt-mesh-mr3-legacy-presence.md`). MR-4 = legacy TRAFFIC.
 > Read first: `crdt-mesh-native-routing-scope.md` (§0 corrections, the MR-0…MR-5 arc).
 
@@ -179,7 +179,7 @@ behaviour incl. the latent ghost-kill). KILL hazards: ordering benign (document)
 findNUser, no wildcard), no doc write on forward (pure transport), msgid via `generate_msgid` (NOT `"*"` —
 distinct KILLs must not dedup).
 
-**MR-4c-2 INVITE — TODO (purely additive notification):** hook the remote-target relay `m_invite.c:213`
+**MR-4c-2 INVITE — DONE + VALIDATED 2026-06-17 (`a7cb3f5`). ⇒ MR-4c COMPLETE.** As designed below: hook the remote-target relay `m_invite.c:213`
 (`if (!crdt_route_unicast_try(sptr,'I',acptr,inv_msgid,chptr->chname)) sendcmdto_one(...)`); gateway re-emit
 `'I'`: `chptr=FindChannel(m_text)`; if live `sendcmdto_one(srcc, CMD_INVITE, tgt, "%s %H %Tu", cli_name(tgt),
 chptr, chptr->creationtime)` (reconstruct `%Tu` from the gateway's OWN channel, NOT the wire) else fall back

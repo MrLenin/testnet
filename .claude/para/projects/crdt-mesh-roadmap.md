@@ -254,8 +254,12 @@ legacy-gateway track, beacon-proxied presence NOT the doc servers-map).
   forwards any cmd verbatim, reuse `crdt_route_unicast_try`). KILL: do_kill routes `'K'` + SKIPS the local
   exit (fixes a ghost-kill divergence — the doc QUIT-tombstone teardown is the sole authority); gateway
   re-emits P10 KILL; validated nef7-oper KILLs a real legacy user on .2 → killed, source preserved, gone on
-  all CRDT nodes w/ 0 mismatch, 0 crash. → **MR-4c-2 INVITE** (`'I'`, channel `%Tu` reconstructed at gateway)
-  → MR-4d (multi-gateway gating + `legacy_net_id`). All other traffic classes already work.
+  all CRDT nodes w/ 0 mismatch, 0 crash. **MR-4c-2 INVITE DONE 2026-06-17 (`a7cb3f5`)** — `'I'` over CR-M,
+  gateway re-emits P10 INVITE (`%Tu` reconstructed from the gateway's live channel; add_invite happens on
+  legacy); validated nef7 user INVITEs legacyguy to a doc channel → holder receives `:inviter INVITE
+  legacyguy #crdttest`, 0 crash. **⇒ MR-4c COMPLETE** (KILL + INVITE; reuse `FEAT_CRDT_GATEWAY_BRIDGE`). →
+  MR-4d (multi-gateway prevent-by-construction: `legacy_net_id` + establishment gating). All other traffic
+  classes already work.
 - **MR-0 — routing table (observability)** · S · **DONE 2026-06-15 (submodule pending commit).**
   Two net-new pure primitives (cmocka 20/20): `crdt_meshmap_nexthop` (per-viewpoint unicast
   shortest-path first-hop, the MR-1 input) + `crdt_meshmap_canon_tree` (root-free Kruskal-lex
