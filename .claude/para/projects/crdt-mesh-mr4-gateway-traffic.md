@@ -1,6 +1,7 @@
 # CRDT-Mesh MR-4 — Gateway as the mesh's legacy face: P10↔CR traffic translation (scope)
 
-> Status: **MR-4a DONE + live-validated (submodule `f7d35f5`); MR-4b (the bridge) next.** Source-grounded (Plan-agent pass).
+> Status: **MR-4a + MR-4b DONE + live-validated (submodule `f7d35f5`, `93bd33d`); MR-4c (INVITE/KILL) next.** Source-grounded (Plan-agent pass).
+> HEADLINE ACHIEVED: a CRDT user on a leaf with no direct P10 link to legacy PMs a legacy service user and gets a reply.
 > Builds on MR-3 (legacy PRESENCE, done — `crdt-mesh-mr3-legacy-presence.md`). MR-4 = legacy TRAFFIC.
 > Read first: `crdt-mesh-native-routing-scope.md` (§0 corrections, the MR-0…MR-5 arc).
 
@@ -100,9 +101,18 @@ No new transport, no doc change, no new file.
   on the gateway, digest unaffected, 0 crashes. *Scope trim vs the original plan: the `fronted_by` beacon
   field + `/CRDT gateway` oracle moved to MR-4b — `fronted_by` is only USED there (route-to-gateway), so a
   beacon wire change now would propagate an unread field; the log line is sufficient for the 4a proof.*
-- **MR-4b — the CR→P10 unicast bridge (SHADOW→FLAG). HEADLINE.** §3(b) route-to-gateway + §3(c) re-emit,
-  gated `FEAT_CRDT_GATEWAY_BRIDGE`. *Proves nef7→AuthServ DELIVERS + reply returns; `cr_to_p10_bridged`
-  up, `dead_sink_dropped`→0; exactly-once.*
+- **MR-4b — the CR→P10 unicast bridge. HEADLINE. DONE + LIVE-VALIDATED 2026-06-17 (submodule `93bd33d`,
+  log-level bump `<follow-up>`).** Only §3(c) re-emit + flag `FEAT_CRDT_GATEWAY_BRIDGE` (default off); §3(b)
+  route-to-gateway/`fronted_by` **deferred to MR-4d** — proven unnecessary for single-gateway correctness:
+  the CR-M flood already reaches the gateway, only the fronting node passes `!IsCrdtAware(tsrv)`, and
+  `crdt_m_seen` dedups the flood per-node ⇒ exactly-once with no routing change. At the dead-sink branch,
+  `sendcmdto_one(srcc, CMD_PRIVATE/NOTICE, tgt, "%C :%s", tgt, m_text)` (source `findNUser(srcyxx)`, gated
+  `crdt_user_is_mesh_only` as R6b; else count the drop with a reason). TAGMSG deferred (its @tags unicast
+  legacy form differs). **Validated** (x3 a synthetic anchor on far leaf nef7 ⇒ NO P10 path, so genuinely
+  the CR→legacy bridge): nef7 client PMs AuthServ → full HELP reply returns. Gateway wire trace: inbound
+  `CRDT M <id> P AIAAA DHAAC 32 :HELP` → re-emit `@<time> AIAAA P DHAAC :HELP` (source numeric preserved);
+  `dead_sink_dropped`=0, digest converged (0 mismatch), 0 crashes. Bridge log bumped L_DEBUG→L_INFO so the
+  re-emit shows in the SYSTEM log (testnet, per user).
 - **MR-4c — INVITE + KILL (FLAG, same shape) + KILL-vs-trailing-msg ordering.**
 - **MR-4d — multi-gateway prevent-by-construction (`FEAT_CRDT_GATEWAY_GATING`).** `legacy_net_id` +
   establishment gating + standby-promotion; SERVER-collision tiebreak a further deferred sub-step.

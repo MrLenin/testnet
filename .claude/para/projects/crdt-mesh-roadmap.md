@@ -243,11 +243,14 @@ legacy-gateway track, beacon-proxied presence NOT the doc servers-map).
 - **MR-4 — gateway P10↔CR traffic translation** · L · **SCOPED 2026-06-17: `crdt-mesh-mr4-gateway-traffic.md`.**
   Only gap = **CR→legacy UNICAST** (dead-sink CONFIRMED at `m_crdt.c:646`: floods then silently drops — the
   'M' handler only does `MyConnect` delivery; flag-independent). Fix = `fronted_by` append-only beacon field
-  + route-to-gateway + CR→P10 re-emit (R6b idiom). Phasing: **MR-4a DONE 2026-06-17 (submodule `f7d35f5`)**
-  — inert dead-sink counter+log at the 'M' handler (two nef7→AuthServ PMs = two drops on gateway nef3, 0
-  crash; `fronted_by`+`/CRDT gateway` moved to 4b where they're used) → MR-4b (the bridge,
-  `FEAT_CRDT_GATEWAY_BRIDGE`; headline = nef7 PMs AuthServ → delivers + reply) → MR-4c (INVITE/KILL) →
-  MR-4d (multi-gateway gating + `legacy_net_id`). All other classes already work.
+  + route-to-gateway + CR→P10 re-emit (R6b idiom). Phasing: **MR-4a DONE 2026-06-17 (`f7d35f5`)** — inert
+  dead-sink counter (2 nef7→AuthServ PMs = 2 drops on gateway nef3). **MR-4b DONE + HEADLINE ACHIEVED
+  2026-06-17 (`93bd33d`)** — the CR→P10 re-emit (`FEAT_CRDT_GATEWAY_BRIDGE`, default off): nef7 client PMs
+  AuthServ → full reply returns (x3 a synthetic anchor on nef7 ⇒ no P10 path ⇒ genuinely the bridge);
+  wire-traced inbound CR-M → P10 re-emit w/ source preserved; dead-sink 0, 0 crash. `fronted_by`/route-to-
+  gateway proven UNNECESSARY for single-gateway correctness (flood reaches gw + only gw fronts + crdt_m_seen
+  dedup ⇒ exactly-once), deferred to MR-4d. → **MR-4c (INVITE/KILL)** → MR-4d (multi-gateway gating +
+  `legacy_net_id`). All other traffic classes already work.
 - **MR-0 — routing table (observability)** · S · **DONE 2026-06-15 (submodule pending commit).**
   Two net-new pure primitives (cmocka 20/20): `crdt_meshmap_nexthop` (per-viewpoint unicast
   shortest-path first-hop, the MR-1 input) + `crdt_meshmap_canon_tree` (root-free Kruskal-lex
