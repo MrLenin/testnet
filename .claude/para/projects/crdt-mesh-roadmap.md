@@ -221,8 +221,15 @@ legacy-gateway track, beacon-proxied presence NOT the doc servers-map).
   Gateway proxy-beacons its legacy subtree (single-writer via `!IsCrdtAware(cli_from)`); `crdt_should_suppress_intro`
   pure fn + cmocka (for 3c); shadow oracle `crdt_shadow_legacy_presence_diff`. Flag `FEAT_CRDT_LEGACY_PRESENCE`
   (default off). Validated on the hybrid bed (nef3↔legacy testnet↔x3): far leaf nef7 shows testnet+x3
-  `beacon=FRESH`, gateway `ABSENT` (single-writer), inert (SERVER relay still wins), 0 crash. Next: MR-3b
-  (anchor-from-beacon on a cut leaf) → MR-3c (suppress legacy SERVER intro toward CRDT peers, flag-enable).
+  `beacon=FRESH`, gateway `ABSENT` (single-writer), inert (SERVER relay still wins), 0 crash.
+- **MR-3b — validation, surfaced a GAP** · 2026-06-17. Server-presence half good (nef7 shows 3 legacy servers
+  `beacon=FRESH`; CRDT shadow counts 8 = 5 CRDT + 3 legacy, 0 mismatch). Clean network-cut BLOCKED (no
+  NET_ADMIN in containers). **⚠ GAP: legacy USERS not in the doc** (nef7 doc 6 users vs LUSERS 9 — x3 service
+  users missing). Cause: `crdt_shadow_user_add` hooked only at register paths, NOT `ms_nick` (remote-NICK), so
+  the gateway never mints legacy users into the doc → MR-3c would orphan them. **Reshapes MR-3:** add MR-3b′
+  (gateway mints legacy users into the doc; leaves materialize via reconcile_users) BEFORE 3c; and MR-3c must
+  suppress legacy-user P10 traffic toward CRDT peers too (the gateway P10→CR boundary, overlaps MR-4). Verify
+  the gap definitively first. Details in `crdt-mesh-mr3-legacy-presence.md` §4.
 - **MR-0 — routing table (observability)** · S · **DONE 2026-06-15 (submodule pending commit).**
   Two net-new pure primitives (cmocka 20/20): `crdt_meshmap_nexthop` (per-viewpoint unicast
   shortest-path first-hop, the MR-1 input) + `crdt_meshmap_canon_tree` (root-free Kruskal-lex

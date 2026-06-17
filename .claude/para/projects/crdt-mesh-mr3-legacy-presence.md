@@ -97,14 +97,37 @@ assumption).
   relay still wins so no anchor fires (inert); 0 crashes. **Bed note:** after a CRDT-node recreate the
   legacy `.2`/x3 hold stale links and reject (`All connections in use`) until ping-timeout — restart `.2`
   (or wait) then `/CONNECT testnet… 4496` to re-form the gateway link.
-- **MR-3b — anchor-from-beacon validated (still no suppress).** On a test leaf, cut the direct P10 path
-  to the legacy SERVER (so `FindNServer` fails) with the CR mesh up; confirm Case-B
-  `crdt_shadow_make_anchor` fires from the proxy-beacon and materializes the legacy users. *De-risks the
-  anchor path before any suppression.*
-- **MR-3c — suppress the legacy SERVER relay (FLAG-ENABLE).** Flip `FEAT_CRDT_LEGACY_PRESENCE`: the
-  `crdt_should_suppress_intro` guard skips the legacy SERVER intro toward CRDT-aware peers → the
-  proxy-beacon + Case-B anchor become the *only* way a no-direct-link leaf learns the legacy server.
-  *Proves the exact R7b failure case now passes (§5).* Reversible by clearing the flag;
+- **MR-3b — anchor-from-beacon + legacy-user-delivery validation. PARTIAL 2026-06-17 — surfaced a GAP.**
+  Findings on the live hybrid bed (nef3 ↔ legacy testnet ↔ x3 ↔ upstream; **3 legacy servers**):
+  - **Server-presence half: looks good.** nef7 (far leaf) shows all 3 legacy servers `beacon=FRESH`
+    (MR-3a), and its CRDT shadow now counts **8 servers** (5 CRDT + 3 legacy) with 0 mismatch — legacy
+    presence is represented in the CRDT layer.
+  - **Clean network-cut BLOCKED (infra):** containers have no `NET_ADMIN` (no in-container `iptables`);
+    a host-level FORWARD cut is risky on the loaded shared host. The proxy-beacon's value is already
+    proven by MR-3a's `beacon=FRESH`, so the cut is a nice-to-have, not load-bearing.
+  - **⚠ GAP — legacy USERS are (apparently) NOT in the CRDT doc.** nef7 doc = **6/6 users** but LUSERS =
+    **9** network-wide (4 visible + 5 invisible) — the ~3 difference is x3's SERVICE users (AuthServ/
+    ChanServ/OpServ). Root cause: `crdt_shadow_user_add` is hooked only at register paths (`m_oper.c:244`,
+    `s_user.c:1019/1373/2609`) — **NOT at the remote-NICK path (`ms_nick`)** — so a legacy/remote user the
+    gateway learns via P10 NICK is never minted into the doc. **Consequence:** MR-3c (suppress the legacy
+    SERVER intro) would ORPHAN those users on a no-direct-link leaf (no doc fallback) — the scope's "legacy
+    users are already minted into the doc" assumption is **contradicted by the live data** and must be
+    fixed first. **VERIFY definitively, then add an MR-3b′ step: the gateway mints legacy-server users into
+    the doc (hook the remote-NICK path for non-CRDT-sourced users), leaves materialize them onto the
+    beacon-anchor (reconcile_users), validated WITHOUT a cut (just confirm a leaf's doc gains x3's users).**
+- **MR-3b′ — gateway mints legacy users into the doc (PREREQUISITE for 3c, surfaced by 3b).** Hook the
+  remote-NICK path so the gateway mints non-CRDT-sourced (legacy) users into the `users` doc (single-writer:
+  the gateway is the only CRDT node processing the legacy NICK; `from_crdt_peer(cli_from)` is false for a
+  legacy source). Leaves materialize them onto the proxy-beacon anchor via `reconcile_users` (Case-B). Also
+  handle legacy-user QUIT/KILL → doc tombstone. *Validate without a cut: a leaf's doc/verify gains x3's
+  service users; STATS/WHOIS on a leaf sees them.* Until this lands, 3c WILL orphan legacy users.
+- **MR-3c — suppress the legacy SERVER relay + legacy-user P10 traffic toward CRDT peers (FLAG-ENABLE).**
+  Bigger than first scoped: suppressing the legacy SERVER intro alone is insufficient — the legacy server's
+  P10 user NICKs (and other sourced traffic) toward CRDT peers must ALSO be suppressed (else a direct CRDT
+  peer gets an orphan NICK for a now-unknown server prefix). With MR-3b′ done, those users ride the doc +
+  beacon-anchor instead. This is effectively the **gateway P10→CR boundary** that overlaps MR-4 — scope it
+  with that in mind. Wire `crdt_should_suppress_intro` (the SERVER intro) + the legacy-user-traffic
+  suppression. *Proves the R7b failure case passes (§5).* Reversible by clearing the flag;
   `crdt_shadow_server_add` stays a no-op throughout (servers-map never touched).
 
 ## 5. Validation (5-node hybrid bed: nef3–7 + legacy `testnet`/`x3.services`)
