@@ -70,7 +70,12 @@ blind-implement. The headline is a **cross-cutting prerequisite**:
   by NAME (ignores IsServer/IsService). FIX (enabler for B3/B7): propagate the service flag to the anchor —
   carry it on the proxy-beacon (CR H) + `SetService` in `crdt_shadow_make_anchor` when the beacon says the
   server is a service — and/or teach `find_services_server` to accept `IsMeshStub && IsService` anchors.
-- **B3 REGISTER/VERIFY/REGREPLY** (`m_register.c:113/132` fwd, `:391` rev) — token `server!fd.cookie`
+- **B3 REGISTER/VERIFY/REGREPLY — NOT ACTIONABLE (user 2026-06-18): X3 as-is does NOT speak
+  REGISTER/VERIFY/REGREPLY** (essentially unusable). The CR-X carrier already includes the `G`/`V`/`R`
+  cmd codes, so B3 is "carrier-ready, blocked on X3-side implementation" — DROP from the active list until
+  X3 gains these P10 tokens; bridging to a service that ignores them is pointless. (Was the cleanest mirror
+  by token shape, below, hence the detail — kept for if/when X3 implements it.)
+- ~~B3 REGISTER/VERIFY/REGREPLY~~ (`m_register.c:113/132` fwd, `:391` rev) — token `server!fd.cookie`
   (IDENTICAL to SASL) → the reverse uses the proven token-mismatch routing (B1 model). Server-sourced (&me).
   The CLEANEST mirror once the prerequisite is solved. Note `FEAT_REGISTER_SERVER` default "*" → find any
   IsService server (hits the anchor-recognition gap). REGREPLY rev: `find_prereg_client` fails on the gateway
@@ -90,10 +95,12 @@ blind-implement. The headline is a **cross-cutting prerequisite**:
   is the messaging user). Reverse is FREE (the service replies via a normal user-PM → MR-1/MR-4b). Forward
   only, once both are solved. Validatable via `PRIVMSG nick@x3.services`.
 
-**Recommended order for the next session:** (0) the anchor-service-recognition prerequisite [unblocks B3/B7],
-then (1) B3 REGISTER [clean B1 mirror], (2) carrier user-source extension [B6/B7], (3) B7 directed-PM
-[validatable], (4) B6 XQUERY, (5) B2 LOC [the hard one — pick a reverse-routing strategy], (6) B4 rename.
-Each is flag-gated; validate per-subsystem (the carrier itself is proven by B1).
+**Recommended order for the next session (REVISED — B3 dropped, X3 doesn't speak it):** confirm WHICH P10
+service protocols X3 actually speaks first (it speaks SASL [B1 done] + directed-PM; LOC/XQUERY/rename TBD —
+ASK or test). Then: (0) the anchor-service-recognition prerequisite [unblocks B7's IsService check + B6] +
+the carrier user-source extension [B6/B7], (1) **B7 directed-PM** [X3 handles it, the most validatable:
+`PRIVMSG nick@x3.services`], (2) B6 XQUERY [if X3 uses it], (3) B2 LOC [if X3 speaks LOC; the hard reverse].
+B3 REGISTER/B4 rename = blocked on X3-side support. Each is flag-gated; the CR-X carrier is proven by B1.
 
 ## Sub-steps
 1. **S1 mechanism (TDD-first):** `crdt_route_services_try` + `crdt_route_services_reply_try` + `'X'` arm in `ms_crdt` + `crdt_server_is_mesh_only` (crdt_shadow.c) + `FEAT_CRDT_SERVICES_BRIDGE`. **cmocka FIRST.**
