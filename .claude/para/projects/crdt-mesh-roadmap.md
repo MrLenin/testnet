@@ -280,9 +280,14 @@ legacy-gateway track, beacon-proxied presence NOT the doc servers-map).
   stateful-subsystem decision. Regression oracle = the literal R7b case (far leaf 7/7 not 7/0). Unblocks
   MR-4d-3 + the multi-gateway live test. Overlay-as-primary transport = a follow-on MR-6. **MR-5-0 DONE
   2026-06-17 (`45540d1`):** `crdt_server_intro_suppress` shadow oracle (inert) on a SEPARATE flag
-  `FEAT_CRDT_TREE_RETIRE` (not the shared R7a flag — it's already on; controlled cutover). GREEN BOARD live —
-  steady-state would-suppress CRDT subjects all `present=1` fresh ⇒ R7b overturned LIVE; cold-link gap
-  (`present=0` at estab) confirmed ⇒ 5-3 needs the beacon-burst.
+  `FEAT_CRDT_TREE_RETIRE`; GREEN BOARD live. **MR-5-1 DONE (`e48083c`):** KILL/INVITE home-delivery at a CRDT
+  target's home (the gap was home-side delivery, not the predicate) + route hooks decoupled from the bridge
+  flag; legacy no-regression validated. **MR-5-2/5-3 DONE — R7b OVERTURNED, LIVE (`d1fe32a`):** all 3
+  SERVER-relay sites gated (5-2/5-3 collapsed — s_serv.c:287 at-link burst also needs gating); far leaf nef7
+  P10 LINKS = only itself + 1 direct neighbor, 6/6 users materialized via doc onto 8 mesh anchors, 0
+  mismatch (R7b 7/0 → 6/6); cross-CRDT KILL+INVITE deliver via MR-5-1 home-delivery; single digest, oplog=0,
+  0 crash. **⇒ THE P10 SPANNING TREE IS RETIRED AMONG CRDT PEERS.** Remaining: event-driven beacon-burst
+  (cold-link bringup latency, deferred) + MR-5-5 (stateful subsystems MD/CH/MR/BS-BX/CI).
 - **MR-0 — routing table (observability)** · S · **DONE 2026-06-15 (submodule pending commit).**
   Two net-new pure primitives (cmocka 20/20): `crdt_meshmap_nexthop` (per-viewpoint unicast
   shortest-path first-hop, the MR-1 input) + `crdt_meshmap_canon_tree` (root-free Kruskal-lex
