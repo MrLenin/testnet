@@ -96,6 +96,14 @@ MR-5 unblocks the deferred **MR-4d-3** (multi-gateway establishment gating — n
 
 ## 9. MR-5-5 — stateful-subsystem decision (SCOPED 2026-06-17, source-grounded @ `aaaf8b4`)
 
+> **SUPERSEDED/EXPANDED by the comprehensive S2S audit → `crdt-mesh-s2s-gap-audit.md` (2026-06-17).** The
+> 7-subsystem view below is correct but INCOMPLETE — the full `sendcmdto_*` sweep found more: holes in
+> already-"DONE" work (directed `/msg nick@server` never got the MR-1 guard `ircd_relay.c:1135/1248`; INVITE
+> guarded at only 1 of 4 sites `m_invite.c:341/367/369`) + a services-reachability class FAR broader than the
+> scoped SASL relay (LOC/REGISTER/VERIFY/rename/XQUERY all dead-sink to the x3 anchor). Use the audit doc's
+> tiered list (A=DONE-holes, B=services class, C=other correctness, D=converges-but-scoped-leg, E=ops) as the
+> go-live checklist; the sub-step order below is revised in the audit's "Sequencing suggestion".
+
 **The one mechanism that governs everything (verified):** an anchor is `make_client(NULL, STAT_MESH_SERVER)` (`crdt_shadow.c:870`) with `fd=-1`, `cli_serv->updown=NULL`, and **NO `add_dlink`** — so it is NOT in `cli_serv(&me)->down`. Therefore:
 - **Broadcast** (`sendcmdto_serv_butone[/_v3]`) iterates `cli_serv(&me)->down` (`send.c:1884,2020`) = direct physical CRDT↔CRDT P10 links only → **never touches an anchor**, propagates hop-by-hop over the still-alive direct links → **WORKS** (given the keystone's mixed-path `p10Only==0` invariant).
 - **Targeted** `sendcmdto_one(..., <server-or-user-resolved-through-an-anchor>, ...)` → `cli_from()` is the dead-sink fd=-1 → **silently dropped** → BREAKS.
