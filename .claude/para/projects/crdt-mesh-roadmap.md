@@ -257,9 +257,15 @@ legacy-gateway track, beacon-proxied presence NOT the doc servers-map).
   all CRDT nodes w/ 0 mismatch, 0 crash. **MR-4c-2 INVITE DONE 2026-06-17 (`a7cb3f5`)** — `'I'` over CR-M,
   gateway re-emits P10 INVITE (`%Tu` reconstructed from the gateway's live channel; add_invite happens on
   legacy); validated nef7 user INVITEs legacyguy to a doc channel → holder receives `:inviter INVITE
-  legacyguy #crdttest`, 0 crash. **⇒ MR-4c COMPLETE** (KILL + INVITE; reuse `FEAT_CRDT_GATEWAY_BRIDGE`). →
-  MR-4d (multi-gateway prevent-by-construction: `legacy_net_id` + establishment gating). All other traffic
-  classes already work.
+  legacyguy #crdttest`, 0 crash. **⇒ MR-4c COMPLETE** (KILL + INVITE; reuse `FEAT_CRDT_GATEWAY_BRIDGE`).
+  **MR-4d-election DONE 2026-06-17 (`f3c8c71`)** — multi-gateway double-delivery prevented: append-only
+  `fronted_by` proxy-beacon positional + `min_fronter` tracking + pure `crdt_gateway_should_standby` (cmocka
+  8-row) ⇒ only the lowest-numeric gateway re-emits; stale min ⇒ promote. Validated single-gateway
+  (fronted_by=AD propagates N-hop, PM still replies, standby=0, 0 crash). **2-gateway live test is inherently
+  POST-MR-5** (a 2nd P10 gateway loops today — nef3 bursts CRDT servers to legacy). **MR-4d-3** (legacy_net_id
+  conf + establishment gating + standby-promotion, `FEAT_CRDT_GATEWAY_GATING`) DEFERRED post-MR-5 (only
+  prevents a 2nd active gateway, which can't exist pre-MR-5). **⇒ MR-4 CLOSED for the single-gateway target;
+  MR-4d-3 + multi-gw live test ride with MR-5.** All other traffic classes already work.
 - **MR-0 — routing table (observability)** · S · **DONE 2026-06-15 (submodule pending commit).**
   Two net-new pure primitives (cmocka 20/20): `crdt_meshmap_nexthop` (per-viewpoint unicast
   shortest-path first-hop, the MR-1 input) + `crdt_meshmap_canon_tree` (root-free Kruskal-lex

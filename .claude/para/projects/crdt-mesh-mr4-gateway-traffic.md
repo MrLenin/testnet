@@ -1,7 +1,7 @@
 # CRDT-Mesh MR-4 — Gateway as the mesh's legacy face: P10↔CR traffic translation (scope)
 
-> Status: **MR-4a/4b/4c DONE + live-validated; MR-4d (multi-gateway gating) is the only remaining piece.** Source-grounded (Plan-agent passes).
-> HEADLINE ACHIEVED: a CRDT user on a leaf with NO direct P10 link to legacy can PM / KILL / INVITE a legacy user across the §17.7 gateway (PM gets a reply; KILL kills + converges via the doc tombstone; INVITE delivers with the channel). Submodules `f7d35f5`/`93bd33d`/`4ef1a97`/`696ba93`/`a7cb3f5`.
+> Status: **MR-4 ESSENTIALLY COMPLETE — 4a/4b/4c/4d-election DONE + live-validated.** Only MR-4d-3 (establishment gating + legacy_net_id) remains, and it is inherently POST-MR-5 (deferred, see §11). Source-grounded (Plan-agent passes).
+> HEADLINE ACHIEVED: a CRDT user on a leaf with NO direct P10 link to legacy can PM / KILL / INVITE a legacy user across the §17.7 gateway (PM gets a reply; KILL kills + converges via the doc tombstone; INVITE delivers with the channel); multi-gateway double-delivery is prevented by a lowest-fronter election. Submodules `f7d35f5`/`93bd33d`/`4ef1a97`/`696ba93`/`a7cb3f5`/`f3c8c71`.
 > Builds on MR-3 (legacy PRESENCE, done — `crdt-mesh-mr3-legacy-presence.md`). MR-4 = legacy TRAFFIC.
 > Read first: `crdt-mesh-native-routing-scope.md` (§0 corrections, the MR-0…MR-5 arc).
 
@@ -191,3 +191,34 @@ remote target. `RPL_INVITING`/invite-notify to the inviter stay local.
 wire: nef7 CR-M `K`, gateway L_INFO "MR-4 bridge: CR-M KILL …", nef3↔legacy P10 KILL, legacyguy disconnects,
 anchor copy vanishes on all CRDT nodes via tombstone, 0 crash. Negative (flag off): "dead-sink … KILL …
 dropped (bridge off)", legacyguy survives.
+
+## 11. MR-4d — multi-gateway double-delivery election (DONE) + MR-4d-3 (deferred, post-MR-5)
+
+**The failure mode (confirmed):** the re-emit gate (`m_crdt.c`, `IsServer(tsrv) && !IsCrdtAware(tsrv) && …`)
+is purely LOCAL — it asks "do I front this legacy server?". With TWO CRDT gateways fronting the same legacy
+net, BOTH pass it and BOTH re-emit a CR-M unicast as P10 ⇒ the legacy user gets PM/KILL/INVITE **twice**.
+
+**MR-4d-election DONE + validated 2026-06-17 (`f3c8c71`):** an append-only `fronted_by` positional on the
+CR H proxy-beacon carries the FRONTING gateway's own numeric (emit + 'H' parse/relay, backward-compatible).
+`crdt_beacon[]` tracks `min_fronter` (lowest gateway seen beaconing a legacy numeric) + freshness; the
+re-emit branch defers to the pure `crdt_gateway_should_standby(my, fronter, fresh)` (cmocka 8-row) — stand
+down iff a FRESH fronter is strictly lower ⇒ exactly the lowest-numeric gateway re-emits (agreement-by-rule,
+no consensus). A stale min ⇒ departed ⇒ promote (gateway-loss handoff, inline, no sweep). Reuses
+`FEAT_CRDT_GATEWAY_BRIDGE`. Validated single-gateway: `fronted_by`=AD emitted + propagated N-hop to nef7;
+PM still replies (no regression); `standby_suppressed`=0 (no false standby); 0 crash, digest converged.
+
+**THE LIVE-VALIDATION CONSTRAINT (no silent defer):** the two-gateway double-delivery test is inherently
+**post-MR-5**. A 2nd P10 gateway to the same legacy net creates a spanning-tree LOOP today: since MR-5 isn't
+done, nef3 P10-bursts the CRDT servers (nef4-7) to legacy, so legacy already knows leaf2 (nef4) via hub2
+(nef3) ⇒ nef4 linking directly to legacy collides (duplicate SERVER → SQUIT). Multi-gateway only becomes
+possible once the CRDT servers are mesh-only (MR-5). The election is correct-by-construction for that point;
+the DECISION is cmocka-pinned and the `fronted_by`→`min_fronter` integration is exercised live.
+
+**MR-4d-3 — DEFERRED (post-MR-5 refinement).** `legacy_net_id` (Connect-block conf field, modeled on
+`connectsslfp` in `ircd_parser.y`/`ircd_lexer.l`/`s_conf.h`) + deterministic establishment gating at
+`server_estab` (default-active/demote-later, NOT gate-at-estab — avoids false-positive gating a legitimate
+sole gateway during convergence) + standby-promotion-on-stale + clean SQUIT-on-loss; new flag
+`FEAT_CRDT_GATEWAY_GATING`. It PREVENTS a 2nd active gateway (silences the cosmetic beacon-flap the election
+already renders harmless) — only meaningful once multi-gateway is possible (post-MR-5). Split-brain-both-
+healthy P10 SERVER-collision tiebreak is a further-deferred sub-step. ⇒ **MR-4 closed for the single-gateway
+target topology; MR-4d-3 + the multi-gateway live test ride with MR-5.**
