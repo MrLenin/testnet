@@ -1,5 +1,20 @@
 # CRDT-Mesh services-anchor bridge (Tier B) — design + plan
 
+> **★ B1 (SASL) DONE + LIVE-VALIDATED 2026-06-18 (submodule `5e1f5dd`).** testadmin SASL PLAIN on nef7
+> (`SASL_LOCAL=FALSE` → Path-3; x3 a mesh-only anchor) succeeds end-to-end in 0.1s (903 + 900 logged in),
+> wire-traced forward (leaf→gateway→x3) + reverse (x3→gateway→leaf); 5 CRDT + legacy + x3 all 0 crashes.
+> CR-X carrier built exactly as designed. **THREE implementation corrections found via live debugging
+> (all fixed):** (1) the CR-X frame must carry the **originating server** (`srcSrvYXX`) so the gateway
+> re-emits to x3 with that source → x3 replies to the origin, not the gateway. (2) **Gateway-as-proxy
+> reverse:** under tree-retirement x3 only knows the gateway, so when the gateway lacks the origin's
+> anchor it re-emits with `src=&me` and x3 replies to the GATEWAY — caught at the **token-prefix-mismatch**
+> path in `ms_sasl` (route by the token's first-2-char server numeric, `crdt_route_services_reply_by_num`).
+> Both reverse paths now exist (the `!IsMe` owner path when the gateway has the anchor + the token-mismatch
+> fallback). (3) The leaf re-inject runs `ms_sasl(sptr=&me)`, whose `IsServer(sptr)` guard rejected it →
+> relaxed to accept `IsMe` (a mesh-validated local re-injection, unforgeable by a client). **B2-B6 + B7 =
+> NEXT (same carrier; sites enumerated below). B7 needs the carrier to also carry a USER source.**
+
+
 > Source-grounded design (Plan agent @ `82d1a75`, 2026-06-18). Fixes the S2S-audit Tier B class:
 > a far CRDT leaf reaches x3.services ONLY as a mesh anchor (dead-sink) — every command TO x3 and
 > reply FROM x3 drops. X3 SASL is a non-negotiable prod-blocker. Companion: `crdt-mesh-s2s-gap-audit.md`.

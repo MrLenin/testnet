@@ -52,7 +52,7 @@ The MR-5-5 "SASL gateway-translate" must be generalized to a **services-anchor b
 class, not just `m_authenticate.c`/`m_sasl.c`.
 | # | Gap | Site(s) |
 |---|---|---|
-| B1 | SASL relay (already scoped) | `m_authenticate.c:283-294`, `m_sasl.c:150/153/303`, `m_endburst.c:228` |
+| B1 | SASL relay — **✅ DONE + LIVE-VALIDATED 2026-06-18 (`5e1f5dd`)** via the CR-X services-anchor bridge (testadmin SASL over the mesh, 0.1s, 0 crash). The carrier (CR X) + the gateway-proxy reverse model are proven; B2-B7 ride it. | `m_authenticate.c` (sasl_forward), `m_sasl.c` (reverse: !IsMe owner + token-mismatch) |
 | B2 | LOC origination → x3 (CMD_ACCOUNT S/H/C) | `s_auth.c:496/501/507` |
 | B3 | REGISTER / VERIFY → x3 | `m_register.c:113` (RG), `:132` (VF); back-leg REGREPLY `:392` |
 | B4 | AC R rename-permission → x3 | `m_rename.c:435` |
