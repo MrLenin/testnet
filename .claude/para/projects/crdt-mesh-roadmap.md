@@ -286,8 +286,13 @@ legacy-gateway track, beacon-proxied presence NOT the doc servers-map).
   SERVER-relay sites gated (5-2/5-3 collapsed — s_serv.c:287 at-link burst also needs gating); far leaf nef7
   P10 LINKS = only itself + 1 direct neighbor, 6/6 users materialized via doc onto 8 mesh anchors, 0
   mismatch (R7b 7/0 → 6/6); cross-CRDT KILL+INVITE deliver via MR-5-1 home-delivery; single digest, oplog=0,
-  0 crash. **⇒ THE P10 SPANNING TREE IS RETIRED AMONG CRDT PEERS.** Remaining: event-driven beacon-burst
-  (cold-link bringup latency, deferred) + MR-5-5 (stateful subsystems MD/CH/MR/BS-BX/CI).
+  0 crash. **⇒ THE P10 SPANNING TREE IS RETIRED AMONG CRDT PEERS.** **Event-driven beacon-burst DONE — LIVE
+  (`aaaf8b4`):** `crdt_shadow_beacon_burst` from `server_finish_burst` hands a freshly-linked CRDT peer the
+  full beacon set (self + proxy-legacy via new single-target `crdt_gossip_beacon_to`, plus a replay of every
+  fresh far-server beacon) at link time. LOAD-BEARING (not just latency): Case-B materialize needs a fresh
+  beacon (crdt_shadow.c:2306). Validated: leaf restart → uplink logs `+7 replayed far-server beacon(s) at
+  link time`, leaf materializes all 6 users + 3 channels the SAME second; 5/5 one digest, oplog=0, 0 crash.
+  Remaining: MR-5-5 (stateful subsystems MD/CH/MR/BS-BX/CI).
 - **MR-0 — routing table (observability)** · S · **DONE 2026-06-15 (submodule pending commit).**
   Two net-new pure primitives (cmocka 20/20): `crdt_meshmap_nexthop` (per-viewpoint unicast
   shortest-path first-hop, the MR-1 input) + `crdt_meshmap_canon_tree` (root-free Kruskal-lex
