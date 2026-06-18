@@ -91,3 +91,37 @@ Bed gotchas: nftables → `iptables-nft` via netshoot `--cap-add NET_ADMIN`; aft
 
 ## 8. Relationship to the rest of the roadmap
 MR-5 unblocks the deferred **MR-4d-3** (multi-gateway establishment gating — needs CRDT servers mesh-only to even have a 2nd gateway) + the **MR-4d multi-gateway double-delivery LIVE test**. The overlay-as-primary transport promotion is a follow-on **MR-6**. The stateful-subsystem CR transport (MR-5-5) is the largest remaining unknown after the SERVER cutover.
+
+---
+
+## 9. MR-5-5 — stateful-subsystem decision (SCOPED 2026-06-17, source-grounded @ `aaaf8b4`)
+
+**The one mechanism that governs everything (verified):** an anchor is `make_client(NULL, STAT_MESH_SERVER)` (`crdt_shadow.c:870`) with `fd=-1`, `cli_serv->updown=NULL`, and **NO `add_dlink`** — so it is NOT in `cli_serv(&me)->down`. Therefore:
+- **Broadcast** (`sendcmdto_serv_butone[/_v3]`) iterates `cli_serv(&me)->down` (`send.c:1884,2020`) = direct physical CRDT↔CRDT P10 links only → **never touches an anchor**, propagates hop-by-hop over the still-alive direct links → **WORKS** (given the keystone's mixed-path `p10Only==0` invariant).
+- **Targeted** `sendcmdto_one(..., <server-or-user-resolved-through-an-anchor>, ...)` → `cli_from()` is the dead-sink fd=-1 → **silently dropped** → BREAKS.
+
+**So the single discriminator per subsystem = does its S2S flow do a targeted send to an anchor-resolved server, or is it a pure broadcast?** There are **zero `hunt_server` uses** in any of the 7 subsystems.
+
+### Gap matrix (one row per subsystem)
+
+| # | Subsystem | Wire / files | Routing | Verdict | DECISION |
+|---|---|---|---|---|---|
+| 1 | Metadata MD/MDQ | `m_metadata.c`,`metadata.c` | MD sync = `serv_butone_v3` broadcast (`:799,1516`); GET local-only (MDQ vestigial, replies to `cptr`) | **WORKS-AS-IS** | accept-as-is |
+| 2 | Read-marker MR | `m_markread.c` | broadcast only (`:368,447`); session markers local | **WORKS-AS-IS** | accept-as-is |
+| 3 | Cache-inval CI | `sasl_webhook.c` | flood-fill broadcast (`:137-187`,`ms_cacheinval:328`) | **WORKS-AS-IS** | accept-as-is |
+| 4 | Redaction RD | `m_redact.c` | live redact = broadcast (`:323,431`); fed msgid-lookup shares CH | **WORKS** (fed sub-path degrades w/ CH) | accept-as-is; fed folds into CH |
+| 5 | SASL relay / AC | `m_sasl.c`,`m_authenticate.c`,`m_account.c` | AC = broadcast (`sasl_auth.c:622`) + doc-carried (WORKS). **Path-3 relay** `sendcmdto_one(&me,CMD_SASL,acptr,…)` to x3 (`m_authenticate.c:283-294`) + `ms_sasl` reply leg (`m_sasl.c:148-155`) + LOC (`m_account.c:310-364`) → **x3/origin is an ANCHOR on a far leaf** | **AC WORKS; relay BREAKS** (only mechs that fall through to Path-3; bed's local-Keycloak absorbs PLAIN/OAUTHBEARER) | **shadow-measure FIRST → gateway-translate iff traffic, else accept-degraded** |
+| 6 | Chathistory CH | `m_chathistory.c`,`history.c` | local STORE answers GET from own RocksDB (WORKS). **Federated Q/W** `sendcmdto_one(&me,CMD_CHATHISTORY,server,…)` where `server=FindNServer()` resolves an anchor (`:1982,2509,3807`) | **DEGRADES** (cross-server fed query dropped; local history fine) | **accept-degraded for PoC** (every node is STORE; fed = redundancy). Harden the `FedRequest` timeout. CR-M route = follow-on |
+| 7 | Bouncer BS/BX | `bouncer_session.c`,`m_bouncer.c` | BS convergence = broadcast (WORKS). **BX E/M** `sendcmdto_one(sptr,CMD_BOUNCER_TRANSFER,target,…)` to a remote alias (`:8235,8820`); aliases are deliberately EXCLUDED from the doc (`IsBouncerAlias` skipped `crdt_shadow.c:558,583,1729`) | **BS WORKS / BX BREAKS**, but **`FEAT_BOUNCER_ENABLE=0` in the bed** | **accept-degraded** (subsystem off; CR-M route is future, must respect alias invariants — bouncer-analyst review) |
+
+### Sub-step order
+- **MR-5-5a — SASL shadow-measure (FIRST; the only genuine hot-path break).** Read-only dead-sink probe (mirror MR-5-0 / `crdt_dead_sink_dropped`): log every targeted `sendcmdto_one` in m_sasl/m_authenticate/m_account(LOC) whose resolved target `IsMeshStub`/dead-sink, on nef7. Run the bed SASL tests against the far leaf. **The measurement IS the decision gate:** count==0 (Keycloak absorbs all live mechs) → accept-degraded + a guarded log; count>0 → build 5-5b.
+- **MR-5-5b — SASL gateway-translate** (ONLY if 5-5a measures real traffic). New CR-M cmd code `'S'` for the leaf↔gateway SASL hop + gateway CR→P10 re-emit toward x3 + reverse for the reply, keyed on the `<yxx>!fd.cookie` token; mirrors the MR-4b/4c bridge (`m_crdt.c:713-784`). Gate the re-emit on the EXISTING `FEAT_CRDT_GATEWAY_BRIDGE`. Auth-critical + timeout-sensitive → isolate. cmocka: the token split + relay-vs-broadcast decision.
+- **MR-5-5c — CH accept-degraded hardening.** Skip anchored `server_ads[]` entries so a federated `CH Q` doesn't wedge a `FedRequest` on an impossible reply (clean timeout). No CR-M build.
+- **MR-5-5d — doc-only decisions** for MD/MR/CI/RD (accept-as-is) + bouncer (accept-degraded, off). One commit recording rationale + the dead-sink counter logs.
+
+### Flag strategy
+Reuse **`FEAT_CRDT_TREE_RETIRE`** for accept-degraded guards + shadow logging (inseparable from the retirement they react to). If 5-5b is built, gate its re-emit on the existing **`FEAT_CRDT_GATEWAY_BRIDGE`** (same class as MR-4b/4c). No new per-subsystem flags.
+
+### Shadow-measurement plan (run on the live bed BEFORE building)
+Principle: do not over-build CR transport for a flow that never crosses a dead-sink. Add the read-only probe (§MR-5-5a), exercise each subsystem from nef7 (SASL login; a federated CHATHISTORY query for a far-only-archived channel; set metadata / mark-read / Keycloak account change / redact — confirm broadcasts reach all 5 + target no anchor; bouncer skipped, off), and gate build-vs-accept on the per-subsystem anchor-target count. **SASL is the single decisive measurement.**
