@@ -278,7 +278,11 @@ legacy-gateway track, beacon-proxied presence NOT the doc servers-map).
   `p10Only==0`). Sub-steps: 5-0 shadow oracle (inert) → 5-1 KILL/INVITE → 5-2 suppress SERVER relay
   (`m_server.c`) → 5-3 suppress at `server_estab` + event-driven beacon-burst → 5-4 BURST verify → 5-5
   stateful-subsystem decision. Regression oracle = the literal R7b case (far leaf 7/7 not 7/0). Unblocks
-  MR-4d-3 + the multi-gateway live test. Overlay-as-primary transport = a follow-on MR-6.
+  MR-4d-3 + the multi-gateway live test. Overlay-as-primary transport = a follow-on MR-6. **MR-5-0 DONE
+  2026-06-17 (`45540d1`):** `crdt_server_intro_suppress` shadow oracle (inert) on a SEPARATE flag
+  `FEAT_CRDT_TREE_RETIRE` (not the shared R7a flag — it's already on; controlled cutover). GREEN BOARD live —
+  steady-state would-suppress CRDT subjects all `present=1` fresh ⇒ R7b overturned LIVE; cold-link gap
+  (`present=0` at estab) confirmed ⇒ 5-3 needs the beacon-burst.
 - **MR-0 — routing table (observability)** · S · **DONE 2026-06-15 (submodule pending commit).**
   Two net-new pure primitives (cmocka 20/20): `crdt_meshmap_nexthop` (per-viewpoint unicast
   shortest-path first-hop, the MR-1 input) + `crdt_meshmap_canon_tree` (root-free Kruskal-lex
