@@ -65,6 +65,14 @@ anchor by the gateway). Single fix family. **B6 (XQUERY) is open-ended** — any
 XQUERY silently drops; if none do, B6 can be accept-degraded, but B1–B5 are required (X3 SASL/registration
 is non-negotiable for prod).
 
+> **★ CONSOLIDATED + DEEPENED 2026-06-18 → `crdt-mesh-tier-c-scope.md`** (two agent passes @ `e5cd75c`).
+> Key correction: **"BOUNCER BS = broadcast WORKS" (below + MR-5 §9 row 7) is TRUE ONLY ON A FULL MESH.**
+> The bed is a partial mesh → BS/`BX C/X/U/V` (`sendcmdto_serv_butone_v3` over `->down`) don't cross a
+> multi-hop-only CRDT pair → the alias is doubly absent (doc-excluded AND never created). So 5-5e =
+> BS-convergence-first (new CR 'B' carrier), bigger than C2 records. Also: BATCH `route_to` unknown
+> RESOLVED (all MyConnect → not Tier C); C3 REDACT broadcast-covered (no work); C4 OPER accept-degraded;
+> the real C1 surprise is the CHANNEL-multiline hole (`m_batch.c:1522`). See the scope doc.
+
 ### Tier C — other correctness gaps
 | # | Gap | Site(s) | Treatment |
 |---|---|---|---|
