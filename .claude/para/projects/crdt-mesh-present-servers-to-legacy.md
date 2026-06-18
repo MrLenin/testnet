@@ -1,9 +1,24 @@
 # CRDT-Mesh "B0 / MR-3d" — present mesh servers to legacy (natural services-reply routing)
 
+> **★ DONE + LIVE-VALIDATED 2026-06-18 (submodule `e5cd75c`, crdt-mesh). B2 LOC done with it.**
 > Source-grounded design (Plan agent @ `5e1f5dd`, 2026-06-18; user-confirmed direction). The clean
 > foundation that makes services-reply routing (SASL, LOC, any X3 P10 flow) just normal P10 routing,
-> REMOVING the per-subsystem reverse-routing hacks. Lands BEFORE B2 LOC; retroactively simplifies B1.
+> REMOVING the per-subsystem reverse-routing hacks. Landed BEFORE B2 LOC; retroactively simplified B1.
 > Companion: `crdt-mesh-services-bridge.md`, `crdt-mesh-mr3-legacy-presence.md`.
+>
+> **What shipped (vs the plan below):** S1 sweep = `crdt_present_one` / `crdt_shadow_present_mesh_servers`
+> (verify timer, before reconcile) + `crdt_shadow_present_one_num` (CR-H ingest fast path, m_crdt.c) —
+> reuses R6c `crdt_present_stub`/`make_anchor` wholesale; only the beacon-driven trigger is new. S3 LOC
+> reverse = the one-liner at m_account.c (type-A/D `!IsMe` branch → `crdt_route_services_reply_try`). PLUS
+> two things the plan under-scoped: (a) the LOC **forward** also needs tunneling — `loc_forward()` in
+> s_auth.c (3 PASS-LOC sites, explicit NumNick numerics); (b) **ms_account needed the same IsMe relaxation
+> as B1's ms_sasl** — the leaf re-inject runs `ms_account(&me,&me,…)` and the `if(!IsServer(sptr))
+> protocol_violation("ACCOUNT from non-server")` guard rejected it (THE bug live-testing caught; the LOC
+> analog of B1 correction #3). S4 (remove SASL token-mismatch fallback) DEFERRED 1 release (risk #5);
+> validation confirmed SASL now uses the clean owner-path so it's dead-but-safe. EXTENDED_ACCOUNTS=TRUE
+> required on the leaf to trigger PASS-LOC (`PASS :/account/password`). **Validated:** sweep presents
+> user-less leaf4+leaf5, legacy ACCEPTS the J10 anchors, `PASS :/testadmin/testadmin123` on nef7 → logged
+> in sub-second over the retired tree (x3 replied to :leaf5), B1 SASL still PASS, 0 crashes.
 
 ## The core insight
 
