@@ -40,8 +40,11 @@ A far CRDT server / its users / x3.services / legacy servers exist on a remote C
 ### Tier A — correctness, user-facing, HOLES IN ALREADY-"DONE" WORK (fix first; small)
 | # | Gap | Site(s) | Why it breaks | Fix |
 |---|---|---|---|---|
-| A1 | **Directed PM/NOTICE** `/msg nick@server` | `ircd_relay.c:1135` (PRIVMSG), `:1248` (NOTICE) | `relay_directed_*` calls bare `sendcmdto_one(from,CMD_PRIVATE/NOTICE,acptr,…)` — the MR-1 `crdt_route_unicast_try` guard exists on the PRIVATE path (`:1406`) but was NEVER added here → anchored target dead-sinks | add the same `crdt_route_unicast_try(sptr,'P'/'N',acptr,…)` guard. **Quick win — closes an MR-1 hole.** |
-| A2 | **INVITE relays** (3 of 4 sites) | `m_invite.c:341, 367, 369` | only `:227` got the MR-4c `crdt_user_is_mesh_only→crdt_route_unicast_try('I')` guard; the other three relay sites are bare `sendcmdto_one(sptr,CMD_INVITE,acptr,…)` → anchored invitee dead-sinks | extend the `crdt_user_is_mesh_only` guard to all three. **Quick win — closes an MR-4c hole.** |
+| A2 | **INVITE relays in `ms_invite`** | `m_invite.c:341` (non-existent channel) + `:369` (remote). **NOT `:367`** (the `MyConnect` LOCAL branch). | the `ms_invite` S2S relay sites were bare `sendcmdto_one` → anchored invitee dead-sinks | **✅ DONE + LIVE-VALIDATED 2026-06-18 (`a0e3b50` + `82d1a75`).** Plus an `ich==NULL` branch in the CR-M 'I' HOME handler (`m_crdt.c:688`) for the non-existent-channel form. **NB — live-testing found the guard PREDICATE itself was wrong** (see below). |
+
+> **⚠ PRESENTED-STUB ROUTING BUG (found + fixed 2026-06-18, `82d1a75`) — a deeper, pre-existing defect than A2.** MR-5-1/MR-4c gated INVITE/KILL mesh-routing on `crdt_user_is_mesh_only(target)` (= `IsMeshStub && !IsPresented`). On the GATEWAY, R6c PRESENTS an anchored stub to legacy (`SetPresented`), so that predicate is **false** for a presented stub's users — but their `cli_from` is still the dead-sink anchor, so the P10 fallback silently drops the INVITE/KILL. **PRIVMSG never had this** — it calls `crdt_route_unicast_try` UNCONDITIONALLY (keyed on `IsMeshStub`), P10 fallback only on 0. Fixed all INVITE sites (`m_invite.c:224/341/369`) + KILL (`m_kill.c:142`) to the PRIVMSG pattern. Live-validated: Alice@nef3 INVITE Bob@nef7 (a presented stub on nef3) now delivers (wire-traced CR-M 'I' → home delivery); was dropped. **Lesson: `crdt_user_is_mesh_only` is correct for §17.7 legacy-EMIT gates but WRONG as a CR-M routing predicate — audit any other site that routes on it.** MR-5-1's earlier "INVITE validated" only exercised a target-LOCAL invitee (MyConnect branch), never this cross-node presented-stub path.
+
+**A1 RECLASSIFIED → Tier B (was mis-scoped here).** On reading the code to implement: `relay_directed_message`/`_notice` (`ircd_relay.c:1135/1248`) target a **services SERVER** (`acptr = FindServer(server+1)` gated `IsService`), NOT a remote user (the auditor's "remote user" was wrong — directed `nick@server` is services-only since the Vampire- brute-force fix). So `crdt_route_unicast_try` (which needs `cli_user(tgt)`) does NOT apply — this is the same x3-services dead-sink as the rest of Tier B, and its fix is the services-anchor bridge, not an MR-1 guard-extend. See B7 below.
 
 ### Tier B — the SERVICES-REACHABILITY class (broader than the scoped SASL relay) — CORRECTNESS
 All target the x3 pseudo-server (or the requesting server's back-leg), which is an **anchor** on a CRDT leaf.
@@ -55,6 +58,7 @@ class, not just `m_authenticate.c`/`m_sasl.c`.
 | B4 | AC R rename-permission → x3 | `m_rename.c:435` |
 | B5 | AC A/D LOC reply | `m_account.c:318/321/324/364` |
 | B6 | **XQUERY / XREPLY** (open-ended services query channel) | `m_xquery.c:116/144`, `s_auth.c:2942`, `m_xreply.c:123` |
+| B7 | **Directed PM/NOTICE `nick@services`** (was mis-scoped as Tier A1) | `ircd_relay.c:1135` (PRIVMSG), `:1248` (NOTICE) — `sendcmdto_one(from,CMD_PRIVATE/NOTICE, services-server, …)`; the server is an anchor on a far leaf |
 
 **Treatment:** route the whole to-/from-services class over the MR-4b CR-M gateway bridge (x3 fronted as an
 anchor by the gateway). Single fix family. **B6 (XQUERY) is open-ended** — any X3 module using cross-mesh
