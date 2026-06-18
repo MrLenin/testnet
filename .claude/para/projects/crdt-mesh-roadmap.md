@@ -266,6 +266,19 @@ legacy-gateway track, beacon-proxied presence NOT the doc servers-map).
   conf + establishment gating + standby-promotion, `FEAT_CRDT_GATEWAY_GATING`) DEFERRED post-MR-5 (only
   prevents a 2nd active gateway, which can't exist pre-MR-5). **⇒ MR-4 CLOSED for the single-gateway target;
   MR-4d-3 + multi-gw live test ride with MR-5.** All other traffic classes already work.
+- **MR-5 — retire the P10 SERVER/BURST tree among CRDT peers (THE KEYSTONE)** · L · **SCOPED 2026-06-17:
+  `crdt-mesh-mr5-tree-retirement.md`.** The SERVER-intro half of tree-retirement (R7a did SQUIT). **VERDICT:
+  the R7b "infeasible" verdict is OVERTURNED** — R7b orphaned entities because the suppressed server's
+  dependents (legacy x3) didn't beacon; now (a) legacy servers proxy-beacon (MR-3a) + (b) a CRDT server
+  beacons ITSELF ⇒ both anchorable + materialized from the doc, so suppressing a CRDT SERVER intro orphans
+  nothing. Reuses `crdt_should_suppress_tree` (the symmetric forward of R7a's SQUIT gate) + `FEAT_CRDT_MESHMAP_
+  PRESENCE` (no new flag). Gap matrix: all structural state + primary delivery DONE; CORE gaps = KILL/INVITE
+  of CRDT-owned targets (widen MR-4c `'K'`/`'I'`) + stateful subsystems MD/CH/MR/BS-BX/CI (still pure P10 —
+  explicit decide-don't-defer). Mixed-path invariant (CRDT subgraph must be CR-connected; gate via MR-0
+  `p10Only==0`). Sub-steps: 5-0 shadow oracle (inert) → 5-1 KILL/INVITE → 5-2 suppress SERVER relay
+  (`m_server.c`) → 5-3 suppress at `server_estab` + event-driven beacon-burst → 5-4 BURST verify → 5-5
+  stateful-subsystem decision. Regression oracle = the literal R7b case (far leaf 7/7 not 7/0). Unblocks
+  MR-4d-3 + the multi-gateway live test. Overlay-as-primary transport = a follow-on MR-6.
 - **MR-0 — routing table (observability)** · S · **DONE 2026-06-15 (submodule pending commit).**
   Two net-new pure primitives (cmocka 20/20): `crdt_meshmap_nexthop` (per-viewpoint unicast
   shortest-path first-hop, the MR-1 input) + `crdt_meshmap_canon_tree` (root-free Kruskal-lex
