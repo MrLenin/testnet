@@ -295,12 +295,16 @@ legacy-gateway track, beacon-proxied presence NOT the doc servers-map).
   **MR-5-5 SCOPED 2026-06-17 (plan §9, source @ `aaaf8b4`):** single discriminator = broadcast
   (`serv_butone_v3` iterates direct DLinks, never touches anchors) WORKS vs targeted `sendcmdto_one`→anchor
   BREAKS (dead-sink); no `hunt_server` in any of the 7. WORKS-AS-IS: MD/MDQ, MR, CI, redaction. **SASL relay
-  BREAKS** (Path-3→x3 anchor; AC broadcast fine) but bed local-Keycloak absorbs PLAIN/OAUTHBEARER → shadow-
-  measure FIRST, gateway-translate iff traffic else accept-degraded. **CH DEGRADES** (local STORE works; fed
-  Q/W→anchor dropped) → accept-degraded for PoC + harden FedRequest timeout. **Bouncer BX BREAKS but
-  `FEAT_BOUNCER_ENABLE=0`** → accept-degraded. Sub-steps 5-5a SASL shadow-measure (decisive) → 5-5b SASL
-  gateway-translate (iff) → 5-5c CH timeout-harden → 5-5d doc-only. Flags: reuse `FEAT_CRDT_TREE_RETIRE` +
-  `FEAT_CRDT_GATEWAY_BRIDGE`.
+  BREAKS** (Path-3→x3 anchor; AC broadcast fine) — **X3 SASL is NON-NEGOTIABLE for prod (user 2026-06-17), so
+  gateway-translate is REQUIRED, not conditional** (bed local-Keycloak only MASKS it; all nodes
+  `SASL_SERVER=x3.services`). **CH DEGRADES** (local STORE works; fed Q/W→anchor dropped) → genuine
+  accept-degraded for PoC + harden FedRequest timeout. **Bouncer BX cross-mesh BREAKS — and
+  `BOUNCER_ENABLE=TRUE` on ALL CRDT nodes ircd3-7 (verified; bed runs bouncer mesh-wide, NOT off)** → a LIVE
+  break; accept-degraded for now but a PROD-BLOCKER (fix = CR-M route for BX E/M + alias-presence decision,
+  bouncer-analyst review; aliases deliberately doc-excluded). **Both SASL-X3 + bouncer-over-mesh are
+  prod-blockers (CRDT is the forward path), not follow-ons.** Sub-steps 5-5a SASL characterize → 5-5b SASL
+  gateway-translate (REQUIRED) → 5-5c CH timeout-harden → 5-5d doc-only → 5-5e bouncer-over-mesh (separate
+  track). Flags: reuse `FEAT_CRDT_TREE_RETIRE` + `FEAT_CRDT_GATEWAY_BRIDGE`.
 - **MR-0 — routing table (observability)** · S · **DONE 2026-06-15 (submodule pending commit).**
   Two net-new pure primitives (cmocka 20/20): `crdt_meshmap_nexthop` (per-viewpoint unicast
   shortest-path first-hop, the MR-1 input) + `crdt_meshmap_canon_tree` (root-free Kruskal-lex
