@@ -70,13 +70,13 @@ is non-negotiable for prod).
 | C4 | **Remote OPER** (`/OPER server …`) | `m_oper.c:489, 545` | CR-M route the oper-up to the O-line server's home, or accept-degraded (oper against a directly-reachable server) |
 | C5 | CH federated Q/W (already scoped = 5-5f) | `m_chathistory.c:1982/2509/3080/3807/4067/4219/4434` | CR-M route (see MR-5-5 §9) |
 
-### Tier D — global state CONVERGES, only the scoped per-server leg breaks (low severity)
+### Tier D — global state CONVERGES, only the scoped per-server leg breaks (P2 — defer to MR-6, not won't-fix)
 Targeted `/<line> <server>` forwards: **GLINE** `m_gline.c:194/268/523/568`, **SHUN** `m_shun.c:190/264/515/560`,
 **ZLINE** `m_zline.c:194/268/527/572`, **JUPE** `m_jupe.c:135/238`. The doc cutover replicates the *global*
 line so network state still converges; only the operator's explicit "activate on THAT server" routed leg
-dead-sinks. **Treatment: accept-degraded** (doc covers global state) or CR-M route the scoped command.
+dead-sinks. **Treatment: defer to P2** (doc covers global state in the hybrid window); CR-M route the scoped command at/before MR-6.
 
-### Tier E — ops / cosmetic (accept-degrade; document, don't build)
+### Tier E — ops / cosmetic (P2 — defer to MR-6; required once there's no P10 fallback)
 - **MULTILINE channel delivery to anchored members** — `m_batch.c:1528-1573` `if(!IsServer)continue` skips the
   anchor → anchored members miss channel multiline (silent, not a crash). Tunnel over CR or accept the
   PRIVMSG-fallback the doc path covers.
@@ -102,15 +102,31 @@ ERROR/BURST/EOB. CR_REPLICATION sends to `peer` = the mesh substrate itself (dir
 
 1. **"DONE" ≠ done at every site.** MR-1 and MR-4c each guarded the primary path but missed relay/directed
    sites (A1, A2). Any future cutover must be audited at EVERY `sendcmdto_one` for that token, not just the
-   headline one. A1/A2 are quick wins (extend an existing guard) and should land regardless of sequencing —
-   they're plain bugs once the tree is retired.
+   headline one. A1/A2 are quick wins (extend an existing guard) and are plain bugs once the tree is retired.
 2. **The SASL fix is really a services-anchor bridge** (Tier B) — generalize MR-5-5b to cover LOC/register/
    rename/XQUERY, all the same dead-sink to x3.
-3. **Go-live gate.** Before `FEAT_CRDT_TREE_RETIRE` is enabled anywhere near prod: Tier A (quick), Tier B
-   (services — non-negotiable), Tier C (incl. CH 5-5f + bouncer 5-5e) must be handled; Tier D/E can be
-   accept-degraded with the rationale recorded. This audit IS that gate's checklist.
 
-## Sequencing suggestion (revises MR-5-5 §9)
-A (quick guard-extends) → B (services-anchor bridge, supersedes the SASL-only 5-5b) → C1/C2/C3/C4 → 5-5f (CH)
-→ 5-5e (bouncer, bouncer-analyst first) → D/E (doc-only accept-degraded). Resolve the BATCH `route_to`
-unknown early (it may add to C).
+## Priority scale — WHEN, not IF (user 2026-06-17)
+
+**Every gap here closes on the road to CRDT-as-primary; "degradation acceptable" means acceptable DURING the
+dev window only, not a won't-fix.** The end state (MR-6: overlay-as-primary, P10 links dropped) has NO P10
+fallback, so even the ops/cosmetic tiers must route over the mesh eventually. So "accept-degraded" below =
+"deferred to a later priority band," never "abandoned." The bands map to the CRDT adoption stages:
+
+- **P0 — now (dev hybrid).** **Tier A** (the MR-1/MR-4c guard holes). Plain bugs; land them regardless of
+  sequencing. Cheap (extend an existing guard).
+- **P1 — gate for CRDT carrying PROD traffic (still hybrid: P10 present as fallback).** **Tier B** (services
+  / auth — X3 SASL+registration non-negotiable) + **Tier C** (correctness: directed-PM already in A, multiline
+  PM, bouncer BX E/M/K, targeted REDACT, remote OPER, CH federation 5-5f). These are the user-visible
+  correctness gaps; CRDT cannot carry production until they route over the mesh.
+- **P2 — gate for CRDT-as-PRIMARY (MR-6: P10 links dropped, no fallback).** **Tier D** (scoped
+  gline/shun/zline/jupe per-server legs) + **Tier E** (ops tooling: STATS/TRACE/LINKS/MAP/CONNECT hunt_server,
+  multiline-to-anchored-members, PRIVS/GITSYNC/RPING/RPONG/ASLL/SETTIME-to-server). Tolerable while the P10
+  tree still exists as a fallback; REQUIRED once it's gone — at MR-6 there is no other path.
+
+This audit is the checklist for all three gates. Resolve the BATCH `route_to` unknown early (it may add to P1).
+
+## Sequencing (within the bands)
+P0: A1+A2 guard-extends. P1: B (services-anchor bridge, supersedes the SASL-only 5-5b) → C1/C2/C3/C4 → 5-5f
+(CH) → 5-5e (bouncer, bouncer-analyst first). P2 (with/after MR-6): D → E (CR-M route the hunt_server /
+ops / multiline classes; the P10 tree's removal forces these).
