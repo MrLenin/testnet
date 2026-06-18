@@ -99,6 +99,16 @@ dead-sinks. **Treatment: defer to P2** (doc covers global state in the hybrid wi
   (STATS/TRACE/LINKS/MAP/CONNECT/ADMIN/INFO/LUSERS/MOTD/NAMES/REHASH/RULES/TIME/UPING/VERSION/WHOIS/WHOWAS/CHECK).
 
 ### Verified SAFE (broadcast or link-local — checked, not skipped)
+> **★ 2026-06-18 EMPIRICAL CORRECTION (`crdt-mesh-tier-c-scope.md` §4b): the "BROADCAST → WORKS" premise
+> is VIOLATED under TREE_RETIRE.** Live `/MAP` on hub2 shows its P10 tree EXCLUDES the intro-suppressed
+> overlay-only nodes (leaf4/leaf5), so a `sendcmdto_serv_butone[/_v3]` broadcast reaches only the
+> emitter's P10-tree component, NOT every node (proven via bouncer BS split-brain: sessions islanded to
+> each origin's direct P10 neighbours). **Every entry in THIS "Verified SAFE" list that is a pure-P10
+> broadcast and NOT also doc/CR-carried is SUSPECT for overlay-only nodes and must be re-audited**
+> (doc/CR-carried state — users/channels/modes/glines/MD/MR/CI — is fine; the doc converges across all
+> nodes). This likely adds rows to Tier C/D/E. P0 re-audit pending.
+
+
 Full **SVS\*** family (svsnick/svsmode/svsjoin/svspart/svsident/svsquit/svsnoop/svsinfo) = `serv_butone`
 broadcast with the target named in the payload → WORKS. Also broadcast-safe: SWHOIS, MARK, AWAY, TEMPSHUN,
 SMO, SNO, OPMODE, CLEARMODE, DESTRUCT, DESYNCH, WEBPUSH, SETNAME, RENAME, the `*`-form GITSYNC,

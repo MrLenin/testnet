@@ -183,6 +183,83 @@ site → c-auditor for the Invariant-2 `%C`/STAT_MESH_SERVER crash before merge.
   arm; `crdt_dead_sink_dropped` won't see it). A read-only BX dead-sink probe may be worth a 5-5e-0a.
 - Decide CR 'B' + CR 'C' as separate arms vs generalizing CR-X into one tagged opaque-body carrier.
 
+## 4b. ★ DEEP-DRILL EMPIRICAL FINDINGS (2026-06-18) — supersede the conflicting code-traces
+
+Two follow-up agent passes (bouncer transport + CH internals) PLUS a live 5-5e-0 measurement. The live
+measurement is ground truth and **overturns a confident code-trace**, so it governs.
+
+### 5-5e-0 RESULT (measured, decisive): bouncer session convergence is SPLIT-BRAIN under TREE_RETIRE
+Method: `testadmin` via SASL on a CRDT node + `BOUNCER SET HOLD on` (the actual session-create trigger —
+NOT a bare authenticated connection; a connection-class/`draft/bouncer` thing is NOT required, `SET HOLD`
+is), then `BOUNCER LISTSESSIONS *` (oper) on each node, comparing the session-id.
+- ircd4 (leaf2) session `AZ7cJWoJ…`; **hub2/ircd3 (adjacent) shows the SAME id** → converges one hop.
+- ircd7 (leaf5) session `AZ7cJwJN…` (a DIFFERENT id); **leaf3/ircd5 (adjacent to ircd7) shows that SAME
+  `AZ7cJwJN…`**. So two ISLANDS: `{ircd4,hub2}` vs `{leaf3,ircd7}` — a SPLIT-BRAIN session for one account.
+- The clusters did NOT merge **even though hub2↔leaf3 is a live direct P10 link** (`/MAP` on hub2 lists
+  leaf3 as a tree child). ⇒ BS reaches only the **origin's direct P10 neighbours (~1 hop); it is NOT
+  flooded onward** between CRDT-aware peers under TREE_RETIRE.
+
+### Resolves the agent conflict
+- The first bouncer pass ("BS convergence broken on the partial mesh") is **VALIDATED** (the outcome is
+  real) — though its "the alias is doubly absent / not in `->down`" reasoning was imprecise.
+- The deep bouncer pass ("BS CONVERGES at rest; the P10 relay tree is intact; CR 'B' is partition-only")
+  is **EMPIRICALLY REFUTED.** Its `->down` hop-by-hop trace assumed the re-broadcast floods the whole
+  tree; live data shows it does not (stops after one hop between CRDT peers). **Do not act on "converges
+  at rest."** CR 'B' (BS/BX over the CRDT sync mesh) is **REQUIRED AT REST**, not just under partition.
+
+### ★ BIGGER IMPLICATION (new, P0 re-audit): the gap audit's "broadcast = SAFE" premise is VIOLATED
+`/MAP` on hub2 = `{hub2, leaf3, leaf2, testnet, upstream, x3}` — **leaf4/leaf5 are ABSENT** (intro-
+suppressed → reachable only as overlay anchors). So under TREE_RETIRE the **P10 tree is FRAGMENTED**; a
+`sendcmdto_serv_butone[/_v3]` broadcast reaches only the emitter's P10-tree component, NOT every node.
+The gap audit's core discriminator ("BROADCAST iterates `->down` → never touches an anchor → WORKS")
+holds only for a *connected* P10 tree — which TREE_RETIRE does not provide. **Therefore every "broadcast
+= SAFE/WORKS" classification (the audit's whole "Verified SAFE" list: SVS\*, SWHOIS, MARK, AWAY, SNO/SMO,
+OPMODE, CLEARMODE, DESTRUCT, broadcast REDACT, QUIT, etc.) is SUSPECT for overlay-only nodes** — any
+pure-P10 broadcast NOT also doc/CR-carried will island. (Doc/CR-carried state is fine: the CRDT doc
+converges across all 8 nodes, digests/0-mismatch — that's why users/channels/modes/glines are unaffected.)
+**Action: re-audit the SAFE list — for each, is it doc/CR-carried (fine) or pure-P10-broadcast (islands)?**
+This likely ADDS rows to Tier C/D/E and is the highest-value next analysis.
+
+### CH deep-drill (de-risks C5; from the CH internals pass) — all confirmed source-grounded
+- **CR-X wire actually carries the origin numeric**: `X <msgid> <srcSrvYXX> <dstSrvYXX> <p10cmd> <ttl>
+  :<body>` (the `m_crdt.c:409` doc-comment is stale). So CH replies route back trivially.
+- **Reply routing**: reqid = `cli_yxx(&me)`+counter = the ORIGINATOR's numeric, intact everywhere →
+  the reply node sets CR-C `dstSrvYXX = reqid[0..1]` → flood-by-dst + dedup; intermediates DON'T re-parse
+  reqid; exactly one node (origin) re-injects; unknown/timed-out reqid = clean no-op (existing NULL guard).
+- **Chunk reassembly = THE keystone risk**: the federated REPLY uses the CH **B** chunker (NOT WB — WB is
+  write-forward). Today completeness = "absence of trailing `+`" + blind arrival-order append → over a
+  lossy/unordered flood a reordered/lost-middle chunk **silently decodes truncated garbage and
+  `add_fed_message`s it** (silent data corruption). FIX (must land WITH the tunnel): add `(seq, nchunks)`
+  + a `got_mask` bitmap to `ChunkEntry`, retire `+`, complete ⇄ mask full, holed ⇒ **log+drop (NOT
+  re-request** — `fed_timeout` already bounds it). cmocka first: out-of-order + dropped-middle ⇒ rejected,
+  never truncated-add.
+- **Dedup**: per-CR-C-FRAME `generate_msgid` (globally unique) via `crdt_m_seen_check_add`; key = carrier
+  frame msgid, NEVER the reqid (spans frames). Same-chunk-via-two-paths → same msgid → exactly once.
+- **servers_pending**: rule = count ⟺ dispatch-that-can-`E`. 5-5c skips `IsMeshStub` in BOTH
+  `count_storage_servers` + the 3 query loops (consistent, incomplete); 5-5f flips both to count-and-tunnel
+  together; `fed_timeout` backstops a genuinely-unreachable tunneled stub. No conflict.
+- **No materialize race**: the storage node answers from RocksDB **by channel name** (no `FindChannel`/
+  live-materialize needed); reply arms need only the pre-created `FedRequest` slot → no reply-before-request
+  window; origin's `findNUser` is already NULL-guarded. Do NOT global-burst-gate (NB12). 'C' re-inject uses
+  `cptr=sptr=&me` (safe — not a stub prefix); c-auditor anyway.
+
+### CR 'B' design (the FIX for 5-5e, from the deep bouncer pass — valid even though its "partition-only" framing was wrong)
+Frame `CR B <msgid> <ttl> <srcnumeric> :<verbatim BS/BX body>`, flooded over the `IsCrdtSyncTarget` set
+(which DOES reach all nodes — that's how the doc converges), dedup on frame msgid via `crdt_m_seen`.
+Re-inject MUST set `sptr = FindNServer(srcnumeric)` (the TRUE origin — Invariant #3; NEVER `&me` like
+CR-X's services reinject, NEVER `hs_origin`) and `cptr` = the CR uplink, reproducing a normal P10 arrival
+byte-exactly; assert `IsServer(src)||IsMeshStub(src)` and keep a server `sptr` out of any `cli_user(sptr)`
+deref (Invariant #8 crash site `s_user.c:1288` `cli_yxx(cli_user(sptr)->server)`). The `parse.c:2037`
+fake-direction guard is intentionally bypassed → msgid dedup is the SOLE loop terminator. Targeted BX
+E/M/K to anchored aliases remain a separate (real, at-rest) gap → `crdt_route_bx_try`.
+
+### Open code-traces for the implementation phase (do FIRST)
+1. **The exact gate** that stops the BS re-broadcast between CRDT-aware peers (bouncer handler relay vs a
+   TREE_RETIRE broadcast-suppression vs intro-suppression side-effect). Pin it before building CR 'B' so
+   the fix hooks the right spot (and to know if un-gating P10 relay is even an option vs CR 'B').
+2. **The broadcast-reachability re-audit** (the P0 above): which "SAFE" broadcasts are doc/CR-carried
+   (fine) vs pure-P10 (island). Determines the true Tier C/D/E surface.
+
 ## 5. Cross-refs
 Supersedes the Tier C rows in `crdt-mesh-s2s-gap-audit.md` (and **corrects its "BS = WORKS"** to
 "WORKS only on a full mesh; partial-mesh multi-hop pairs need CR 'B'"). Extends
