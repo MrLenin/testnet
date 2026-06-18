@@ -1,16 +1,29 @@
 # CRDT-Mesh services-anchor bridge (Tier B) — design + plan
 
-> **★ TIER B EFFECTIVELY CONCLUDED AT B1 (user direction 2026-06-18).** The prod direction is to implement
-> account/registration/auth **NATIVELY in Nefarious against Keycloak** (the `SASL_LOCAL` model), NOT to relay
-> service protocols to X3 over P10. X3 is unlikely to ever implement REGISTER/VERIFY/REGREPLY (and the rest of
-> the X3 P10 service protocols). So bridging those relays to X3 (B2 LOC, B3 REGISTER, B6 XQUERY) is **moot** —
-> there's nothing to bridge to. **B1 (SASL bridge) stays as a done+validated piece** useful for any deployment
-> still using the X3-relay SASL path (and it proved the CR-X carrier), but the native-Keycloak prod path
-> doesn't traverse the mesh to X3 for auth at all (each node authenticates against Keycloak locally). The
-> COMMON services reachability over the retired tree already works: SASL (native Keycloak per-node, OR B1's
-> bridge for X3-relay) + `PRIVMSG AuthServ`/bot replies (MR-4b). **B7 directed-PM is niche; B2-B6 moot.**
-> ⇒ NEXT real work = **Tier C** (bouncer-over-mesh, CH federation, multiline-PM, REDACT, OPER) — un-gated,
-> CRDT-mesh-native, prod-relevant — NOT more X3-relay bridging.
+> **★ TIER B STATUS (user direction 2026-06-18, refined):** **B1 SASL = DONE+validated.** **B2 LOC =
+> REQUIRED + actionable** ("loc is definitely spoken and required" — X3 speaks LOC; it's the one remaining
+> Tier B item that matters). **B3 REGISTER/VERIFY/REGREPLY = MOOT** (X3 won't implement; account/registration
+> go NATIVELY in Nefarious via Keycloak). **B6 XQUERY = MOOT** ("x3 I don't think x3 uses"). **B7 directed-PM
+> = niche** (common bot-PM already works via MR-4b). So the ONLY remaining Tier B work = **B2 LOC**.
+>
+> **★ B2 LOC SUPERSEDED BY B0/MR-3d (user-confirmed 2026-06-18) — the state-map/token-rewrite fork below is
+> DROPPED.** The clean fix is to **present CRDT mesh servers to legacy** (`crdt-mesh-present-servers-to-legacy.md`):
+> x3 then knows the leaf, the gateway re-emits `:leaf`, x3 replies to `<leafYXX>` → routes to the gateway →
+> tunnels CR-X → leaf. LOC's tokenless origin stops mattering (the destination server numeric carries it).
+> B0/MR-3d also REMOVES the SASL token-mismatch fallback (B1 gets simpler) + makes B2 LOC a one-line reverse
+> hook. Order: B0/MR-3d → simplify B1 → B2 LOC. The historical fork analysis is kept below for context.
+>
+> ~~B2 LOC is the hard one — design fork (the `.fd.cookie` token has NO origin server):~~ `decode_auth_id`
+> (m_account.c:109) requires `.fd.cookie` (`id[0]=='.'`) + `cli_loc`/`LocalClientArray[fd]`; the origin is only
+> in the P10 source prefix, not the token. So B1's token-routed reverse can't route the LOC reply back.
+> Options: **(a) gateway token-rewrite (recommended, stateless):** on the forward CR-X re-emit, the gateway
+> rewrites the LOC token `.fd.cookie` → `<srcSrvYXX>!fd.cookie`; x3 echoes it; the reverse routes by the
+> `<srcSrvYXX>` prefix (like SASL) and the gateway rewrites it BACK to `.fd.cookie` before tunneling, so the
+> leaf's `decode_auth_id` is unchanged. **(b) gateway cookie→origin state map** (simpler logic, adds state).
+> **OPEN VALIDATION QUESTION: how is LOC triggered in the bed** (PASS account:password? cert? a client flow?)
+> — needed to live-validate B2 (cli_loc is set from the LOC creds; the forward fires at s_auth.c:496).
+> ⇒ After B2 LOC: **Tier C** (bouncer-over-mesh, CH federation, multiline-PM, REDACT, OPER) — un-gated,
+> CRDT-mesh-native — is the next real work.
 
 
 > **★ B1 (SASL) DONE + LIVE-VALIDATED 2026-06-18 (submodule `5e1f5dd`).** testadmin SASL PLAIN on nef7
