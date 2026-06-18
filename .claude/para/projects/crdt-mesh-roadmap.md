@@ -297,14 +297,18 @@ legacy-gateway track, beacon-proxied presence NOT the doc servers-map).
   BREAKS (dead-sink); no `hunt_server` in any of the 7. WORKS-AS-IS: MD/MDQ, MR, CI, redaction. **SASL relay
   BREAKS** (Path-3→x3 anchor; AC broadcast fine) — **X3 SASL is NON-NEGOTIABLE for prod (user 2026-06-17), so
   gateway-translate is REQUIRED, not conditional** (bed local-Keycloak only MASKS it; all nodes
-  `SASL_SERVER=x3.services`). **CH DEGRADES** (local STORE works; fed Q/W→anchor dropped) → genuine
-  accept-degraded for PoC + harden FedRequest timeout. **Bouncer BX cross-mesh BREAKS — and
+  `SASL_SERVER=x3.services`). **CH DEGRADES — a CORRECTNESS gap, not redundancy (user 2026-06-17):** store is local-witness-gated
+  (`ircd_relay.c:180` — a node stores only msgs its own members witnessed), so federation FILLS gaps for
+  un-witnessed msgs; tree-retirement dead-sinks fed Q/W → permanent history holes (an MR-5-introduced
+  regression). accept-degraded for now but prod-relevant; real fix = CR-M route for CH Q/W (5-5f), the
+  FedRequest timeout-harden (5-5c) is only a wedge band-aid. **Bouncer BX cross-mesh BREAKS — and
   `BOUNCER_ENABLE=TRUE` on ALL CRDT nodes ircd3-7 (verified; bed runs bouncer mesh-wide, NOT off)** → a LIVE
   break; accept-degraded for now but a PROD-BLOCKER (fix = CR-M route for BX E/M + alias-presence decision,
-  bouncer-analyst review; aliases deliberately doc-excluded). **Both SASL-X3 + bouncer-over-mesh are
-  prod-blockers (CRDT is the forward path), not follow-ons.** Sub-steps 5-5a SASL characterize → 5-5b SASL
-  gateway-translate (REQUIRED) → 5-5c CH timeout-harden → 5-5d doc-only → 5-5e bouncer-over-mesh (separate
-  track). Flags: reuse `FEAT_CRDT_TREE_RETIRE` + `FEAT_CRDT_GATEWAY_BRIDGE`.
+  bouncer-analyst review; aliases deliberately doc-excluded). **3 correctness items are prod-blockers, not
+  follow-ons (CRDT is the forward path): SASL-X3, bouncer-over-mesh, CH-federation; only MD/MR/CI/RD are
+  genuine harmless-broadcast.** Sub-steps 5-5a SASL characterize → 5-5b SASL gateway-translate (REQUIRED) →
+  5-5c CH timeout band-aid → 5-5d doc-only (MD/MR/CI/RD) → 5-5e bouncer-over-mesh (separate track) → 5-5f CH
+  federation over CR-M. Flags: reuse `FEAT_CRDT_TREE_RETIRE` + `FEAT_CRDT_GATEWAY_BRIDGE`.
 - **MR-0 — routing table (observability)** · S · **DONE 2026-06-15 (submodule pending commit).**
   Two net-new pure primitives (cmocka 20/20): `crdt_meshmap_nexthop` (per-viewpoint unicast
   shortest-path first-hop, the MR-1 input) + `crdt_meshmap_canon_tree` (root-free Kruskal-lex
