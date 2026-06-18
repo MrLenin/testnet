@@ -1,5 +1,18 @@
 # CRDT-Mesh services-anchor bridge (Tier B) — design + plan
 
+> **★ TIER B EFFECTIVELY CONCLUDED AT B1 (user direction 2026-06-18).** The prod direction is to implement
+> account/registration/auth **NATIVELY in Nefarious against Keycloak** (the `SASL_LOCAL` model), NOT to relay
+> service protocols to X3 over P10. X3 is unlikely to ever implement REGISTER/VERIFY/REGREPLY (and the rest of
+> the X3 P10 service protocols). So bridging those relays to X3 (B2 LOC, B3 REGISTER, B6 XQUERY) is **moot** —
+> there's nothing to bridge to. **B1 (SASL bridge) stays as a done+validated piece** useful for any deployment
+> still using the X3-relay SASL path (and it proved the CR-X carrier), but the native-Keycloak prod path
+> doesn't traverse the mesh to X3 for auth at all (each node authenticates against Keycloak locally). The
+> COMMON services reachability over the retired tree already works: SASL (native Keycloak per-node, OR B1's
+> bridge for X3-relay) + `PRIVMSG AuthServ`/bot replies (MR-4b). **B7 directed-PM is niche; B2-B6 moot.**
+> ⇒ NEXT real work = **Tier C** (bouncer-over-mesh, CH federation, multiline-PM, REDACT, OPER) — un-gated,
+> CRDT-mesh-native, prod-relevant — NOT more X3-relay bridging.
+
+
 > **★ B1 (SASL) DONE + LIVE-VALIDATED 2026-06-18 (submodule `5e1f5dd`).** testadmin SASL PLAIN on nef7
 > (`SASL_LOCAL=FALSE` → Path-3; x3 a mesh-only anchor) succeeds end-to-end in 0.1s (903 + 900 logged in),
 > wire-traced forward (leaf→gateway→x3) + reverse (x3→gateway→leaf); 5 CRDT + legacy + x3 all 0 crashes.
