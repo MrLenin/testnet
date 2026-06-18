@@ -56,6 +56,45 @@ REGISTER/VERIFY/prereg tokens too; LOC uses `.fd.cookie` + server-numeric revers
 - Reuse `FEAT_CRDT_GATEWAY_BRIDGE` for the gateway P10 re-emit (both directions' gateway legs).
 - Both off ⇒ today's exact P10 behaviour (dead-sink-to-anchor). Controlled rollout.
 
+## B2-B7 — per-subsystem findings (2026-06-18, from reading the sites; NOT trivial B1 mirrors)
+
+Investigating the remaining Tier B sites showed they each have wrinkles beyond B1's pattern — do NOT
+blind-implement. The headline is a **cross-cutting prerequisite**:
+
+- **★ PREREQUISITE — services anchors aren't recognized as services.** `find_services_server()`
+  (`m_register.c:60`) requires `IsServer(acptr) && IsService(acptr)`, and the directed-PM path requires
+  `IsService(acptr)` (`ircd_relay.c:1111/1232`). But a Case-B synthetic anchor is `STAT_MESH_SERVER`
+  (IsServer=FALSE) and is NOT marked `IsService` (make_anchor doesn't set it; the +s flag isn't propagated
+  to the leaf via the proxy-beacon). So on a leaf, REGISTER (B3) and directed-PM (B7) **can't even find x3**
+  → their forward never fires. **B1 SASL dodged this** because `find_match_server(FEAT_SASL_SERVER)` resolves
+  by NAME (ignores IsServer/IsService). FIX (enabler for B3/B7): propagate the service flag to the anchor —
+  carry it on the proxy-beacon (CR H) + `SetService` in `crdt_shadow_make_anchor` when the beacon says the
+  server is a service — and/or teach `find_services_server` to accept `IsMeshStub && IsService` anchors.
+- **B3 REGISTER/VERIFY/REGREPLY** (`m_register.c:113/132` fwd, `:391` rev) — token `server!fd.cookie`
+  (IDENTICAL to SASL) → the reverse uses the proven token-mismatch routing (B1 model). Server-sourced (&me).
+  The CLEANEST mirror once the prerequisite is solved. Note `FEAT_REGISTER_SERVER` default "*" → find any
+  IsService server (hits the anchor-recognition gap). REGREPLY rev: `find_prereg_client` fails on the gateway
+  (prereg client is on the leaf) → MUST route by the token's server first (like B1's token-mismatch).
+- **B2 LOC** (`s_auth.c:496/501/507` fwd, `m_account.c:362` rev) — token `.fd.cookie` has an EMPTY server
+  field → the origin is only in the P10 source prefix, NOT the token. So the gateway-proxy reverse (route by
+  token-origin, B1's model) has nothing to route by. Needs EITHER the gateway to introduce the leaf to x3
+  (so x3 replies to a known leaf numeric → gateway anchor → tunnel; but that re-exposes leaves to legacy) OR
+  gateway state (cookie→origin map). A real design decision — NOT a mirror.
+- **B4 rename** (`m_rename.c:435` fwd, CMD_ACCOUNT R) — forward is server-sourced; reverse is LOCAL
+  cookie-dispatch (no extra reverse). Forward mirrors B1 once the prerequisite is solved.
+- **B6 XQUERY/XREPLY** (`m_xquery.c:116/144`, `m_xreply.c:122`) — USER-sourced (the oper issuing XQUERY) →
+  the CR-X frame must carry a USER numeric source (carrier extension: re-emit src = `findNUser(srcyxx) ??
+  FindNServer(srcyxx) ?? &me`). XREPLY reverse target may be a user or server.
+- **B7 directed PM/NOTICE `nick@services`** (`ircd_relay.c:1135/1248`) — needs BOTH the anchor-IsService
+  prerequisite (else `!IsService` → ERR_NOSUCHNICK before the forward) AND a USER-source carrier (the source
+  is the messaging user). Reverse is FREE (the service replies via a normal user-PM → MR-1/MR-4b). Forward
+  only, once both are solved. Validatable via `PRIVMSG nick@x3.services`.
+
+**Recommended order for the next session:** (0) the anchor-service-recognition prerequisite [unblocks B3/B7],
+then (1) B3 REGISTER [clean B1 mirror], (2) carrier user-source extension [B6/B7], (3) B7 directed-PM
+[validatable], (4) B6 XQUERY, (5) B2 LOC [the hard one — pick a reverse-routing strategy], (6) B4 rename.
+Each is flag-gated; validate per-subsystem (the carrier itself is proven by B1).
+
 ## Sub-steps
 1. **S1 mechanism (TDD-first):** `crdt_route_services_try` + `crdt_route_services_reply_try` + `'X'` arm in `ms_crdt` + `crdt_server_is_mesh_only` (crdt_shadow.c) + `FEAT_CRDT_SERVICES_BRIDGE`. **cmocka FIRST.**
 2. **S2 B1 forward** (`m_authenticate.c:278-296`).
