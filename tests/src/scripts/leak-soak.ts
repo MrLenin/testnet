@@ -57,6 +57,7 @@ const CHATHISTORY = parseInt(process.env.CHATHISTORY || '2', 10);
 const REVIVES = parseInt(process.env.REVIVES || '4', 10);
 const NICKCHURN = parseInt(process.env.NICKCHURN || '3', 10);
 const SASLONLY = parseInt(process.env.SASLONLY || '0', 10);
+const BARECONN = parseInt(process.env.BARECONN || '0', 10);
 const INTERVAL_MIN = parseFloat(process.env.INTERVAL_MIN || '5');
 const CHAN = process.env.CHAN || '#soak';
 const OUT_DIR = process.env.OUT_DIR || path.resolve(__dirname, '../../leak-soak-results');
@@ -191,6 +192,26 @@ async function chattyWorker(id: number, host: string, port: number, stop: { valu
     } catch { /* swallow */ }
     finally { c.close(); }
     if (!stop.value) await sleep(500);
+  }
+}
+
+/** Bare-connect worker: connect, NICK/USER, 001, immediate QUIT.
+ * No SASL, no JOIN, no nothing.  Tests IRC connection lifecycle in
+ * isolation. */
+async function bareConnectWorker(id: number, host: string, port: number, stop: { value: boolean }) {
+  while (!stop.value) {
+    const nick = uniq(`bc${id}_`).substring(0, 9);
+    const c = new RawClient(host, port);
+    try {
+      await c.ready();
+      c.send(`NICK ${nick}`);
+      c.send(`USER ${nick} 0 * :bc${id}`);
+      await c.waitForLine(/\s001\s/, 15000);
+      c.send('QUIT :bare-connect cycle');
+      await sleep(100);
+    } catch { /* swallow */ }
+    finally { c.close(); }
+    if (!stop.value) await sleep(200);
   }
 }
 
@@ -646,6 +667,10 @@ async function main() {
   for (let i = 0; i < SASLONLY; i++) {
     workerPromises.push(saslOnlyWorker(i, IRC_HOST, IRC_PORT, stop));
     await sleep(500);
+  }
+  for (let i = 0; i < BARECONN; i++) {
+    workerPromises.push(bareConnectWorker(i, IRC_HOST, IRC_PORT, stop));
+    await sleep(200);
   }
 
   const { firstSnap, lastSnap } = await observerPromise;
