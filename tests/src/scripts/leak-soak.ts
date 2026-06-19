@@ -56,6 +56,7 @@ const BOUNCERS = parseInt(process.env.BOUNCERS || '6', 10);
 const CHATHISTORY = parseInt(process.env.CHATHISTORY || '2', 10);
 const REVIVES = parseInt(process.env.REVIVES || '4', 10);
 const NICKCHURN = parseInt(process.env.NICKCHURN || '3', 10);
+const SASLONLY = parseInt(process.env.SASLONLY || '0', 10);
 const INTERVAL_MIN = parseFloat(process.env.INTERVAL_MIN || '5');
 const CHAN = process.env.CHAN || '#soak';
 const OUT_DIR = process.env.OUT_DIR || path.resolve(__dirname, '../../leak-soak-results');
@@ -190,6 +191,40 @@ async function chattyWorker(id: number, host: string, port: number, stop: { valu
     } catch { /* swallow */ }
     finally { c.close(); }
     if (!stop.value) await sleep(500);
+  }
+}
+
+/** SASL-only worker: bare SASL PLAIN, then immediate QUIT.  No JOIN,
+ * no BOUNCER HOLD, no channel state.  Isolates the SASL handshake
+ * (Keycloak ROPC via libkc) from every other path — if FD growth
+ * appears here, the leak is in the SASL path itself. */
+async function saslOnlyWorker(id: number, host: string, port: number, stop: { value: boolean }) {
+  const account = `pool${String(id).padStart(2, '0')}`;
+  const password = `poolpass${String(id).padStart(2, '0')}`;
+  const saslPayload = Buffer.from(`\0${account}\0${password}`).toString('base64');
+  while (!stop.value) {
+    const nick = uniq(`s${id}_`).substring(0, 9);
+    const c = new RawClient(host, port);
+    try {
+      await c.ready();
+      c.send('CAP LS 302');
+      await c.waitForLine(/CAP \S+ LS/, 5000).catch(() => {});
+      c.send('CAP REQ :sasl');
+      await c.waitForLine(/CAP \S+ ACK :sasl/, 5000).catch(() => {});
+      c.send(`NICK ${nick}`);
+      c.send(`USER ${nick} 0 * :sasl${id}`);
+      c.send('AUTHENTICATE PLAIN');
+      await c.waitForLine(/AUTHENTICATE \+/, 5000);
+      c.send(`AUTHENTICATE ${saslPayload}`);
+      await c.waitForLine(/\s903\s|\s904\s|\s905\s/, 8000);
+      c.send('CAP END');
+      await c.waitForLine(/\s001\s/, 15000);
+      // Immediate clean QUIT — no JOIN, no HOLD, no channel state
+      c.send('QUIT :sasl-only cycle');
+      await sleep(200);
+    } catch { /* swallow */ }
+    finally { c.close(); }
+    if (!stop.value) await sleep(300);
   }
 }
 
@@ -607,6 +642,10 @@ async function main() {
   for (let i = 0; i < NICKCHURN; i++) {
     workerPromises.push(nickChurnWorker(i, IRC_HOST, IRC_PORT, stop));
     await sleep(300);
+  }
+  for (let i = 0; i < SASLONLY; i++) {
+    workerPromises.push(saslOnlyWorker(i, IRC_HOST, IRC_PORT, stop));
+    await sleep(500);
   }
 
   const { firstSnap, lastSnap } = await observerPromise;
