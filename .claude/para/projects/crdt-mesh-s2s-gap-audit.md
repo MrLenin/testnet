@@ -105,15 +105,24 @@ dead-sinks. **Treatment: defer to P2** (doc covers global state in the hybrid wi
 > emitter's P10-tree component, NOT every node (proven via bouncer BS split-brain: sessions islanded to
 > each origin's direct P10 neighbours). **Every entry in THIS "Verified SAFE" list that is a pure-P10
 > broadcast and NOT also doc/CR-carried is SUSPECT for overlay-only nodes and must be re-audited**
-> (doc/CR-carried state — users/channels/modes/glines/MD/MR/CI — is fine; the doc converges across all
-> nodes). This likely adds rows to Tier C/D/E. P0 re-audit pending.
+> nodes). **RE-AUDIT DONE 2026-06-18 → `crdt-mesh-tier-c-scope.md` §4c** — results below.
 
-
-Full **SVS\*** family (svsnick/svsmode/svsjoin/svspart/svsident/svsquit/svsnoop/svsinfo) = `serv_butone`
-broadcast with the target named in the payload → WORKS. Also broadcast-safe: SWHOIS, MARK, AWAY, TEMPSHUN,
-SMO, SNO, OPMODE, CLEARMODE, DESTRUCT, DESYNCH, WEBPUSH, SETNAME, RENAME, the `*`-form GITSYNC,
-SILENCE-broadcast, MD/MR/CI, broadcast REDACT, QUIT (manual `->down` loop). LINK-LOCAL: PING/PONG/PROTO/
-ERROR/BURST/EOB. CR_REPLICATION sends to `peer` = the mesh substrate itself (direct CRDT links by design).
+**RE-AUDIT RESULT (2026-06-18, code-trace @ e5cd75c).** Only tokens whose state reaches an op-recording
+crdt_shadow setter hook are genuinely SAFE; the rest are pure-P10 and ISLAND to overlay-only nodes.
+- **GENUINELY SAFE (doc/CR-carried):** SVSNICK, SVSMODE, SVSJOIN, SVSPART, SVSQUIT (the SVS subset that
+  flows through `set_nick_name`/`set_user_mode`/`crdt_shadow_join|part`/`exit_client`), OPMODE, CLEARMODE,
+  DESTRUCT (modebuf/channel-destroy hooks), QUIT (manual `->down` loop + user-remove tombstone). LINK-LOCAL
+  (PING/PONG/PROTO/ERROR/BURST/EOB) + CR_REPLICATION (mesh substrate) — safe by construction.
+- **NOT SAFE — ISLANDS (pure P10, state NOT in the doc; the audit's earlier list was WRONG):** SVSIDENT,
+  SVSNOOP, SVSINFO, SWHOIS, MARK, AWAY, TEMPSHUN, SMO, SNO, DESYNCH, WEBPUSH, SETNAME, RENAME, SILENCE,
+  **MD, MDQ, MR, CI, RD(broadcast REDACT)** (NOT "fine" — they are RocksDB/flag state with no CRDT bridge),
+  **plus ACCOUNT** (`m_account.c:227/296` raw `cli_user->account` write, no hook → identity/auth islands).
+  Tier/fix-family breakdown in §4c (F1 user-state setter-hooks = the biggest, cleanest; F2 RocksDB
+  feature-state; F3 enforcement flags; F4 RENAME split-brain; F5 ephemeral notices). MR-6 makes all of
+  these network-wide (every peer overlay-only) → P1 before prod, hard blockers at MR-6.
+- **Mechanism:** NO general relay-suppression gate in send.c (a tree-resident CRDT-aware downlink gets
+  every broadcast) — islanding is pure fragmentation (intro-suppressed nodes off the P10 tree), EXCEPT BS,
+  which additionally self-suppresses via `bounce_handle_bsc` dedup `return 0`s before `bsc_forward`.
 
 ### Unresolved (needs a runtime-provenance trace before classifying)
 - **BATCH_CMD `route_to` / `acptr`** — `m_batch.c:247/269` and `:2289/2308`. Whether `route_to` is always a

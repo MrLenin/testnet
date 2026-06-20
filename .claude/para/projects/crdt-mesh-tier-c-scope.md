@@ -260,6 +260,59 @@ E/M/K to anchored aliases remain a separate (real, at-rest) gap → `crdt_route_
 2. **The broadcast-reachability re-audit** (the P0 above): which "SAFE" broadcasts are doc/CR-carried
    (fine) vs pure-P10 (island). Determines the true Tier C/D/E surface.
 
+## 4c. ★ BROADCAST-SAFETY RE-AUDIT RESULTS (2026-06-18, code-trace @ e5cd75c)
+
+Classified every "Verified SAFE" broadcast token: is its STATE doc/CR-carried (converges over the
+overlay regardless of P10 fragmentation) or pure-P10 (islands to overlay-only nodes)?
+
+**SAFE (doc/CR-carried — reach an op-recording crdt_shadow setter hook):** SVSNICK, SVSMODE, SVSJOIN,
+SVSPART, SVSQUIT, OPMODE, CLEARMODE, DESTRUCT, QUIT. (These flip via `set_nick_name`/`set_user_mode`/
+`crdt_shadow_join|part`/`exit_client`/`modebuf_flush`/`channel_destroy` → real doc field/collection.)
+
+**NEW GAPS — ISLANDS (pure P10, state NOT in the doc; reach only the emitter's P10 component):**
+SVSIDENT, SVSNOOP, SVSINFO, SWHOIS, MARK, AWAY, TEMPSHUN, SMO, SNO, DESYNCH, WEBPUSH, SETNAME, RENAME,
+SILENCE, MD, MDQ, MR, CI, RD(broadcast REDACT) — **plus ACCOUNT** (high-value side finding: `m_account.c:
+227/296` writes `cli_user->account` raw with NO crdt hook → account/identity islands too; gates SASL).
+⇒ the audit's "broadcast REDACT / MD / MR / CI / SETNAME / RENAME / SILENCE / AWAY are broadcast-safe"
+is **FALSE under TREE_RETIRE** — none are doc-carried.
+
+### The two islanding mechanisms (Task-2 verdict — settles the BS puzzle)
+1. **General P10 fragmentation** — overlay-only nodes (leaf4/leaf5) are absent from the P10 tree, so they
+   miss EVERY pure-P10 broadcast. There is **NO standing `IsCrdtAware`/`TREE_RETIRE` relay-suppression
+   gate in send.c** (the only `->down`-walk skips are source-dir, `!IsIRCv3Aware`, the one-shot
+   TAGMSG-demote `skip_crdt`, and `IsBurstGated`). So a CRDT-aware downlink that IS in the tree gets every
+   broadcast — broadcasts relay normally WITHIN a connected component; they just don't reach nodes the
+   intro-suppression dropped from the tree. (This refutes the "maybe a general relay gate" worry.)
+2. **BS-specific handler suppression** — the bouncer BS-'C' handler `bounce_handle_bsc` has dedup/reconcile
+   `return 0` early-exits BEFORE its `bsc_forward:` re-broadcast (`bouncer_session.c:3914/3949/3964-3973`):
+   when a node already holds a converging/dup session it applies locally + skips the onward relay → BS
+   islands EVEN WITHIN a connected P10 component (the hub2→leaf3 non-relay). This is handler logic, not
+   send-layer. CR 'B' (5-5e) makes the P10 re-broadcast moot; otherwise these returns must still forward.
+
+### Fix families (the islanding gaps cluster into a few coherent work-packages)
+- **F1 — user-state doc hooks (BIGGEST + cleanest; the proven §17.7 setter-hook pattern):** AWAY, SETNAME,
+  SVSINFO, SVSIDENT, SWHOIS, SILENCE, MARK, ACCOUNT — all per-user state written RAW in the S2S handler
+  with no crdt_shadow hook. Fix = extend CrdtUserRecord with the missing field(s) + add a
+  `crdt_shadow_user_*` refresh at each raw-write site (exactly what the c-auditor flags). One pattern,
+  many tokens → highest leverage. (ACCOUNT + CI lean toward Tier B / the services-auth class — stale CI =
+  revoked creds accepted elsewhere = a security hole, escalate.)
+- **F2 — RocksDB feature-state (heavier; new doc collections or CR carriers):** MD (metadata), MR
+  (read-marker), RD (redaction). Each has a RocksDB store but no CRDT bridge.
+- **F3 — enforcement flags:** TEMPSHUN, SVSNOOP (server-local; doc collection or CR).
+- **F4 — RENAME:** channel split-brain (channel keyed by name, rename not modeled in the doc) — trickiest.
+- **F5 — ephemeral notices (Tier D/E, tunnel or accept-degrade):** SMO, SNO, DESYNCH, WEBPUSH.
+- **BS:** CR 'B' carrier (5-5e) + the `bounce_handle_bsc` forward-after-dedup fix.
+
+### Revised Tier placement (folds into the gap audit)
+- **Tier C / P1 (user-visible correctness):** AWAY, SETNAME, SVSINFO, SVSIDENT, SWHOIS, SILENCE, MARK,
+  TEMPSHUN, SVSNOOP, RENAME, MD, MR, RD, MDQ.
+- **Toward Tier B (auth/services, escalate):** CI, ACCOUNT.
+- **Tier D/E / P2 (ops/cosmetic):** SMO, SNO, DESYNCH, WEBPUSH.
+
+**Severity scales with overlay-only-node count:** today only leaf4/leaf5 are overlay-only, so the blast
+radius is bounded — but MR-6 (overlay-as-primary, P10 links dropped) makes EVERY CRDT peer overlay-only,
+at which point all F1–F5 gaps are network-wide. So these are MR-6 hard blockers, P1 before prod traffic.
+
 ## 5. Cross-refs
 Supersedes the Tier C rows in `crdt-mesh-s2s-gap-audit.md` (and **corrects its "BS = WORKS"** to
 "WORKS only on a full mesh; partial-mesh multi-hop pairs need CR 'B'"). Extends
