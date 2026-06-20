@@ -833,7 +833,7 @@ services:
       - .env
       - .env.local
     volumes:
-      - ./data/ldap/bootstrap.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/50-bootstrap.ldif:ro
+      - ./data/ldap/bootstrap.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/50-bootstrap.ldif
     networks:
       irc_net:
         ipv4_address: 172.29.0.13
