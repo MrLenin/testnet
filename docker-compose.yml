@@ -720,11 +720,18 @@ services:
       # it — that static copy is pre-templatization and shadows the env-driven config
       # (it's how LDAP kept reverting to disabled). LDAP/identity live in .env.local.
       - ./x3cores:/x3/cores  # Core dump directory
+    # nefarious's healthcheck is just pgrep, so it goes "healthy" before the S2S port
+    # (4496) is listening -> x3 can connect too early and exhaust its uplink retries.
+    # Restart so x3 keeps retrying the uplink until S2S is ready (reconnect is normal).
+    restart: unless-stopped
 
   # Auto-create X3 admin account after X3 starts (first oper gets olevel 1000)
   x3-admin-init:
     container_name: x3-admin-init
     image: docker:cli
+    # x3 may still be (re)connecting its uplink when this first runs; retry until AuthServ
+    # is on the network and registration succeeds (the script is idempotent).
+    restart: on-failure
     networks:
       - irc_net
     depends_on:
