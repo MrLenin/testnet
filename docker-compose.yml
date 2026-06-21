@@ -705,6 +705,11 @@ services:
         condition: service_healthy
       x3-init:
         condition: service_completed_successfully
+      # X3 (LDAP-authoritative) writes account credentials to LDAP on registration, so
+      # openldap MUST be up first — else x3-admin-init registers testadmin into saxdb with
+      # no LDAP creds and SASL fails. Clean-slate ordering bug; this fixes it.
+      openldap:
+        condition: service_healthy
     env_file:
       - .env
       - .env.local
