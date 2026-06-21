@@ -828,7 +828,8 @@ services:
   openldap:
     container_name: openldap
     hostname: openldap
-    image: startcodex/openldap:latest
+    build:
+      context: ./docker/openldap   # startcodex/openldap + baked inetOrgAnonAccount schema
     environment:
       - LDAP_ORGANISATION=Fractal Realities
       - LDAP_DOMAIN=fractalrealities.net
