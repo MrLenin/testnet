@@ -710,7 +710,10 @@ services:
       - .env.local
     volumes:
       - x3_data:/x3/data
-      - ./data/x3.conf:/x3/x3.conf
+      # NOTE: x3.conf is generated in-image from x3.conf-dist + X3_* env vars
+      # (.env.local) via dockerentrypoint.sh. Do NOT bind-mount ./data/x3.conf over
+      # it — that static copy is pre-templatization and shadows the env-driven config
+      # (it's how LDAP kept reverting to disabled). LDAP/identity live in .env.local.
       - ./x3cores:/x3/cores  # Core dump directory
 
   # Auto-create X3 admin account after X3 starts (first oper gets olevel 1000)
