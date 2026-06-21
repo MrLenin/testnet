@@ -832,11 +832,12 @@ services:
     environment:
       - LDAP_ORGANISATION=Fractal Realities
       - LDAP_DOMAIN=fractalrealities.net
+      # admin password reuses the existing .env.local var so openldap, X3
+      # (X3_LDAP_ADMIN_PASS) and Keycloak's bindCredential all match — no secret in git.
+      - LDAP_ADMIN_PASSWORD=${X3_LDAP_ADMIN_PASS}
     env_file:
       - .env
       - .env.local
-    volumes:
-      - ./data/ldap/bootstrap.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/50-bootstrap.ldif
     networks:
       irc_net:
         ipv4_address: 172.29.0.13
@@ -847,6 +848,27 @@ services:
       retries: 6
       start_period: 20s
     restart: unless-stopped
+
+  # One-shot: seed data/ldap/bootstrap.ldif into openldap once it's healthy. Done via
+  # ldapadd (NOT osixia's custom-bootstrap dir, which chown/sed/rm's the mounted file and
+  # crash-loops). Read-only mount + idempotent (-c continues past "already exists"), so it's
+  # safe to re-run on every `up`. openldap is ephemeral (no data volume) -> re-seeded each start.
+  openldap-seed:
+    container_name: openldap-seed
+    image: startcodex/openldap:latest
+    depends_on:
+      openldap:
+        condition: service_healthy
+    networks:
+      - irc_net
+    environment:
+      - LDAP_ADMIN_PASSWORD=${X3_LDAP_ADMIN_PASS}
+    volumes:
+      - ./data/ldap/bootstrap.ldif:/bootstrap.ldif:ro
+    entrypoint: ["/bin/sh", "-lc"]
+    command:
+      - 'ldapadd -x -c -H ldap://openldap:389 -D "cn=admin,dc=fractalrealities,dc=net" -w "$$LDAP_ADMIN_PASSWORD" -f /bootstrap.ldif; rc=$$?; echo "openldap-seed: ldapadd rc=$$rc (0=added, 20=already exists -> both ok)"; exit 0'
+    restart: "no"
 
   keycloak:
     container_name: keycloak
