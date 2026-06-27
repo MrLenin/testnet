@@ -851,6 +851,15 @@ services:
     env_file:
       - .env
       - .env.local
+    volumes:
+      # Persist the LDAP database + slapd config so an openldap restart does NOT
+      # wipe ou=users / testadmin (X3 writes testadmin via ldap_writeback at
+      # register time; without persistence every restart broke SASL).  Named
+      # volumes (NOT bind-mounts) — osixia's first-init chown/sed/rm's these
+      # dirs so a bind-mount crash-loops; the inetOrgAnonAccount schema is baked
+      # into the image (docker/openldap), not mounted.
+      - ldap_data:/var/lib/ldap
+      - ldap_config:/etc/ldap/slapd.d
     networks:
       irc_net:
         ipv4_address: 172.29.0.13
@@ -865,7 +874,8 @@ services:
   # One-shot: seed data/ldap/bootstrap.ldif into openldap once it's healthy. Done via
   # ldapadd (NOT osixia's custom-bootstrap dir, which chown/sed/rm's the mounted file and
   # crash-loops). Read-only mount + idempotent (-c continues past "already exists"), so it's
-  # safe to re-run on every `up`. openldap is ephemeral (no data volume) -> re-seeded each start.
+  # safe to re-run on every `up`. openldap data now PERSISTS (ldap_data/ldap_config
+  # volumes) so it survives restarts; the seed stays idempotent for a fresh `down -v`.
   openldap-seed:
     container_name: openldap-seed
     image: startcodex/openldap:latest
@@ -1028,6 +1038,8 @@ volumes:
   webpush_data6:
   webpush_data7:
   x3_data:
+  ldap_data:
+  ldap_config:
 
 networks:
   irc_net:
