@@ -49,3 +49,33 @@ services:
     build:
       additional_contexts:
         - libkc=docker-image://local/libkc:dev
+
+  nefarious5-init:
+    build:
+      additional_contexts:
+        - libkc=docker-image://local/libkc:dev
+
+  nefarious5:
+    build:
+      additional_contexts:
+        - libkc=docker-image://local/libkc:dev
+
+  nefarious6-init:
+    build:
+      additional_contexts:
+        - libkc=docker-image://local/libkc:dev
+
+  nefarious6:
+    build:
+      additional_contexts:
+        - libkc=docker-image://local/libkc:dev
+
+  nefarious7-init:
+    build:
+      additional_contexts:
+        - libkc=docker-image://local/libkc:dev
+
+  nefarious7:
+    build:
+      additional_contexts:
+        - libkc=docker-image://local/libkc:dev
