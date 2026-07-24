@@ -1,0 +1,57 @@
+# docker-compose.clocktest.yml -- CRDT-mesh timing-race test harness overlay.
+#
+# Injects a per-node DEBUG-only wall-clock offset (in seconds) into each CRDT
+# mesh node so live tests can reproduce clock skew / NTP-step convergence races
+# deterministically. The ircd reads it at startup via
+# getenv("IRCD_FAKE_CLOCK_OFFSET") -- a DEBUG-BUILD-ONLY hook that is compiled
+# out of release builds -- and logs a loud L_WARNING whenever the offset is
+# non-zero, so a fake clock can never be silently active. Runtime steps use the
+# oper command  /CRDT clockstep <+-secs>  (also DEBUG-only, relative).
+#
+# Layer it onto the testnet docker-compose.yml by service name, from the testnet
+# root (same pattern as docker-compose.libkc-dev.yml):
+#
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.clocktest.yml \
+#     scripts/dc.sh -l --profile multi up -d
+#
+# The values below are a DEFAULT static-skew layout (nef4 +30s ahead, the rest on
+# the reference clock); adjust per scenario -- the MVP scenarios override these:
+#   * static skew : edit the IRCD_FAKE_CLOCK_OFFSET values here, then bring the
+#                   mesh up; every node stamps HLC + CurrentTime skewed by its
+#                   offset from boot.
+#   * U6 forward step / M2 backward step : boot at one offset, then issue
+#                   /CRDT clockstep <+-secs> at runtime to jump that node's clock.
+#   * M13 expiry  : step the fake clock past a ban lifetime to fire expiry fast.
+#
+# Valgrind is forced OFF on every node (NEFARIOUS_VALGRIND=0): its ~30x slowdown
+# swamps the millisecond-scale timing this harness measures (memory was already
+# validated valgrind-clean in the steady-state cycles).
+#
+# A netns partition sidecar (for the partition/heal scenarios) is a later add and
+# is intentionally NOT part of this static-skew MVP.
+
+services:
+  nefarious3:
+    environment:
+      - IRCD_FAKE_CLOCK_OFFSET=0
+      - NEFARIOUS_VALGRIND=0
+
+  nefarious4:
+    environment:
+      - IRCD_FAKE_CLOCK_OFFSET=+30
+      - NEFARIOUS_VALGRIND=0
+
+  nefarious5:
+    environment:
+      - IRCD_FAKE_CLOCK_OFFSET=0
+      - NEFARIOUS_VALGRIND=0
+
+  nefarious6:
+    environment:
+      - IRCD_FAKE_CLOCK_OFFSET=0
+      - NEFARIOUS_VALGRIND=0
+
+  nefarious7:
+    environment:
+      - IRCD_FAKE_CLOCK_OFFSET=0
+      - NEFARIOUS_VALGRIND=0
