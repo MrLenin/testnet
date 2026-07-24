@@ -143,10 +143,23 @@ dead since written. It is the intended eager channel-metadata restore (symmetric
 in-memory metadata after the channel empties + is recreated is the LAZY promotion in
 `metadata_cmd_get`'s channel branch. That is exactly why removing that promotion regressed (2nd-review
 Critical-2): the dead eager-load left the lazy GET-fallback as the sole restore path.
-**Fix (own change, own review — NOT part of the M8 CLEAR fix):** call `metadata_channel_load` when a
-channel is created / first materialized (mirror the user-side eager `metadata_load_account` at auth),
-then channel GETs can be memory-first like users; KEEP the GET promotion as the lazy backstop for the
-same gap-paths the user side has. Symmetric with [[project_ephemeral_metadata_burst_gap]].
+**Do NOT just "wire the eager load" (corrected 2026-07-24 after discussion — earlier note here
+recommended exactly that; it's wrong).** There IS an ircd-side registration signal (`MODE_REGISTERED`
+/`+R`, arrives at the MODE transition + on burst), so a trigger technically exists — but there is
+NOTHING RELIABLE TO LOAD FROM. Channel metadata is (a) explicitly EXCLUDED from doc convergence
+(`crdt_shadow.c:2240` `if (IsChannelName(account)) return 0;` "never converge channel metadata"), and
+(b) never bursted (`metadata_burst_channel` is a STUB, metadata.c:1864) — unlike user metadata, which
+got the full F2-b doc convergence + `metadata_burst_self_to_client` wiring. A node's local channel
+store is populated ONLY by real-time `ms_metadata` MD-broadcast caching (m_metadata.c:1604), so an
+eager `metadata_channel_load` at +R-time would hydrate node-local, possibly-empty/stale data. The dead
+function is the visible edge of a HALF-BUILT subsystem (channel persistence added, channel
+convergence never finished). The lazy GET-promotion is the HONEST design: it makes no convergence
+promise, just pulls whatever the local store holds on demand — sidestepping both "when to load" and
+"load from what." **Real fork:** either ACCEPT lazy-only (shipped; channel metadata = best-effort,
+node-local, not convergent), OR do the real project — give channels the F2-b treatment (doc
+convergence or a real `metadata_burst_channel`), after which the loader gets both a clean trigger
+(materialize-with-+R) and something worth loading. Symmetric gap with
+[[project_ephemeral_metadata_burst_gap]]; this is the channel half of what F2-b did for users.
 
 ## Harness lessons burned into the scenarios
 - **Convergence oracle = mdigest** (GC-invariant). The raw doc digest legitimately flaps
