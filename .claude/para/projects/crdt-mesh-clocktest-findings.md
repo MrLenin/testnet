@@ -135,6 +135,19 @@ overlay-dense testbed. Options: (a) build per-node multi-edge partition helpers;
 sparser bed (fewer overlays) for the partition tier; (c) defer the partition scenarios. The
 NON-partition timing-race fixes (M12/m15/M13/M8) are fully validated without any of this.
 
+## 🐛 FINDING 5 (dangling implementation, pre-existing — SEPARATE ITEM): `metadata_channel_load` has no caller
+`metadata_channel_load` (metadata.c, `return metadata_account_list(channel);`) was added complete but
+NEVER wired in — commit `92ea12a` "feat: Add LMDB persistence for metadata-2" (2025-12-24, Opus 4.5),
+dead since written. It is the intended eager channel-metadata restore (symmetric to
+`metadata_load_account` for users), so with it dead the ONLY path that repopulates a channel's
+in-memory metadata after the channel empties + is recreated is the LAZY promotion in
+`metadata_cmd_get`'s channel branch. That is exactly why removing that promotion regressed (2nd-review
+Critical-2): the dead eager-load left the lazy GET-fallback as the sole restore path.
+**Fix (own change, own review — NOT part of the M8 CLEAR fix):** call `metadata_channel_load` when a
+channel is created / first materialized (mirror the user-side eager `metadata_load_account` at auth),
+then channel GETs can be memory-first like users; KEEP the GET promotion as the lazy backstop for the
+same gap-paths the user side has. Symmetric with [[project_ephemeral_metadata_burst_gap]].
+
 ## Harness lessons burned into the scenarios
 - **Convergence oracle = mdigest** (GC-invariant). The raw doc digest legitimately flaps
   during per-node GC / expiry-tombstone waves; asserting on it gives false FAILs.
