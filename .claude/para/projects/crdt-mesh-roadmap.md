@@ -68,8 +68,10 @@ current truth, reconciled against `git log` on branch `crdt-mesh`. **The promoti
    PERMANENT-only (user prefs + persistence-profile config; TTL caches like last_present excluded),
    single-writer, additive; SET heal + DELETE store-walk reconcile into metadata_cf. Live-proven:
    overlay-only leaf (cut from tree) converged SET + CLEAR purely via the doc. **RD reclassified → 5-5f**
-   (CH federation; live redaction is broadcast-covered). Remaining Tier C: F3 (TEMPSHUN/SVSNOOP), F4
-   (RENAME channel split-brain), F5 (ephemeral notices SMO/SNO/DESYNCH/WEBPUSH); plus a deferred
+   (CH federation; live redaction is broadcast-covered). **F3-TEMPSHUN DONE 2026-07-25 (`773857d`):
+   CRDT_COLL_TEMPSHUNS LWW register, entry-minted/home-applied; SVSNOOP=accept-degrade (no emitter);
+   `crdt-mesh-tier-c-f3.md`.** Remaining Tier C: F4 (RENAME channel split-brain — trickiest), F5
+   (ephemeral notices SMO/SNO/DESYNCH/WEBPUSH); plus a deferred
    network-wide last_present MAX-register slice (TTL + not-S2S, distinct from F2-b). Detail:
    `crdt-mesh-tier-c-f2.md` / `-scope.md`.
 2. **Nick-collision live-validation** — exercise the resolver under a real concurrent-claim partition;
