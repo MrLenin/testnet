@@ -68,7 +68,7 @@ current truth, reconciled against `git log` on branch `crdt-mesh`. **The promoti
    PERMANENT-only (user prefs + persistence-profile config; TTL caches like last_present excluded),
    single-writer, additive; SET heal + DELETE store-walk reconcile into metadata_cf. Live-proven:
    overlay-only leaf (cut from tree) converged SET + CLEAR purely via the doc. **RD reclassified → 5-5f**
-   (CH federation; live redaction is broadcast-covered). **F3-TEMPSHUN DONE 2026-07-25 (`773857d`):
+   (CH federation; live redaction is broadcast-covered). **F2-c WEBPUSH subscription convergence DONE 2026-07-25 (`aaeb657`, `crdt-mesh-tier-c-webpush.md`); reclassified out of F5 (subscription=state). F3-TEMPSHUN DONE 2026-07-25 (`773857d`):
    CRDT_COLL_TEMPSHUNS LWW register, entry-minted/home-applied; SVSNOOP=accept-degrade (no emitter);
    `crdt-mesh-tier-c-f3.md`.** Remaining Tier C: F4 (RENAME — **BLOCKED on services integration**, see `crdt-mesh-tier-c-f4.md`; not pickable now), F5
    (ephemeral notices SMO/SNO/DESYNCH/WEBPUSH); plus a deferred
