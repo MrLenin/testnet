@@ -214,25 +214,28 @@ draft/chathistory=limit=100,pm=global
 
 **Connection Notice** (CHATHISTORY_PM_NOTICE): When enabled, sends a NOTE (standard-replies) or NOTICE on connect informing users of the PM storage policy and how to opt-in/out.
 
-### Metadata Caching Configuration
+### Metadata Storage Configuration (era-2, two-tier)
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `FEAT_METADATA_CACHE_ENABLED` | TRUE | Enable RocksDB metadata caching |
-| `FEAT_METADATA_X3_TIMEOUT` | 60 | Seconds to wait for X3 before using cache-only mode |
-| `FEAT_METADATA_QUEUE_SIZE` | 1000 | Maximum pending writes when X3 is unavailable |
-| `FEAT_METADATA_BURST` | TRUE | Send metadata during netburst to linking servers |
+| `FEAT_METADATA_MAX_KEYS` | 20 | Per-target key limit enforced on SET |
+| `FEAT_METADATA_MAX_VALUE_BYTES` | 300 | Per-value size limit (bounded by the 512-byte IRC line) |
+| `FEAT_METADATA_MAX_SUBS` | 50 | Per-client subscription limit (SUB) |
+| `FEAT_METADATA_RATE_LIMIT` | 10 | Per-client METADATA command rate limit |
+| `FEAT_METADATA_BURST` | TRUE | Send metadata during netburst to IRCv3-aware tree/legacy peers (CRDT peers receive the doc via CR F instead) |
 | `FEAT_METADATA_DB` | "metadata" | RocksDB directory path for the metadata CF |
-| `FEAT_METADATA_CACHE_TTL` | 14400 | Seconds before cached metadata expires (4 hours) |
-| `FEAT_METADATA_PURGE_FREQUENCY` | 3600 | Seconds between cache purge runs (1 hour) |
+| `FEAT_METADATA_CACHE_TTL` | 14400 | Age (seconds) at which legacy TTL-class rows expire — see tier notes below |
+| `FEAT_METADATA_PURGE_FREQUENCY` | 3600 | Seconds between purge sweeps of expired TTL-class rows |
 | `FEAT_METADATA_DB_AUTOGROW` | TRUE | Legacy libmdbx-era flag; ignored under RocksDB (kept for config compatibility) |
 | `FEAT_METADATA_DB_NORDAHEAD` | TRUE | Legacy libmdbx-era flag; under RocksDB the random-access pattern is handled by per-CF block-cache tuning |
 
-**Cache-Aware Metadata**: When enabled, Nefarious maintains a RocksDB-backed cache for metadata:
-- **X3 Detection**: Automatically detects X3 availability via heartbeat on METADATA updates
-- **Write Queue**: Queues writes when X3 is unavailable, replays when reconnected
-- **Netburst**: Sends user/channel metadata to linking servers during netburst
-- **Store Path**: Configurable via `METADATA_DB` feature (default: `metadata/` relative to ircd dir)
+**Two-tier storage model** (era-2; design spec `.claude/para/projects/metadata-era2-completion.md`):
+- **Permanent tier** — the real data. Account metadata (authenticated users) and **registered (+R) channel** metadata persist as `target\0key` rows in the metadata CF, visibility-encoded (`P:` private / `*:` public prefix; server-managed `draft/persistence/` keys stay bare = private-by-rule; legacy bare rows read as public). All writes flow through the single `metadata_account_set_ts` chokepoint. On the crdt-mesh branch every permanent row is also CRDT-doc-converged (LWW, minted at the origin only; the reconcile heals remote stores AND live memory, firing subscriber notifies). `+R` hydrates channel memory from the store; `-R` and `METADATA CLEAR` wipe store + doc (tombstones) + live memory network-wide.
+- **Ephemeral** — unauthenticated users and unregistered channels are memory + S2S relay only: no store row ever; state dies with the session/channel. (Under CRDT tree-retirement, unregistered-channel metadata converges only within the source's tree horizon until the MR-6 delivery work — permanent-tier data is unaffected, the doc carries it.)
+- **TTL tier (legacy, write-dead)** — rows carrying a timestamp decay after `CACHE_TTL` via the purge sweep. Era-2 removed the writers (remote channel cache; TTL oper offline-SET); the sweep remains to age out pre-era-2 rows.
+- The era-1 "cache-aware" machinery this section used to describe (`FEAT_METADATA_CACHE_ENABLED`, `FEAT_METADATA_X3_TIMEOUT`, `FEAT_METADATA_QUEUE_SIZE`, the X3 heartbeat/write-queue) no longer exists.
+- **Retired wire surface**: the `MDQ` query token and the `MD` `Z` compressed-passthrough flag are removed on crdt-mesh (no live sender ever existed; the production `ircv3.2-upgrade` fork retains them until the era-2 cherry-pick lands there).
+- **Visibility on GET**: a private key the viewer cannot see answers 766 (`RPL_KEYNOTSET`) exactly like an absent key — key existence does not leak.
 
 ### Compression Configuration (Nefarious)
 
@@ -249,13 +252,12 @@ draft/chathistory=limit=100,pm=global
 - Level 9: Similar to zlib -9
 - Level 19-22: Maximum compression, much slower
 
-**Compression Passthrough (Z flag)**: When X3 sends metadata responses via the P10 `MD` token with the `Z` flag, Nefarious stores the pre-compressed data directly without recompression:
-```
-Az MD ABAAB avatar * Z :KLUv/QBYpQEAaHR0cHM6Ly9...
-```
-This eliminates unnecessary decompress/recompress cycles between services.
+**Compression Passthrough (Z flag) — RETIRED (era-2)**: the P10 `MD` `Z` pre-compressed
+passthrough was removed on crdt-mesh — no originator ever existed, and it bypassed the
+single storage chokepoint. The production fork retains the code until the era-2
+cherry-pick. Application-level zstd (above) owns metadata value compression.
 
-**RocksDB CF compression is intentionally OFF** for the CFs that hold these blobs — chathistory (`messages`, `msgid_index`, `targets`, `quotas`, `reply_index`), metadata (`metadata`, `readmarkers`, `bouncer_sessions`), and `ml_content` / `ml_paste_secrets`. All callers pass `compress=0` to `db_cf_open`, so the RocksDB adapter (`ircd/db_rocksdb.c:make_cf_options`) skips `rocksdb_options_set_compression`. Application-level zstd (above) and the Z-flag passthrough own the bytes end-to-end; RocksDB stores them byte-for-byte. The `db_cf_opts.compress` plumbing is kept for future CFs that hold *never*-app-compressed data and could benefit from RocksDB-level compression.
+**RocksDB CF compression is intentionally OFF** for the CFs that hold these blobs — chathistory (`messages`, `msgid_index`, `targets`, `quotas`, `reply_index`), metadata (`metadata`, `readmarkers`, `bouncer_sessions`), and `ml_content` / `ml_paste_secrets`. All callers pass `compress=0` to `db_cf_open`, so the RocksDB adapter (`ircd/db_rocksdb.c:make_cf_options`) skips `rocksdb_options_set_compression`. Application-level zstd (above) owns the bytes end-to-end (on the prod fork the retired Z-flag passthrough also feeds pre-compressed blobs in); RocksDB stores them byte-for-byte. The `db_cf_opts.compress` plumbing is kept for future CFs that hold *never*-app-compressed data and could benefit from RocksDB-level compression.
 
 (Future work — getting both application-level passthrough *and* RocksDB-level compression: RocksDB supports `bottommost_compression` to compress only the deepest LSM level. Hot tiers stay uncompressed so passthrough and reads are fast; cold blobs at the bottom level get compressed during major compaction. The trade-off is that pre-compressed blobs would also be re-compressed when they reach the bottom level — wasting CPU briefly per compaction. Worth considering when storage size starts mattering more than write latency.)
 
@@ -276,7 +278,7 @@ This eliminates unnecessary decompress/recompress cycles between services.
 
 **Away Throttle**: When `AWAY_THROTTLE` is set to a value > 0, users are rate-limited on how frequently they can change their away status. This prevents abuse and reduces network traffic from clients that rapidly toggle away state. The value represents the minimum seconds between AWAY command changes.
 
-**Persistence**: The `last_present` timestamp for each account is persisted via the metadata RocksDB CF using the reserved key `last_present`.
+**Persistence**: `last_present` is served **virtually** from live bouncer/presence state; the reserved metadata key of the same name is a legacy TTL-tier row whose store writer (`account_conn.c`) is dead code — do not rely on the CF row. (Network-wide `last_present` is a separate deferred track.)
 
 ### P10 Protocol Features
 

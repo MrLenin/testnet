@@ -246,6 +246,16 @@ Delete (with parse.c/msg.h/header/decl cleanup where applicable):
   the ms_metadata channel cache dying in P2/B5 and oper offline SET now permanent (A4), the
   TTL row machinery (`CACHE_TTL`, purge sweep) may have zero live writers left → candidate
   for retirement in P2/P3, and `account_conn.c` itself for removal.
+  **RESOLVED BY P3 SURVEY (2026-07-25, exhaustive c-auditor sweep of all 14 real call sites):
+  ZERO live TTL writers** — every reachable non-NULL write is `metadata_account_set_permanent`
+  (ts=0); the sole true TTL writer (`account_conn.c:465`) is dead code; all `metadata_account_set`
+  survivors are NULL-value deletes (TTL bypassed). The doc-mirror's `!permanent` gate
+  independently guarantees no TTL row can ever converge. DECISION: **keep `CACHE_TTL` + the purge
+  sweep as a LEGACY-AGER** (the only path that physically reclaims pre-era-2 rows; read-time
+  expiry just masks them) — re-commented in code (`metadata_account_purge_expired` header +
+  ircd.c callback) so nobody reintroduces a TTL writer thinking it's load-bearing. Full
+  retirement = a one-time on-disk migration pass, separate follow-on if ever wanted;
+  `account_conn.c` file removal folds into the prod cherry-pick housekeeping.
 - **GET existence-leak on denied private keys (found P1/T7 live + final review):** in
   `metadata_cmd_get` a private key the viewer can't see does `continue` (no reply), while a
   truly-absent key returns 766 RPL_KEYNOTSET — so a non-owner can distinguish "exists-but-
@@ -294,11 +304,16 @@ Delete (with parse.c/msg.h/header/decl cleanup where applicable):
 ## Phasing (implementation order)
 
 - **P0 — shrink the surface**: §D retirements + §C1 burst token fix. No behavior redesign;
-  every deletion is auditable dead code. Docker + cmocka gate.
+  every deletion is auditable dead code. Docker + cmocka gate. **DONE 2026-07-24 (`236e1ff`).**
 - **P1 — account tier**: A2 (encoding first — everything reads through it), A3, A1, A6, A4.
-  Live-validate scenarios 4/6/7.
-- **P2 — channel tier**: B1→B6. Live-validate scenarios 1/2/3.
+  Live-validate scenarios 4/6/7. **DONE 2026-07-24 (`f98b04d`).**
+- **P2 — channel tier**: B1→B6. Live-validate scenarios 1/2/3. **DONE 2026-07-25 (`207a083`;
+  + final-review CLEAR-on-+R fix; §B3 -R memory semantics amended above; GET existence-leak
+  closed in-phase).**
 - **P3 — docs**: FEATURE_FLAGS_CONFIG.md rewrite + skill/memory updates (this file tracks state).
+  **DONE 2026-07-25** (FEATURE_FLAGS metadata/Z/last_present sections rewritten to this model;
+  p10-protocol skill both copies + submodule CLAUDE.md MDQ-retirement annotations; roadmap
+  addendum; TTL-writer retirement survey recorded below).
 - Commit per phase (standing crdt-mesh OK); submodule push + testnet pointer per constraints in
   `crdt-mesh-tier-c-f2.md` §Constraints.
 

@@ -7,6 +7,85 @@ Authored 2026-06-11. Supersedes the scattered "remaining/deferred" notes; cross-
 `compressed-marinating-teacup.md` (Tier-1 plan). Live state in personal memory
 `project_crdt_mesh_phase0.md`.
 
+## Where we are (2026-06-28) — AUTHORITATIVE; supersedes all dated markers below
+
+The per-phase prose further down lags reality (last bulk-authored 2026-06-11/17). This snapshot is the
+current truth, reconciled against `git log` on branch `crdt-mesh`. **The promotion gate is MET: the
+§17.7 gateway bridges legacy↔CRDT bidirectionally and the fork is shippable as prod** (see
+`project_crdt_bouncer_gateway_legacy` / `project_crdt_m6c1_gateway_synth`).
+
+**Addendum 2026-07-25 (post-snapshot completions, now @ `207a083`):**
+- Tier C F1-b/F1-c (SVSINFO/MARK, SILENCE), F2-a (read-marker), F2-b (permanent account metadata)
+  converge over the mesh; C1 multiline; nick-collision handling; 5-node bed expansion.
+- Phase-3 hardening backlog COMPLETE (`0d9fe5c`, 368 cmocka Docker-gated) + overlay liveness
+  (`f33b86b`) + DEBUGMODE clock-injection harness (M12/m15/M13 clocktest PASS).
+- **Account-prop leaf defect FIXED** (`75783ce`..`3fa1041`): beyond-horizon mesh-anchor sources
+  admitted on CRDT links (`CrdtAcceptBeyondHorizonSource`, cmocka truth-table) + services-handler
+  class sweep (3 crash sites, MARK/PRIVS gates, NICK stub-drop) + `/CRDT status` stub count fix.
+- **Metadata era-2 overhaul P0+P1+P2+P3 COMPLETE** (spec `metadata-era2-completion.md`; SDD ledger
+  `nefarious-crdt/.superpowers/sdd/progress.md`): P0 surface shrink (MDQ/Z retired, `236e1ff`);
+  P1 account tier (A2 visibility encoding, eager load, doc→memory+notify, oper offline SET
+  permanent, `f98b04d`); P2 channel tier (+R persistence + doc convergence + ±R hooks + CLEAR
+  fix, era-1 channel cache retired, GET existence-leak closed, `207a083`); P3 docs 2026-07-25.
+  Live gates green (p2_chreg/p2_restart + P1 + leafauth regression). NEXT: prod-fork cherry-pick
+  subset (spec final section).
+- **S2S gap A live-confirmed** (beyond-horizon USER-sourced tree tokens fake-direction-dropped;
+  unregistered-channel MD horizon-scoped) — folded into the MR-6 gating work (s2s coverage audit).
+
+**DONE + live-validated since 2026-06-11:**
+- **Track B P10-retirement arc — COMPLETE through MR-5 (the keystone).** MR-0 routing observability →
+  MR-1 unicast → MR-2/2b channel+WALLOPS broadcast → MR-3a/c legacy presence + SERVER-intro suppression
+  → MR-4a/b/c/d gateway traffic bridge + KILL/INVITE home-delivery + multi-gateway election →
+  **MR-5-0/1/2/3 retire the P10 SERVER tree among CRDT peers** (`d1fe32a`, 2026-06-17) + event-driven
+  beacon-burst. R6c partition-faithful gateway + freshly-linked-peer backfill (`9299202`).
+- **Global bans into the doc — DONE.** GLINE (3 steps) + SHUN + ZLINE + JUPE all CRDT-native
+  (engine + shadow-write + cutover + §17.7 gateway), 2026-06-15/16. SETTIME scoped OUT (layering).
+- **Services bridge (Tier B) — B0/B1/B2 DONE + live** (present mesh servers to legacy → SASL + LOC
+  route naturally, `e5cd75c`). B3 REGISTER/VERIFY blocked on X3; B4/B6/B7 optional.
+- **5-5e bouncer-over-mesh — COMPLETE (M2→M6d).** bsessions/bconns collections (M2/M4), doc-derived
+  election (M3), **M5 liveness-lease kernel**, M6a materializer+reap, M6b-1/1b session+HOLDING
+  suppression, **M6c-1 gateway BS/BX synthesis (promotion capstone, `f0a84da`+`5328b29`)**, **M6d
+  authoritative lease — doc-driven revive/demote with ghost-freedom** (`f762ccb`/`b890378`), BX alias
+  path (Inc-0..2c), **M6b-2 BS O doc-native oper grant + restart revalidation** (`9a9f030`/`cc2d581`).
+  Plus this-session hardening: userstats over/under-count crash class (`d389fbe`..`92e64b2`,
+  FLAG_COUNTED_* unification) + convert-in-place absorbed-nick ghost (`73f0ed4`). Detail:
+  `crdt-mesh-5-5e-bouncer.md`.
+- **Tier C correctness — PARTIAL.** F1 user-state: AWAY, SVSIDENT, SWHOIS, SETNAME/realname converge
+  over the mesh (`d97c6e5`/`f3fb20c`/`5a2b073`). C1 multiline: channel + DM-target over CR
+  (`bd14966`/`1cb06e1`). 5-5c CH-federation skip-mesh-only band-aid (`3cd3861`).
+- **Nick-collision resolver — BUILT + wired** (`crdt_resolve_nick_collision` / `crdt_nick_force_rename`,
+  crdt_shadow.c:3099). Live-validation under a concurrent-claim partition: unconfirmed (test gap).
+- **Orphan-reap milestone — Inc 1 detector landed** (`5aeb86e`); Inc 2 destructive reap gated/deferred.
+  See `crdt-orphan-reap-milestone.md`.
+
+**OPEN (genuine remaining work, by value):**
+1. **Tier C remaining tokens** — **F1 COMPLETE** (minus ACCOUNT, reclassified to Tier B): F1-a
+   AWAY/SVSIDENT/SWHOIS/SETNAME; F1-b SVSINFO + MARK realname/version/sslclifp/geoip (`00b048f`);
+   **F1-c SILENCE per-user OR-Set DONE 2026-06-29 (`57c6575`, ptr `601f8f4`)**. **F2-a read-marker (MR)
+   MAX-register DONE 2026-06-29 (`8eec2df`, ptr `29eaf16`)** — live-proven: overlay-only leaf nef7
+   converged a read-marker purely via the doc (P10 MR didn't reach it). **F2-b MD (metadata-2) DONE
+   2026-06-29 (`e7be832`, ptr `893a90e`)** — plain HLC-LWW collection, opaque account\0key,
+   PERMANENT-only (user prefs + persistence-profile config; TTL caches like last_present excluded),
+   single-writer, additive; SET heal + DELETE store-walk reconcile into metadata_cf. Live-proven:
+   overlay-only leaf (cut from tree) converged SET + CLEAR purely via the doc. **RD reclassified → 5-5f**
+   (CH federation; live redaction is broadcast-covered). Remaining Tier C: F3 (TEMPSHUN/SVSNOOP), F4
+   (RENAME channel split-brain), F5 (ephemeral notices SMO/SNO/DESYNCH/WEBPUSH); plus a deferred
+   network-wide last_present MAX-register slice (TTL + not-S2S, distinct from F2-b). Detail:
+   `crdt-mesh-tier-c-f2.md` / `-scope.md`.
+2. **Nick-collision live-validation** — exercise the resolver under a real concurrent-claim partition;
+   likely a test gap, not a build gap. SMALL.
+3. **M7** — retire the now-dead per-hop bouncer election on the mesh side (cutover live via 21
+   `FEAT_CRDT_BOUNCER_DOC` sites). Pure dead-code removal. SMALL, low-urgency.
+4. **Orphan-reap Inc 2** — destructive reap; gated on capturing a persistent ghost + a partition
+   isolation test. DEFERRED.
+5. **CH federation over CR (5-5f)** — reroute federated CH Q/W over the mesh (the 5-5c band-aid's real
+   fix). User-deferred (chathistory waits). MEDIUM-LARGE.
+6. **MR-6 overlay-as-primary transport** — drop P10 links entirely; endgame, gated on Tier C
+   completeness. LARGE.
+7. **Multi-gateway live test** — election code in (`f3c8c71`); 2-gateway live exercise deferred.
+
+---
+
 ## Where we are (2026-06-11)
 Event model fully CRDT-authoritative (Phases 3a-3o). Tier-1 done (overlay + Fix A digest-aware
 anti-entropy → doc converges across any partition). Tier-2 done: T2-a/b/c (mesh-stub keep + live
