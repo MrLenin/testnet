@@ -26,10 +26,13 @@ live shun (window practically empty; registration precedes shun). Not F3-introdu
   of a user homed 2+ tree hops out silently never lands. That is the F3 defect.
 - **SVSNOOP** = per-server O-line kill switch (m_svsnoop.c: on the TARGET server only, `+` marks
   every CONF_OPERATOR line CONF_ILLEGAL + SetServerNoop; `-` rehashes + clears), relayed
-  unconditionally. **No emitter exists**: X3 never sends it (zero hits in x3/src), there is no
-  oper command (server-only handler, Ultimate port). Converging it would be dead code (the MDQ
-  lesson) — but unlike MDQ it is upstream-inherited legacy surface shared with prod, so it is
-  NOT retired here either.
+  unconditionally. **X3 never emits it** (zero hits in x3/src) and there is no oper command —
+  BUT it is standard ircu/P10 surface that OTHER services (uworld, srvx-family, other X-series)
+  DO emit, so "no emitter" is X3-parochial and WRONG as a justification (corrected 2026-07-25
+  after user pushback). The real reason it stays accept-degrade is architectural: the fork's
+  direction is integrated services ([[project_x3_nefarious_merge]] — services fold INTO the
+  ircd), so an external P10 service emitting SVSNOOP is a fading legacy-interop concern, not a
+  forward requirement. Low-value to invest in.
 
 ## Decisions
 
@@ -38,7 +41,17 @@ live shun (window practically empty; registration precedes shun). Not F3-introdu
    partitions (an enforcement flag delivered ephemerally would miss rejoining nodes), and the
    user record already has the exact machinery (wire roundtrip, LWW, reconcile, materialize).
 2. **SVSNOOP → accept-degrade, documented**: stays a legacy tree token; no doc model, no CR
-   carrier. Revisit only if an emitter ever appears. (F5-class disposition, recorded here so
+   carrier. **NB the fix shape, if ever wanted, is NOT F3-style convergence** — SVSNOOP is
+   SERVER-sourced, so the account-prop parse exemption (`CrdtAcceptBeyondHorizonSource`) already
+   ADMITS a beyond-horizon (mesh-anchor) SVSNOOP; the ONLY thing dropping it is `ms_svsnoop`'s
+   own `!IsServer(sptr)` source gate (m_svsnoop.c:114) rejecting the stub. So the entire
+   available fix is a ONE-LINE `IsMeshStub(sptr)` tolerance (the exact pattern the account-prop
+   class sweep gave ms_account/ms_mode/ms_mark/m_privs; stub-safe — sptr only flows to
+   `sendcmdto_serv_butone`, no cli_user deref), fixing the tree-relay-still-present window. Full
+   doc convergence would only be for post-MR-6 mesh-only delivery (the general gap-A/CR-M work,
+   not SVSNOOP-specific). DEFERRED (not applied): low value vs the integration direction, and
+   un-live-gateable on the bed (no emitter to trigger it). Revisit iff a legacy-interop
+   requirement surfaces. (F5-class disposition, recorded here so
    F3 is closed as a family.)
 
 ## TEMPSHUN design — REVISED during TDD-red (user-record model REJECTED)
