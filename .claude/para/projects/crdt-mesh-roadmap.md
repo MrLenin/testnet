@@ -70,7 +70,7 @@ current truth, reconciled against `git log` on branch `crdt-mesh`. **The promoti
    overlay-only leaf (cut from tree) converged SET + CLEAR purely via the doc. **RD reclassified → 5-5f**
    (CH federation; live redaction is broadcast-covered). **F3-TEMPSHUN DONE 2026-07-25 (`773857d`):
    CRDT_COLL_TEMPSHUNS LWW register, entry-minted/home-applied; SVSNOOP=accept-degrade (no emitter);
-   `crdt-mesh-tier-c-f3.md`.** Remaining Tier C: F4 (RENAME channel split-brain — trickiest), F5
+   `crdt-mesh-tier-c-f3.md`.** Remaining Tier C: F4 (RENAME — **BLOCKED on services integration**, see `crdt-mesh-tier-c-f4.md`; not pickable now), F5
    (ephemeral notices SMO/SNO/DESYNCH/WEBPUSH); plus a deferred
    network-wide last_present MAX-register slice (TTL + not-S2S, distinct from F2-b). Detail:
    `crdt-mesh-tier-c-f2.md` / `-scope.md`.
