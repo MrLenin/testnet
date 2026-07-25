@@ -192,14 +192,37 @@ try:
           % (r3_pub, r3_priv, r7_pub, r7_priv,
              'PASS' if no_resurrect else 'FAIL'))
 
-    # 6. mesh still converges
+    # 6. CLEAR-resurrection guard (final-review finding): with the channel
+    #    still +R, re-SET both keys, METADATA CLEAR, then hold PAST a
+    #    reconcile tick (30s verify cycle): pre-fix the doc kept the SETs
+    #    (CLEAR was memory-only, no tombstones) and the reconcile re-healed
+    #    store+memory on every node within ~30s. Post-fix the CLEAR origin
+    #    wipes store + mints doc tombstones, so the keys must STAY gone.
+    meta_set(op3, CHAN, PUB_KEY, PUB_VAL, vis='public')
+    meta_set(op3, CHAN, PRIV_KEY, PRIV_VAL, vis='private')
+    time.sleep(4)
+    op3.send('METADATA %s CLEAR' % CHAN)
+    op3.drain(2.0)
+    time.sleep(40)                      # > one 30s reconcile tick
+    c3_pub, _ = meta_get(op3, CHAN, PUB_KEY)
+    c3_priv, _ = meta_get(op3, CHAN, PRIV_KEY)
+    c7_pub, _ = meta_get(op7, CHAN, PUB_KEY)
+    c7_priv, _ = meta_get(op7, CHAN, PRIV_KEY)
+    clear_holds = (c3_pub is None and c3_priv is None
+                   and c7_pub is None and c7_priv is None)
+    print('post-CLEAR +40s (past reconcile): nef3 pub=%r priv=%r  nef7 pub=%r priv=%r -> %s'
+          % (c3_pub, c3_priv, c7_pub, c7_priv,
+             'PASS' if clear_holds else 'FAIL(RESURRECTED)'))
+
+    # 7. mesh still converges
     conv, tc, _ = wait_converged(opers, timeout=90)
     print('mesh converged: %s (%.1f s)' % (conv, tc))
 
-    verdict = (oper_sees_both and vis_ok and all_reaped and no_resurrect and conv)
-    print('\nP2-CHREG %s  (converge=%s vis=%s reap=%s no_resurrect=%s mesh=%s)'
+    verdict = (oper_sees_both and vis_ok and all_reaped and no_resurrect
+               and clear_holds and conv)
+    print('\nP2-CHREG %s  (converge=%s vis=%s reap=%s no_resurrect=%s clear=%s mesh=%s)'
           % ('PASS' if verdict else 'FAIL', oper_sees_both, vis_ok, all_reaped,
-             no_resurrect, conv))
+             no_resurrect, clear_holds, conv))
 finally:
     close_all(opers)
     if B:
