@@ -48,11 +48,17 @@ Fix pattern is uniform: route the cross-server leg through `crdt_route_unicast_t
 - **XQUERY (XQ) + XREPLY (XR)** — services RPC, tree-only; the CR-X bridge has DORMANT 'Q'/'Y' dispatch cases
   (m_crdt.c:552/582) but no forward caller → dead-sink to a mesh-only target. (Latent — wiring half-exists.)
 
-### Cluster B — SASL cache invalidation (SECURITY, MAJOR)
-- **CI (CACHEINVAL)** — SASL positive-auth-cache invalidation is P10-tree-only (`sendcmdto_serv_butone_v3`
-  over `cli_serv(&me)->down`, send.c:2026); no doc, no CR carrier, not in the CR-X bridge switch. An
-  overlay-only leaf keeps a **stale positive auth cache → revoked/changed credentials accepted up to
-  `FEAT_SASL_POSCACHE_TTL`=300s.** Fix: a CR broadcast carrier for CI (or fold into the CR-X services bridge).
+### Cluster B — SASL cache invalidation (SECURITY, MAJOR) — ✅ FIXED 2026-07-26 (`2b1283d`)
+- **CI (CACHEINVAL)** — was P10-tree-only; an overlay-only leaf kept a **stale positive auth cache →
+  revoked/changed credentials accepted up to `FEAT_SASL_POSCACHE_TTL`=300s.**
+- **FIX SHIPPED:** dual-plane `ci_broadcast()` (sasl_webhook.c) replaces all 5 raw CI emit sites — v3
+  tree copy (legacy) + one mesh **CR M cmd `I`** broadcast (msgid-deduped flood). mesh-mint at the
+  origin webhook sites + at the ms_cacheinval relay ONLY when the CI arrived from a non-CRDT peer
+  (`!IsCrdtAware(cptr)` = §17.7 gateway edge; no per-hop re-mint). Receiver (m_crdt.c CR M `I`) does
+  LOCAL invalidate only (MR-2b `W` precedent — no legacy re-emit → no dual-plane echo loop). Additive
+  (crdt_gossip_message self-gates → mesh-off = old behavior). Live-gated: POST credential event to
+  hub nef3 → mesh CI reached overlay-only **nef7** in ~1s, each peer exactly once, origin local once,
+  no storm/echo, converged. The lowest-hanging MR-6 gate; first S2S-audit cluster closed.
 
 ### Cluster C — state not represented in the doc (structural, needs a schema add)
 - **Extended channel modes — MAJOR.** The doc `modes` collection stores only `CRDT_MODE_MASK`
