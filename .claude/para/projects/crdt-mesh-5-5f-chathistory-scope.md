@@ -1,8 +1,9 @@
-# Chathistory federation — scoping (prod discovery fix + 5-5f mesh transport)
+# Chathistory federation — scoping (mixed-bed interop + 5-5f mesh transport)
 
-**Status:** SCOPED 2026-07-26 (survey agent + brainstorming). Not yet implemented.
-**Supersedes:** the standing hypothesis in memory `project_chathistory_federation_gap.md`
-(now root-caused below) and the 5-5c band-aid contract in `3cd3861`.
+**Status:** SCOPED 2026-07-26; **Phase A VOID** (disproven by instrumentation — see memory
+`project_chathistory_federation_gap.md`: discovery works, the red tests were test-env
+artifacts); **Phase 0 IMPLEMENTED 2026-07-27** (mixed-bed interop, below). B1–B3 open.
+**Supersedes:** the 5-5c band-aid contract in `3cd3861` (partially — see Phase 0).
 **Companion (OUT OF SCOPE, deferred):** the bloom-filter channel-ad optimization in
 `federation-dedup-s2s-msgid.md`.
 
@@ -10,20 +11,58 @@
 
 ## TL;DR
 
-"Chathistory" is **two independent problems** sharing machinery:
-
-- **(A) prod-fork federation discovery bug** — the 5 failing `chathistory-federation.test.ts`
-  tests. A late-linking server never learns which peers store history (`server_ads[]`
-  stays empty → federation never starts → secondary returns 0). Reproduces on the
-  non-mesh nefarious/nefarious2 pair; nothing to do with the CRDT mesh. **Phase A.**
+- **(A) prod-fork federation discovery bug — VOID.** The "server_ads[] stays empty on a
+  late-linker" hypothesis was disproven live: ads land, discovery works, 7/7 tests pass
+  native+isolated. The 5 red tests were (1) CRDT-bed pollution + (2) valgrind slowness
+  vs the 5s fed timeout. Do not implement the EOB ad-replay; nothing is broken there.
+- **(Phase 0) mixed-bed interop — IMPLEMENTED 2026-07-27.** Root cause of the "CRDT-bed
+  pollution": mesh nodes advertise CH A S into legacy `server_ads[]` (via the gateway),
+  legacy dutifully queries them, and the query dies inside the mesh node — on a
+  CR-snapshot link the legacy net-burst is suppressed, so legacy servers exist on inner
+  mesh nodes only as lazily-minted synthetic anchors (`STAT_MESH_SERVER`), and
+  `ms_chathistory`'s `!IsServer(sptr)` gate silently discarded anchor-sourced queries
+  (hard-invariant 2, handler-side). Three fixes (see "Phase 0 as-built" below):
+  source gate accepts stubs, replies route via the arrival link when the origin is
+  anchored, and reqid-prefix reply forwarding added on BOTH branches — the prod fork
+  could never traverse >1 hop either (replies were dropped at the first intermediate;
+  masked because the tests only ever used a directly-linked pair).
 - **(B) 5-5f: chathistory over the retired P10 tree** — CH Q/reply are tree-routed
   `sendcmdto_one`, so they dead-sink at mesh anchors, and overlay-only nodes (nef7)
   never hear ads at all. Under R6a tree-demote there is exactly ONE stored copy
   network-wide (the origin's), so the witness redundancy that used to mask federation
   gaps is gone → permanent history holes. A MR-6 gate. **Phase B = B1 → B2 → B3.**
 
-Ship order: **A → B1 → B2 → B3.** A is a prerequisite understanding for B (both build on
-`server_ads[]` / the FedRequest pipeline) and clears the red test board first.
+Ship order: **Phase 0 (done) → B1 → B2 → B3.**
+
+## Phase 0 as-built (2026-07-27)
+
+Files: `m_chathistory.c` on BOTH `nefarious-crdt` (crdt-mesh) and `nefarious`
+(ircv3.2-hardening); testnet `tests/src/helpers/ircv3-client.ts` + `data/ircd{,2}.conf`.
+
+1. **Source gate (crdt only):** `ms_chathistory` entry accepts `IsServer || IsMeshStub`.
+2. **`ch_fed_reply_target()` (crdt only):** replies for a query whose origin resolves to
+   a stub/anchor (dead-sink `cli_from`) are routed via `cptr` — the link the query
+   arrived on, i.e. the P10 path the query itself took. B3's CR tunnel replaces this.
+3. **`forward_fed_reply()` (BOTH branches):** R/B/Z/T/E receive branches forward
+   non-local reqids hop-by-hop toward `FindNServer(reqid[0..1])` (reqid =
+   `<yy><counter>`), rebuilding the frame faithfully (only the trailing param can hold
+   spaces). Drops when origin is unknown/local(stale)/anchored or the send would bounce
+   back out the arrival link (loop guard). This is what lets a reply cross
+   nef5 → hub2 → primary → secondary.
+4. **Test infra:** SECONDARY_SERVER default derives from how the primary is addressed
+   (host run → localhost:6668) so host runs can never silently all-skip again;
+   `CHATHISTORY_TIMEOUT` 5→3 on the prod pair so server-side partial completion always
+   beats the vitest clients' 5s wait (was a dead heat).
+
+**Phase 0 residue (deliberate, → B3):** the four 5-5c `IsMeshStub` skips STAND — a mesh
+node still never *initiates* federation toward an anchored (legacy) storage server.
+A Q whose dest resolves to an anchor at a transit node (e.g. the gateway forwarding a
+legacy query toward a tree-split mesh node that legacy still counts as a real server)
+gets an **`E <reqid> 0` synthesized on the dest's behalf** so the requester's
+`servers_pending` completes promptly instead of wedging to the fed timeout — that
+tree-split state is routine on this bed. Replies transiting an anchor-only hop are
+dropped (rare; requires nested splits). Mesh-originated reads rely on local witness
+copies until B1 (storage symmetry) + B3 (CR tunnel) land.
 
 ## THE HARD SCALE CONSTRAINT (decides the whole discovery design)
 
@@ -149,6 +188,15 @@ federation from the steady-state critical path for the least code.
 
 ### B1 — restore witness-store on the CR-M delivery path (survey Option 3)
 
+**✅ IMPLEMENTED 2026-07-27 (`b05982e`).** As scoped: `store_channel_history` exported
+(ircd_relay.h, gates travel with it), CR-M P/N first-arrival store inside the chan_local
+dedup, origin msgid off the frame, arrival-time timestamp (server-relay parity), TAGMSG +
+mesh-stub sources skipped (a stub's MyConnect is true → would defeat the local-interest
+gate). Live gate: nef3→nef5 CR-M delivery (untagged prefixes, tree suppressed), local
+CHATHISTORY limit==count returned all origin-msgid'd messages in 176ms, ZERO CH Q.
+Runtime note: only nef5 runs the B1 binary until the next bed-wide roll; the committed
+image is uniform.
+
 **Problem:** under R6a tree-demote the tree relay to CRDT peers is suppressed
 (ircd_relay.c:935-947); remote copies arrive via `crdt_gossip_message('P'…)` and the CR-M
 channel-delivery block (m_crdt.c:875-901) delivers to local members via `sendrawto_one` and
@@ -217,6 +265,55 @@ local copy federates a query THROUGH an anchor to the real storage owner and get
 history back. **Size: M.** **Risk: MEDIUM** — reply-loss accounting, nested chunk framing,
 double-delivery if both P10 and overlay paths exist (msgid-dedup covers CR-M but a
 CH-in-CR wrapper must reuse it).
+
+**B3-gateway slice (user directive 2026-07-27: "the gateway should relay the real
+responses if it can, instead of just saying there's nothing").** The Phase-0 `E 0` synth
+at the gateway's Q-forward is availability-only; the ideal is real answers.
+
+> ### ⛔ IMPLEMENTED 2026-07-27 BUT **NO LIVE TRIGGER — BLOCKED ON B2**
+>
+> **The "shippable before B2" premise below is DISPROVEN.** It assumed legacy keeps
+> serving ads that crossed before a node became anchored. It does not:
+> `exit_one_client` calls **`clear_server_ad(bcptr)` (s_misc.c:319)** for every
+> server that exits, so the instant a node leaves the tree — SQUIT, split, or the
+> R6c stub conversion — *every* node that observes the exit forgets it stores
+> history. An ad is only (re)created by a `CH A S` at EOB over a **real P10 link**,
+> which an anchored/overlay-only node by definition never has.
+>
+> Therefore: **no requester ever dispatches a CH Q whose dest is a mesh stub**, so
+> neither the B3 tunnel *nor* the Phase-0 `E 0` synth can fire. Both are correct
+> defensive code on an unreachable path until discovery can advertise a node that
+> has no P10 link — which **is exactly B2**.
+>
+> Live-gate attempts (both correctly FAILED, 0/3, and diagnosed rather than
+> massaged): SQUIT leaf2 @ hub2 → primary held no AE ad at all; SQUIT leaf3 @ hub2
+> → primary *had* AG's ad, hub2 converted to stub and re-presented via R6c, but the
+> propagated SQUIT cleared AG at the primary first, so the re-query dispatched only
+> to AC/AD. Ads are also empirically **patchy** across restarts (leaf2 advertised on
+> the secondary in the Phase-0 run, absent on the primary later) — another thing a
+> doc-based capability collection fixes by construction.
+>
+> **Revised order: B2 → (re-gate B3-gateway) → B3-full.** The code below is committed
+> but must be treated as UNVERIFIED until B2 gives it a trigger; gate it as part of B2.
+
+The gateway transit case as built (implementation is sound; only the trigger is missing):
+- Gateway, Q-forward, dest = anchor: instead of synthesizing, wrap the Q in a routed CR
+  frame toward the anchored owner (reuse `crdt_route_unicast_try` next-hop routing +
+  msgid dedup). If the CR route lookup fails IMMEDIATELY → fall back to the `E 0` synth
+  (the 5-5c accounting invariant — never leave pending uncredited). Mid-flight tunnel
+  loss falls to the requester's fed timeout (rare: beacon-fresh-but-unroutable).
+- Owner: unwrap, run the local query with replies emitted through a tunnel-transport
+  variant of `send_ch_response` (re-chunk INSIDE the CR frame budget — never nest a
+  full 500-byte CH line in a wrapper; the 512 cap is immutable), tunneled back keyed by
+  reqid toward the gateway.
+- Gateway: unwrap replies and hand them to the EXISTING P10-side machinery
+  (`forward_fed_reply` path resolves the reqid-prefix origin and relays legacy-ward).
+- The `E 0` synth STAYS as the permanent fallback layer (unroutable owner, tunnel
+  disabled, pre-B3 nodes) — B3 makes it the exception path, not the answer.
+Revised ship order option: B1 → B3-gateway-slice → B2 → B3-full (mesh-initiated
+federation via the 5-5c skip replacement). B2's legacy-ward capability synth must stay
+gated on reachability (tree-resolvable OR tunnel-routable) so legacy is never advertised
+a store that only ever answers empty.
 
 ---
 
