@@ -52,7 +52,7 @@ Licensing is a non-issue: libkc is GPL-2.0-or-later, "matching X3 and Nefarious.
 ## Phase 1 — the move (verbatim, reviewable as a move)
 
 **STATUS: COMPLETE 2026-07-27 (nefarious 9f2d892).**
-Gate evidence: 17/17 cmocka suites in-image (13 pre-existing + kc_url/kc_base64/kc_cache/kc_jwt); `src/sasl` 2/2 (live PLAIN/ROPC through kc_http/kc_url/kc_base64/kc_cache); `src/keycloak` OAUTHBEARER 2/4 passed, 2 pre-existing failures unrelated to vendoring — RFC 7628 abort-handshake timing gap in `sasl_auth.c` (untouched by this merge, blamed to 2026-03-17) and nick-collision test-pool residue; `kc_jwt_validate_local`'s runtime path (JWKS fetch, signature verify, claim extraction) directly confirmed working via server logs across 3 independent runs; `src/ircv3/sasl.test.ts` 20/20 passed (EXTERNAL, AUTHENTICATE chunking, malformed-payload handling).
+Gate evidence: 17/17 cmocka suites in-image (13 pre-existing + kc_url/kc_base64/kc_cache/kc_jwt); `src/sasl` 2/2 (live PLAIN/ROPC through kc_http/kc_url/kc_base64/kc_cache); `src/keycloak` OAUTHBEARER 2/4 passed, 2 pre-existing failures unrelated to vendoring — RFC 7628 abort-handshake timing gap in `sasl_auth.c` (untouched by this merge — `git log 3e00825..9f2d892 -- ircd/sasl_auth.c` is empty; blamed to `ee7e87f`, 2026-03-11) and nick-collision test-pool residue; `kc_jwt_validate_local`'s runtime path (JWKS fetch, signature verify, claim extraction) directly confirmed working via server logs across 3 independent runs; `src/ircv3/sasl.test.ts` 20/20 passed (EXTERNAL, AUTHENTICATE chunking, malformed-payload handling).
 
 ### 1.1 Layout
 
@@ -75,8 +75,22 @@ the six consumer files. The only source edits are intra-libkc includes:
 sole translation layer.
 
 This is the same shape as the `ircd_string.c must stay dependency-light` rule. Enforced
-mechanically: a build-time grep for `#include "ircd` / `#include <ircd` under `ircd/kc/`, failing
-the build. Documented in `nefarious/.claude/skills/nefarious-codebase.md` and CLAUDE.md.
+mechanically by `make check-kc-boundary` (`ircd/Makefile.in`), the first prerequisite of `build:`
+so a plain `make` runs it.
+
+**Guard shape, corrected in final review (2026-07-27).** The original grep (`#include "…"` or
+`#include <ircd…>`) was a deny-list with two holes: `#include <s_conf.h>` passed (every angle-form
+ircd header not named `ircd*` — `<client.h>`, `<send.h>`, `<numnicks.h>`, … — and `CPPFLAGS`'
+`-I${top_srcdir}/include` resolves them), and it only globbed `ircd/kc/*`, so `include/kc/*.h` —
+half the vendored surface — had no enforcement at all. A deny-list cannot work here: `<client.h>`
+and `<stdlib.h>` are structurally identical. The guard is now an **allow-list** over both
+directories, permitting angle-form `<kc/…>`, `<curl/…>`, `<openssl/…>`, `<jansson.h>`,
+`<sys/…> <arpa/…> <netinet/…> <net/…>`, and the C-standard / top-level POSIX headers enumerated in
+`KC_ALLOWED_STD_HDRS`. Everything else fails the build — every quoted include, and every angle
+include naming an ircd header.
+
+Documented in `nefarious/.claude/skills/nefarious-codebase/SKILL.md` (and its testnet mirror
+`.claude/skills/nefarious-codebase/SKILL.md`) and in `.claude/CLAUDE.md`.
 
 Rationale: the `kc_event_ops` seam is *why* the ircd adapter is clean. Vendoring tempts future
 contributors to reach straight into ircd internals and collapse it. The rule keeps the merge a
@@ -94,6 +108,18 @@ merge rather than a dissolution.
 - `ircd/Makefile.in` — add the nine `kc/*.c` to `IRCD_SRC`. `OBJS = ${SRC:%.c=%.o}` handles the
   subdirectory, so the build rule needs the `kc/` object dir to exist.
 - Sources compile only under `--enable-keycloak`, matching current conditional behavior.
+  **Mechanism, corrected in final review (2026-07-27):** the first cut added the nine sources to
+  `IRCD_SRC` *unconditionally*, which broke the default (`--disable-keycloak`, the `AC_ARG_ENABLE`
+  default) build — `-lcurl`/`-ljansson` enter `LIBS` only inside the enabled block, so a plain
+  `./configure && make` compiled `kc_webhook.c` and died at link with `undefined reference to
+  json_string_value`. The in-tree idiom used by every *other* optional consumer (`sasl_auth.c`,
+  `ircd_kc_adapter.c`, …) — an unconditional `IRCD_SRC` entry plus `#ifdef USE_LIBKC` around the
+  file body — is unavailable here, because editing `ircd/kc/*.c` would break the verbatim-move
+  guarantee. The gate therefore lives in the build system: `configure.in` `AC_SUBST`s `KC_SRC`
+  (the nine sources) and `KC_CMOCKA_TESTPROGS` (the four kc cmocka suites), both set only inside
+  the `--enable-keycloak` block and empty otherwise; `ircd/Makefile.in` references `@KC_SRC@` from
+  `IRCD_SRC` and `ircd/test/Makefile.in` references `@KC_CMOCKA_TESTPROGS@` from
+  `CMOCKA_TESTPROGS`. Adding a kc source or kc suite means editing `configure.in`, not a Makefile.
 - No new Docker build deps: `nefarious/Dockerfile:19` already installs `libcurl4-openssl-dev`,
   `libjansson-dev` and `libcmocka-dev`. Only the libkc `.so`/header COPY goes away.
 
@@ -108,8 +134,9 @@ merge rather than a dissolution.
 
 ### 1.5 Repo disposition
 
-**Before archiving:** push `fbb13dd` (F-K1/F-K2) and `d236906` (F-K3) to `evilnet/libkc` so the
-archived history is not missing its own security fixes. Then archive the repo with a README
+**Before archiving:** ~~push `fbb13dd` (F-K1/F-K2) and `d236906` (F-K3) to `evilnet/libkc` so the
+archived history is not missing its own security fixes.~~ **DONE** — `evilnet/libkc` `main` is now
+`d236906`, so the archived history carries both security fixes. Then archive the repo with a README
 pointing at the ircd tree. `git subtree split` remains the extraction path if an external consumer
 ever materializes — the escape hatch costs nothing to leave open.
 
@@ -120,14 +147,31 @@ suite with its own `ircd/test/Makefile.in`, gated in the Docker build via
 `cd ircd/test && make cmocka && make test-cmocka` (`nefarious/Dockerfile:88`). New suites register
 there and link the `kc/*.o` they need. The merge is what makes these testable:
 
-- `kc_url_cmocka.c` — URL building and escaping
-- `kc_base64_cmocka.c` — decode, padding, URL-safe alphabet
-- `kc_cache_cmocka.c` — TTL and eviction
-- `kc_jwt_cmocka.c` — claim validation against fixed tokens (`exp`/`nbf` — the F-K3 work, currently
-  untested)
+**What the four suites actually cover** (corrected in final review 2026-07-27 — the original
+bullets here advertised coverage that was never written; 30 tests total, all passing):
+
+- `kc_url_cmocka.c` (7) — 5 of the 16 endpoint builders: `kc_url_token`, `kc_url_jwks`,
+  `kc_url_user`, `kc_url_user_by_username` (exact and inexact), `kc_url_group_by_path` (literal
+  slashes survive curl escaping); plus NULL-realm rejection on `kc_url_token`/`_jwks`/`_users`.
+- `kc_base64_cmocka.c` (7) — the **standard** alphabet only: encode/decode round-trip, one- and
+  two-character padding, empty input, binary payloads, rejection of an out-of-alphabet character,
+  and `kc_isbase64` (which asserts `-` is *not* accepted, i.e. it pins standard-vs-URL-safe rather
+  than testing URL-safe).
+- `kc_cache_cmocka.c` (9) — user-id cache put/get, miss, case-insensitive lookup, overwrite,
+  remove, and the hit/miss stats delta; representation cache deep-copy, credential stripping, and
+  remove.
+- `kc_jwt_cmocka.c` (7) — the F-K3 claim policy via static `jwt_parse_claims`: valid claims
+  accepted, missing `exp` rejected, expired rejected, future `nbf` rejected, absent `nbf` tolerated,
+  garbage payload rejected, `kc_jwt_extract_created_at` malformed-input handling.
 
 No network in any of them. Integration coverage stays where it is: the testnet SASL/Keycloak tests
 are the real gate and must pass unchanged before and after the move.
+
+**Known unit-coverage gaps** (recorded, not filled — see Phase 2 §2.3):
+`kc_cache.c`'s TTL expiry and eviction paths (`KC_USERID_CACHE_TTL`, the evict-when-full branches
+at `kc_cache.c:138-157`, `:192`, `:260-272`); `kc_jwt.c`'s `base64url_decode_alloc` URL-safe
+translation (`kc_jwt.c:104-135`) — compiled but never exercised, because none of the four fixed
+payloads contains a `-` or `_`; and the eleven `kc_url` builders with no happy-path coverage.
 
 ### 1.7 Explicitly NOT in Phase 1
 
@@ -182,6 +226,23 @@ evidence-backed `MAXCONNECTS` fix as a red flag). These are the real defects it 
 
 Item 3 and item 6 are the two with production consequence; 1 is the one most likely to bite under
 load. Item 2 is contract hygiene. 4, 5, 7 are cheap once the file is open.
+
+### 2.3 Unit-coverage completion (LOW — carried from §1.6)
+
+Recorded during the Phase 1 final review; deliberately **not** written in the fix pass, which was
+scoped to defects. Each is a real gap, not a doc error:
+
+1. **`kc_cache.c` TTL and eviction untested.** `KC_USERID_CACHE_TTL` (300s) expiry at
+   `kc_cache.c:192`, the prefer-expired / else-oldest eviction at `:138-157`, and the repr cache's
+   evict-oldest at `:260-272` have no coverage. Needs a seam for "now" (or a fill-then-overflow
+   test for the eviction half, which is testable today without one).
+2. **`kc_jwt.c` base64url translation untested.** `base64url_decode_alloc` (`kc_jwt.c:104-135`) is
+   the only URL-safe `-`/`_` → `+`/`/` translation in the tree; none of `kc_jwt_cmocka.c`'s four
+   fixed payloads contains either character, so the branch is compiled and never executed. Add a
+   payload whose base64url encoding forces both.
+3. **Eleven `kc_url` builders have no happy-path coverage** — `kc_url_introspect`, `_users`, `_user_groups`,
+   `_user_group`, `_user_reset_password`, `_groups`, `_group`, `_group_members`, `_group_children`,
+   `_group_search`, `_fingerprint_search`.
 
 ## Decisions taken (do not relitigate)
 

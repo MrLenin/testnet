@@ -7,8 +7,6 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-        args:
-          LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "0:0"  # Run as root to fix permissions
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -37,8 +35,6 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-        args:
-          LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "1234:1234"  # nefarious user
     # SYS_PTRACE for `docker exec nefarious gdb -p 1` live attach during
     # diagnostic runs.  Safe to leave enabled in dev (no security cost
@@ -94,8 +90,6 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-        args:
-          LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -123,8 +117,6 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-        args:
-          LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "1234:1234"  # nefarious user
     # Match nefarious's ulimits — ircd boot calls os_set_fdlimit(MAXCONNECTIONS=4096)
     # and bails if the container's RLIMIT_NOFILE hard cap is below that.
@@ -180,8 +172,6 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-        args:
-          LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -208,8 +198,6 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-        args:
-          LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "1234:1234"
     cap_add:
       - SYS_PTRACE
@@ -264,8 +252,6 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-        args:
-          LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -292,8 +278,6 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-        args:
-          LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "1234:1234"
     cap_add:
       - SYS_PTRACE
@@ -348,8 +332,6 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-        args:
-          LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -376,8 +358,6 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-        args:
-          LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "1234:1234"
     cap_add:
       - SYS_PTRACE
@@ -432,8 +412,6 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-        args:
-          LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -460,8 +438,6 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-        args:
-          LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "1234:1234"
     cap_add:
       - SYS_PTRACE
@@ -516,8 +492,6 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-        args:
-          LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -544,8 +518,6 @@ services:
         dockerfile: Dockerfile
         additional_contexts:
           - data=./data
-        args:
-          LIBKC_IMAGE: ghcr.io/evilnet/libkc:sha-10aa335
     user: "1234:1234"
     cap_add:
       - SYS_PTRACE
@@ -671,7 +643,6 @@ services:
       dockerfile: Dockerfile
       additional_contexts:
         - data=./data
-        - libkc=./libkc
     user: "0:0"  # Run as root to fix permissions
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -688,7 +659,6 @@ services:
       dockerfile: Dockerfile
       additional_contexts:
         - data=./data
-        - libkc=./libkc
     user: "1234:1234"  # x3 user
     # Enable core dumps for crash debugging
     ulimits:

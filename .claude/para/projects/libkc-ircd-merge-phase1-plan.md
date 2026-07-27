@@ -92,6 +92,8 @@ In `IRCD_SRC`, immediately after the `jupe.c \` line, insert:
 	kc/kc_webhook.c \
 ```
 
+**Corrected in the Phase 1 final review (2026-07-27):** adding these nine lines *literally* — i.e. unconditionally — broke the default `--disable-keycloak` build, which then compiled `kc_webhook.c` with no `-ljansson` in `LIBS`. The shipped form is `@KC_SRC@ \`, `AC_SUBST`ed from `configure.in` (nine sources when Keycloak is enabled, empty otherwise); `ircd/test/Makefile.in`'s `CMOCKA_TESTPROGS` gets `@KC_CMOCKA_TESTPROGS@` the same way. See spec §1.3.
+
 `OBJS = ${SRC:%.c=%.o}` yields `kc/kc_http.o` etc., and the suffix rule `.c.o:` writes the object next to the source — so the `kc/` directory must exist at build time. It does, since it holds the sources. No rule change needed. Verify after building that `ircd/kc/*.o` exist.
 
 - [ ] **Step 5: Regenerate configure and build**
@@ -212,7 +214,9 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 sed -n '10,60p' /home/ibutsu/testnet/scripts/dc.sh
 ```
 
-`-l` currently does two things — the linked-server profile and the libkc-dev `COMPOSE_FILE` overlay. Only the overlay half is removed; `-l` must keep its linked-server behavior. Do not collapse the flag.
+~~`-l` currently does two things — the linked-server profile and the libkc-dev `COMPOSE_FILE` overlay. Only the overlay half is removed; `-l` must keep its linked-server behavior. Do not collapse the flag.~~
+
+**Corrected during execution (Task 3 review; see also Task 9 Step 1):** the premise above is **wrong**. `-l` only ever did *one* thing — the libkc-dev `COMPOSE_FILE` overlay. `scripts/dc.sh:22-33` assigns `LINKED=1` and never reads it, before or after this task; `nefarious2`..`nefarious7` are profile-gated in `docker-compose.yml` and need an explicit `--profile linked`. Removing the overlay branch therefore leaves `LINKED` a dead variable. Deleting the whole `if [[ $LINKED -eq 1 ]] … fi` block (rather than just the `export COMPOSE_FILE=` line, which would leave an empty then-body and a bash syntax error) was the correct edit and is what shipped.
 
 - [ ] **Step 2: Remove the submodule**
 
@@ -291,7 +295,7 @@ Insert before the `build:` target:
 # that seam, so it is a build error.  See
 # .claude/para/projects/libkc-ircd-merge.md.
 check-kc-boundary:
-	@bad=`grep -l -E '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"](ircd|client|s_debug|struct|msgq|dbuf)' ${srcdir}/kc/*.c ${srcdir}/kc/*.h 2>/dev/null`; \
+	@bad=`grep -l -E '^[[:space:]]*#[[:space:]]*include[[:space:]]*("|<ircd)' ${srcdir}/kc/*.c ${srcdir}/kc/*.h 2>/dev/null`; \
 	if [ -n "$$bad" ]; then \
 		echo "ERROR: ircd/kc must not include ircd headers:"; \
 		for f in $$bad; do echo "  $$f"; done; \
@@ -302,11 +306,13 @@ check-kc-boundary:
 
 Add `check-kc-boundary` as the first prerequisite of the `build:` target, and add it to `.PHONY` if a `.PHONY` line exists in this file (if not, no change needed — the target name collides with no file).
 
+**Widened during execution (Task 4 review, user ruling):** the original expression matched only `(ircd|client|s_debug|struct|msgq|dbuf)` prefixes and missed 22 core ircd headers (`channel.h`, `s_conf.h`, `numnicks.h`, `send.h`, `hash.h`, `list.h`, …). After Task 1 every legitimate include under `ircd/kc/` is angle-form — `<kc/…>`, `<stdlib.h>`, `<curl/curl.h>`, `<jansson.h>`, `<openssl/…>` — so **any quoted include is by definition a reach into the ircd tree**. The rule above flags quoted includes plus angle-form `<ircd…>`, needs no maintenance as `include/` grows, and the red test must plant a header the old expression missed (e.g. `#include "s_conf.h"`) to prove the widening.
+
 - [ ] **Step 2: Verify the check fails on a real violation (red)**
 
 ```bash
 cd /home/ibutsu/testnet/nefarious
-sed -i '1i #include "ircd_log.h"' ircd/kc/kc_url.c
+sed -i '1i #include "s_conf.h"' ircd/kc/kc_url.c
 make -C ircd check-kc-boundary; echo "exit=$?"
 ```
 
@@ -1044,15 +1050,17 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 ```bash
 cd /home/ibutsu/testnet
-scripts/dc.sh -l build nefarious nefarious2 2>&1 | tail -20
-scripts/dc.sh -l up -d
+scripts/dc.sh --profile linked build nefarious nefarious2 2>&1 | tail -20
+scripts/dc.sh --profile linked up -d
 ```
+
+**Corrected during execution (Task 3 review):** `-l` does *not* activate the `linked` compose profile — `dc.sh` sets `LINKED=1` and never reads it, before or after Task 3. `nefarious2`..`nefarious7` are profile-gated in `docker-compose.yml`, so `--profile linked` must be passed explicitly. CLAUDE.md's "Linked (adds nefarious2): `scripts/dc.sh -l up -d`" is inaccurate for the same reason; fixing `dc.sh` or the doc is a behavior change and stays out of Phase 1.
 
 - [ ] **Step 2: Confirm the in-image cmocka gate ran all four new suites**
 
 ```bash
 cd /home/ibutsu/testnet
-scripts/dc.sh -l build nefarious 2>&1 | grep -E 'kc_(url|base64|cache|jwt)_cmocka'
+scripts/dc.sh --profile linked build nefarious 2>&1 | grep -E 'kc_(url|base64|cache|jwt)_cmocka'
 ```
 
 Expected: each of the four appears with passing output. If they are absent, they were not added to `CMOCKA_TESTPROGS` and the Docker gate silently skipped them.
@@ -1096,6 +1104,6 @@ Two Phase-1 items also depend on Phase 2 landing first, and must not be attempte
 - `kc_jwt_validate_local` has no unit coverage; it cannot get any until 2.1 introduces a seam between claim validation and the JWKS fetch. Task 8 covers `jwt_parse_claims` only.
 - `kc_http.c` has no unit coverage; the singleton `g_multi`/`g_ops` state makes it untestable without a context handle. Out of scope — the spec explicitly declined a context-handle refactor.
 
-## Remaining repo action (blocked, needs the user)
+## Remaining repo action
 
-Before `evilnet/libkc` is archived, `fbb13dd` (F-K1/F-K2) and `d236906` (F-K3) must be pushed so the archived history is not missing its own security fixes. `git push origin fork-hardening:main` from the libkc checkout is a clean fast-forward (origin/main is 0 behind). This was attempted and **blocked by the permission classifier** — it needs the user to run it or grant the permission. Archiving the repo is a GitHub-side action for the user regardless.
+**DONE (verified in the Phase 1 final review, 2026-07-27):** `evilnet/libkc` `main` is now `d236906`, so `fbb13dd` (F-K1/F-K2) and `d236906` (F-K3) are both in the archived history. Original note: ~~Before `evilnet/libkc` is archived, `fbb13dd` (F-K1/F-K2) and `d236906` (F-K3) must be pushed so the archived history is not missing its own security fixes.~~ `git push origin fork-hardening:main` from the libkc checkout is a clean fast-forward (origin/main is 0 behind). Archiving the repo remains a GitHub-side action for the user.

@@ -33,6 +33,14 @@ Audit rule: a bare `LEN` constant where the buffer is `LEN+1`, or a non-NUL-term
 - **Simple removal**: defer to a 0-second timer (`TT_RELATIVE, 0`). `timer_run()` executes after `engine_loop`'s event dispatch, once all `gen_ref`s are released.
 - **Never `memset` a Socket struct that has pending gen_refs** — it zeroes `gh_ref` and corrupts the synchronous ET_DESTROY event chain.
 
+## The ircd/kc boundary
+
+`nefarious/ircd/kc/*.c` + `nefarious/include/kc/*.h` are vendored libkc (formerly the `evilnet/libkc` submodule + GHCR image, merged in-tree 2026-07) and stay **verbatim** — no `#ifdef USE_LIBKC` inside them. They reach the ircd **only** through `kc_event_ops` / `kc_log_ops`; `ircd_kc_adapter.c` is the sole translation layer. Including an ircd header from `kc/` is a build error, enforced by `make check-kc-boundary` (first prerequisite of `ircd/Makefile`'s `build:`, so a plain `make` runs it).
+
+The guard is an **allow-list**, not a deny-list — `<client.h>` and `<stdlib.h>` are structurally identical, so only an explicit permit-set can work. kc code may include, angle-form only: `<kc/…>`, `<curl/…>`, `<openssl/…>`, `<jansson.h>`, `<sys/…> <arpa/…> <netinet/…> <net/…>`, and the C-standard / top-level POSIX headers in `KC_ALLOWED_STD_HDRS` (`ircd/Makefile.in`). Everything else fails — every quoted include, and every angle include naming an ircd header. It covers **both** directories.
+
+Because the files carry no `#ifdef`, `--enable-keycloak` gates them at the *source-list* level: `configure.in` substitutes `@KC_SRC@` into `IRCD_SRC` and `@KC_CMOCKA_TESTPROGS@` into the test `CMOCKA_TESTPROGS`, both empty when Keycloak is disabled — so a default `./configure && make` builds with no curl/jansson dependency. Adding a `kc/*.c` file or a kc cmocka suite means editing `configure.in`, not the Makefiles.
+
 ## Config File Parsing
 
 ### Block ordering (CRITICAL)

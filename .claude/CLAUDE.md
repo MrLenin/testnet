@@ -57,6 +57,8 @@ scripts/dc.sh -l --profile multi down
 
 **Rebuilding IS allowed** — use `scripts/dc.sh` (or your `dc`/`dcl` shell aliases), which sources `.env` and `.env.local`. Batch edits before rebuilding rather than rebuilding per change. **Avoid raw `docker compose build`** — it skips `.env.local`. See the `service-debugging` skill for the container topology that the rebuild has to wake up cleanly (esp. `pdns-recursor`, which several services depend on transitively).
 
+The Keycloak client is vendored in the IRCd tree (`nefarious/ircd/kc/*.c`, `nefarious/include/kc/*.h`, built under `--enable-keycloak`) — there is no `libkc` submodule or image. Those files stay verbatim and may not include IRCd headers; `make check-kc-boundary` (an allow-list guard, run by every `make`) enforces it. See the `nefarious-codebase` skill.
+
 ## Testing rules
 
 Tests live in `tests/` and run under Vitest.
