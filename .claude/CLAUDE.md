@@ -21,7 +21,6 @@ Afternet Testnet — Docker-orchestrated IRC test environment running Nefarious 
 | `nefarious` | evilnet/nefarious2 (fork on MrLenin/nefarious2) | The IRCd we develop. Ships from MrLenin → upstream |
 | `nefarious-upstream` | evilnet/nefarious2 master | Unmodified upstream for legacy-vs-fork comparison testing |
 | `x3` | evilnet/x3 | Services (AuthServ / ChanServ / OpServ) with Keycloak/SASL/LDAP additions |
-| `libkc` | evilnet/libkc | Hand-rolled Keycloak adapter library (HTTP server + REST client + ops abstraction) |
 | `keycloak-webhook-spi` | evilnet/keycloak-webhook-spi | Java SPI bundled into Keycloak for outbound webhook events |
 | `linesync-data` | MrLenin/gitsync-test | Test data for the gitsync (libgit2-based config distribution) feature |
 | `nefarious-rs` | MrLenin/nefarious-rs | Rust IRCd rewrite (parallel exploration, not part of the production path) |
@@ -56,7 +55,7 @@ scripts/dc.sh logs x3
 scripts/dc.sh -l --profile multi down
 ```
 
-**Rebuilding IS allowed** — use `scripts/dc.sh` (or your `dc`/`dcl` shell aliases), which sources `.env` and `.env.local`. Batch edits before rebuilding rather than rebuilding per change. **Avoid raw `docker compose build`** — it skips `.env.local` and breaks the libkc overlay. See the `service-debugging` skill for the container topology that the rebuild has to wake up cleanly (esp. `pdns-recursor`, which several services depend on transitively).
+**Rebuilding IS allowed** — use `scripts/dc.sh` (or your `dc`/`dcl` shell aliases), which sources `.env` and `.env.local`. Batch edits before rebuilding rather than rebuilding per change. **Avoid raw `docker compose build`** — it skips `.env.local`. See the `service-debugging` skill for the container topology that the rebuild has to wake up cleanly (esp. `pdns-recursor`, which several services depend on transitively).
 
 ## Testing rules
 

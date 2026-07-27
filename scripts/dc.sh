@@ -13,9 +13,6 @@
 # The "linked" wrapper (parallel to dcl) is selected via -l / --linked
 # before the docker compose args:
 #   scripts/dc.sh -l up -d --build
-#
-# -l adds the libkc-dev overlay via COMPOSE_FILE so local/libkc:dev
-# resolves correctly on `--build`.
 
 set -euo pipefail
 
@@ -46,10 +43,6 @@ if [[ -f .env.local ]]; then
   # shellcheck disable=SC1091
   source .env.local
   set +a
-fi
-
-if [[ $LINKED -eq 1 ]]; then
-  export COMPOSE_FILE="docker-compose.yml:docker-compose.libkc-dev.yml"
 fi
 
 # BuildKit collapses successful build output by default, so compiler warnings
