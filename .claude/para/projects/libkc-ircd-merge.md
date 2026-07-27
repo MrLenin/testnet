@@ -52,6 +52,7 @@ Licensing is a non-issue: libkc is GPL-2.0-or-later, "matching X3 and Nefarious.
 ## Phase 1 — the move (verbatim, reviewable as a move)
 
 **STATUS: COMPLETE 2026-07-27 (nefarious 9f2d892).**
+Gate evidence: 17/17 cmocka suites in-image (13 pre-existing + kc_url/kc_base64/kc_cache/kc_jwt); `src/sasl` 2/2 (live PLAIN/ROPC through kc_http/kc_url/kc_base64/kc_cache); `src/keycloak` OAUTHBEARER 2/4 passed, 2 pre-existing failures unrelated to vendoring — RFC 7628 abort-handshake timing gap in `sasl_auth.c` (untouched by this merge, blamed to 2026-03-17) and nick-collision test-pool residue; `kc_jwt_validate_local`'s runtime path (JWKS fetch, signature verify, claim extraction) directly confirmed working via server logs across 3 independent runs; `src/ircv3/sasl.test.ts` 20/20 passed (EXTERNAL, AUTHENTICATE chunking, malformed-payload handling).
 
 ### 1.1 Layout
 
