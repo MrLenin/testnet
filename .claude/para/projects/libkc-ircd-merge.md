@@ -51,6 +51,8 @@ Licensing is a non-issue: libkc is GPL-2.0-or-later, "matching X3 and Nefarious.
 
 ## Phase 1 — the move (verbatim, reviewable as a move)
 
+**STATUS: COMPLETE 2026-07-27 (nefarious 9f2d892).**
+
 ### 1.1 Layout
 
 ```
