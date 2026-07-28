@@ -608,3 +608,30 @@ lines that were previously invisible.
 `bounce_resolve_hs_client_from_ghost()` runs, so the pair of lines is a decisive discriminator —
 `hs_client=(nil)` followed by "ACTIVE alias_remote path" proves the helper recovered the pointer
 (fix load-bearing); a non-nil pointer there proves the path never needed it.
+
+### GAP A: SETTLED with evidence — the fix is DEFENSIVE, not demonstrated-necessary
+
+With the LS_USER sink live, the relink scenario finally logged its own decision on the leaf:
+
+```
+Bouncer: ACTIVE session AZ+qjm7IcGOmel3k8fg/Qg found for pool01
+         (origin=Bj me=AC hs_client=0x0000000014edb0c0 alias_count=0)
+Bouncer: ACTIVE alias_remote path for pool01 session AZ+qjm7IcGOmel3k8fg/Qg (primary on testnet)
+bounce_setup_local_alias: converting rlN3752 to alias of rlP3752
+```
+
+That `hs_client=%p` is printed BEFORE `bounce_resolve_hs_client_from_ghost()` runs, and it is
+**NON-NULL** — so the helper early-returned and contributed nothing.  **The post-relink path already
+worked; the GAP A fix is NOT load-bearing there.**  (The HELD path likewise logged
+`HELD alias_remote path` + a successful alias conversion for pool02.)  Something already populates
+`hs_client` on a burst-created replica — worth identifying if this area is revisited, since it also
+explains why the missing ghost numeric in burst BS C never mattered.
+
+Standing assessment of the fix (`cfe3722` / `272d8d2`): the ASYMMETRY it removes is real (HELD had
+the recovery, ACTIVE did not), the change is a strict improvement, and it is gated by build +
+cmocka + 2/2 cross-server tests.  But the state it repairs — `hs_client` NULL *with*
+`hs_ghost_numeric` set — has NOT been observed live.  The analyst's reachability argument
+(`bounce_null_hs_client_pointing_at` on Client free, a refused `bounce_hs_client_assign_checked`
+install) is plausible but unconfirmed.  **Treat it as defensive hardening, not a proven bug fix.**
+Anyone wanting to prove or retire it should force those two states directly rather than via a
+relink, which demonstrably does not produce them.
