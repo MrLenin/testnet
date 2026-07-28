@@ -478,3 +478,15 @@ Cross-server alias attach is CONFIRMED WORKING in the committed suite.  The
 (lines ~101-116) should be deleted — the newer block (~82-89, pool↔Keycloak SASL drift) is
 the accurate one.  NB that test is NOT `it.skip` — it is a live `it()` that early-returns
 when the leaf is unreachable, so it has been silently passing-as-noop, not skipping.
+
+### FULLY SETTLED 2026-07-28 — BOTH tests pass
+
+`bouncer-alias-multi-server` **1/1 ✓** (attach) AND `bouncer-cross-server-promote` **1/1 ✓**
+(`remote alias promoted via 0-tick deferred timer after primary QUIT`).  The entire "blocker"
+was stale documentation.  **This also VALIDATES Gap C** — the promote chain
+(`bounce_schedule_cross_server_promote` → `bounce_finish_cross_server_promote`, BX P, BS T)
+now has live end-to-end coverage on the 2-server bed.  The obsolete comment block in the
+promote test has been replaced with the verified status + a warning not to restore it.
+Still open from this investigation: **GAP A** (ACTIVE-branch `hs_ghost_numeric` fallback →
+parallel primary) and **GAP B** (node-local `METADATA *acct` wipe), plus the CRDT-mesh
+session-propagation gap (no BS C/BS A reaches an overlay-only node; the doc must carry it).

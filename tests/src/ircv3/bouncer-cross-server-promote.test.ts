@@ -98,23 +98,20 @@ describe('Bouncer cross-server immediate-promote on primary clean QUIT', () => {
   //      returns -1 → bounce_hold_client + bounce_schedule_cross_server_promote
   //   6. 0-tick timer fires → bounce_promote_alias(0) → BX P → leaf
   //      alias becomes primary
-  // Skip: blocked on an upstream issue — cross-server alias attach isn't
-  // landing in the running build despite the 2a1cb97 BS C race fix.
-  // When a SASL'd client connects to leaf with the same account as
-  // testnet's primary, leaf welcomes it as a regular user rather than
-  // routing through bounce_setup_local_alias.  Observed wire on leaf:
-  // N arrives from testnet for the primary, BS C arrives, then leaf's
-  // local SASL'd client gets standard 001-005 welcome with no
-  // ALIAS_ATTACHED note.  hs_aliases[] stays empty on testnet's side,
-  // so this test (and the pre-existing bouncer-alias-multi-server
-  // skipped test) can't get to the primary-QUIT step.
+  // VERIFIED PASSING 2026-07-28 (this test and bouncer-alias-multi-server,
+  // both 1/1 against nefarious 91fff9c).  The obsolete "cross-server alias
+  // attach isn't landing" narrative that used to sit here was written BEFORE
+  // e9b3b34 and is deleted: that root cause (BOUNCER SET HOLD emitted BS C
+  // but not BS A, so the replica's hs_client stayed NULL and registration
+  // fell through to the ordinary-user welcome) was fixed by e9b3b34 +
+  // abac5f4 + e96fde1.  It cost real debugging time because it read as
+  // current; if this test starts failing again, describe the NEW symptom
+  // rather than restoring the old text.
   //
-  // The deferred-tick v2 timer machinery (nefarious d8236f7) is
-  // committed and ready — once cross-server alias attach lands an
-  // alias on testnet's hs_aliases[], primary QUIT will exercise
-  // bounce_schedule_cross_server_promote → bounce_finish_cross_server_promote
-  // and the test below should run end-to-end without further changes.
-  it.skip('remote alias promoted via 0-tick deferred timer after primary QUIT', async () => {
+  // Note this is a live it() with an early return when the leaf is
+  // unreachable — it no-ops rather than reporting as skipped, so a green
+  // run does not by itself prove the leaf was exercised.
+  it('remote alias promoted via 0-tick deferred timer after primary QUIT', async () => {
     if (!leafReachable) {
       console.warn(`Skipping: leaf at ${leafHost}:${leafPort} not reachable. ` +
         'Run docker compose --profile linked up -d, or set IRC_HOST2/IRC_PORT2.');
