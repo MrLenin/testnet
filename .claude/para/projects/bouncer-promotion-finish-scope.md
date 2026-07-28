@@ -528,3 +528,16 @@ drive `CONNECT` from an oper on the leaf after the sever (testnet's Operator blo
 `set`/`rehash` but NOT squit/connect; nef3's grants neither — so a config edit is needed first),
 or shorten the leaf's reconnect backoff for the test.  Worth turning into the standing link-flap
 regression test the analyst proposed rather than an ad-hoc script.
+
+#### Harness traps hit while gating this (all cost real time)
+
+1. **Held ghosts KEEP THEIR NICKS.** A gate reusing fixed nicks gets `433 Nickname is already in
+   use`, the client never registers, and it looks exactly like "attach failed".  Use unique nicks
+   per run (the suite's `uniqueNick()`).
+2. **`python3` buffers stdout when piped** — a long repro shows NOTHING until it exits, so you fly
+   blind.  Use `python3 -u` for anything you intend to watch.
+3. **A rolling `docker logs --since Nm` poll can MISS a one-shot event.**  Waiting for a relink by
+   grepping `--since 5m` every 10s never matched, because the burst fired immediately on restart
+   and aged out of the window before the first poll — the bed was healthy the whole time and the
+   PROBE was wrong.  For one-shot events either grep the whole log, anchor `--since` to a fixed
+   start timestamp, or verify functionally (here: connect and read the 251 server count).
