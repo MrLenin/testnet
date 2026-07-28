@@ -254,6 +254,10 @@ scoped to defects. Each is a real gap, not a doc error:
    (`:664`), and unknown-`kid`/unsupported-alg return `KC_ERROR` (fall back to remote introspection)
    rather than accepting. Test needs a fixed RSA keypair fixture: sign a payload, assert accept; flip
    one signature byte, assert reject; wrong-`kid`, assert `KC_ERROR` not accept.
+   **CLOSED 2026-07-28 (`1ae325e` prod fork, cherry-picked to crdt-mesh): 7 signature-path
+   tests — accept, sig-tamper, payload-graft, unknown-kid fallback, alg-confusion pin
+   (HS256/none), JWKS n/e fromdata reconstruction round-trip, garbage n/e. 14/14 green,
+   valgrind 0 errors.**
 
 ## Decisions taken (do not relitigate)
 
