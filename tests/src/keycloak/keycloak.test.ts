@@ -685,11 +685,15 @@ describe.skipIf(!isKeycloakAvailable())('Keycloak Integration', () => {
           console.log('Auto-created account for:', uniqueUser);
 
           client.capEnd();
-          client.register('kcauto1');
+          // Register under the same unique name as the Keycloak account.  A
+          // hardcoded nick here collided with leftovers from earlier runs of
+          // this test, so registration failed with 433 and the whole case went
+          // flaky for reasons unrelated to auto-creation.
+          client.register(uniqueUser);
           await client.waitForNumeric('001');
 
           // Verify logged in to the new account
-          client.send(`WHOIS kcauto1`);
+          client.send(`WHOIS ${uniqueUser}`);
           const whois = await client.waitForNumeric(['330', '311'], 3000);
           console.log('WHOIS:', whois.raw);
         }
