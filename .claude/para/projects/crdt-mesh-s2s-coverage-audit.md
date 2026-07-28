@@ -103,12 +103,16 @@ Fix pattern is uniform: route the cross-server leg through `crdt_route_unicast_t
   no storm/echo, converged. The lowest-hanging MR-6 gate; first S2S-audit cluster closed.
 
 ### Cluster C — state not represented in the doc (structural, needs a schema add)
-- **Extended channel modes — MAJOR.** The doc `modes` collection stores only `CRDT_MODE_MASK`
-  (p/s/m/t/i/n/k/l/R/D/registered). ZERO carriage for: the **exmode** bits
-  (EXMODE_PERSIST/PUBLICHISTORY/NOSTORAGE — gate chathistory storage + channel persistence), **+A/+U**
-  (APASS/UPASS oplevel passwords — **founder protection, security**), **+L** (redirect). Since CR F replaces
-  BURST and P10 BURST is skipped (s_serv.c:377), a channel materialized on a mesh-only peer silently loses
-  these. Steady-state masked by residual P10 MODE relay; hard break at MR-6. Fix: extend the modes doc value.
+- **Extended channel modes — MAJOR — ✅ FIXED 2026-07-28 (`573c6e1`, live-gated).** ShadowModeSnap now
+  carries xmode (CRDT_EXMODE_MASK = all persistent exmode bits) + upass/apass/redir. **LESSON: +A/+U/+L are
+  STRING-ONLY modes** — channel.c sets chptr->mode.{apass,upass,redir} directly and the renderer gates on
+  *string; the MODE_APASS/UPASS/REDIRECT bits are modebuf-transport flags, NEVER set in mode.mode. First cut
+  gated capture on the bit → always false → nothing carried (caught by DBG trace: build=none, apply=redir'').
+  Fixed to gate on string presence; apply copies strings directly (no bit) so a materialized channel is
+  byte-identical to native. Append-only fields, length-tolerant parse (mode_snap_parse) = version-safe both
+  ways. GATE: overlay-only nef7 materialized `+PlL 50 #redir` identical to nef3 (exmode +P + redirect string).
+  +A/+U covered by the same string path (+L is the live proof; founder-pass setup n/a on bed). DEFERRED:
+  gateway_birth_modes rendering exmode/+A/+U to legacy at CRDT-birth (legacy-presentation edge, not data-loss).
 - **Bouncer alias soft-state — MAJOR/MINOR.** Aliases are excluded from the users doc, and **BX N (alias
   nick), BX K (snomask), BX V (visibility)** got neither a doc field nor a CR carrier → cross-peer alias
   drift. Root cause: 5-5e models durable session/connection STATE (bsessions/bconns + lease) but not the
