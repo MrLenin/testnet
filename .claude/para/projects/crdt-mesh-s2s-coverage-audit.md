@@ -79,8 +79,19 @@ bed roll (receivers must be everywhere first — the emit skips CRDT-aware peers
 - **LIVE GATE (pending):** roll all 5 nodes onto the 'U' receiver, flip FEAT_CRDT_ROUTE_WALL,
   WALLUSERS nef3 → +w user on overlay-only nef7.
 
-**Then:** SVS force-commands (SVSJOIN/PART/MODE/QUIT/NICK — CR-X toward the target's home server,
-receiver re-injects) and BX E/M alias echo (CR carrier in bouncer_session.c:9590 family).
+**SVS + BX SHIPPED 2026-07-28 (`6cdddee`) — LIVE GATE PENDING.** SVS J/P/M/D/N: each relay branch
+tunnels to the target's HOME over CR-X before the unchanged tree broadcast; re-emit + re-inject cases
+dispatch into ms_svs*.  **MINT AT MESH ENTRY ONLY** (`!IsServer(cptr) || !IsCrdtAware(cptr)`) — the SVS
+relay is a tree BROADCAST, so per-hop re-mint would tunnel N copies (each mint = own msgid, CR-X dedup
+can't collapse).  SVSNICK applies per-hop (no early return) so its tunnel is additionally `!MyUser`-gated
+— only the authoritative home mints the doc nick op.  BX 'B': bounce_alias_echo's 2 remote BX E sends +
+forward_bxm_line tunnel to a mesh-only alias/primary home, re-injected into ms_bouncer_transfer; BX M
+rebuilds the line with the forward_fed_reply join pattern (round-trips all 3 param shapes).  All
+self-gate (reply_try=0 → original P10 send).  **GATE (pending): services SVSJOIN toward a user homed on
+nef7; an alias homed on nef7 receiving a PM echo.**
+
+**⇒ CLUSTER A CODE-COMPLETE** (CP/CN, XQ/XR, WALL*, SVS, BX) — remaining: WC/WV/WH emit (R6a
+tree-demote+dedup) + the WALL*/SVS/BX live gates.
 Live gate for slice 1: whisper nef3→mesh-only user + XQUERY toward an anchored service
 leaf, both directions.
 Same shape as the KILL/INVITE dead-sink that MR-4 fixed with CR-M, but never extended to these siblings.
