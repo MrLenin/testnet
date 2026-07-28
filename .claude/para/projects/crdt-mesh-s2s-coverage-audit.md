@@ -30,8 +30,19 @@ design-pass it at MR-6, don't patch ad hoc.
 ## GENUINE-MISS gaps (NOT on the roadmap) — the high-value output
 
 ### Cluster A — targeted delivery has no CR-M fallback (one root cause, ~15 tokens, all MAJOR)
-**SLICE 1 SHIPPED 2026-07-28 (`dc86c3f`, LIVE GATE PENDING — self-gating fallbacks, old path
-untouched when they return 0):** CP/CN whisper now routes via crdt_route_unicast_try (real
+**SLICE 1 SHIPPED + LIVE-GATED GREEN 2026-07-28 (`dc86c3f` + `f757e0b` XQ gate-fix):**
+whisper CR-M verified both directions (nef3<->nef7 mesh-only); XQUERY nef3->overlay-only nef7
+tunneled end-to-end (REV-try cmd=Q -> CR-X emitted -> re-injected -> "Received extension query").
+XQ gate-fix `f757e0b`: services_try's is_mesh_only EXCLUDES presented stubs (which still
+dead-sink) — switched the two XQ forward sites to reply_try (IsMeshStub gate). **WHILE HERE,
+FOUND + FIXED A SHIPPED REGRESSION (`b11de58`):** the gap-B CI fix (`2b1283d`) added an
+unguarded `else if (m_cmd[0]=='I')` CI branch BEFORE the unicast INVITE handler — both ride
+cmd 'I', so CI swallowed EVERY mesh INVITE into sasl_cache_invalidate_user(channelname)
+(no security impact — accounts never start with '#' — but INVITE-over-mesh to a mesh-only
+target was DEAD since 2b1283d). Proven live, fixed with a `&& target[0]=='*'` guard (CI always
+"*", INVITE always a user numeric); re-gated INVITE delivers + no spurious CI. Original
+slice-1 note follows:
+**(prior)** CP/CN whisper now routes via crdt_route_unicast_try (real
 minted msgid — the "*" placeholder is single-use per dedup window, never reuse it); XQ/XR
 forward sites wired to the dormant CR-X 'Q'/'Y' cases (all three: mo_/ms_xquery, ms_xreply;
 XREPLY builds user vs server numerics itself).  REMAINING (next session): targeted WALL*
