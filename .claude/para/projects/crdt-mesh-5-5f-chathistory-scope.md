@@ -289,6 +289,52 @@ LIVE — nef7 learns nef3 stores + issues a federated query it could not before.
 **Risk: MEDIUM-HIGH** but pays down the whole discovery debt; the right shape for the MR-6
 endgame.
 
+### B4 — legacy-ward capability synth (Phase B closer) — SHIPPED `7e61bd9`, LIVE-GATED GREEN 2026-07-28
+
+**Gate:** history seeded ONLY on nef7; client on the LEGACY primary queried; primary
+dispatched `Bj CH Q … AI` off the synthesized ad, gateway tunneled, nef7 served, replies
+rode CR-X dst=Bj and the gateway re-emitted them as real P10 sourced from leaf5
+(`crdt_services_reemit` 'H' — the leg unverified since B3 — fired 8×); legacy client got
+3/3.  **Phase B (B1→B2→B3→B4) is closed end-to-end in BOTH directions.**  Design as
+scoped below, plus: the per-leaf synth cache (`ch_synth_last[]`) is keyed retention+1 and
+reset only by restart — new legacy links get a full resend via the EOB path regardless.
+
+**Problem:** the mesh direction is closed (B2 part 2), but legacy never queries a
+mesh-only store: it dispatches only to servers it holds CH A S ads for, and nothing
+advertises doc-known stores to legacy.  The gateway-to-legacy reply leg
+(`crdt_services_reemit` case 'H') is the one B3 path still unverified for lack of
+exactly this trigger.
+
+**Design (gateway-side):**
+- `crdt_shadow_ch_storage_synth_to(sptr)` — walk the doc; for each store S (skip
+  self — m_endburst already sends our own ad; skip unreachable: `!FindNServer(S) &&
+  !beacon_fresh(S)`, the reachability gate this doc already mandates), emit
+  `:<S> CH A S <retention>` to @a sptr.  Client-less S (meshmap) emits via
+  sendrawto with the raw numeric prefix (the CR-M prefix-reconstruction pattern).
+- Call 1: m_endburst MyConnect block, beside the own-ad emit, gated
+  `IsIRCv3Aware(sptr) && !IsCrdtAware(sptr)` (CRDT peers use the doc; CH-less
+  legacy logs PARSE ERROR — same gate as the own ad).
+- Call 2: verify-tick sweep, change-gated by a per-leaf last-synthed cache
+  (re-emit to all legacy links only when the doc value changes / a store appears
+  later than the link, e.g. nef7 booting after primary linked).  A S is
+  idempotent at the receiver, so multi-gateway duplication is harmless.
+- **In-forward Client-less fix (required for the Q leg):** ms_chathistory's
+  dest-addressed path currently FALLS THROUGH TO LOCAL PROCESSING when
+  FindNServer(dest) is NULL — once legacy starts dispatching to mesh numerics
+  that mis-serves the gateway's own data under a foreign reqid.  Fix: NULL dest
+  → tunnel on fresh beacon (same predicate as the collector), else `E 0`.
+- Reply leg needs nothing new: replies tunnel to the reqid-prefix origin (the
+  LEGACY numeric), CR-X routes toward it, the gateway holds the live legacy link
+  → `crdt_services_reemit` 'H' re-emits real P10 sourced from the owner (legacy
+  resolves it — presentation machinery).  This is the leg's live gate.
+- **Withdrawal residue (accepted):** CH has no un-advertise subcmd; a store that
+  withdraws leaves a stale legacy ad → legacy queries → beacon-stale in-forward
+  answers `E 0` (credited, no wedge).  Harmless; revisit only if it ever matters.
+- Tests: integration-layer (no engine change) → live gate only, per the
+  cmocka-scope rule.  Gate: history seeded ONLY on nef7; client on legacy primary
+  queries; expect primary to dispatch `CH Q … AI`, gateway tunnel, owner serve,
+  replies re-emitted as real P10, batch delivered.
+
 ### B3 — CR tunnel for CH Q / reply (survey Option 1; the 5-5c contract)
 
 **Problem:** `CH Q`/replies are targeted `sendcmdto_one` → dead-sink at a STAT_MESH_SERVER
