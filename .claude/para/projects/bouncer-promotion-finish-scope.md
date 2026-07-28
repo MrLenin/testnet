@@ -468,3 +468,13 @@ stale `hs_origin` — fine on the 2-server bed, a problem with x3/upstream in be
 LS_USER defaults to no sink (`ircd_log.c:163`).  **Every one of those lines is discarded today.**  Add
 `"LOG" = "USER" "FILE" "ircd-user.log";` + `"LOG" = "USER" "LEVEL" "INFO";` to both configs before
 debugging this area again — one run then names the branch taken.
+
+### SETTLED 2026-07-28 by running the suite
+
+`IRC_HOST=localhost npm test -- src/ircv3/bouncer-alias-multi-server.test.ts` →
+**`✓ creates an alias on leaf when same account is already primary on testnet` (1 passed).**
+Cross-server alias attach is CONFIRMED WORKING in the committed suite.  The
+`bouncer-cross-server-promote` narrative is obsolete; only its stale lower comment block
+(lines ~101-116) should be deleted — the newer block (~82-89, pool↔Keycloak SASL drift) is
+the accurate one.  NB that test is NOT `it.skip` — it is a live `it()` that early-returns
+when the leaf is unreachable, so it has been silently passing-as-noop, not skipping.
