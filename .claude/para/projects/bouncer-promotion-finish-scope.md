@@ -583,3 +583,28 @@ primary is FALSE — something else resolves the primary on that path.  What rem
 undetermined is whether the GAP A fix is load-bearing here or whether this path already worked
 before it; `bounce_hs_client_assign_checked` only logs on REFUSAL, so a successful recovery is
 silent.  Wiring the `LS_USER` sink (see the diagnostic prereq above) would answer it in one run.
+
+### LS_USER sink WIRED 2026-07-28 (do this before any further bouncer debugging)
+
+The branch-decision logs in `bounce_auto_resume` / `bounce_setup_local_alias` were being discarded
+because `LS_USER` had no sink.  Added to BOTH prod-pair servers:
+
+```
+     "LOG" = "USER" "FILE" "ircd-user.log";
+     "LOG" = "USER" "LEVEL" "INFO";
+```
+
+**Where to put it:** NOT `data/ircd*.conf` — those are UID-1234-owned and the host user can't write
+them.  The live file is `/home/nefarious/ircd/base.conf` INSIDE each container (generated from
+`base.conf-dist`, so it uses 5-space indent and `LEVEL "CRIT"`, not the host file's formatting —
+a sed keyed to the host file's shape silently matches nothing).  Edit in place with awk/sed to a
+temp file + `cat >` truncation (never `sed -i`/`mv`: a rename breaks the per-file bind mount), then
+`docker kill --signal=HUP`.  The file is created lazily on the first LS_USER write.
+
+Confirmed live: `ircd-user.log` now carries `check_auth_finished` entry/exit and `Bouncer HOLD:`
+lines that were previously invisible.
+
+**Why this matters for GAP A:** the `:1200` ACTIVE log prints `hs_client=%p` BEFORE
+`bounce_resolve_hs_client_from_ghost()` runs, so the pair of lines is a decisive discriminator —
+`hs_client=(nil)` followed by "ACTIVE alias_remote path" proves the helper recovered the pointer
+(fix load-bearing); a non-nil pointer there proves the path never needed it.
