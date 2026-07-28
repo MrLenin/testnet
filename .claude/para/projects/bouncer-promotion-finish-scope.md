@@ -506,3 +506,25 @@ returning REMOTE changes no caller behavior.  Crdt placement differs: the M6d le
 ahead of the alias-remote test there, so the call goes just inside that scope.
 GATE: build + cmocka clean on both branches; `bouncer-alias-multi-server` +
 `bouncer-cross-server-promote` **2/2** on the fixed prod binary.
+
+#### GAP A positive repro — ATTEMPTED, INCONCLUSIVE (be honest about this)
+
+Staged: primary+HOLD on testnet, alias attached on leaf (baseline `ALIAS_ATTACHED: 1` ✓), then
+severed the leaf's uplink with `ss -K dst <testnet-ip>` from a netshoot sidecar in the leaf's
+netns (`rc=0`, killed the ESTAB socket).  **The leaf then failed to autoconnect back within 5
+minutes** — one `Connect to testnet.fractalrealities.net` attempt at sever+~30s and no retry
+after; the pair stayed split until a manual `restart nefarious2`.
+
+Consequence: the new SASL client on the leaf connected while the primary was genuinely
+UNREACHABLE, so `findNUser` on the composed ghost numeric correctly returned NULL, hs_client
+stayed NULL, and orphan-reclaim fired — which is the CORRECT behaviour for a real split (the new
+client took over the session, welcome came back under the primary's nick `gaP4364`).  **This
+exercised the split case, not GAP A.**  GAP A needs the post-RELINK state: primary re-introduced
+by burst (so the numeric resolves) while hs_client is still NULL.
+
+So the fix currently rests on: build + cmocka + 2/2 non-regression + the code argument.  The
+targeted path is NOT yet proven live.  To finish it, the repro needs a reliable relink — either
+drive `CONNECT` from an oper on the leaf after the sever (testnet's Operator block grants
+`set`/`rehash` but NOT squit/connect; nef3's grants neither — so a config edit is needed first),
+or shorten the leaf's reconnect backoff for the test.  Worth turning into the standing link-flap
+regression test the analyst proposed rather than an ad-hoc script.
