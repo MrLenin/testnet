@@ -21,7 +21,12 @@ Numerics nef3=3 nef4=4 nef5=6 nef6=7 nef7=8; client ports 6669/6670/6672/6673/66
 Connect block; the `pgrep` healthcheck greens before the 4496 listener (valgrind boot) so sequence
 targets-before-initiators or autoconnect gets "refused" → backoff; force a stuck P10 uplink with oper
 `CONNECT`; overlays only re-autoconnect on the 10-min `try_connections` cycle (can't force via CONNECT)
-— never restart 3+ nodes at once. (Older 3-node star nef3+nef4/nef5+overlay is the subset still
+— never restart 3+ nodes at once.
+**A just-restarted OVERLAY-ONLY node logs nothing until its overlays reconnect** — that is not a
+stall. nef7 has no P10 links, so until the `try_connections` cycle re-forms its CR overlays (minutes,
+not seconds) there is no traffic and no verify-tick output beyond `Server Ready`. Confirm liveness with
+oper `/CRDT status` (it answers from the live shadow) rather than concluding the log is misrouted.
+ (Older 3-node star nef3+nef4/nef5+overlay is the subset still
 described in many notes below.)
 
 ## Three layers (keep them straight)
@@ -52,13 +57,45 @@ described in many notes below.)
   dedup/anti-entropy key. **Summarises op COUNTS, not content** (see the SV-invisible-divergence rule).
 - **Oplog** — the replicated op stream (CRDT_OP_SET / CRDT_OP_DELETE), chunked + gossiped as deltas.
 - **Causal-stability GC** (`crdt_state_gc`) — frees ops/tombstones every peer has seen (`stable` =
-  component-wise min SV across all connected CRDT peers). Reclaims oplog + LWW delete-tombstones +
-  OR-Set tombstones. Also `crdt_state_reclaim_orphan_member_meta` (members_status/kick_info of fully-
-  departed members → mints DELETE ops).
-- **Digest vs mdigest** — `crdt_state_digest` hashes the DOC (LWW vals + HLCs + OR-Set);
-  `crdt_state_digest_materialized` (mdigest) hashes the live materialized view (GC-invariant, the real
-  convergence metric — the verify NOTICE logs both). **The digest is NOT on the wire by default** (it's
-  a local diagnostic) — except Fix A now carries it on CR S (see below).
+  component-wise min SV across all connected CRDT peers; live `IsCrdtSyncTarget` links ONLY — a split
+  peer leaves the set at link-death; zero peers → GC skips entirely). Reclaims oplog + LWW
+  delete-tombstones + OR-Set tombstones. Sibling orphan reclaims (all GC-cycle, all mint real ops):
+  `crdt_state_reclaim_orphan_member_meta` (members_status/kick_info of fully-departed members),
+  `_orphan_chan_meta` (topic/modes/chanmeta of fully-gone channels), `_orphan_silences` +
+  `_orphan_tempshuns` (user-anchored: owner wholly absent), `_orphan_members` (2026-07-26: membership
+  add-tags of wholly-absent users — the partition-cycle member-residue leak; heal re-merges a healed
+  node's still-present adds after the remove-tombstones were GC'd during the darkness). **The USERS-layer
+  twin (live-reproduced 2026-07-26: quit-during-partition users RESURRECT network-wide as unkillable
+  doc-present zombies when heal lands after complete mainland tombstone GC; KILL can't clean them —
+  non-owner exits self-skip the tombstone and reconcile re-materializes) is closed by
+  `crdt_shadow_own_user_sweep` (crdt_shadow.c, verify tick, kill-switch `FEAT_CRDT_OWNER_SWEEP`):
+  each node reaps its OWN-origin user records with no live Client by minting the DELETE itself
+  (single-writer clean; !bursting + 2-pass debounce; also covers restart re-import residue + hookless
+  teardowns; live-gated via docker-kill owner death). Op-less-tombstone stickiness (pinned by
+  `test_owner_remove_beats_snapshot_reimport`): a snapshot-delivered LWW tombstone has no local oplog
+  op so `crdt_state_gc` never reclaims it — safe (anti-resurrection anchor) but permanent local
+  residue; a change to either behavior must be conscious.** **DECOMMISSION (2026-07-26,
+  "jupe without the jupe part"): `CRDT_COLL_DECOMMISSIONS` standing marker (2-char srvnum →
+  {oper,reason}) minted via oper `/CRDT decommission <server|numeric> [remove|<reason>]` (refused
+  while target present/beacon-fresh); `crdt_shadow_decomm_sweep` (tick+eager+EOB) reaps the marked
+  server's user records + bconns (sessions/leases untouched — revive path owns them) and
+  AUTO-DISSOLVES the marker the moment the server returns (dissolve runs BEFORE any reap; never a
+  link ban). `crdt_shadow_own_user_reassert` (tick+EOB) is the recovery completion: a live local
+  registered user with an absent/tombstoned record is always wrong → re-mint (heals
+  wrong-decommission-while-partitioned-alive). **Membership re-assert (`cb88069`): a doc-driven
+  PART may NEVER remove a LIVE local member — every legitimate local removal applies live-first,
+  so a tombstone that still finds a live MyUser member without KICK attribution is reap residue:
+  the reconcile-remove refuses and re-mints join+status in place (fresh add-tag beats old
+  tombstones; mainland re-JOINs). Remote KICK-via-doc still applies via the kick_info gate.**
+- **Digest vs mdigest** — `crdt_state_digest` (the Fix-A wire digest, on CR S) hashes LIVE content
+  ONLY: LWW tombstones and OR-Set covered-tags/tombstones are SKIPPED (**GC-INVARIANT since
+  2026-07-26** — hashing per-node GC bookkeeping into the reconciliation trigger drove a live
+  PERMANENT full-snapshot oscillation between reclaimed-vs-retained nodes; snapshot exchange cannot
+  converge tombstone presence, so it must not be compared). `crdt_state_digest_materialized`
+  (mdigest) hashes the live materialized view (also GC-invariant, the convergence oracle — the
+  verify NOTICE logs both). Related pinned fact: a snapshot-delivered LWW tombstone has no local
+  oplog op and is NEVER reclaimed by `crdt_state_gc` (op-less stickiness — safe anti-resurrection
+  anchor, permanent local residue; `test_owner_remove_beats_snapshot_reimport`).
 - **`CrdtMsgidDedup`** (R3) — time-windowed open-addressing hash set; `crdt_dedup_check_add(d,id,now,
   window)` → 1 if seen within `window`, else records. Replaces the old count-bounded ring.
 
