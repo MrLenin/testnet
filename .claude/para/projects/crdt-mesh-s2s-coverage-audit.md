@@ -76,8 +76,20 @@ bed roll (receivers must be everywhere first — the emit skips CRDT-aware peers
 - **DEFERRED — WC/WV/WH EMIT:** a channel broadcast can't use the flat all-server flood WALLUSERS
   uses; needs R6a-style tree-demote-among-CRDT + msgid dedup (else CRDT peers double-deliver via
   P10 AND CR-M). Receivers ready.
-- **LIVE GATE (pending):** roll all 5 nodes onto the 'U' receiver, flip FEAT_CRDT_ROUTE_WALL,
-  WALLUSERS nef3 → +w user on overlay-only nef7.
+- **WC/WV/WH EMIT SHIPPED `9087e75`** — `crdt_wall_demote()` (R6a scan + tree-relay suppression to
+  CRDT peers) + `crdt_wall_flood()` (CR-M c/h/v), called under the SAME predicate at all 6 sites so
+  demote/flood can't disagree.  No cross-plane msgid dedup needed: walls carry no wire msgid and the
+  demote guarantees the tree copy never reaches a CRDT peer.  Body = final client text INCLUDING the
+  "@ "/"% "/"+ " prefix.
+- **WALLUSERS LIVE GATE GREEN 2026-07-28:** all 5 nodes rolled to the receiver, flag enabled on the
+  EMITTER only (nef3), `+w` user on overlay-only nef7 received `$ wallgate-probe` and the wire shows
+  `CRDT M <msgid> U ADAAF * 32` — the CR-M 'U' frame, not a tree copy.
+  **FLAG-FLIP MECHANICS (bed):** `/SET` needs `PRIV_SET` which the testbed Operator block does NOT
+  grant → set it in the config Features block instead.  `data/ircd*.conf` is owned by UID 1234 and
+  NOT writable by the host user: edit from INSIDE the container (nef3's config is rw-mounted) using
+  temp-file + `cat >` truncation — never `sed -i`/`mv`, which rename and break the per-file bind
+  mount — then `docker kill --signal=HUP`.  The edit reaches the host file through the bind mount.
+- **WC/WV/WH live gate:** pending (needs the emit binary on nef3; receivers already bed-wide).
 
 **SVS + BX SHIPPED 2026-07-28 (`6cdddee`) — LIVE GATE PENDING.** SVS J/P/M/D/N: each relay branch
 tunnels to the target's HOME over CR-X before the unchanged tree broadcast; re-emit + re-inject cases
