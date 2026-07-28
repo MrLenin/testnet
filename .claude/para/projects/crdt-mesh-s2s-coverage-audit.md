@@ -65,8 +65,19 @@ Two sub-families to build:
    WALL_WALLUSERS; MR-2b crdt_route there is WALL_WALLOPS-only.  The receiver 'W' branch hardcodes
    sendwallto_local(WALL_WALLOPS), so WU needs a separate letter (e.g. 'U') → WALL_WALLUSERS
    local delivery.  Broadcast, no member-leak; an old peer mis-maps 'U'→PRIVMSG-to-'*' = benign drop.
-**MIXED-VERSION:** gate the WC/WV/WH emit behind a feature flag flipped only after a full bed roll
-(guard must be everywhere first), or sequence guard-gen → emit-gen.  Size M, risk MEDIUM.
+**MIXED-VERSION:** gate the emit behind FEAT_CRDT_ROUTE_WALL (default off), flip only after a full
+bed roll (receivers must be everywhere first — the emit skips CRDT-aware peers on P10).
+
+**SHIPPED 2026-07-28 (`14a1d99`, flag-gated OFF — inert until flip):**
+- **WALLUSERS ('U') COMPLETE** — receiver (sendwallto_local WALL_WALLUSERS, target "*") + emit
+  (send.c computes crdt_letter W/U by type+flag, skips CRDT-aware peers on P10 like WALLOPS).
+- **WC/WV/WH ('c'/'h'/'v') RECEIVERS in place** — dedicated CR-M channel branch, member filter
+  (c=chanops / h=+halfops / v=+voiced), "@ "/"% "/"+ " prefix in the frame text.
+- **DEFERRED — WC/WV/WH EMIT:** a channel broadcast can't use the flat all-server flood WALLUSERS
+  uses; needs R6a-style tree-demote-among-CRDT + msgid dedup (else CRDT peers double-deliver via
+  P10 AND CR-M). Receivers ready.
+- **LIVE GATE (pending):** roll all 5 nodes onto the 'U' receiver, flip FEAT_CRDT_ROUTE_WALL,
+  WALLUSERS nef3 → +w user on overlay-only nef7.
 
 **Then:** SVS force-commands (SVSJOIN/PART/MODE/QUIT/NICK — CR-X toward the target's home server,
 receiver re-injects) and BX E/M alias echo (CR carrier in bouncer_session.c:9590 family).
