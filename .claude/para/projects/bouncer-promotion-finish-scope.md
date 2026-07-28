@@ -552,3 +552,25 @@ regression test the analyst proposed rather than an ad-hoc script.
    and aged out of the window before the first poll — the bed was healthy the whole time and the
    PROBE was wrong.  For one-shot events either grep the whole log, anchor `--since` to a fixed
    start timestamp, or verify functionally (here: connect and read the 251 server count).
+
+### GAP A is PARTIAL — the relink case has no ghost numeric at all (code-verified 2026-07-28)
+
+Reading `bounce_burst` (`bouncer_session.c:3570`) while building the link-flap test: on a relink it
+sends **only `BS C`** per session (plus `BS O` for an oper grant).  Its `BS C` format carries
+account/sessid/token/state/created/attach_count/total_active/channels — **no ghost numeric**.  And
+`hs_ghost_numeric` is written in only two places: the DB-restore ghost path (`:3275`) and the BS D
+wire field (`:3805`), plus the BS A/BS D handlers on replicas.  Every `bounce_broadcast(...,'A',...)`
+site is event-driven (attach/resume/hold-create: `:1212`, `:1265`, `:5526`, `m_bouncer.c:102/168`,
+`m_persistence.c:224`) — **none fires on relink.**
+
+⇒ A replica created fresh by a relink burst has hs_client NULL **and hs_ghost_numeric EMPTY**, so
+`bounce_resolve_hs_client_from_ghost()` returns immediately and the GAP A fix does NOT help it.
+The fix covers only the case where a BS A/BS D had already populated the numeric and hs_client was
+later nulled (Client free on SQUIT, collision kill, refused install).
+
+If the relink case is reachable in practice it is the *more common* shape — it needs only an
+ordinary relink — and the correct fix is upstream of where GAP A was patched: have `bounce_burst`'s
+`BS C` carry the primary's numeric (or follow it with a `BS A`) so a relinked replica can identify
+the primary at all.  Live test in flight: primary+HOLD on testnet, restart the leaf to force the
+burst, then a new same-account client on the leaf — ALIAS_ATTACHED means the replica resolved the
+primary; a plain welcome means orphan-reclaim fired and there are now two primaries for one session.
