@@ -416,3 +416,55 @@ a session minted while the peer is overlay-only may never be doc-mirrored/eager-
 reuses fixed nicks gets `433 Nickname is already in use` and the client never registers (looks like
 "attach failed"); use unique nicks per run like the suite's `uniqueNick()`.  (b) `testadmin` is
 polluted with held sessions from ad-hoc runs; use a clean pool account (`poolNN`/`poolpassNN`).
+
+### Code-level corroboration (bouncer-analyst, 2026-07-28)
+
+**Why the skip note misleads:** `bouncer-cross-server-promote.test.ts` carries TWO stacked, contradictory
+comment blocks — lines ~82-89 (newer: root cause fixed in `e9b3b34`, blocked on pool/Keycloak drift) and
+~101-116 (older, pre-fix: "blocked on an upstream issue"). The older one reads first and is obsolete.
+Decisive history: the sibling test covering the SAME attach step, `bouncer-alias-multi-server.test.ts`,
+was **un-skipped in `19b48a7` ("cross-server alias attach works", 2026-05-16)** and is still un-skipped;
+the promote test was re-skipped hours EARLIER in `2762d31` for "pending pool/Keycloak sync stability",
+never for the attach defect.
+
+**The historical mechanism (now fixed):** `BOUNCER SET HOLD on` used to emit `BS C` but not `BS A`, so a
+replica's `hs_client` stayed NULL → the ALIAS_REMOTE gate (`bouncer_session.c:1209-1218`) failed → control
+fell to the orphan-reclaim branch (`:1225-1234`) → `bounce_attach()` returned 1 → `register_user` fell
+through to the NORMAL welcome + `N` broadcast.  Exactly the reported symptom.  Closed by `e9b3b34`
+(BS A from both create paths) + `abac5f4` (S2S METADATA hold broadcast) + `e96fde1` (session-exists
+bypass) — all ancestors of the current prod HEAD.  ⇒ the defect was in the session-establishing
+BROADCAST (`m_bouncer.c`), not the registration path, the BS C handler, or `bounce_setup_local_alias`.
+
+**GAP A — REAL LATENT BUG, still open, both branches.** The HELD branch of `bounce_auto_resume` recovers a
+NULL `hs_client` via `hs_ghost_numeric` + `findNUser` (`bouncer_session.c:1107-1114`); the **ACTIVE branch
+(`:1209-1224`) has NO equivalent** — it logs "ACTIVE remote alias unavailable" and drops into orphan
+reclaim, i.e. silently manufactures a PARALLEL PRIMARY (same failure shape as the historical bug, reached
+another way).  Reachable in steady state (not burst — `s_serv.c:499-503` orders `bounce_burst` after the N
+loop): `bounce_null_hs_client_pointing_at()` (`:2552-2564`) nulls it on Client free (primary's server
+SQUIT+relink, collision kill), and `bounce_hs_client_assign_checked()` (`:2586-2609`) refuses a mismatched
+BS A install leaving NULL while `hs_ghost_numeric` is written unconditionally at `:4151`.
+FIX: hoist `:1107-1114` into a helper and call it at the top of BOTH remote branches, still routed through
+`bounce_hs_client_assign_checked` (don't bypass the account check).  Stresses invariant #3 (numeric
+composed from `hs_origin` — the existing site's own comment `:1092-1106` flags this; widening it needs
+that audit note updated) and must not weaken #6.  TEST: link-flap variant of alias-multi-server — SQUIT
+leaf↔hub, relink, third SASL connection on the leaf, assert exactly ONE primary in `/CHECK -b`.
+
+**GAP B — cross-server hold divergence.** `METADATA *<account>` (oper account-target form) is NODE-LOCAL
+by design (`m_metadata.c:749-754`), and the pool cleanup wipes `draft/persistence/hold` through a testnet
+oper only (`account-pool.ts:351-356`) — so a leaf can retain `"0"` from a prior run.  Masked today only
+because `bouncerEnableHold` re-broadcasts `"1"` first; any cross-server bouncer test relying on
+`BOUNCER_DEFAULT_HOLD` WITHOUT calling it will silently get a plain user on the leaf and look exactly like
+the old bug (`bouncer_session.c:1069-1071` returns 0 on explicit "0" before the e96fde1 bypass).  Do NOT
+relax that check — an explicit opt-out must keep winning; fix the wipe's reach instead.
+
+**GAP C — the promote half is genuinely unvalidated:** nothing exercises
+`bounce_schedule_cross_server_promote` → `bounce_finish_cross_server_promote` (`:4718-4797`).  Also `BS T`
+goes out via `sendcmdto_serv_butone_v3` (IRCv3-aware peers only), so a legacy peer in the path keeps a
+stale `hs_origin` — fine on the 2-server bed, a problem with x3/upstream in between.
+
+**DIAGNOSTIC PREREQ:** `bounce_auto_resume` logs its chosen branch at `bouncer_session.c:1118/1123/1200/
+1214/1219/1227/1235/1250/1262` and `bounce_setup_local_alias` at `:7145/7161/7186`, all `LS_USER L_INFO`
+— but `data/ircd.conf:269-270` and `data/ircd2.conf:222-223` configure only the SYSTEM subsystem, and
+LS_USER defaults to no sink (`ircd_log.c:163`).  **Every one of those lines is discarded today.**  Add
+`"LOG" = "USER" "FILE" "ircd-user.log";` + `"LOG" = "USER" "LEVEL" "INFO";` to both configs before
+debugging this area again — one run then names the branch taken.
