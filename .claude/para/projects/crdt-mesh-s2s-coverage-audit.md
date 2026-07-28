@@ -30,6 +30,17 @@ design-pass it at MR-6, don't patch ad hoc.
 ## GENUINE-MISS gaps (NOT on the roadmap) — the high-value output
 
 ### Cluster A — targeted delivery has no CR-M fallback (one root cause, ~15 tokens, all MAJOR)
+**SLICE 1 SHIPPED 2026-07-28 (`dc86c3f`, LIVE GATE PENDING — self-gating fallbacks, old path
+untouched when they return 0):** CP/CN whisper now routes via crdt_route_unicast_try (real
+minted msgid — the "*" placeholder is single-use per dedup window, never reuse it); XQ/XR
+forward sites wired to the dormant CR-X 'Q'/'Y' cases (all three: mo_/ms_xquery, ms_xreply;
+XREPLY builds user vs server numerics itself).  REMAINING (next session): targeted WALL*
+(WC/WV/WH/WU — needs a CR-M member-FILTER extension: new cmd letters + receiver-side
+op/voice/halfop filtering + mixed-version check on unknown-cmd handling), SVS
+force-commands (SVSJOIN/PART/MODE/QUIT/NICK — CR-X toward the target's home server,
+receiver re-injects), BX E/M alias echo (CR carrier in bouncer_session.c:9590 family).
+Live gate for slice 1: whisper nef3→mesh-only user + XQUERY toward an anchored service
+leaf, both directions.
 Same shape as the KILL/INVITE dead-sink that MR-4 fixed with CR-M, but never extended to these siblings.
 Fix pattern is uniform: route the cross-server leg through `crdt_route_unicast_try` (unicast) / a CR carrier.
 - **CPRIVMSG (CP) + CNOTICE (CN)** — the `whisper()` path does a direct `sendcmdto_one` (s_user.c:1553/1558)
@@ -103,3 +114,36 @@ SETTIME (scoped out, layering — HLC+NTP handle skew); QUIT reason (cosmetic); 
 3. **Cluster C** — the two doc-schema adds (extended channel modes; bouncer alias soft-state). +A/+U first
    (security/founder-protection).
 4. Fold the REDACT + server-WALLOPS corrections into the roadmap; reclassify REDACT out of "covered."
+
+## 2026-07-27 — IsServer-exact SOURCE-gate sweep (anchor/stub sources, invariant-2 handler-side)
+
+Full msgtab server-slot sweep (97 handlers + reachable helpers) for `IsServer(sptr)` gates that
+silently mis-handle a mesh-anchor source (the class the account-prop fix `75783ce`/`bf7f358` swept
+for services handlers; re-triggered by the ms_chathistory find). **FIXED this pass (Phase 0 cycle):**
+- `m_chathistory.c` entry gate (silent drop of every legacy-originated federated query on inner mesh
+  nodes — the mixed-bed wedge) + reply dead-sink + missing multi-hop reply forwarding (both branches).
+- `m_silence.c:337` **CRASH** — stub-sourced SILENCE U fell past the server branch into
+  `apply_silence(sptr)` → `cli_user(stub)->silence` NULL deref; X3 emits SILENCE from its server
+  numeric, so remote-triggerable on any tree-retired leaf. Gate now `IsServer || IsMeshStub`.
+- `m_fake.c:115` — stub-sourced FAKE rejected with protocol_violation; fakehost has NO doc backstop
+  (shadow carries realname/swhois/sethost, not fakehost) → silently lost on the leaf. Gate relaxed.
+
+**DEFERRED (low, noted per feedback_no_silent_defer):**
+- `m_gline.c:140` / `m_shun.c:140` / `m_zline.c:140` — `if (IsServer(sptr)) flags |= *_FORCE`: a
+  stub source loses only the expire-bounds bypass; bans still apply and converge via the doc track.
+  Fix opportunistically when next in those files.
+- `m_batch.c:527` REVIEW — S2S BATCH with anchor source unclear/likely unreachable; revisit at MR-6.
+- BS/BX residual: no IsServer DROP gates, but the nine `bounce_alias_*` sub-handlers were not
+  individually traced for unguarded `cli_user(sptr)` on a stub source. Follow-up trace if
+  BX-with-stub-source becomes a supported path (M6c gateway synth suggests doc-convergence makes it
+  unlikely today).
+- `m_topic.c:153` theoretical: raw legacy-SERVER TOPIC with no setter + FEAT_HOST_IN_TOPIC derefs
+  `cli_user(from)` — X3 always topics from a service-bot user with setter; unreachable via services.
+
+## 2026-07-27 — latent header nit (found during 5-5f B3)
+`include/handlers.h:308` declares `forward_history_write`'s 5th parameter as `int`; the
+definition (`m_chathistory.c`) uses `enum HistoryMessageType`. ABI-identical (small enum
+promotes to int) so it is NOT a bug, but it means m_chathistory.c cannot include handlers.h
+without a conflicting-types error — that file therefore declares what it needs locally.
+Fix opportunistically (type the prototype as the enum + include history.h in handlers.h, or
+retype the definition to int); do not sweep mid-feature.
