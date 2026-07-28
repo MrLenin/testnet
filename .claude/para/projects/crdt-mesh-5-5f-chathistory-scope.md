@@ -230,17 +230,40 @@ from the verify tick + eagerly at EOB per the F3 lesson), and
 LIVE: overlay-only nef7 (AI, no P10 links, could never emit CH A S) publishes its
 capability, exactly once across many ticks.
 
-**PART 2 — the consumer half, still open (this is what actually delivers).** Two blockers,
-both found by live-gating rather than assumed:
-1. `count_storage_servers()` iterates `server_ads[]` **directly** and never calls
-   `has_chathistory_advertisement()`, so the doc fallback does not reach the main consumer.
-   It needs to walk doc-known servers as a second source.
-2. Even then the **5-5c `IsMeshStub` skip** excludes exactly the peers B2 exists to expose.
-Fixing (1) alone changes nothing observable — verified: a CHATHISTORY query on nef7
-dispatched zero `CH Q`. So (1) must land WITH tunnel dispatch replacing that skip (the
-B3-full change, which also finally gives the B3-gateway slice its trigger), and the
-`forward_fed_reply` reply-tunnel completion belongs in the same change. One coherent chunk,
-gateable end-to-end.
+**PART 2 SHIPPED + LIVE-GATED GREEN 2026-07-28 — the consumer half.** As built:
+- **`collect_storage_targets(target, query_time)`** — ONE shared enumerator that both
+  counts and dispatches (`fed_target_buf[]` + `fed_target_seen[]` statics; single-threaded,
+  no re-entry between collect and dispatch).  Source 1: the legacy `server_ads[]` walk
+  (marks seen — legacy answers first, no dual add).  Source 2: the doc, via new
+  `crdt_shadow_ch_storage_foreach()`.  Every dispatcher seeds `servers_pending` from its
+  return and iterates the buffer — count == dispatch **by construction** (the 5-5c
+  never-uncredited invariant settled at collect time: a mesh-only target is included only
+  when `crdt_ch_tunnel_avail()`, so tunnel_try cannot refuse what the counter counted).
+- **All FOUR dispatchers converted** (targets / start_fed_query / auto-replay / REDACT).
+  Mesh-only targets (`.tunnel`) go out as CR-X `H` frames via `crdt_ch_tunnel_try`; live
+  targets as dest-addressed P10.  **REDACT bonus fix:** it seeded pending from the
+  network-wide count but dispatched to DIRECT links only — every fed REDACT wedged to
+  timeout on any multi-hop topology; now dest-addressed from the same collector.
+- **Meshmap reachability lesson (live-gate finding #1):** on nef7 the doc knew AD but
+  `FindNServer("AD")==NULL` — under meshmap routing a CRDT peer beyond the direct links
+  has **no local Client at all** (no anchor minted), so "unresolvable = unreachable" is
+  WRONG.  The collector's doc walk now includes an unresolvable server when its **CR H
+  beacon is fresh** (`crdt_shadow_server_beacon_fresh`, hard-invariant-10's exact
+  predicate), tunnel=1, retention read from the doc record directly.
+- **`&me` gate fix (live-gate finding #2, latent B3 bug):** `crdt_ch_tunnel_dispatch`
+  re-injects as `ms_chathistory(&me, &me, …)` but the source gate only admitted
+  `IsServer||IsMeshStub` — STAT_ME is neither, so **every tunneled frame died silently at
+  its destination**.  Gate now admits `IsMe`.  B3 shipped this dead and no gate could
+  catch it until B2 provided the trigger.
+- **`forward_fed_reply` reply-tunnel symmetry:** a reply whose reqid-prefix origin
+  resolves to a mesh stub tunnels via `crdt_ch_tunnel_reply` instead of dropping.
+- **LIVE GATE (the exact part-1 repro, inverted):** history seeded ONLY on nef3; client
+  on nef7 (no legacy ad for AD, no local Client for AD) ran `CHATHISTORY LATEST` →
+  dispatched BOTH a plain P10 `CH Q … AG` (real link) AND `CR X … AI AD H :Q …` (tunnel);
+  nef3 re-injected (self=1), served count=5 from RocksDB, replies tunneled back as
+  `AD AI H` frames **relayed through nef5** (multi-hop), re-injected at nef7, batch
+  delivered 3/3 markers to the client.  cmocka all-suite green (stale-object false alarm
+  on the first incremental run — clean rebuild 100/100 + 13/13 wire-hardening).
 
 
 **Problem:** CH A S/R travel P10 only. Overlay-only nef7 has no P10 links → never
@@ -293,7 +316,16 @@ CH-in-CR wrapper must reuse it).
 responses if it can, instead of just saying there's nothing").** The Phase-0 `E 0` synth
 at the gateway's Q-forward is availability-only; the ideal is real answers.
 
-> ### ⛔ IMPLEMENTED 2026-07-27 BUT **NO LIVE TRIGGER — BLOCKED ON B2**
+> ### ✅ RESOLVED 2026-07-28 — B2 part 2 provided the trigger; tunnel + reply-tunnel
+> ### LIVE-GATED GREEN (mesh-initiated direction). See PART 2 above for the gate.
+> Residue: the **legacy-ward leg** (a legacy requester's Q hitting the gateway toward a
+> mesh dest, gateway re-emitting tunneled replies as real P10 via `crdt_services_reemit`
+> case 'H') still has no live trigger — legacy only queries servers it has ads for, and
+> the legacy-ward capability synth (CH A S synthesized to legacy for doc-known stores) is
+> deliberately deferred (must stay reachability-gated).  The `IsMe` gate bug below would
+> have killed this leg too; it is fixed, but the leg stays UNVERIFIED until that synth.
+>
+> ### ⛔ original 2026-07-27 analysis (kept for the record) — BLOCKED ON B2
 >
 > **The "shippable before B2" premise below is DISPROVEN.** It assumed legacy keeps
 > serving ads that crossed before a node became anchored. It does not:
