@@ -319,7 +319,16 @@ Delete (with parse.c/msg.h/header/decl cleanup where applicable):
 
 ## Prod-fork cherry-pick subset (no doc dependencies)
 
-C1 (burst fix), A2 (visibility encoding + unified restore), A3 (read-only promotions + eager
-load), A4-local (permanent not TTL; still node-local), A6 (private notifies), all of §D except
-doc-adjacent comments. §B channel persistence WITHOUT B2/B4-doc parts is possible (store+load on
-+R) but weaker (no cross-node backfill) — decide at cherry-pick time, not now.
+**DONE 2026-07-28 — prod fork `ircv3.2-hardening` @ `840db28` (20 commits), gated 29/29
+on the 2-server legacy bed (metadata.test.ts + metadata-limits.test.ts; full build +
+cmocka clean).** As shipped: C1, A2, A3, A4-local, A6, all §D, the CLEAR-propagation
+base fix (fdf93a5), **and the §B doc-free half** — decision taken at cherry-pick time
+as the spec instructed: B1 (+R chokepoint persistence), B3 hooks (store work on EVERY
+node — no entry gate needed without a doc; suspend brackets dropped per site), the -R
+memory-clear resurrection fix, B5 (TTL channel-cache retirement + GET 766), and
+CLEAR-on-+R store wipe.  Rationale: B1 runs on relayed applies, so every node persists
++R rows from the ordinary MD broadcast; the only loss vs the doc is cross-node backfill
+for a node that was down at SET time (documented).  Skipped as doc-only: A1
+(apply_converged/memory_del), B2 (doc keys), B4 (doc materialization).  C1's e2e proof
+(spec scenario 5) landed with this gate as predicted.  Comments reworded
+branch-accurate (crdt-mesh machinery referenced as such, never as present).
