@@ -295,6 +295,15 @@ at the gateway's Q-forward is availability-only; the ideal is real answers.
 >
 > **Revised order: B2 → (re-gate B3-gateway) → B3-full.** The code below is committed
 > but must be treated as UNVERIFIED until B2 gives it a trigger; gate it as part of B2.
+>
+> **Also fold into B2 — the reply-direction asymmetry** (found 2026-07-27 reviewing the
+> hardening→crdt-mesh merge): the B3 slice made the QUERY direction tunnel to an anchored
+> counterpart, but `forward_fed_reply` still *drops* a reply whose origin resolves to a
+> mesh anchor (its `!IsServer(origin)` test). Two halves of one feature now disagree. The
+> completion is to call `crdt_ch_tunnel_try()` there before dropping — deliberately not
+> done yet, because it is the same no-live-trigger family as the rest of this box. The
+> code comment at `forward_fed_reply` records the asymmetry so it is not mistaken for an
+> oversight. Gate it with B2 alongside the tunnel itself.
 
 The gateway transit case as built (implementation is sound; only the trigger is missing):
 - Gateway, Q-forward, dest = anchor: instead of synthesizing, wrap the Q in a routed CR

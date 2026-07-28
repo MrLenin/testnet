@@ -243,6 +243,17 @@ scoped to defects. Each is a real gap, not a doc error:
 3. **Eleven `kc_url` builders have no happy-path coverage** — `kc_url_introspect`, `_users`, `_user_groups`,
    `_user_group`, `_user_reset_password`, `_groups`, `_group`, `_group_members`, `_group_children`,
    `_group_search`, `_fingerprint_search`.
+4. **The JWT SIGNATURE path is untested — the security boundary itself** (added 2026-07-27 from the
+   Phase 1 review; the highest-value gap in this list). `kc_jwt_cmocka.c` reaches `static
+   jwt_parse_claims` by `#include`ing `kc_jwt.c` and stubbing everything else, so it covers the F-K3
+   exp/nbf *claim policy* well (expired, future-`nbf` past the 60s skew, missing-`exp`, garbage
+   payload) but executes **none** of `jwt_verify_signature` (`kc_jwt.c:371`) or the JWKS RSA-key
+   reconstruction (`:146+`, `EVP_PKEY_fromdata`/`OSSL_PARAM_BLD`). The file header discloses this;
+   it was missing from this list. What ordering review DID confirm by inspection: `alg` is pinned to
+   RS256 (`:614`, no alg-confusion path), the signature is verified (`:643`) BEFORE claims are parsed
+   (`:664`), and unknown-`kid`/unsupported-alg return `KC_ERROR` (fall back to remote introspection)
+   rather than accepting. Test needs a fixed RSA keypair fixture: sign a payload, assert accept; flip
+   one signature byte, assert reject; wrong-`kid`, assert `KC_ERROR` not accept.
 
 ## Decisions taken (do not relitigate)
 
