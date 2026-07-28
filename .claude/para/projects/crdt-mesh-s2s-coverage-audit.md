@@ -89,7 +89,11 @@ bed roll (receivers must be everywhere first — the emit skips CRDT-aware peers
   NOT writable by the host user: edit from INSIDE the container (nef3's config is rw-mounted) using
   temp-file + `cat >` truncation — never `sed -i`/`mv`, which rename and break the per-file bind
   mount — then `docker kill --signal=HUP`.  The edit reaches the host file through the bind mount.
-- **WC/WV/WH live gate:** pending (needs the emit binary on nef3; receivers already bed-wide).
+- **WC/WV/WH LIVE GATE GREEN 2026-07-28 — all four assertions:** op on overlay-only nef7 received
+  WALLCHOPS, voiced member received WALLVOICES, and the PLAIN member received NEITHER (the privilege
+  filter — the leak the forward-compat guard `bac5770` exists to prevent).  Wire:
+  `CRDT M <msgid> c ADAAA #wcgate 32 :@ wc-chops-probe` — 'c' letter, channel target, prefixed body.
+  **⇒ WALL* 100% COMPLETE + GATED (WALLUSERS + WC/WV/WH, emit + receivers).**
 
 **SVS + BX SHIPPED 2026-07-28 (`6cdddee`) — LIVE GATE PENDING.** SVS J/P/M/D/N: each relay branch
 tunnels to the target's HOME over CR-X before the unchanged tree broadcast; re-emit + re-inject cases
@@ -106,8 +110,12 @@ X3) toward a target homed on overlay-only nef7 → nef3 `REV-try cmd=J` → `CR-
 gateway-edge mint (the SVSJOIN arrives from the non-CRDT x3 link).  BX half still ungated (needs an
 alias homed on nef7 receiving a PM echo).  Bed nick: OpServ is **`O3`** here, not "OpServ".
 
-**⇒ CLUSTER A CODE-COMPLETE** (CP/CN, XQ/XR, WALL*, SVS, BX) — remaining: WC/WV/WH emit (R6a
-tree-demote+dedup) + the WALL*/SVS/BX live gates.
+**⇒ CLUSTER A CODE-COMPLETE + GATED** (CP/CN ✅, XQ/XR ✅, WALL* ✅ both halves, SVS ✅, BX shipped).
+**ONLY REMAINING: the BX live gate — BLOCKED on a PRE-EXISTING bed defect**, not on the BX carrier:
+cross-server alias attach doesn't land (a SASL'd client on a leaf gets a normal welcome instead of
+routing through `bounce_setup_local_alias`, so `hs_aliases[]` stays empty).  Two tests are already
+skipped for it (`bouncer-cross-server-promote`, `bouncer-alias-multi-server`).  The BX 'B' carrier
+cannot be exercised until that lands.
 Live gate for slice 1: whisper nef3→mesh-only user + XQUERY toward an anchored service
 leaf, both directions.
 Same shape as the KILL/INVITE dead-sink that MR-4 fixed with CR-M, but never extended to these siblings.
