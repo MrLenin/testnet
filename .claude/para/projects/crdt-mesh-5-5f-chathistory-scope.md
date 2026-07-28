@@ -220,6 +220,29 @@ mesh-stub-only relay hop). Does NOT fix discovery — a complement, not standalo
 
 ### B2 — mesh-native storage-capability discovery (survey Option 2, discovery half)
 
+**PART 1 SHIPPED 2026-07-27 (`2203dae`) — publish half live-gated; consumer half NOT done.**
+`CRDT_COLL_CH_STORAGE` (LWW per server `{stores, retention_days}`, salt 25, op-recording,
+tombstone withdrawal), `crdt_shadow_ch_storage_publish()` (CHANGE-GATED — an unconditional
+re-mint would append an op per server per tick and churn the digest via fresh HLCs; called
+from the verify tick + eagerly at EOB per the F3 lesson), and
+`crdt_shadow_ch_storage_lookup()` wired as a FALLBACK behind the legacy table in
+`has_chathistory_advertisement`/`server_retention_days`. cmocka 100/100 (+4).
+LIVE: overlay-only nef7 (AI, no P10 links, could never emit CH A S) publishes its
+capability, exactly once across many ticks.
+
+**PART 2 — the consumer half, still open (this is what actually delivers).** Two blockers,
+both found by live-gating rather than assumed:
+1. `count_storage_servers()` iterates `server_ads[]` **directly** and never calls
+   `has_chathistory_advertisement()`, so the doc fallback does not reach the main consumer.
+   It needs to walk doc-known servers as a second source.
+2. Even then the **5-5c `IsMeshStub` skip** excludes exactly the peers B2 exists to expose.
+Fixing (1) alone changes nothing observable — verified: a CHATHISTORY query on nef7
+dispatched zero `CH Q`. So (1) must land WITH tunnel dispatch replacing that skip (the
+B3-full change, which also finally gives the B3-gateway slice its trigger), and the
+`forward_fed_reply` reply-tunnel completion belongs in the same change. One coherent chunk,
+gateable end-to-end.
+
+
 **Problem:** CH A S/R travel P10 only. Overlay-only nef7 has no P10 links → never
 advertises, never hears ads → `server_ads[]` empty → federation never STARTS on it, and its
 store is invisible. Post-MR-6 there is no EOB to hang CH A S on at all.
