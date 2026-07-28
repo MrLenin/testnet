@@ -45,11 +45,31 @@ slice-1 note follows:
 **(prior)** CP/CN whisper now routes via crdt_route_unicast_try (real
 minted msgid — the "*" placeholder is single-use per dedup window, never reuse it); XQ/XR
 forward sites wired to the dormant CR-X 'Q'/'Y' cases (all three: mo_/ms_xquery, ms_xreply;
-XREPLY builds user vs server numerics itself).  REMAINING (next session): targeted WALL*
-(WC/WV/WH/WU — needs a CR-M member-FILTER extension: new cmd letters + receiver-side
-op/voice/halfop filtering + mixed-version check on unknown-cmd handling), SVS
-force-commands (SVSJOIN/PART/MODE/QUIT/NICK — CR-X toward the target's home server,
-receiver re-injects), BX E/M alias echo (CR carrier in bouncer_session.c:9590 family).
+XREPLY builds user vs server numerics itself).
+
+**WALL* carrier — SCOPED 2026-07-28, forward-compat guard LANDED (`bac5770`):**
+The channel-delivery cmdstr map DEFAULTS any unknown cmd letter to PRIVMSG, so a future
+targeted-WALL frame reaching a peer without its receiver logic would deliver to ALL members
+as a PRIVMSG (privilege leak — same shared-letter hazard as the CI/INVITE 'I' collision).
+Guard landed: the channel branch now requires a known cmd (P/N/T); unknown channel-target
+cmds drop locally and relay-only.  This MUST precede any WALL* emit by a bed generation.
+Two sub-families to build:
+1. **Channel-targeted WC/WV/WH** — deliver to a member-privilege subset (WALLCHOPS→SKIP_NONOPS;
+   WALLHOPS→SKIP_NONHOPS = chanops+halfops; WALLVOICES→SKIP_NONVOICES = chanops+halfops+voiced,
+   send.c:2418-2420).  NEW channel-family CR-M cmd letters (e.g. c/h/v — distinct from P/N/T/K/I/W
+   and in-branch distinguishable per the 'I' lesson); receiver applies the IsChanOp/IsHalfOp/
+   HasVoice filter in the channel loop + emits the right client command (WALLCHOPS/VOICES/HOPS)
+   with its "%H :@ %s" format; extend the guard's known-cmd set.  Emit sites: the SKIP_NON*
+   sendcmdto_channel_butone calls in m_wallchops/voices/hops.
+2. **WALLUSERS (WU)** — network-wide +w-USER broadcast (not channel) via sendwallto_group_butone
+   WALL_WALLUSERS; MR-2b crdt_route there is WALL_WALLOPS-only.  The receiver 'W' branch hardcodes
+   sendwallto_local(WALL_WALLOPS), so WU needs a separate letter (e.g. 'U') → WALL_WALLUSERS
+   local delivery.  Broadcast, no member-leak; an old peer mis-maps 'U'→PRIVMSG-to-'*' = benign drop.
+**MIXED-VERSION:** gate the WC/WV/WH emit behind a feature flag flipped only after a full bed roll
+(guard must be everywhere first), or sequence guard-gen → emit-gen.  Size M, risk MEDIUM.
+
+**Then:** SVS force-commands (SVSJOIN/PART/MODE/QUIT/NICK — CR-X toward the target's home server,
+receiver re-injects) and BX E/M alias echo (CR carrier in bouncer_session.c:9590 family).
 Live gate for slice 1: whisper nef3→mesh-only user + XQUERY toward an anchored service
 leaf, both directions.
 Same shape as the KILL/INVITE dead-sink that MR-4 fixed with CR-M, but never extended to these siblings.
