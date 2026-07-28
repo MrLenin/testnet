@@ -490,3 +490,19 @@ promote test has been replaced with the verified status + a warning not to resto
 Still open from this investigation: **GAP A** (ACTIVE-branch `hs_ghost_numeric` fallback →
 parallel primary) and **GAP B** (node-local `METADATA *acct` wipe), plus the CRDT-mesh
 session-propagation gap (no BS C/BS A reaches an overlay-only node; the doc must carry it).
+
+### GAP A FIXED 2026-07-28 — `cfe3722` (prod) / `272d8d2` (crdt)
+
+`bounce_resolve_hs_client_from_ghost()` extracted from the HELD branch's inline recovery and
+called from BOTH remote branches, still routed through `bounce_hs_client_assign_checked` (the
+account check is never bypassed).  Safety argued rather than assumed, and documented on the
+helper: this is NOT a BS-token handler (no live sender at registration time) so hard-invariant 3
+does not strictly bind, but the hs_origin composition risk after a cross-server rebind is real —
+a mis-composed numeric either fails to resolve (safe) or resolves to another account's client
+(refused), and the residual same-account-sibling case still yields an ALIAS, strictly better than
+the parallel primary it replaces.  Verified `BOUNCE_RESUME_ALIAS_REMOTE` and `_ALIAS_LOCAL` both
+funnel into `bounce_setup_local_alias` (s_user.c:596-600), so recovering a LOCAL client and
+returning REMOTE changes no caller behavior.  Crdt placement differs: the M6d lease block sits
+ahead of the alias-remote test there, so the call goes just inside that scope.
+GATE: build + cmocka clean on both branches; `bouncer-alias-multi-server` +
+`bouncer-cross-server-promote` **2/2** on the fixed prod binary.
