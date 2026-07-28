@@ -568,9 +568,18 @@ site is event-driven (attach/resume/hold-create: `:1212`, `:1265`, `:5526`, `m_b
 The fix covers only the case where a BS A/BS D had already populated the numeric and hs_client was
 later nulled (Client free on SQUIT, collision kill, refused install).
 
-If the relink case is reachable in practice it is the *more common* shape — it needs only an
-ordinary relink — and the correct fix is upstream of where GAP A was patched: have `bounce_burst`'s
-`BS C` carry the primary's numeric (or follow it with a `BS A`) so a relinked replica can identify
-the primary at all.  Live test in flight: primary+HOLD on testnet, restart the leaf to force the
-burst, then a new same-account client on the leaf — ALIAS_ATTACHED means the replica resolved the
-primary; a plain welcome means orphan-reclaim fired and there are now two primaries for one session.
+**RETRACTED by the live test — the relink case WORKS.**  Ran it (primary+HOLD on testnet, restart
+the leaf to force the burst, new same-account client on the leaf) and the leaf's own log shows the
+attach succeeding:
+`NOTE BOUNCER ALIAS_ATTACHED :Attached to session AZ+qej+McGOqSDENTjwcYQ as alias on leaf` and
+`Bouncer: alias rlP9151 created for session ... on leaf`.  My script printed
+"ALIAS_ATTACHED: 0 -> SECOND PRIMARY (gap confirmed)" — that verdict was a HARNESS BUG: the client
+read loop stops at the first of 001/422/433 and the 001 arrives BEFORE the notice, so it never read
+it.  **Always confirm a bouncer verdict against the server log, not just the client stream.**
+
+So: the code observations above stand (burst `BS C` really does carry no ghost numeric, and no
+`BS A` fires on relink), but the INFERENCE that the relink case therefore manufactures a parallel
+primary is FALSE — something else resolves the primary on that path.  What remains genuinely
+undetermined is whether the GAP A fix is load-bearing here or whether this path already worked
+before it; `bounce_hs_client_assign_checked` only logs on REFUSAL, so a successful recovery is
+silent.  Wiring the `LS_USER` sink (see the diagnostic prereq above) would answer it in one run.
