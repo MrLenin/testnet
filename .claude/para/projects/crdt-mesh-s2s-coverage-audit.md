@@ -87,8 +87,12 @@ can't collapse).  SVSNICK applies per-hop (no early return) so its tunnel is add
 — only the authoritative home mints the doc nick op.  BX 'B': bounce_alias_echo's 2 remote BX E sends +
 forward_bxm_line tunnel to a mesh-only alias/primary home, re-injected into ms_bouncer_transfer; BX M
 rebuilds the line with the forward_fed_reply join pattern (round-trips all 3 param shapes).  All
-self-gate (reply_try=0 → original P10 send).  **GATE (pending): services SVSJOIN toward a user homed on
-nef7; an alias homed on nef7 receiving a PM echo.**
+self-gate (reply_try=0 → original P10 send).  **GATE GREEN 2026-07-28 (SVS half):** OpServ (`/msg O3 SVSJOIN`, after AuthServ auth — SVSJOIN is
+services-only, `m_ignore` in the OPER msgtab slot, so an oper CANNOT originate it; drive gates through
+X3) toward a target homed on overlay-only nef7 → nef3 `REV-try cmd=J` → `CR-X emitted dst=AI` → nef7
+`CR-X recv cmd=J` + `re-injected locally` → **target joined**.  This also exercises the §17.7
+gateway-edge mint (the SVSJOIN arrives from the non-CRDT x3 link).  BX half still ungated (needs an
+alias homed on nef7 receiving a PM echo).  Bed nick: OpServ is **`O3`** here, not "OpServ".
 
 **⇒ CLUSTER A CODE-COMPLETE** (CP/CN, XQ/XR, WALL*, SVS, BX) — remaining: WC/WV/WH emit (R6a
 tree-demote+dedup) + the WALL*/SVS/BX live gates.
