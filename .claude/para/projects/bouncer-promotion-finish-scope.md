@@ -531,9 +531,20 @@ regression test the analyst proposed rather than an ad-hoc script.
 
 #### Harness traps hit while gating this (all cost real time)
 
-1. **Held ghosts KEEP THEIR NICKS.** A gate reusing fixed nicks gets `433 Nickname is already in
-   use`, the client never registers, and it looks exactly like "attach failed".  Use unique nicks
-   per run (the suite's `uniqueNick()`).
+1. **Nick reuse across runs is only fatal when the ghost's account DIFFERS from the one you
+   authenticate as.**  Registration does NOT hard-433 on a bouncer-held nick: `m_nick.c:319-329`
+   defers the collision through auth (`auth_defer_nick`) when the holder is a bouncer ghost/session
+   — then, per the comment there and confirmed by the maintainer, **a mismatch between the
+   authenticated account and the session's account produces the LATE 433**; a match revives or
+   attaches.  My `bxprim` gate hit exactly that: the leftover ghost belonged to `testadmin` while
+   the script had been switched to authenticate as `pool07`.  So: use unique nicks per run
+   (`uniqueNick()`), and never reuse a nick across accounts.
+   *Correction:* two ad-hoc probes I ran to "confirm the softening" were VACUOUS — the hold
+   returned `SETTINGS_UPDATED` rather than `SESSION_CREATED`, no ghost persisted (a plain client
+   later took the nick freely), so they exercised a free nick and prove nothing either way.  The
+   deferral semantics above rest on the code + maintainer, not on those probes.  If you want a
+   real test, first assert `SESSION_CREATED` and then assert the nick is still occupied after the
+   holder disconnects.
 2. **`python3` buffers stdout when piped** — a long repro shows NOTHING until it exits, so you fly
    blind.  Use `python3 -u` for anything you intend to watch.
 3. **A rolling `docker logs --since Nm` poll can MISS a one-shot event.**  Waiting for a relink by
