@@ -390,3 +390,10 @@ Both earlier "failures" were probe bugs, not server: (1) CAP-flow ordering, (2) 
 shift field indices** — a `@time=...` prefix makes p[1] the source, not the numeric, so the
 probe never saw its own 001.  Tag-aware splitting is mandatory in any probe that enables
 server-time (scratchpad chfed3.py is the reference).  6-1 exit now needs only the 24h soak.
+
+LOADED SOAK BURST 1 — CLEAN (2026-07-29 18:54–19:44 EDT, driver: scratchpad soakload.py):
+8 churn workers (nef7-weighted) + cross-node delivery checker.  272 connect/quit cycles,
+758 joins, 1282 msgs, 329 nick changes; 28/28 gateway→overlay-only deliveries; 0 kills,
+0 errors, 0 mat-check gaps fleet-wide, valgrind 0.  User's point stands and is adopted:
+an idle soak only proves timers — LOADED bursts are the exit standard.  Recommend 2-3 more
+bursts across the window (driver is re-runnable, bounded ≤1h per run).
