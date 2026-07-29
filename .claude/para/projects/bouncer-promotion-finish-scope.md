@@ -934,3 +934,16 @@ retirement and CAME BACK ~2 min after heal with no restart (`create-reconcile: c
 
 (Doc correction for the skill: `ctime_del` IS serialized in the CR F snapshot (crdt_wire.c:359)
 — the "per-server-local" note is about the DIGEST not hashing it; the wire does carry it.)
+
+### 2026-07-29 (morning) — ORESET/HOLD-off orphan FIXED (`5d44734`): bounce_destroy_owned
+
+The Item-5-class orphan from last night root-caused: FIVE sites (m_bouncer SET HOLD off,
+m_persistence SET OFF + DETACH, s_user umode hold-pref clear, bounce_kill_session) cleared
+`hs_client = NULL` BEFORE `bounce_destroy` to unanchor the primary from later exit cleanup —
+silently defeating the destroy's MyConnect single-writer tombstone gate (5-5e M2), so
+bsess/blease doc records orphaned on every such destroy.  `bounce_destroy_owned()` tombstones
+while hs_client still proves ownership, then unanchors + destroys; all five converted.
+GATE (non-vacuous): 2 sessions destroyed via the HOLD-off path + a third left HOLDING as the
+live M3 election subject → two sweeps, ZERO divergence (pre-fix the oldest orphan wins the doc
+election every tick).  Residue: pool03's PRE-fix orphaned records remain inert until the Item-5
+reap (they only surface when pool03 has a live session).
