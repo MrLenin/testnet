@@ -352,3 +352,36 @@ BATTERY FINDINGS (the point of the battery):
   Re-run during the 24h soak.
 - REMAINING for 6-1 CLOSE: 24h soak (0 crashes/valgrind, mat-check quiet), CH re-run, then the
   standing regression battery items (WALL*, GLINE cutover, CI) as soak spot-checks.
+
+SOAK STARTED 2026-07-29 ~18:05 UTC (nef7/nef5 boot; nef3/4/6 18:12) — baseline: all running,
+fleet mat-check 0, valgrind clean.  Exit check due ~2026-07-30 18:00 UTC: zero crashes/restarts
+(compare StartedAt), valgrind zero invalid accesses on nef7, mat-check quiet, no BELOW-REDUNDANCY
+alarms, + the CH federation re-run.  A session-length anomaly monitor runs while the driving
+session lives; across sessions, verify via `docker inspect StartedAt` against these baselines.
+
+## §5 decisions — user rulings 2026-07-29
+
+- **#9 bed shape: nef7** (done — 6-1 shipped against it).
+- **#4 hybrid capability: PURE OVERLAY, apart from the gateway.** CRDT nodes keep NO dormant
+  break-glass P10 Connect blocks; only the gateway retains P10 (to legacy/.2/upstream/x3).
+  Consequence: rollback is a config exercise, and `check_loop_and_lh`/BURST paths stop being
+  load-bearing between CRDT peers at 6-4 — treat their retirement as in-scope cleanup, and make
+  the §2.8 overlay-redundancy guard a HARD precondition (no P10 safety net left).
+- **#5 Tier C gate: UNSURE — left open.** Revisit before 6-4; F4 RENAME is blocked on services
+  regardless, so the practical question is only whether F5 hard-gates the endgame.
+- **#7 AC U LOGOUT: NEEDS DOING.** Design + implement the doc-driven logout (the direction
+  deliberately not driven since 2026-07-29 because `ms_account 'U'` destroys sessions + clears
+  metadata on a possibly-lagging doc read). Schedule: before 6-4 (at MR-6 the tree AC is the
+  last carrier); candidate design = tombstone the account field with a grace window +
+  MyConnect/ownership gating, mirroring the derived-state lesson (drive the real handler, don't
+  hand-roll state).
+- **#8 gateway HA: NOT a hard exit criterion for the first 6-4 gate.** Valuable, but sequenced
+  AFTER the rest is proven; first endgame gate may accept "manual gateway restart, mesh keeps
+  running degraded". Keep MR-4d-3 code in place; the 2-gateway live test moves to a follow-on.
+
+CH FEDERATION SOAK LEG — GREEN 2026-07-29 15:05 EDT: message written on the gateway (nef3,
+#chfed) retrieved via `CHATHISTORY LATEST` on the OVERLAY-ONLY node (nef7), zero P10 links.
+Both earlier "failures" were probe bugs, not server: (1) CAP-flow ordering, (2) **message tags
+shift field indices** — a `@time=...` prefix makes p[1] the source, not the numeric, so the
+probe never saw its own 001.  Tag-aware splitting is mandatory in any probe that enables
+server-time (scratchpad chfed3.py is the reference).  6-1 exit now needs only the 24h soak.
