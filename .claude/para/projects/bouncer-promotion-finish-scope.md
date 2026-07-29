@@ -772,3 +772,11 @@ mat-gaps are also gone (cured by `d499f60`).  Remaining mat-check residue, both 
 separate: (a) `dp32573 in doc, not live` on nef3 — held-session ghost's doc user record vs no live
 client (reap/hold interplay, watch-item); (b) `BjAAA/BjAAB fields: host umode` — legacy-side (prod)
 user host/umode drift in the mirror, the known legacy-leaf residue class.
+
+### 2026-07-29 — gateway_birth_modes extended-render IMPLEMENTED (`eba38ec`), gate deferred
+
+Birth bridge now emits +A/+U/+L (string-presence-gated) + exmode bits + widened entry gate
+(extended-only channels were skipped).  GATE PLAN (next session): partition nef3 from the mesh (or
+use a legacy-peer relink) so a channel with apass/upass/redir/exmode set on nef7 is doc-resident
+BEFORE nef3 births it; then assert the legacy peer (prod testnet) sees the extended modes on the
+birthed channel.  A fresh-channel test races the eager birth and proves nothing.
