@@ -908,3 +908,29 @@ bsess doc record un-tombstoned (destroy-path ordering skips the MyConnect-gated
 crdt_shadow_bsess_remove) → stale record makes the M3 election-divergence diagnostic fire on
 the owner every tick (diagnostic-only; the stale lease is inert — M6d needs a live local
 primary).  Fold into the existing deferred Item 5 (orphan doc-record reap for bsess/bconn).
+
+### 2026-07-29 — NICK-COLLISION LIVE GATE GREEN (§17.5) + partition-reap channel-death fix
+
+**Collision gate** (roadmap item 2 closed): netns-sidecar partition of nef7 (iptables DROP + ss -K
+its 2 S2S links); split-born `collgate` on BOTH nef7 and nef3; heal + forced `CONNECT
+leaf3` from nef7.  Resolution: nef7 `CRDT nick-collision: force-renamed local collgate -> AIAAA
+(lost 'collgate')` — the loser got a clean NICK echo on its own socket and STAYED CONNECTED the
+full 15-min hold; the winner never saw a thing; end state fleet-consistent (collgate + AIAAA both
+live everywhere); valgrind zero invalid accesses.  Rule check: both claims were the SAME
+user@host (host-bridge ip + ident `cg`) → §17.5's same-identity branch = NEWER wins (reconnect
+semantics) — the observed outcome is per-spec (older-wins applies only to DIFFERING identities).
+
+**Bonus find — partition-reap permanently killed alive-elsewhere channels:** post-heal, #TheOps/
+#OperServ/#MrSnoopy stayed "in doc, not live" on nef7 forever.  Chain: anchor retirement reaped
+x3's users (correctly WITHOUT doc tombstones — single-writer), emptying the service channels →
+local destruct bumped the LOCAL ctime incarnation (invariant 7) → post-heal the doc members are
+present-not-removed FOREVER (the bots never left), so invariant 7's "stays dead until the
+tombstone clears the member" branch can never resolve → permanent local channel death.  Fix: a
+reachability-destruct bracket around crdt_shadow_retire_mesh_stub's reap — channel destructs
+inside it are MECHANICAL (path loss), and skip the ctime bump so reconcile-create can resurrect
+from the doc.  GATE: re-ran the identical partition cycle on the fixed binary — channels died at
+retirement and CAME BACK ~2 min after heal with no restart (`create-reconcile: created channel`
++ NAMES shows @MemoServ); fleet mat-check zero.
+
+(Doc correction for the skill: `ctime_del` IS serialized in the CR F snapshot (crdt_wire.c:359)
+— the "per-server-local" note is about the DIGEST not hashing it; the wire does carry it.)
