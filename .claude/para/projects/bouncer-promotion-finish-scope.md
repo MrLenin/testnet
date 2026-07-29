@@ -816,3 +816,45 @@ DIRECTLY-CONNECTED bursting link (real inbound resync); 2-pass debounce stays.  
 "in doc, not live" mat-gap is gone.  (The residue's origin — bouncer-DB restore re-keys held
 ghosts to new numerics across restart, orphaning old-numeric records — is now handled by the
 sweep as designed.)
+
+### 2026-07-29 — legacy host/umode mirror drift ROOT-CAUSED + FIXED; +A/+U + pool10 questions closed
+
+**Drift mechanism (BjAAA/BjAAB, every-tick `fields: host umode` on all four mesh nodes, gateway
+clean):** the doc record was RIGHT (== nef3 live: host `pool00.Users.Network`, umodes `xrCc`);
+the mesh nodes' LIVE copies were stale (raw-IP host, `xr` only) and the reconcile could never
+converge them, because (a) the umode delta cannot drive param'd modes — `set_user_mode` cases
+C/c/r/h/f require a following value the delta doesn't carry and the record doesn't store — and
+(b) no clause drives the displayed host at all (it's DERIVED state: hidden-host style/cloak).
+The poisoned copies came from materializing a HALF-INTRO record: `set_user_mode`'s tail mint
+fires during N-intro parse (set_nick_name applies umodes BEFORE register_user derives
+cloak/hidden-host), publishing flags `+xrCc` with the still-raw host; a mesh node that
+materialized from that snapshot could then never heal (account already converged → the
+ms_account-driven hide_hostmask re-derivation never fired again).
+
+**Fix (both sides):** (1) owner: gate the set_user_mode tail mint on `IsRegistered` — the
+register_user tail (which runs user_setcloaked + hide_hostmask FIRST) mints moments later with
+derived state; (2) consumer: derived-state convergence clause in `crdt_reconcile_user_update`
+after the umode/account drives — `user_setcloaked(live)` when rec has C/c but live lacks the
+flags (cloaks compute from ip + shared keys, owner-identical), and `hide_hostmask(live)` on
+host drift (self-noops when converged, proper CHGHOST emission).  nef5 rebuilt: baseline clean
+(Bj mat-gaps zero).  Standing 30s mat-check is the long-run gate fleet-wide.
+
+**+A/+U set-syntax question CLOSED — not a bridge gap:** `mode_parse_apass/upass` are reached
+for client sources only under `FEAT_OPLEVELS` (channel.c `case 'A'/'U'`), which the bed leaves
+off (commented out in ircd.conf) — the "unknown mode char" spray was the unconsumed password
+argument.  Server-sourced A/U always parses, and the extended birth render drives A/U via the
+same modebuf_mode_string path the gate proved with REDIRECT.  To client-gate A/U end-to-end,
+enable OPLEVELS on the writer node (deliberately not done mid-bed: it changes oplevel burst
+semantics).
+
+**pool10 "cred drift" CLOSED — pool10 does not exist:** Keycloak (realm `testnet`) provisions
+exactly pool00..pool09 (kcadm-verified).  The 904 was a probe against a non-provisioned
+account; cleanup-tests.ts pool range corrected to 00..09 (the earlier 01..10 comment was wrong).
+
+Gate caveat (per no-silent-defer): the new consumer derivation clause was NOT separately
+live-exercised — nef5's baseline healed by re-materializing from the now-healthy record, and the
+driftgate2 differential (mid-session auth, fixed nef5 vs unfixed nef4) converged on BOTH nodes
+via the normal ms_account→hide_hostmask path (account+umode co-drift in one tick).  The poisoned
+state needs the materialize-from-half-intro interleaving (burst/partition op ordering), which
+has no on-demand repro.  The mechanism is code-proven (mint ordering in set_user_mode vs
+register_user) and the fleet-wide 30s mat-check is the standing regression alarm.
