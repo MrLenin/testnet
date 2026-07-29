@@ -307,3 +307,48 @@ drifted).  Explains every uniform-binary observation; plan waves accordingly.
 
 NEXT: 6-1 (nef7 drops its last P10 link behind FEAT_CRDT_OVERLAY_PRIMARY) — but first the §5
 user decisions, esp. #9 (bed shape) which 6-1 consumes directly.
+
+### 2026-07-29 — MR-6-1 execution: cold-boot GREEN; battery findings
+
+Cutover shipped: FEAT_CRDT_OVERLAY_PRIMARY (decl+reg+status render + §2.8 <2-edge guard in the
+verify cycle); ircd7 leaf3 P10→crdtmesh overlay + FEAT on; ircd5 leaf5 P10-passive→crdtmesh
+passive.  TWO self-inflicted boot crashes en route, both classic: F_B registration order must
+match the enum (features[] boot assert — took the whole fleet down via the shared image), and
+config Class{} must precede the Connect that references it (nef7 exit 7).  Fleet-wide outage
+~25 min; both fixed.
+
+COLD-BOOT GATE GREEN: nef7 booted with ZERO P10 links, 3 overlay edges (incl. the new leaf3
+edge), full materialize from doc alone (5 users/3 channels/0 gaps, drained from 8 within ~90s),
+redundancy guard quiet at 3 edges (and correctly ALARMING during link-up), /CRDT status renders
+OVERLAY-PRIMARY.
+
+BATTERY FINDINGS (the point of the battery):
+1. **sasl cap silently un-advertised on the overlay-only node** (nef5 offered it; nef7 didn't):
+   `sasl_server_available`'s tail is IsServer-exact (`find_match_server`) — x3 is an ANCHOR on
+   nef7.  Scoped risk #2 (anchors-as-steady-state exposing IsServer-exact branches) arriving in
+   phase 1, not 6-2.  FIXED: mesh-anchor branch (FindClient + IsMeshStub + crdt_server_is_mesh_only
+   + FEAT_CRDT_SERVICES_BRIDGE) in m_cap.c; the `"*"` wildcard branch (UserStats.servers) left
+   IsServer-exact → 6-2 sweep item.
+2. Status census on an overlay-primary node reads `0 crdt, 0 legacy, 1 stub; partitioned=YES` —
+   the partition heuristic (crdt_have_mesh_stub) and server counts need re-basing for
+   anchors-as-steady-state.  6-2 item, cosmetic-but-misleading.
+3. Post-registration AuthServ AUTH does not alias-attach (attach decision runs at register_user)
+   — not a bug, but battery scripts must use SASL like real bouncer clients.
+
+### 2026-07-29 (cont) — MR-6-1 battery GREEN, code committed (`6b79a41`)
+
+- sasl fix two-parted: the anchor-aware availability branch (code) AND
+  `SASL_DEFAULT_MECHANISMS = "PLAIN"` on nef7 (config) — X3's dynamic mech broadcast is P10-only
+  and can never reach an overlay-only node; the static fallback is the documented legacy path.
+  Mech-list-into-the-doc queued as a 6-2 carrier item.
+- ALIAS E2E GREEN over zero-P10: SASL 903 (CR-X), registered as the primary's nick,
+  `BOUNCER ALIAS_ATTACHED ... as alias on leaf5`.
+- Held-primary residue exercised the full pipeline live: umode mat-gap on consumers →
+  owner-sweep reaped the orphan record (~3 min) → consumers de-materialized → fleet quiet.
+  No new bug; the machinery composes.
+- CH-federation battery leg NOT re-run to completion (probe harness stalled at registration on
+  a CAP-REQ non-SASL path; server-side auth completed — looks like probe CAP-flow, not server;
+  identical clients registered fine all day).  Prior coverage: 5-5f Phase B gated this axis.
+  Re-run during the 24h soak.
+- REMAINING for 6-1 CLOSE: 24h soak (0 crashes/valgrind, mat-check quiet), CH re-run, then the
+  standing regression battery items (WALL*, GLINE cutover, CI) as soak spot-checks.
