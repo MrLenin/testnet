@@ -283,3 +283,27 @@ Full wire-protocol replacement (CR keeps riding P10 framing; YXX numerics kept �
 folded into the IRCd (`project_x3_nefarious_merge` — the gateway bridges x3 indefinitely; do NOT
 plan X3-as-CRDT-peer); path-vector routing (invariant 10 / R4 spike verdict); legacy peers ever
 speaking CR (gateway is the boundary); prod-fork (`nefarious`) cherry-picks.
+
+---
+
+## Execution log
+
+### 2026-07-29 — MR-6-0 SHIPPED + GATED (`1d3a012`)
+
+6-0a (establish parity): `mr_crdtmesh` tail now `crdt_shadow_beacon_burst(cptr)` before the
+CR S pull (both sides run it).  GATE: at the CRDTMESH handshake on nef7↔nef6, the wire shows the
+immediate CR H burst (self-beacon + fresh far-server replays) — no more 30s blind window.
+No unsolicited CR F (deliberate): bidirectional CR S pull + Fix-A escalation covers it.
+
+6-0b (operability): `/CRDT link <server>` forces an overlay (re)connect — try_connections-style
+dedupe (live/in-progress overlay scan), backoff cancel, connect_overlay.  GATE: killed overlay
+forced back up in SECONDS vs the 10-min cycle.  Learned along the way: a half-dead overlay
+Client blocks the dedupe until reaped (read-error/probe), so "link refused: already
+up/connecting" right after a kill is CORRECT behavior, not a bug — retry after the reap.
+
+Fleet note: nefarious3-7 share ONE compose image — any `--build nefariousN` updates all five
+services' image and the next `up -d` recreates the whole fleet (+ prod/x3 when their images
+drifted).  Explains every uniform-binary observation; plan waves accordingly.
+
+NEXT: 6-1 (nef7 drops its last P10 link behind FEAT_CRDT_OVERLAY_PRIMARY) — but first the §5
+user decisions, esp. #9 (bed shape) which 6-1 consumes directly.
