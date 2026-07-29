@@ -353,6 +353,11 @@ BATTERY FINDINGS (the point of the battery):
 - REMAINING for 6-1 CLOSE: 24h soak (0 crashes/valgrind, mat-check quiet), CH re-run, then the
   standing regression battery items (WALL*, GLINE cutover, CI) as soak spot-checks.
 
+SOAK RESTARTED 2026-07-29 19:25 UTC on the crash-fix binary (ircd.202607291925, all 5 nodes) —
+the 6-2 audit found a REACHABLE UAF (ms_squit exit_client on an anchor) before the first soak
+was 90 min old, so it was fixed + redeployed rather than soaking a binary we knew was wrong.
+Exit check due ~2026-07-30 19:25 UTC.  Superseded baseline below (kept for the record):
+
 SOAK STARTED 2026-07-29 ~18:05 UTC (nef7/nef5 boot; nef3/4/6 18:12) — baseline: all running,
 fleet mat-check 0, valgrind clean.  Exit check due ~2026-07-30 18:00 UTC: zero crashes/restarts
 (compare StartedAt), valgrind zero invalid accesses on nef7, mat-check quiet, no BELOW-REDUNDANCY
