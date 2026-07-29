@@ -780,3 +780,14 @@ Birth bridge now emits +A/+U/+L (string-presence-gated) + exmode bits + widened 
 use a legacy-peer relink) so a channel with apass/upass/redir/exmode set on nef7 is doc-resident
 BEFORE nef3 births it; then assert the legacy peer (prod testnet) sees the extended modes on the
 birthed channel.  A fresh-channel test races the eager birth and proves nothing.
+
+### 2026-07-29 — **birth-modes extended-render GATE GREEN** (`eba38ec` deployed nef3)
+
+Partition choreography via the nef3 rebuild window: #bmgate created on nef7 with
+`+stinMTSlL 47 #bmover` (exmodes M/T/S + redirect; +A/+U skipped — MODE syntax rejected the pass
+args, revisit separately) while nef3 was down.  On boot+sync nef3 logged
+`create-reconcile: created channel #bmgate from doc` immediately followed by the legacy-ward
+`M #bmgate +stinMTSlL 47 #bmover <ts>` — the full extended set (exmode letters + redirect string)
+in the birth emit, which pre-fix carried only classic+key/limit.  MR-6 residue list is now:
++A/+U set-syntax question (client-side; not a bridge gap), held-ghost doc record watch-item,
+legacy host/umode mirror drift, pool10 creds.
