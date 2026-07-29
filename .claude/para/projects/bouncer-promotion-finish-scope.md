@@ -696,3 +696,34 @@ nef3"; scope: `crdt-mesh-3l-users.md`).  Fix THAT and the BX gate unblocks.
   target-FIRST (`METADATA <target> GET <key>`).
 - An UNOPERED reader of a private key gets 766 NOTSET even when the row exists (deliberate
   existence-leak fix) — a probe that fails to oper produces a vacuous "not set" verdict.
+
+### 2026-07-29 (cont.) — account-prop fix SHIPPED (`b0a2cbd`); hold-"0" re-mint is the remaining saboteur
+
+**Account-prop fix (crdt `b0a2cbd`, deployed nef3+nef7):** producer — `ms_account` now re-mints the
+doc user record at all three syntax tails (U/R/M + old), single-writer safe via the `from_crdt_peer`
+gate; consumer — `recon_user_cb` gained an ACCOUNT drift clause (drives `ms_account` R/M,
+SERVER-sourced, skip_crdt one-shot = legacy gateway).  LOGOUT direction deliberately not driven
+(`AC U` destroys bouncer sessions + clears metadata — too destructive on doc lag) — DEFERRED.
+Gate: compiles, deployed, mat-check shows zero `account` gaps + no regression; **the drift-heal
+fire + full alias E2E are still UNGATED** because of the item below.
+
+**OPEN BUG — stale hold-"0" re-mint (the thing that sabotaged every alias gate tonight):**
+`/CRDT key pool06 draft/persistence/hold` on nef7 showed `"0" writer=6` (nef5 — a node NOT touched
+all night) minted at ~1:38:39, ~4s AFTER nef3's genuine `"1"` (SESSION_CREATED 1:38:35) → "0" wins
+LWW → reconcile re-imposes "0" on every store → `bounce_auto_resume` silently early-returns on the
+explicit opt-out.  nef5's DEBUG log shows NO inbound "0" on the wire — the mint came from a LOCAL
+write path on nef5 at peer-relink time.  Pattern so far: doc-absent window (post-GC or fresh boot)
++ any node holding a stale store row → that node re-mints the stale value with a NOW HLC and
+clobbers genuinely-newer state.  Same shape seen at nef3's boot (writer=3 mint ~3min post-restart)
+and nef7's 0:23 restart (poisoned pool01-03).  UNIDENTIFIED: the exact local code path on nef5
+that wrote "0" (candidates: umode -b flag→metadata sync via set_user_mode on burst/MODE processing;
+a bouncer path; NOT ms_metadata — suspend bracket held, wire clean).  NEXT STEPS: (1) find the
+writer — grep set_user_mode 'b' MODE_DEL reachability from burst/relink, and add a one-line
+LS_SYSTEM log at m_bouncer/persistence/s_user hold-"0" write sites naming the caller; (2) design
+fix: backfill/boot mints of PRE-EXISTING store rows must not carry a NOW HLC (epoch-HLC mint, or
+no mint at all — doc-absent means unknown, not "assert my copy"); (3) then re-run the pool06 alias
+E2E (primary nef3 + hold, 75s, connect nef7, expect `ACTIVE alias_remote path` + 
+`bounce_setup_local_alias: converting` in nef7's ircd-user.log).
+
+Bed-state note: pool01–03 hold="0" in the doc (nef7-boot mints), pool06 "0" (nef5 mint); healing =
+any newer genuine "1" write (SET HOLD on) AFTER the last stale mint wins and re-imposes everywhere.
