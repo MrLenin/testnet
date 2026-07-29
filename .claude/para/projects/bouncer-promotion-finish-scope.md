@@ -727,3 +727,23 @@ E2E (primary nef3 + hold, 75s, connect nef7, expect `ACTIVE alias_remote path` +
 
 Bed-state note: pool01–03 hold="0" in the doc (nef7-boot mints), pool06 "0" (nef5 mint); healing =
 any newer genuine "1" write (SET HOLD on) AFTER the last stale mint wins and re-imposes everywhere.
+
+### 2026-07-29 (final) — hold-"0" re-mint ROOT-CAUSED + FIXED (`d499f60`); ALIAS-ATTACH GATE GREEN
+
+The re-mint was a **dual-plane coherence loop**, not a backfill: metadata→flag sync set
+FLAG_BNC_HOLDPREF (wire umode 'b') without re-minting the doc user record → doc umode letters
+lacked 'b' while burst carried +b to peers → each peer's umode-reconcile drove `-b` → `case 'b'`
+MODE_DEL called `metadata_set_client(hold,"0")` UNGATED for the remote user → chokepoint minted
+"0" with a NOW HLC → beat the home's genuine "1".  The "boot backfill amplifier" = the same
+mechanism firing en masse at relink burst; the per-tick `umode N` mat-gaps = the -b/+b fight.
+FIX (one plane per fact): MyUser-gate the flag→metadata writes in set_user_mode ('Y' + 'b');
+re-mint the user record in metadata_set_client when a synced flag actually flips.
+
+**GATE GREEN (fleet-deployed, all 5 nodes, waves of ≤2):** pool07 primary+hold on nef3 → 80s →
+same account on overlay-only nef7 → `ACTIVE alias_remote path` + `bounce_setup_local_alias:
+converting zp76552 to alias of zp36552`, client welcomed under the PRIMARY's nick.  hs_client was
+NULL at entry — the Gap A ghost-numeric recovery (`272d8d2`) resolved it AND the account check
+passed (`b0a2cbd`): both validated load-bearing in the same run.  Zero "0" mints on the former
+minter; doc hold=1, writer=home only.  **THE BX-GATE BLOCKER IS CLEARED.**
+Remaining for the full BX gate: verify the alias's doc bconn materializes back on the primary's
+side (nef3 aliases:1) + the destroy half over the overlay — next session.
