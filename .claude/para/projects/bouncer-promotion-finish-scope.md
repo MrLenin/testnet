@@ -858,3 +858,23 @@ via the normal ms_account→hide_hostmask path (account+umode co-drift in one ti
 state needs the materialize-from-half-intro interleaving (burst/partition op ordering), which
 has no on-demand repro.  The mechanism is code-proven (mint ordering in set_user_mode vs
 register_user) and the fleet-wide 30s mat-check is the standing regression alarm.
+
+### 2026-07-29 — OPLEVELS enabled bed-wide + A/U GATE GREEN; oplevel-drift reconcile fixed (live-exercised)
+
+`"OPLEVELS" = "TRUE"` enabled in all 7 configs (inode-preserving truncation writes + fleet HUP —
+no restarts, no relink).  A/U gate: fresh channel on nef5, client-set `+A adminpass1` /
+`+U userpass1` accepted (324 `+mtnAU`), values converged byte-identical on the gateway, the
+LEGACY primary, and the overlay-only leaf (CHECK: `+mtnAU adminpass1 userpass1`, same ctime).
+
+The first gate run surfaced a real drift the feature had been masking: `#oplgate member status
+doc=1 live=1` every tick on the P10-CREATE-path branch — mat_member_cb compares member OPLEVEL
+(log printed only status), but reconcile_mstatus_cb's echo guard early-returned on equal status
+bits, so an oplevel-only drift (create-time level on P10-path nodes vs the owner's manager level
+after +A) was checked-but-never-driven.  Fixed both sides, oplevel scoped to OPPED members (it
+is op-grant data, junk otherwise): the echo-guard branch now silently corrects m->oplevel from
+the doc (no wire emission — oplevel rides op grants), and the mat-check only compares oplevel
+while opped + prints both values (`doc=st/opl live=st/opl`).  Deployed in 3 waves; second gate
+run: `member-status-reconcile: drove 1 member(s)` on 4 nodes with status already in sync — the
+new clause IS the thing that fired — and zero member gaps fleet-wide.  (A transient
+`channel in doc, not live` strand on nef3 after the gate channel dissolved self-repaired within
+one anti-entropy cycle.)  Client +A/+U is now testable on the bed for posterity.
