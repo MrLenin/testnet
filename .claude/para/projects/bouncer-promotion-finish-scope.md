@@ -747,3 +747,19 @@ passed (`b0a2cbd`): both validated load-bearing in the same run.  Zero "0" mints
 minter; doc hold=1, writer=home only.  **THE BX-GATE BLOCKER IS CLEARED.**
 Remaining for the full BX gate: verify the alias's doc bconn materializes back on the primary's
 side (nef3 aliases:1) + the destroy half over the overlay — next session.
+
+### 2026-07-29 — **FULL BX GATE GREEN over the overlay** (pool09 run, post-`d499f60` fleet)
+
+All four legs in one run: (1) session nef3 (`SESSION_CREATED`), (2) nef7 alias attach
+(`ACTIVE alias_remote path`, primary's nick, ALIAS_ATTACHED on the client stream), (3)
+**back-materialization on nef3**: `M6c-1 BX Inc0: materialized alias AIAAD from doc` + BX C synth
+to legacy (`created 0 replica + 1 alias(es)`), (4) **destroy half**: `BX Inc-2: de-materialized
+stale replica alias (doc bconn tombstoned)` after the alias quit.  The alias lifecycle is
+doc-native across the mesh including the overlay-only node.  **MR-6 BX gate: CLOSED.**
+
+Prereq bed hygiene (recurring trap, now understood): the bouncer DB restores held ghost sessions
+across container rebuilds, so pool accounts accumulate stale sessions and `BOUNCER SET HOLD on`
+answers "session limit reached" (no session created → nothing to mirror → a gate silently tests
+nothing).  Cleanup = attach each account + `BOUNCER SET HOLD off` (destroys session network-wide);
+done for pool01-09 (pool04/07 were alias-attached to still-held sessions; pool10 SASL creds
+drifted, 904).  ALWAYS check for `SESSION_CREATED` (not `SETTINGS_UPDATED`) before trusting a gate.
