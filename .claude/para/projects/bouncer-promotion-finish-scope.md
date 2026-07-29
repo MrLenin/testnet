@@ -791,3 +791,15 @@ args, revisit separately) while nef3 was down.  On boot+sync nef3 logged
 in the birth emit, which pre-fix carried only classic+key/limit.  MR-6 residue list is now:
 +A/+U set-syntax question (client-side; not a bridge gap), held-ghost doc record watch-item,
 legacy host/umode mirror drift, pool10 creds.
+
+### OPEN — held-ghost stale doc user record across restart (watch-item promoted to problem statement)
+
+`mat-check gap: user ADAAN (dp32573) in doc, not live` every tick on nef3, no owner-sweep/reap
+lines at all.  Chronology: pool09's primary quit ~2:27 → session HELD (ghost dp32573, numeric
+ADAAN) → nef3 REBUILT 3:06 → bouncer DB restored the held session with a NEW ghost numeric → the
+doc user record under the OLD numeric ADAAN is orphaned (findNUser NULL) and nothing reaps it.
+Hypothesis: the owner sweep's reap-gating (invariant-11 / orphan-reap characterization: spare
+records tied to live sessions) spares it because pool09 HAS a session, while the record's numeric
+can never resolve again.  NEXT SESSION: load project_crdt_orphan_reap_characterization + the
+invariant-11 lesson, decide whether restore-time should re-key/tombstone the old-numeric record
+(bounce_db_restore side) or the sweep should reap session-owned records whose numeric is dead.
