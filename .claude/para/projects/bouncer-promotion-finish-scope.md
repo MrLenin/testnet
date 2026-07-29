@@ -763,3 +763,12 @@ answers "session limit reached" (no session created → nothing to mirror → a 
 nothing).  Cleanup = attach each account + `BOUNCER SET HOLD off` (destroys session network-wide);
 done for pool01-09 (pool04/07 were alias-attached to still-held sessions; pool10 SASL creds
 drifted, 904).  ALWAYS check for `SESSION_CREATED` (not `SETTINGS_UPDATED`) before trusting a gate.
+
+### 2026-07-29 — ms_mark IsMe fix (`17f9d5e`) fleet-deployed + VERIFIED
+
+Zero "MARK from non-server" violations on nef3/5/7 post-deploy (was: wallops spam every verify tick
+with MARK drift + silently DEAD cversion/sslfp/geoip convergence).  The per-tick umode-oscillation
+mat-gaps are also gone (cured by `d499f60`).  Remaining mat-check residue, both pre-existing and
+separate: (a) `dp32573 in doc, not live` on nef3 — held-session ghost's doc user record vs no live
+client (reap/hold interplay, watch-item); (b) `BjAAA/BjAAB fields: host umode` — legacy-side (prod)
+user host/umode drift in the mirror, the known legacy-leaf residue class.
