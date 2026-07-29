@@ -803,3 +803,16 @@ records tied to live sessions) spares it because pool09 HAS a session, while the
 can never resolve again.  NEXT SESSION: load project_crdt_orphan_reap_characterization + the
 invariant-11 lesson, decide whether restore-time should re-key/tombstone the old-numeric record
 (bounce_db_restore side) or the sweep should reap session-owned records whose numeric is dead.
+
+### 2026-07-29 — held-ghost residue ROOT-CAUSED + FIXED (`8477655`), reap VERIFIED
+
+The owner sweep's burst-defer was GLOBAL over all IsServer links; x3.services never sends EB
+(perpetually in burst), so the sweep was permanently disabled on any node with a legacy path to
+services — the gateway, exactly where legacy-adjacent residue accumulates.  Overlay nodes see x3
+as a mesh anchor (not IsServer), which is why the 2026-07-26 live gates passed.  Same lesson
+reconcile_users' per-user burst guard already encoded, now applied here: defer only on a
+DIRECTLY-CONNECTED bursting link (real inbound resync); 2-pass debounce stays.  VERIFIED on nef3:
+`owner-sweep: reaping own-origin user record ADAAN` fired one debounce cycle after deploy; the
+"in doc, not live" mat-gap is gone.  (The residue's origin — bouncer-DB restore re-keys held
+ghosts to new numerics across restart, orphaning old-numeric records — is now handled by the
+sweep as designed.)
