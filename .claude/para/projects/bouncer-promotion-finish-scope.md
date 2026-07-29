@@ -878,3 +878,33 @@ run: `member-status-reconcile: drove 1 member(s)` on 4 nodes with status already
 new clause IS the thing that fired — and zero member gaps fleet-wide.  (A transient
 `channel in doc, not live` strand on nef3 after the gate channel dissolved self-repaired within
 one anti-entropy cycle.)  Client +A/+U is now testable on the bed for posterity.
+
+### 2026-07-29 — EAGER-MINT SHIPPED + GATED: bsess E2E 13-31s → SUB-SECOND
+
+The user's latency concern closed.  Producer side was the whole wait: the M2/M4 doc mirror was
+sweep-only (30s tick) while the consumer already reconciled per-delta (M6c-1 Inc-2).  Shipped:
+- `bounce_crdt_bsess_mint_one(s, conns)` extracted from the sweep (M2 record + M4 me-hosted
+  roster, self-gating single-writer); sweep keeps the M3/M4 de-risk diagnostics + M5 lease +
+  M6d stand-down TIMER-ONLY (settled-state semantics).
+- Eager calls at 11 mutation sites: bounce_create / attach / hold_client / revive /
+  promote_alias / rebind_ghost / session_transition / apply_remote_oper_grant / m_oper grant /
+  s_user -o|-O grant-clears / m_bouncer SET SESSION HOLD; the M6c-1 Inc-1 ad-hoc alias bconn
+  write generalized into the helper.
+- **hold_override was minted but DROPPED on the consumer** (replica-create hardcoded -1,
+  reconcile never applied drift; `SET SESSION <id> HOLD on|off` has NO BS carrier — the doc is
+  its only path).  Fixed both consumer points (doc-apply clause + replica-create copy).
+- **Create-time eager M5 lease claim** (bounce_create only): consumers' replica-create gates on
+  the lease; sweep-only claim made new-session replicas materialize at the next 30s tick (~19s
+  measured).  A fresh sessid's claim is uncontested by construction; crdt_blease_decide still
+  arbitrates and a contested (<0) result is NOT claimed eagerly — M6d conflict stays timer-paced.
+
+GATES (all live): flip-path — T0 01:22:55.463 SET SESSION HOLD off on nef3 → nef7
+`hold_override -> 0 (doc-apply)` at 5:22:55 (SAME SECOND, was 13-31s).  Create-path —
+SESSION_CREATED 01:28:57 → nef5 AND nef7 `created 1 replica session(s)` at 5:28:57 (same
+second, was ~19-30s).
+
+RESIDUE (Item-5 orphan class, noted not chased): BOUNCER ORESET of a HOLDING ghost leaves the
+bsess doc record un-tombstoned (destroy-path ordering skips the MyConnect-gated
+crdt_shadow_bsess_remove) → stale record makes the M3 election-divergence diagnostic fire on
+the owner every tick (diagnostic-only; the stale lease is inert — M6d needs a live local
+primary).  Fold into the existing deferred Item 5 (orphan doc-record reap for bsess/bconn).
