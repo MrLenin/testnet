@@ -449,13 +449,24 @@ composed from `hs_origin` — the existing site's own comment `:1092-1106` flags
 that audit note updated) and must not weaken #6.  TEST: link-flap variant of alias-multi-server — SQUIT
 leaf↔hub, relink, third SASL connection on the leaf, assert exactly ONE primary in `/CHECK -b`.
 
-**GAP B — cross-server hold divergence.** `METADATA *<account>` (oper account-target form) is NODE-LOCAL
-by design (`m_metadata.c:749-754`), and the pool cleanup wipes `draft/persistence/hold` through a testnet
-oper only (`account-pool.ts:351-356`) — so a leaf can retain `"0"` from a prior run.  Masked today only
-because `bouncerEnableHold` re-broadcasts `"1"` first; any cross-server bouncer test relying on
-`BOUNCER_DEFAULT_HOLD` WITHOUT calling it will silently get a plain user on the leaf and look exactly like
-the old bug (`bouncer_session.c:1069-1071` returns 0 on explicit "0" before the e96fde1 bypass).  Do NOT
-relax that check — an explicit opt-out must keep winning; fix the wipe's reach instead.
+**GAP B — cross-server hold divergence — FIXED 2026-07-28 (`177caf7` prod).** `METADATA *<account>`
+(oper account-target form) was NODE-LOCAL in BOTH branches — the offline case (documented era-2 §A4
+limitation) AND the online-local case (`metadata_set_client` never emits S2S; the account branch
+returned without broadcasting).  Empirically confirmed before the fix: pool04 held a persisted
+`draft/persistence/hold "0"` on the leaf with NO row on testnet — exactly the stale-opt-out state that
+makes `bounce_auto_resume` hand out a plain welcome (the explicit-"0" early-return fires BEFORE the
+e96fde1 `bounce_has_sessions` bypass).  The opt-out check itself was NOT relaxed (explicit opt-out must
+keep winning); the fix is the wipe's reach: mo_metadata broadcasts the write in an account-target wire
+form (`MD *account key [vis] [:value]`) and ms_metadata gained an account-form branch (apply to
+locally-online clients on the account, else persist a PERMANENT row; same first-hop limit stop; relay
+onward; old peers FindUser("*acct")→NULL→harmless drop).  Gated by
+`metadata-limits.test.ts "S2S: oper *account write propagates"` (red→green TDD; set AND delete
+converge); pool04 divergence healed live with one testnet-side delete.  Two notes for posterity:
+(1) the Vitest global teardown IS the Gap B producer — it wipes hold on all 10 pool accounts through
+one server per run; (2) convergence only heals what the origin actually writes — the teardown "found
+nothing to delete" on testnet for pool04, so the leaf's stale row survived until an explicit delete
+was issued (the value-less form always broadcasts, even when the origin has no row).  The crdt-mesh
+twin needs no port: its storage chokepoint mirrors permanent account rows into the doc (Tier C F2-b).
 
 **GAP C — the promote half is genuinely unvalidated:** nothing exercises
 `bounce_schedule_cross_server_promote` → `bounce_finish_cross_server_promote` (`:4718-4797`).  Also `BS T`
