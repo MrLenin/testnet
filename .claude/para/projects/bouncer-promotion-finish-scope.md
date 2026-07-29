@@ -646,3 +646,53 @@ cmocka + 2/2 cross-server tests.  But the state it repairs — `hs_client` NULL 
 install) is plausible but unconfirmed.  **Treat it as defensive hardening, not a proven bug fix.**
 Anyone wanting to prove or retire it should force those two states directly rather than via a
 relink, which demonstrably does not produce them.
+
+### 2026-07-29 — the "mesh session propagation" blocker DISSOLVED; the real blocker is account-prop
+
+**The recorded gap ("a session on nef3 never reaches overlay-only nef7; the doc must carry it")
+was WRONG — the doc ALREADY carries it and the pipeline works.**  Proven live on the crdt bed:
+holder sweep (`bounce_crdt_bsess_sweep`, 30s) → doc → eager push → nef7's
+`crdt_shadow_reconcile_bouncer` materialized pool02's replica session at 0:26:45 — ONE second before
+a same-account client registered there.  Census (`CRDT bouncer doc: 4 session(s), 2 connection(s),
+4 lease(s)`) is identical on hub and overlay-only nodes.  **End-to-end tick latency is up to ~75s**
+(two 30s ticks + slack); an 8s wait between "primary up on nef3" and "connect to nef7" is too
+short and produces a false "no session" verdict (it created a parallel session — retried with 75s
+and the replica was there).
+
+**Why the alias attach STILL fails on nef7 (the ACTUAL BX-gate blocker):** with the replica present,
+`bounce_auto_resume` takes the ACTIVE path, `hs_client` is NULL, and the Gap A helper composes the
+ghost numeric and finds the CORRECT candidate (the real nef3 primary) — but nef7's copy of that
+client carries a STALE ACCOUNT (log: `refusing M6d alias-target hs_client install for session …
+(account=pool05) — candidate yp33261 has account=pool02`).  `bounce_hs_client_assign_checked`
+correctly refuses (without it this would be a cross-account session hijack — **the Gap A defensive
+check is load-bearing on the crdt bed even though it isn't on prod**), the alias path is
+unavailable, and orphan-reclaim manufactures a parallel primary.  Root cause = the known
+**account-propagation gap to overlay-only nodes** (memory: "account-prop reliable only on hub
+nef3"; scope: `crdt-mesh-3l-users.md`).  Fix THAT and the BX gate unblocks.
+
+**The hold-"0" reversion hunt (how we got here), for posterity:**
+- nef7's store held stale `draft/persistence/hold "0"` for pool01–03 → silent
+  `bounce_auto_resume` early-return (explicit opt-out wins by design) → plain welcome regardless
+  of sessions.  This was the FIRST layer masking everything.
+- Restarting a node runs a boot-time store→doc backfill that mints STALE store rows into the doc
+  with FRESH HLCs: nef7's 0:23 restart minted its stale "0"s ~3 min later, which LWW-beat "1"
+  writes made seconds EARLIER on nef3 and re-imposed "0" network-wide via the reconcile.  A
+  restart is therefore a stale-value AMPLIFIER for any store row that diverged before it.
+- New diag `/CRDT key <account> <metakey>` (crdt `24a48f1`) prints the doc entry + HLC + wallclock
+  delta — flags FUTURE entries.  `/CRDT clockstep 0` reads the live fake-clock offset (all 5 nodes
+  were +0; live skew ruled out).
+- UNRESOLVED one-off: pre-restart nef3 showed fresh hold writes never landing in its store
+  (store read "0" at t+1s post-write; zzztest through the same path persisted fine) while the doc
+  had NO hold entry at all.  The process was replaced by the diag rebuild before the mechanism was
+  isolated; if it recurs the diag + phase-watch (store read at t+1s) pins it in minutes.
+- Post-restart everything behaves: hold=1 lands (store+doc), sticks through quit, converges to
+  nef7 (~30s), and nef7's auto_resume then correctly finds the replica.
+
+**Harness traps found (all cost real time):**
+- `tests/src/scripts/cleanup-tests.ts` pool-hold wipe was a LIFETIME NO-OP: old target-second
+  syntax (`METADATA SET *poolNN key` → FAIL SUBCOMMAND_INVALID) accepted by its own
+  `|FAIL METADATA` regex, AND iterated pool00–09 (accounts are pool01–10).  Fixed 2026-07-29.
+- METADATA is CAP-gated (`draft/metadata-2`) — without the cap the command 421s.  Client syntax is
+  target-FIRST (`METADATA <target> GET <key>`).
+- An UNOPERED reader of a private key gets 766 NOTSET even when the row exists (deliberate
+  existence-leak fix) — a probe that fails to oper produces a vacuous "not set" verdict.

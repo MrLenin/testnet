@@ -536,10 +536,16 @@ async function cleanup(): Promise<void> {
     // pre-migration state on pool accounts.
     console.log('\nClearing persistence metadata on pool accounts...');
     let bouncerCleared = 0;
-    for (let i = 0; i < 10; i++) {
+    // pool accounts are pool01..pool10 (1-based), and the wire syntax is
+    // target-FIRST (`METADATA <target> SET <key>`).  The previous loop sent
+    // `METADATA SET *poolNN key` over pool00..pool09 — the server parsed
+    // target="SET" and answered FAIL SUBCOMMAND_INVALID, which the waitForLine
+    // regex below ACCEPTED (`|FAIL METADATA`), so this cleanup was a silent
+    // no-op for its entire life (found 2026-07-29 during the Gap B hunt).
+    for (let i = 1; i <= 10; i++) {
       const poolAccount = `pool${i.toString().padStart(2, '0')}`;
       for (const key of ['draft/persistence/hold', 'bouncer/hold']) {
-        send(`METADATA SET *${poolAccount} ${key}`);
+        send(`METADATA *${poolAccount} SET ${key}`);
         try {
           await waitForLine(
             new RegExp(`\\*${poolAccount}.*${key.replace(/[/.]/g, '\\$&')}|FAIL METADATA`),
