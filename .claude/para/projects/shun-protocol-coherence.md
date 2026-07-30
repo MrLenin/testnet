@@ -4,8 +4,8 @@ Scoped 2026-07-30. **Status: BLOCKED on a product decision (see below). Do not i
 
 Not a stealth feature. This spec deliberately does *not* try to make SHUN undetectable — that was
 investigated and ruled WONTFIX by the maintainer ([[shun-detectability-wontfix]]). It addresses a
-different problem that the same investigation surfaced: SHUN breaks IRCv3 clients, and the server
-lies about capabilities it advertised.
+different problem that the same investigation surfaced: SHUN's silence violates the server's own
+advertised capability contracts, and modern clients render that violation on screen.
 
 ## The problem, in one statement
 
