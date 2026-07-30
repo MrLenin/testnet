@@ -321,7 +321,40 @@ windows. Each phase lists what it develops, what proves it, and confidence.
   (`.env.local:38`), with OpenLDAP authoritative and Keycloak federating from it, so
   that work does not exist. Residual check only: confirm the bed's directory hash
   scheme matches production's, since the rehearsal's value depends on it.
-- **Gate 1b — the registration stopgap, test before scoping Phase 1.** Keycloak's
+- **★ Gate 1b — RUN AND PASSED 2026-07-30. Account registration is NOT merge-blocked.**
+  Tested on the live bed, end to end, then reverted:
+  1. *Baseline (READ_ONLY)* — user created via the Keycloak admin API exists in
+     Keycloak, **absent from LDAP**. The orphan reproduced exactly as theorised.
+  2. *Flip* — `editMode: WRITABLE` + `syncRegistrations: true` on component
+     `openldap` (PUT 204).
+  3. *Writeback* — a newly created user appeared in the directory at
+     `uid=<user>,ou=users,dc=fractalrealities,dc=net` with
+     `objectClass: inetOrgAnonAccount` — the DN shape X3's `X3_LDAP_DN_FMT` expects
+     and the objectClass its filter expects. Keycloak wrote `{SSHA}`, not `{SMD5}`;
+     irrelevant, since bind is scheme-agnostic.
+  4. *Bind* — `ldapwhoami` as that DN with the Keycloak-set password **succeeded**;
+     that is exactly `ldap_check_auth` → `ldap_do_bind` (`x3/src/x3ldap.c:125`).
+  5. *End to end* — a plain IRC client sent `PRIVMSG AuthServ :AUTH <user> <pass>`.
+     AuthServ replied **"Account has been registered to you."** then **"I recognize
+     you."**, and the ircd applied the account-based hidden host
+     (`<user>.Users.Network`). `ldap_autocreate` (`x3/src/nickserv.c:2461`) created
+     the X3 handle on first bind, as predicted.
+
+  **Consequence: the daemon can create accounts that X3 fully recognises, today,
+  with a two-value config change and no code.** The presenting pain that motivated
+  this programme is solvable outside it. This does **not** shrink Phase 1 — Phase 1
+  is the daemon *owning* accounts, not registration merely working — it removes the
+  schedule pressure, so the merge proceeds on its own merits (self-contained
+  deployment, channel authority).
+
+  *Bed state: restored to `READ_ONLY` / `syncRegistrations: false`; both test users
+  deleted from Keycloak and verified gone from LDAP. Caveat: an X3 saxdb handle
+  autocreated during step 5 was not removed — harmless on the bed, but note that
+  under WRITABLE, deleting a Keycloak user removes the LDAP entry while leaving the
+  X3 handle behind. Not yet examined: what WRITABLE does on account **rename** and
+  **deletion** at scale, which is the same name-reuse territory as §2.3.*
+
+- Original analysis, retained for context — **Gate 1b as originally scoped.** Keycloak's
   LDAP federation is configured `editMode: READ_ONLY` with `syncRegistrations: false`
   (`scripts/setup-keycloak.sh:741`). That is the exact mechanism behind
   "X3 doesn't recognise Keycloak-only accounts": X3→LDAP→Keycloak works (Keycloak
