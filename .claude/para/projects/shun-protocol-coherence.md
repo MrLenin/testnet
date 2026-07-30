@@ -18,14 +18,33 @@ if (isshun && !(mptr->flags & MFLG_NOSHUN))
 Every symptom in this area traces to that bare `return 0`. A shunned client's command produces
 *nothing* — no error, no ACK, no numeric. Consequences, in descending order of how much they matter:
 
-1. **labeled-response clients wedge.** A labeled command gets neither a labeled reply nor an ACK.
-   The client's request state machine waits until timeout. This is a client-breaking bug, not a
-   cosmetic one, and it is the strongest reason to do this work.
-2. **The server lies about echo-message.** It advertises the capability, then silently does not
-   echo. A server that advertises a contract and does not honor it is broken regardless of anyone's
-   ability to detect a shun.
+1. **labeled-response clients degrade.** A labeled command gets neither a labeled reply nor an ACK.
+   **Severity qualifier (2026-07-30):** the labeled-response spec itself warns clients that a
+   response may never arrive (even without a label, or at all), so a compliant client must
+   timeout-and-recover rather than hang. This is therefore *not* the hard client-breaking bug it
+   was first assessed as — it is a per-command timeout stall inflicted on every command for the
+   life of the shun, against clients doing exactly what the spec told them to. Degraded UX at
+   scale, not a wedge. Non-compliant clients that do hang exist, but the spec is not on their side.
+2. **The server violates its echo-message contract.** It advertises the capability, then silently
+   does not echo. Unlike labeled-response, echo-message carries no tolerance language — the echo is
+   unconditional once negotiated. This is now the strongest plank, and it is protocol hygiene, not
+   breakage.
 3. **Detectability.** Silence is a reliable oracle. Explicitly *not* the justification here — see
    the WONTFIX — but it improves as a side effect.
+
+The same non-normative section then cuts the other way. It documents the **pending-message
+pattern**: clients display sent messages immediately in a pending state and finalize them on the
+labeled echo, and it states the invariant this rests on verbatim — *"Both methods assume that the
+server will acknowledge all successful messages, or return a labeled error response."* Today's shun
+breaks exactly that invariant, with a user-visible result: in a pending-pattern client, every
+message a shunned user sends **sticks in the pending state or gets marked failed, on screen,
+automatically**. The oracle is not something a suspicious user probes for; the client's own UI
+draws it.
+
+Net severity, honestly stated: no client *hangs* (the tolerance language covers recovery), but
+modern labeled-echo clients render the shun visibly today with no probing — which is both worse UX
+than intended and worse *stealth* than the silence was assumed to buy. The case to the maintainer
+is protocol coherence plus that concrete artifact, not "clients break."
 
 **The governing insight: the oracle is silence, not refusal.** Any deterministic response closes it.
 The response does not need to be convincing, or even friendly — it needs to exist. That is what makes
@@ -88,7 +107,7 @@ That gives the two modes different labeled answers, and both are spec-clean:
 | Client capability | Response at the drop site |
 |---|---|
 | labeled-response + standard-replies (honest mode) | **labeled `FAIL`** — the error is the response; the label rides on it |
-| labeled-response (silent mode, if that ruling stands) | **bare `@label=<x> ACK`** — the spec's "processed, nothing to say". For a client without echo-message this is byte-identical to a *successful* PRIVMSG, so it un-wedges the client while revealing nothing. The wedge fix survives either ruling. |
+| labeled-response (silent mode, if that ruling stands) | **bare `@label=<x> ACK`** — the spec's "processed, nothing to say". For a client **without** echo-message this is byte-identical to a *successful* PRIVMSG — success produces no response, and ACK is the labeled stand-in for exactly that — so it reveals nothing. For a client **with** echo-message the outcome is implementation-defined: the label round-trip completes (some clients resolve the pending message as sent — illusion preserved), but a client that renders only the server's echo has nothing to render. Strictly better than silence in every case; a perfect illusion only for the non-echo case. |
 | standard-replies, no label | `send_fail(cptr, <command>, <code>, NULL, <description>)` |
 | cap-notify (see prerequisites) | withdraw `draft/chathistory`; optionally `labeled-response`. **`echo-message` is never withdrawn** — see below |
 | none of the above | a server NOTICE explaining the restriction (frequency per open question 2) |
