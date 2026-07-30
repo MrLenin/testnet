@@ -93,10 +93,45 @@ hash. Deployment status — one fact observed, one assumed, one structural:
   `x3/src/x3ldap.c:367`) and authenticates by bind against it; Keycloak federates
   **READ_ONLY** from the same subtree (`scripts/setup-keycloak.sh:741`,
   `usersDn=ou=users,dc=fractalrealities,dc=net`, matching X3's
-  `X3_LDAP_DN_FMT`); the daemon authenticates via Keycloak. Production is reported
-  to store RFC 2307 `{SMD5}` in the directory — **still an assumption**, and
-  production's `ldap_enable` value remains unconfirmed, but the testnet topology is
-  now observed, not assumed.
+  `X3_LDAP_DN_FMT`); the daemon authenticates via Keycloak.
+
+- **★ Directory hash scheme — bed observed `{MD5}`; production UNVERIFIED and
+  reported as `{SMD5}`. Reconcile during the census; do not hardcode either.**
+  Whole-directory sweep of the bed: `{MD5}` × 13, plus one **plaintext** entry
+  (`uid=testuser`, from `data/ldap/bootstrap.ldif:9` — a bed artifact, but note
+  plaintext-in-directory is possible at all). No SMD5 anywhere in the bed, in any
+  config, or in any script.
+
+  The mechanism is *code, not configuration*: `make_password()` (`x3/src/x3ldap.c:281`)
+  takes X3's already-`cryptpass`'d hex, packs it to raw bytes, base64s it and
+  prefixes **`{MD5}`** explicitly, so OpenLDAP's own default hash (historically
+  SMD5, latterly SSHA) never applies to X3-written entries — that default only
+  governs entries whose writer supplies no scheme.
+
+  **Therefore: if production's directory shows `{SMD5}`, those entries were written
+  by something other than X3's `ldap_do_add`** — other tooling, a bulk import, or a
+  pre-`make_password` era. That is a finding worth having, not a detail to settle by
+  assumption, and it changes the import branch's provider list. The census must
+  report the scheme histogram over the *production* directory, with any non-`{MD5}`
+  scheme traced to its writer.
+
+  This **simplifies the import branch materially**:
+  - `{MD5}` is base64 of the raw MD5 digest; X3's saxdb *plain* format is hex of the
+    same digest. **One algorithm covers both stores** for modern-era passwords.
+  - X3's custom `$`-salted construction (`md5.c:325`) exists **only in saxdb**, never
+    in the directory — so it matters solely for accounts with no LDAP entry.
+  - Keycloak natively understands `{SSHA}`, which is what it writes under WRITABLE
+    (observed, Gate 1b) — no provider needed for anything it creates.
+
+  So the provider scope becomes **"whatever the production histogram actually
+  shows"**, with `{MD5}` the likely bulk (trivial provider), `{SMD5}` added only if
+  production really carries it, and the custom X3 saxdb form only if the census finds
+  active accounts present in saxdb but absent from the directory. That is a smaller
+  and better-determined scope than the original "`{SMD5}` + custom dual-format X3
+  provider" guess, whichever way production lands.
+
+  Production's `ldap_enable` value and hash histogram both remain unconfirmed
+  (Gate 1); the bed's topology and hash scheme are now observed rather than assumed.
 - Mixed populations are possible either way: `ldap_autocreate`
   (`x3/src/nickserv.c:2461`) creates X3 handles for LDAP-authenticated users, but
   accounts predating LDAP may hold local hashes with no directory entry.
