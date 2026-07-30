@@ -397,3 +397,30 @@ LOADED SOAK BURST 1 — CLEAN (2026-07-29 18:54–19:44 EDT, driver: scratchpad 
 0 errors, 0 mat-check gaps fleet-wide, valgrind 0.  User's point stands and is adopted:
 an idle soak only proves timers — LOADED bursts are the exit standard.  Recommend 2-3 more
 bursts across the window (driver is re-runnable, bounded ≤1h per run).
+
+### 2026-07-30 — SOAK CAUGHT A REAL DEFECT: mesh-homed ACCOUNT never reaches the owner
+
+The soak monitor flagged `mat-check gap: user AIACY (ibutsu) fields: host account umode` on
+ALL FOUR P10 nodes (not the owner).  Root cause, from the wire: `4:26:15 nef3: Server Parsing:
+DH AC AIACY R ibutsu 1785385409` — x3 registered an account for a user homed on the
+OVERLAY-ONLY node.  The gateway applied it to its materialized copy + relayed over P10 (so
+nef3/4/5/6 all showed the user authenticated), but nef7 has no P10 link and AC had no CR
+carrier → the OWNER never learned.  The user's CLIENT saw success (AuthServ notices ride CR-M
+fine), which is what makes this class of bug so quiet.
+
+Impact: a user is NOT logged in on their own home server (account-gated features — bouncer,
+chathistory presence, +r channels — silently dead there), and since the owner mints the doc, the
+doc keeps the accountless record → permanent consumer gaps (the reconcile's account clause only
+drives non-empty→differs; LOGOUT stays undriven by design).
+
+FIX `8262a99` (audit carrier #2, promoted to 6-1 exit blocker): tunnel the applied AC body to a
+mesh-only-homed owner over CR-X (letter 'C' re-injects as ms_account there; the local apply then
+mints the doc as a normal own-user write).  Self-gating — no-ops unless the owner is a mesh stub.
+NOT YET DEPLOYED: the shared compose image means any rebuild recreates nef7 and would drop the
+user's LIVE client session; awaiting the user's go-ahead.
+
+**LESSON — my synthetic load was insufficient in exactly the way the user warned about.**  The
+soakload driver exercises connect/join/msg/nick/mode churn but NO AUTH (no SASL, no AuthServ), so
+it could never have found this; the user's own real session did, within hours.  ACTION: extend
+the driver with an auth mix (SASL clients + AuthServ AUTH + account-gated features) before
+treating any future soak as coverage.
