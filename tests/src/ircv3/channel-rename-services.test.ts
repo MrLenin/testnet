@@ -74,6 +74,24 @@ async function connectRenameClient(nick: string): Promise<X3Client> {
   return client;
 }
 
+/**
+ * Connect a client that completes registration (NICK/USER, past 001) WITHOUT
+ * negotiating any CAP at all — in particular, without draft/channel-rename.
+ * Used to regress the spec rule that the cap gates only the RENAME/legacy-
+ * fallback NOTIFICATION shape, not whether the client may issue the RENAME
+ * command in the first place.
+ */
+async function connectRenameClientNoCap(nick: string): Promise<X3Client> {
+  const client = new X3Client();
+  await client.connect(PRIMARY_SERVER.host, PRIMARY_SERVER.port);
+  client.register(nick);
+  await client.waitForNumeric('001');
+  // Let post-001 welcome traffic (host-hiding NOTICE/MODE, PM-history notice) settle.
+  await new Promise((r) => setTimeout(r, 1000));
+  client.clearRawBuffer();
+  return client;
+}
+
 /** Register a channel via X3 (bot nick X3, not ChanServ — see header comment). */
 async function registerChannelX3(
   client: X3Client,
@@ -518,4 +536,88 @@ describe('Services-Arbitrated Channel Rename (X3 AC R arbitration)', () => {
     expect(nonFounderResult.description ?? '').toMatch(/founder/i);
     expect(nonFounderResult.description ?? '').not.toMatch(/linked server/i);
   }, 60000);
+
+  it('case 8: a client without draft/channel-rename may still RENAME; gets the legacy PART/JOIN fallback (unregistered channel)', async () => {
+    // Spec rule (draft/channel-rename): the cap governs only the
+    // NOTIFICATION shape, not whether the command may be issued. A client
+    // that never negotiated the cap must NOT be rejected with
+    // ERR_UNKNOWNCOMMAND (421) — it must still get the rename performed,
+    // just reported to it as the legacy fallback (PART of the old name,
+    // JOIN to the new one) instead of a RENAME message. Unregistered/
+    // ircd-only path, like cases 4 and 7 — no X3/ChanServ involved.
+    // Self-detects the legacy-topology guard exactly like case 7 rather
+    // than trusting the shared `legacyBlocked` flag, so this case behaves
+    // correctly even run in isolation via `-t`.
+    const chan = uniqueChannel('ncnocap');
+    const renamed = uniqueChannel('ncnocapn');
+
+    const noCapNick = `rnnocap${uniqueId().slice(0, 5)}`;
+    const noCapClient = trackClient(await connectRenameClientNoCap(noCapNick));
+    expect(noCapClient.hasCapEnabled('draft/channel-rename')).toBe(false);
+
+    noCapClient.send(`JOIN ${chan}`);
+    await noCapClient.waitForJoin(chan);
+    await new Promise((r) => setTimeout(r, 300));
+
+    noCapClient.clearRawBuffer();
+    noCapClient.send(`RENAME ${chan} ${renamed} :nocap`);
+
+    // Collect a few seconds of post-RENAME traffic and inspect all of it at
+    // once, rather than waiting for one specific message shape — we need to
+    // positively assert the ABSENCE of 421 and of a RENAME message, not just
+    // the presence of the fallback.
+    await new Promise((r) => setTimeout(r, 4000));
+    const seen = noCapClient.allParsedLines;
+
+    const failMsg = seen.find(
+      (m) => m.command === 'FAIL' && m.params[0]?.toUpperCase() === 'RENAME'
+    );
+    if (
+      failMsg &&
+      failMsg.params[1] === 'CANNOT_RENAME' &&
+      /linked server/i.test(failMsg.trailing ?? '')
+    ) {
+      console.log(
+        '[channel-rename-services] case 8: topology guard fired on the no-cap ' +
+          'RENAME — dynamically skipping the command-vs-notification assertions ' +
+          'for this run.'
+      );
+      return;
+    }
+
+    const got421 = seen.some(
+      (m) => m.command === '421' && m.params[1]?.toUpperCase() === 'RENAME'
+    );
+    expect(
+      got421,
+      'cap-less client was rejected with ERR_UNKNOWNCOMMAND — the cap must gate ' +
+        'only the notification shape, not the command itself'
+    ).toBe(false);
+
+    const gotPart = seen.some(
+      (m) =>
+        m.command === 'PART' &&
+        m.params[0]?.toLowerCase() === chan.toLowerCase() &&
+        m.source?.nick?.toLowerCase() === noCapNick.toLowerCase()
+    );
+    expect(gotPart, 'cap-less client did not receive the legacy PART fallback for the old name').toBe(
+      true
+    );
+
+    const gotJoin = seen.some(
+      (m) =>
+        m.command === 'JOIN' &&
+        m.params[0]?.toLowerCase() === renamed.toLowerCase() &&
+        m.source?.nick?.toLowerCase() === noCapNick.toLowerCase()
+    );
+    expect(gotJoin, 'cap-less client did not receive the legacy JOIN fallback to the new name').toBe(
+      true
+    );
+
+    const gotRename = seen.some((m) => m.command === 'RENAME');
+    expect(
+      gotRename,
+      'cap-less client received a RENAME message despite never negotiating draft/channel-rename'
+    ).toBe(false);
+  }, 30000);
 });
