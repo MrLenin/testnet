@@ -446,4 +446,76 @@ describe('Services-Arbitrated Channel Rename (X3 AC R arbitration)', () => {
       `REGISTER ${mainChannelOriginal} was not blocked by the rename DNR: ${JSON.stringify(lines)}`
     ).toBe(true);
   }, 30000);
+
+  it('case 7: oplevel founder gate on RENAME (unregistered channel, +A active)', async () => {
+    // Unregistered/ircd-only path — no X3/ChanServ involved. With channel
+    // oplevels active (+A apass set), RENAME is founder-gated: only oplevel
+    // 0 / the channel manager may rename, not an arbitrary chanop the
+    // founder opped (see nefarious/ircd/m_rename.c rename_oplevel_ok()).
+    // Shares the same legacy-topology dependence as the other cases: while
+    // a non-IRCv3-aware, non-service server is linked, RENAME is refused
+    // outright by rename_legacy_blocker() before the oplevel gate is ever
+    // reached, so this case self-detects that guard exactly like case 1
+    // rather than trusting the shared `legacyBlocked` flag (this case
+    // should behave correctly even run in isolation via `-t`).
+    const chan = uniqueChannel('opltest');
+
+    const founderNick = `rnfound${uniqueId().slice(0, 5)}`;
+    const founder = trackClient(await connectRenameClient(founderNick));
+
+    founder.send(`JOIN ${chan}`);
+    await founder.waitForJoin(chan);
+
+    founder.clearRawBuffer();
+    founder.send(`MODE ${chan} +A :opltestpass${uniqueId().slice(0, 6)}`);
+    await founder.waitForParsedLine(
+      (m) => m.command === 'MODE' && m.raw.includes(chan) && m.raw.includes('+A'),
+      10000
+    );
+
+    const renamed = uniqueChannel('opltestn');
+    const founderResult = await attemptRename(founder, chan, renamed, 'founder');
+
+    if (
+      founderResult.outcome === 'fail' &&
+      founderResult.code === 'CANNOT_RENAME' &&
+      /linked server/i.test(founderResult.description ?? '')
+    ) {
+      console.log(
+        '[channel-rename-services] case 7: topology guard fired on the founder RENAME ' +
+          '— dynamically skipping the oplevel-gate assertion for this run.'
+      );
+      return;
+    }
+
+    expect(
+      founderResult.outcome,
+      `founder RENAME failed unexpectedly: ${founderResult.code} ${founderResult.description}`
+    ).toBe('success');
+
+    const nonFounderNick = `rnnonf${uniqueId().slice(0, 5)}`;
+    const nonFounder = trackClient(await connectRenameClient(nonFounderNick));
+    nonFounder.send(`JOIN ${renamed}`);
+    await nonFounder.waitForJoin(renamed);
+
+    // Founder ops the second client — oplevel 1, non-founder — and we
+    // confirm the +o actually landed before exercising the gate; otherwise
+    // the RENAME attempt below would fail on ERR_CHANOPRIVSNEEDED instead
+    // of the oplevel check and the test would be vacuous.
+    founder.clearRawBuffer();
+    founder.send(`MODE ${renamed} +o ${nonFounderNick}`);
+    const opped = await waitForChannelMode(nonFounder, renamed, nonFounderNick, '@', 10000);
+    expect(opped, 'non-founder never got opped — cannot exercise the oplevel founder gate').toBe(true);
+
+    const blockedTarget = uniqueChannel('opltestnx');
+    const nonFounderResult = await attemptRename(nonFounder, renamed, blockedTarget, 'nonfounder');
+
+    expect(nonFounderResult.outcome).toBe('fail');
+    expect(nonFounderResult.code).toBe('CANNOT_RENAME');
+    // Assert the specific founder-only reason, not just any FAIL — a
+    // generic FAIL would also match the unrelated legacy-topology guard
+    // message, so require "founder" AND explicitly rule that one out.
+    expect(nonFounderResult.description ?? '').toMatch(/founder/i);
+    expect(nonFounderResult.description ?? '').not.toMatch(/linked server/i);
+  }, 60000);
 });
