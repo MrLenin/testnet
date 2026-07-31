@@ -286,6 +286,20 @@ session; load-bearing results:
   lists): no dangling pointers; semantically stale after rename — policy decision per
   list, default leave-as-is.
 
+## 13. Multi-hop alias source rewrite — LIVE-VERIFIED 2026-07-31 (PASS)
+
+The one path prior review couldn't close live: a bouncer ALIAS renaming a channel a hop
+away from X3, confirming X3 sees the RN sourced from the PRIMARY numeric, not the alias.
+Ran it on a briefly-isolated testnet+leaf+X3 tree (CRDT fleet parked ~10 min with user OK,
+restored clean, soak resumed): primary ACAAD / alias ACAAE (BX C arg order = primary,alias);
+X3 received exactly ONE RN `ACAAD RN #mhtest... ` — source = primary, never the alias.
+PASS. Nuance found: the alias→primary rewrite actually fires at the ORIGIN server's v3
+broadcast (`sendcmdto_serv_butone_v3`), so the RN is already primary-sourced before it
+reaches testnet; testnet's `rename_forward_rcapable` rewrite is confirming defense-in-depth
+for this path. Also (re)confirmed: RENAME is CAP-gated (client must negotiate
+draft/channel-rename or gets 421); bed has BOUNCER_DEFAULT_HOLD=TRUE so a metadata wipe
+reverts hold to on — cleanup must set explicit HOLD off. Invariant #10 holds end-to-end.
+
 ## 12. RN rides the `r` flag, services allowance dropped (user ask 2026-07-31, SHIPPED)
 
 Once X3 advertises `r` (§10), special-casing it as a *service* for RN routing is
