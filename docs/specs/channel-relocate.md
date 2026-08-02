@@ -41,7 +41,7 @@ clients render a "this room has moved" affordance, and nobody is auto-joined.
 
 Design goal: **fully usable at zero client adoption.** Clients without the
 capability get a legible experience through existing primitives (NOTICE,
-`+L` redirect, numeric 470). The capability is additive polish, not a
+`+L` redirect and its numerics). The capability is additive polish, not a
 dependency.
 
 ## Relationship to `draft/channel-rename`
@@ -259,7 +259,7 @@ At grace expiry, dan is still sitting in the tombstone:
   be relabeled without their consent. Consent is expressed per-event (the
   `JOIN` after a `RELOCATE` prompt), in advance (umode `+F`), or by taking
   the action oneself (the issuer).
-* The `470` redirect during the grace period moves a user only in response
+* The `+L` redirect during the grace period moves a user only in response
   to that user's own `JOIN` of the old name, which is longstanding `+L`
   behavior with an existing opt-out (NOLINK).
 * The rename itself remains a privileged, network-policy-gated action; this
