@@ -286,10 +286,13 @@ At grace expiry, dan is still sitting in the tombstone:
    tombstone redirect on their next join. Servers MAY replay a `RELOCATE`
    on rejoin of the tombstone within the grace period.
 
-## Implementation status (v1, 2026-08-02 — deviations & clarifications)
+## Reference implementation (Nefarious/X3, 2026-08-02)
 
-The reference implementation (nefarious + X3 `feature/channel-relocate`)
-conforms with these recorded choices and gaps:
+The reference implementation (`feature/channel-relocate` in both trees) is
+**complete against every normative requirement of this spec**. This section
+records, for reviewers and deployers: which optional (`MAY`) features were
+not taken, how the implementation-defined areas were decided, and the
+operational constraints that fall out of the wire design:
 
 1. **Wire propagation**: relocation rides the existing rename token as
    `RN <old> <new> C :<reason>` — the marker is honored only in the
