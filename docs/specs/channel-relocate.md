@@ -109,16 +109,41 @@ rename discovers the move through the tombstone (below) when it rejoins.
 Advertises relocation mode and the tombstone grace period, e.g.
 `RELOCATE=900`. Clients MAY use this to time out their own prompt UI.
 
-### User mode `+F` (auto-follow)
+### Follow preference
 
-A user-settable mode meaning *"I consent in advance to all channel
-relocations."* A `+F` member is moved immediately at rename time, exactly as
-under `draft/channel-rename`, and is notified per their negotiated
-capabilities (`RENAME` message if they have `draft/channel-rename`, legacy
-`PART`+`JOIN` otherwise).
+There is no server-side "follow" flag. A member follows a relocation by
+issuing an ordinary `JOIN <new-channel>` — accepting the `RELOCATE` prompt,
+clicking through a client affordance, or being auto-joined by their own
+client. The server never moves a non-issuer; *who followed* is expressed
+entirely as real joins, which every server and client already understand and
+which propagate natively. This keeps the follow decision off any per-user
+server state (no scarce, undiscoverable, server-unique mode letter) and off
+any signal a given server might not see.
 
-This is the explicit-opt-in inverse of the draft spec's default. Services
-MAY persist the preference and restore it on login.
+**Auto-follow is a client behavior.** A client MAY auto-`JOIN` on receiving a
+`RELOCATE` (or on encountering the tombstone redirect) without prompting —
+for bots, or users who opted into seamless following. A client that wants
+this preference to persist and travel with the user MAY keep it in a metadata
+key, read back client-side. Relocation defines **no** server-side handling of
+such a key: the metadata subsystem stores and propagates it like any other
+client preference, and only the client acts on it — there is nothing
+relocation-specific for a server to implement here. A server MUST NOT move a
+member on the basis of a metadata key, because metadata is globally
+consistent only *among peers that implement it*, so a server-side move driven
+by a signal a non-metadata peer cannot see would desynchronize membership.
+(The future phase below is exactly where a server-side effect would be added,
+under a deployment gate.)
+
+**Future (deployment-gated): server-side auto-follow.** Once *every* server
+on a network implements metadata — so the preference is globally consistent
+for all peers, with no metadata-blind server to desync — a network MAY enable
+an optimization that moves opted-in members server-side at rename time,
+skipping the client round-trip. This is strictly additive over the
+client-`JOIN` mechanism above and MUST be gated on full deployment: it stays
+off while any non-metadata peer is linked (the same shape as the
+relocation-aware rollout gate). Until then, and on any mixed network,
+following is always the client `JOIN`, so the feature remains fully usable
+and testable regardless of the optimization.
 
 ## Behavior
 
@@ -147,13 +172,16 @@ At rename time each member of the old channel falls into exactly one class:
 | Class | Moved? | Notification |
 |---|---|---|
 | The issuer of the rename | yes | per rename caps (`RENAME` or `PART`+`JOIN`) |
-| Members with umode `+F` | yes | per rename caps (`RENAME` or `PART`+`JOIN`) |
 | Members with `evilnet/channel-relocate` | no | `RELOCATE` |
 | All other members | no | server `NOTICE` to the old channel |
 
-The issuer is always moved: issuing the rename is consent. A member holding
-both `evilnet/channel-relocate` and `draft/channel-rename` is in the
-`RELOCATE` class — this capability takes precedence, and they are not moved.
+The issuer is the only member moved by the server: issuing the rename is
+consent. Every other member stays; those with `evilnet/channel-relocate`
+receive a `RELOCATE` prompt and the rest a fallback `NOTICE`, and any of them
+follows by their own `JOIN <new-channel>` (see *Follow preference*). A member
+holding `draft/channel-rename` but not `evilnet/channel-relocate` is an
+ordinary stayer (a `NOTICE`); the rename capability only governs how a *move*
+is presented, and non-issuers do not move server-side.
 
 The fallback `NOTICE` SHOULD name both channels and the reason, e.g.:
 
@@ -211,18 +239,23 @@ channel itself cannot be renamed.
 ## Examples
 
 Channel `#oldname` is renamed to `#newname` by `alice` (reason
-`moving!`). Members: `alice` (issuer, has `draft/channel-rename`), `bob`
-(umode `+F`, has `draft/channel-rename`), `carol` (has
-`evilnet/channel-relocate`), `dan` (no relevant caps).
+`moving!`). Members: `alice` (issuer, has `draft/channel-rename`), `bob` (has
+`draft/channel-rename` only), `carol` (has `evilnet/channel-relocate`), `dan`
+(no relevant caps).
 
-Alice and bob (moved, have the rename cap):
+Alice (the issuer — the only member moved server-side — has the rename cap):
 
     :alice!a@example RENAME #oldname #newname :moving!
 
-If bob lacked `draft/channel-rename` he would instead see the legacy pair:
+If alice lacked `draft/channel-rename` she would instead see the legacy pair:
 
-    :bob!b@example PART #oldname :Channel renamed to #newname
-    :bob!b@example JOIN #newname
+    :alice!a@example PART #oldname :Channel renamed to #newname
+    :alice!a@example JOIN #newname
+
+Bob (not moved — the rename cap governs move *presentation* only, and bob is
+not moved — so he is an ordinary stayer):
+
+    :services.example.net NOTICE #oldname :#oldname has moved to #newname (moving!). Join #newname to follow; this channel closes in 15 minutes.
 
 Carol (not moved, prompted):
 
@@ -257,8 +290,11 @@ At grace expiry, dan is still sitting in the tombstone:
 
 * The abuse class this extension exists to close: no member's presence can
   be relabeled without their consent. Consent is expressed per-event (the
-  `JOIN` after a `RELOCATE` prompt), in advance (umode `+F`), or by taking
-  the action oneself (the issuer).
+  `JOIN` after a `RELOCATE` prompt) or by taking the action oneself (the
+  issuer). A client MAY auto-`JOIN` on a stored user preference, but the
+  server never moves a non-issuer, so no server-side signal can place a
+  member in the new channel without a `JOIN` they — or their client acting
+  on their standing instruction — initiated.
 * The `+L` redirect during the grace period moves a user only in response
   to that user's own `JOIN` of the old name, which is longstanding `+L`
   behavior with an existing opt-out (NOLINK).
@@ -277,10 +313,11 @@ At grace expiry, dan is still sitting in the tombstone:
    deliberately defines no decline signal, so servers cannot distinguish
    "declined" from "hasn't decided," and the tombstone lifetime is the only
    timeout.
-3. **Multi-session users** (bouncers): whether `+F` and per-session
-   capability sets can disagree across attached sessions of one identity is
-   implementation-defined; implementations SHOULD move a user only if the
-   move is coherent for all of their sessions.
+3. **Multi-session users** (bouncers): a user's attached sessions may
+   present different capabilities, so which session's caps decide the
+   `RELOCATE`-vs-`NOTICE` presentation is implementation-defined. Following
+   is unaffected — any session issuing `JOIN <new-channel>` follows,
+   independently of the others.
 4. **Offline members** of registered channels (services-recognized regulars
    not present at rename time) get no `RELOCATE`; they encounter the
    tombstone redirect on their next join. Servers MAY replay a `RELOCATE`
@@ -288,11 +325,26 @@ At grace expiry, dan is still sitting in the tombstone:
 
 ## Reference implementation (Nefarious/X3, 2026-08-02)
 
-The reference implementation (`feature/channel-relocate` in both trees) is
-**complete against every normative requirement of this spec**. This section
-records, for reviewers and deployers: which optional (`MAY`) features were
-not taken, how the implementation-defined areas were decided, and the
-operational constraints that fall out of the wire design:
+> **Revision 2026-08-03 — follow mechanism changed to client `JOIN` (see
+> *Follow preference*).** The 2026-08-02 build described below implemented
+> auto-follow as a globally-propagated umode `+F`. That has been withdrawn:
+> a per-user server mode is an undiscoverable, server-unique, scarce
+> resource, and (more decisively) any *local* follow signal — a cap, or
+> metadata a non-metadata peer cannot see — cannot drive cross-server
+> membership without desyncing a mixed network. Follow is now a member's own
+> `JOIN`; server-side auto-follow is deferred to a deployment-gated phase.
+> The `+F`-specific items below (the umode in item 7's vicinity and the
+> *New* list) are superseded; the reference trees are being updated, and the
+> nefarious upstream backport (evilnet/nefarious2#96) drops the umode with
+> them. Everything else in this section — tombstone lifecycle, status
+> snapshot, `RELOCATE`/`NOTICE`, propagation, services continuity — stands.
+
+The 2026-08-02 reference implementation (`feature/channel-relocate` in both
+trees) was **complete against every normative requirement of the spec as it
+then stood**. This section records, for reviewers and deployers: which
+optional (`MAY`) features were not taken, how the implementation-defined
+areas were decided, and the operational constraints that fall out of the
+wire design:
 
 1. **Wire propagation**: relocation rides the existing rename token as
    `RN <old> <new> C :<reason>` — the marker is honored only in the
@@ -346,11 +398,15 @@ the core untouched:
   notification machinery, P10 `RN` propagation and the `r` server-flag
   routing.
 * New: the member-partition policy in the post-authorization path (replacing
-  the unconditional `rename_channel()` member move), the `RELOCATE` verb and
-  its capability, umode `+F` (`FLAG_RELOCATE_FOLLOW`; letter `F` is free in
-  `userModeList`), tombstone lifecycle (server-set `+L`, grace timer,
-  expiry sweep with server-generated `PART`s), the status snapshot for
-  grace-period rejoins, and the `RELOCATE=` ISUPPORT token.
+  the unconditional `rename_channel()` member move) — under the revision
+  above this reduces to moving the issuer only, one line in the classifier
+  (`user == sptr`), with every other member left as a snapshotted stayer;
+  the `RELOCATE` verb and its capability; tombstone lifecycle (server-set
+  `+L`, grace timer, expiry sweep with server-generated `PART`s); the status
+  snapshot for grace-period rejoins (now the sole mechanism by which any
+  non-issuer keeps standing, so it is captured for every member); and the
+  `RELOCATE=` ISUPPORT token. (The withdrawn 2026-08-02 build additionally
+  carried umode `+F`/`FLAG_RELOCATE_FOLLOW`; that is being removed.)
 * Mode selection (force-move vs. relocation) would be a feature flag
   (e.g. `FEAT_RENAME_CONSENT`) consulted at the single point where the
   authorized rename executes; both modes ship, networks pick one.
