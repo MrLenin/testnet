@@ -285,9 +285,7 @@ describe('IRCv3 SASL Authentication', () => {
   });
 
   describe('Full SASL Flow', () => {
-    // Skip: This test requires draft/account-registration CAP which is not
-    // currently supported by X3. When X3 adds support, remove the .skip()
-    it.skip('can register account and authenticate with it', async () => {
+    it('can register account and authenticate with it', async () => {
       // Step 1: Register a new account using draft/account-registration
       const regClient = trackClient(await createRawSocketClient());
 
@@ -297,8 +295,12 @@ describe('IRCv3 SASL Authentication', () => {
       // Require the capability - if not present, test fails
       expect(regCaps.ack).toContain('draft/account-registration');
 
+      // Unique per run: a fixed nick would collide with a still-held bouncer
+      // session from a prior run (BOUNCER_DEFAULT_HOLD=TRUE on this bed) and
+      // silently swallow the REGISTER reply out from under the wait below.
+      const regNick = `slreg${uniqueId()}`;
       regClient.capEnd();
-      regClient.register('saslreg1');
+      regClient.register(regNick);
       await regClient.waitForNumeric('001');
 
       // Generate unique account name (max 15 chars for ACCOUNTLEN)
@@ -308,8 +310,14 @@ describe('IRCv3 SASL Authentication', () => {
       // Format per spec: REGISTER <account> <email> <password>
       regClient.send(`REGISTER ${uniqueAccount} ${uniqueAccount}@example.com ${uniquePassword}`);
 
-      const response = await regClient.waitForNumeric('920', 5000);
-      expect(response.command).toBe('920');
+      // The local Keycloak flow (nefarious/ircd/m_register.c
+      // register_complete_success) replies with a raw "REGISTER SUCCESS
+      // <account> :Account registered" line -- not the old relay's 920.
+      const response = await regClient.waitForParsedLine(
+        msg => msg.command === 'REGISTER' && msg.params[0] === 'SUCCESS',
+        15000
+      );
+      expect(response.params[1]).toBe(uniqueAccount);
 
       regClient.send('QUIT');
       await new Promise(r => setTimeout(r, 500));
@@ -323,12 +331,13 @@ describe('IRCv3 SASL Authentication', () => {
       const success = await saslPlain(authClient, uniqueAccount, uniquePassword);
       expect(success).toBe(true);
 
+      const authNick = `slauth${uniqueId()}`;
       authClient.capEnd();
-      authClient.register('saslauth1');
+      authClient.register(authNick);
       await authClient.waitForNumeric('001');
 
       // Verify we're logged in - WHOIS should show account
-      authClient.send(`WHOIS saslauth1`);
+      authClient.send(`WHOIS ${authNick}`);
       const whoisResponse = await authClient.waitForNumeric(['330', '311'], 3000);
       expect(whoisResponse).toBeDefined();
 
