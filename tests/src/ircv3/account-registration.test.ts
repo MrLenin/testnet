@@ -38,6 +38,8 @@ import { execSync } from 'node:child_process';
 import { randomBytes, createHmac, createHash, pbkdf2Sync } from 'node:crypto';
 import {
   createClientOnServer,
+  createIRCv3Client,
+  createX3Client,
   RawSocketClient,
   PRIMARY_SERVER,
   SECONDARY_SERVER,
@@ -406,6 +408,52 @@ describe('IRCv3 draft/account-registration (verification off — nefarious)', ()
         expect(result.success, `SASL PLAIN for ${acct}: ${result.error}`).toBe(true);
       } finally {
         await quitAndClose(plainClient);
+      }
+
+      // X3 recognizes the account (AC-stamp path). REGISTER's own CMD_ACCOUNT
+      // broadcast (register_complete_success() in m_register.c) is
+      // MyConnect-filtered to common-channel members and never reaches X3
+      // (see the account-leak comment at the top of this file) -- but a
+      // client that completes *full* network registration (NICK/USER) while
+      // SASL-authenticated as this account rides the ordinary P10
+      // user-introduction burst, which every linked server sees, X3
+      // included. X3's ldap_autocreate + loc_auth() path is search-based,
+      // not bind-based (nickserv.c smart_get_handle_info() / cmd_account()),
+      // so it picks up a daemon-born account -- one that was never
+      // LDAP-bound (Task 0 ground truth above) -- the moment that AC stamp
+      // arrives. Confirmed live: AuthServ ACCOUNTINFO recognized the account
+      // on the very first poll after CAP END/001 in manual verification
+      // (2026-08-06); the retry loop below is slack for a busier bed, not
+      // evidence this is normally slow.
+      const acStampClient = await createIRCv3Client({
+        host: PRIMARY_SERVER.host,
+        port: PRIMARY_SERVER.port,
+        nick: `acstamp${uniqueId().slice(0, 8)}`,
+        sasl_user: acct,
+        sasl_pass: PASSWORD,
+      });
+      try {
+        expect(acStampClient.isRegistered, 'AC-stamp client should complete full registration').toBe(true);
+
+        const x3 = await createX3Client();
+        try {
+          let recognized = false;
+          let lastLines: string[] = [];
+          const deadline = Date.now() + 15000;
+          while (Date.now() < deadline) {
+            lastLines = await x3.serviceCmd('AuthServ', `ACCOUNTINFO *${acct}`, 5000);
+            if (lastLines.some(l => /Account Information for/i.test(l))) {
+              recognized = true;
+              break;
+            }
+            await new Promise(r => setTimeout(r, 500));
+          }
+          expect(recognized, `X3 ACCOUNTINFO *${acct}: ${lastLines.join(' | ')}`).toBe(true);
+        } finally {
+          x3.close();
+        }
+      } finally {
+        acStampClient.quit();
       }
 
       const scramClient = await connectPreReg(PRIMARY_SERVER, ['sasl']);
