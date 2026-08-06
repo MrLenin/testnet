@@ -68,9 +68,15 @@ describe('buildReport (fixture world)', () => {
     expect(r.sections['NickServ']).toBe(3);
     expect(r.sections['gline']).toBe(0);
     expect(r.sections['modcmd']).toBe(1);
+    expect(r.sections['ChanServ']).toBe(2); // top-level: version_control + channels
   });
-  it('counts chanserv entities', () => {
+  it('counts chanserv entities (descending through the real "channels" key)', () => {
     expect(r.chanserv).toEqual({ channels: 1, userRecords: 3, banRecords: 1 });
+  });
+  it('does not fall back to a flat scan when "channels" is absent', () => {
+    const noChannelsKey = parseDb('"ChanServ" { "version_control" { "version_number" "2"; }; "note_types" { }; };');
+    const r3 = buildReport(noChannelsKey, null, NOW);
+    expect(r3.chanserv).toEqual({ channels: 0, userRecords: 0, banRecords: 0 });
   });
   it('finds the dangling users-key ref', () => {
     expect(r.danglingRefs).toContainEqual({ kind: 'users-key', channel: '#test', name: 'ghost' });

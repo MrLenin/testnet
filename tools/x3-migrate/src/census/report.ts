@@ -71,8 +71,9 @@ export function buildReport(parse: ParseResult, ldap: LdapAccount[] | null, now:
   let banRecords = 0;
 
   const chanserv = ogetObj(root, 'ChanServ');
-  if (chanserv) {
-    for (const [chanName, chanValue] of chanserv.entries) {
+  const channelsSection = chanserv ? ogetObj(chanserv, 'channels') : undefined;
+  if (channelsSection) {
+    for (const [chanName, chanValue] of channelsSection.entries) {
       if (chanValue.kind !== 'object') continue;
       channels++;
 
