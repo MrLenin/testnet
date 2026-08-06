@@ -47,7 +47,7 @@ export function parseLdif(text: string): LdifEntry[] {
   }
 
   while (i < lines.length) {
-    const line = lines[i];
+    const line = lines[i]!;
     i++;
 
     // Skip blank lines between entries
@@ -66,7 +66,11 @@ export function parseLdif(text: string): LdifEntry[] {
     // Skip comment lines
     if (line.startsWith('#')) {
       // Also skip any continuation lines of the comment
-      while (i < lines.length && lines[i]?.startsWith(' ')) {
+      while (i < lines.length) {
+        const commentContinuation = lines[i];
+        if (commentContinuation === undefined || !commentContinuation.startsWith(' ')) {
+          break;
+        }
         i++;
       }
       continue;
@@ -74,9 +78,12 @@ export function parseLdif(text: string): LdifEntry[] {
 
     // Handle continuation lines: unfold by gathering all continuations
     let fullLine = line;
-    while (i < lines.length && lines[i]?.startsWith(' ')) {
-      const continuationLine = lines[i];
-      fullLine += continuationLine.substring(1); // Remove the leading space
+    while (i < lines.length) {
+      const nextLine = lines[i];
+      if (nextLine === undefined || !nextLine.startsWith(' ')) {
+        break;
+      }
+      fullLine += nextLine.substring(1); // Remove the leading space
       i++;
     }
 
@@ -143,7 +150,7 @@ export function ldapAccounts(entries: LdifEntry[]): LdapAccount[] {
 
       const passwords = passwordValues.map((raw) => {
         const match = raw.match(/^\{([^}]+)\}/);
-        const scheme = match ? match[1].toUpperCase() : '';
+        const scheme = match && match[1] ? match[1].toUpperCase() : '';
         return { scheme, raw };
       });
 
