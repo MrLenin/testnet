@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { createRawSocketClient, RawSocketClient, uniqueId } from '../helpers/index.js';
+import { createRawSocketClient, RawSocketClient, uniqueId, getKeycloakAdminToken } from '../helpers/index.js';
 import { getTestAccount, releaseTestAccount } from '../helpers/x3-client.js';
 
 /**
@@ -12,6 +12,38 @@ import { getTestAccount, releaseTestAccount } from '../helpers/x3-client.js';
  * Alternatively, some tests can run without authentication to verify
  * the SASL protocol flow.
  */
+
+// Realm for the one test below (Full SASL Flow) that mints a real Keycloak
+// account via REGISTER and must delete it afterward -- REGISTER-created
+// accounts never reach X3 (the CMD_ACCOUNT broadcast is MyConnect-filtered
+// to local channel members), so scripts/cleanup-tests.ts's AuthServ
+// SEARCH/OUNREGISTER sweep can never see them; see
+// account-registration.test.ts for the same pattern in more detail.
+// tests/src/helpers/keycloak-sync.ts defaults KEYCLOAK_REALM to 'irc'
+// (wrong for this bed) -- match the 'testnet' convention used elsewhere.
+const KEYCLOAK_URL = process.env.KEYCLOAK_URL ?? 'http://localhost:8080';
+const KEYCLOAK_REALM = process.env.KEYCLOAK_REALM ?? 'testnet';
+
+async function deleteKeycloakAccount(username: string): Promise<void> {
+  try {
+    const token = await getKeycloakAdminToken();
+    const res = await fetch(
+      `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/users?username=${encodeURIComponent(username)}&exact=true`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!res.ok) throw new Error(`GET users failed: ${res.status}`);
+    const users: { id: string }[] = await res.json();
+    if (!users[0]) return; // already gone -- not an error
+    const del = await fetch(`${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/users/${users[0].id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!del.ok && del.status !== 404) throw new Error(`DELETE user failed: ${del.status}`);
+  } catch (err) {
+    // Best-effort: never fail an otherwise-passing test over cleanup.
+    console.warn(`sasl.test.ts cleanup: failed to delete Keycloak account ${username}:`, err);
+  }
+}
 describe('IRCv3 SASL Authentication', () => {
   const clients: RawSocketClient[] = [];
 
@@ -307,41 +339,48 @@ describe('IRCv3 SASL Authentication', () => {
       const uniqueAccount = `sl${uniqueId()}`;
       const uniquePassword = 'testpass123';
 
-      // Format per spec: REGISTER <account> <email> <password>
-      regClient.send(`REGISTER ${uniqueAccount} ${uniqueAccount}@example.com ${uniquePassword}`);
+      // REGISTER-created accounts never reach X3 (see the module-level
+      // comment on deleteKeycloakAccount), so this account MUST be cleaned
+      // up here -- best-effort, regardless of how the rest of the test goes.
+      try {
+        // Format per spec: REGISTER <account> <email> <password>
+        regClient.send(`REGISTER ${uniqueAccount} ${uniqueAccount}@example.com ${uniquePassword}`);
 
-      // The local Keycloak flow (nefarious/ircd/m_register.c
-      // register_complete_success) replies with a raw "REGISTER SUCCESS
-      // <account> :Account registered" line -- not the old relay's 920.
-      const response = await regClient.waitForParsedLine(
-        msg => msg.command === 'REGISTER' && msg.params[0] === 'SUCCESS',
-        15000
-      );
-      expect(response.params[1]).toBe(uniqueAccount);
+        // The local Keycloak flow (nefarious/ircd/m_register.c
+        // register_complete_success) replies with a raw "REGISTER SUCCESS
+        // <account> :Account registered" line -- not the old relay's 920.
+        const response = await regClient.waitForParsedLine(
+          msg => msg.command === 'REGISTER' && msg.params[0] === 'SUCCESS',
+          15000
+        );
+        expect(response.params[1]).toBe(uniqueAccount);
 
-      regClient.send('QUIT');
-      await new Promise(r => setTimeout(r, 500));
+        regClient.send('QUIT');
+        await new Promise(r => setTimeout(r, 500));
 
-      // Step 2: Connect fresh and authenticate with the new account
-      const authClient = trackClient(await createRawSocketClient());
+        // Step 2: Connect fresh and authenticate with the new account
+        const authClient = trackClient(await createRawSocketClient());
 
-      await authClient.capLs();
-      await authClient.capReq(['sasl']);
+        await authClient.capLs();
+        await authClient.capReq(['sasl']);
 
-      const success = await saslPlain(authClient, uniqueAccount, uniquePassword);
-      expect(success).toBe(true);
+        const success = await saslPlain(authClient, uniqueAccount, uniquePassword);
+        expect(success).toBe(true);
 
-      const authNick = `slauth${uniqueId()}`;
-      authClient.capEnd();
-      authClient.register(authNick);
-      await authClient.waitForNumeric('001');
+        const authNick = `slauth${uniqueId()}`;
+        authClient.capEnd();
+        authClient.register(authNick);
+        await authClient.waitForNumeric('001');
 
-      // Verify we're logged in - WHOIS should show account
-      authClient.send(`WHOIS ${authNick}`);
-      const whoisResponse = await authClient.waitForNumeric(['330', '311'], 3000);
-      expect(whoisResponse).toBeDefined();
+        // Verify we're logged in - WHOIS should show account
+        authClient.send(`WHOIS ${authNick}`);
+        const whoisResponse = await authClient.waitForNumeric(['330', '311'], 3000);
+        expect(whoisResponse).toBeDefined();
 
-      authClient.send('QUIT');
+        authClient.send('QUIT');
+      } finally {
+        await deleteKeycloakAccount(uniqueAccount);
+      }
     });
   });
 });

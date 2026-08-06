@@ -33,7 +33,7 @@
  * RFC 5802 exchange, ircd/sasl_auth.c ~1274-1700) so this file implements a
  * minimal client HMAC-SHA256/PBKDF2 handshake with node:crypto below.
  */
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execSync } from 'node:child_process';
 import { randomBytes, createHmac, createHash, pbkdf2Sync } from 'node:crypto';
 import {
@@ -93,6 +93,84 @@ async function kcSetVerification(token: string, userId: string, verified: boolea
   });
   if (!res.ok) throw new Error(`Keycloak admin PUT user failed: ${res.status} ${await res.text()}`);
 }
+
+/** Delete a Keycloak user by username, if it exists. Confirmed live (see
+ * task-6-report.md fix-up) that deleting the Keycloak user cascades to the
+ * writable LDAP federation's entry too -- a single admin-REST DELETE cleans
+ * up both stores, no separate LDAP delete needed. */
+async function kcDeleteUserByUsername(token: string, username: string): Promise<void> {
+  const user = await kcGetUserByUsername(token, username);
+  if (!user) return; // already gone -- not an error
+  const res = await fetch(`${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/users/${user.id}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`Keycloak admin DELETE user ${username} failed: ${res.status} ${await res.text()}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Account cleanup -- REGISTER-created accounts never reach X3 (the
+// CMD_ACCOUNT broadcast on registration is MyConnect-filtered to local
+// channel members, so an account minted by a pre-registration REGISTER on
+// an otherwise-channelless connection never crosses into X3's SEARCH index).
+// scripts/cleanup-tests.ts's AuthServ SEARCH/OUNREGISTER sweep therefore can
+// never see these accounts -- this suite must delete everything it creates
+// itself, or every run leaks Keycloak users (and their cascaded LDAP
+// entries) forever.
+//
+// Every call site that confirms an account was actually created (REGISTER
+// SUCCESS or REGISTER VERIFICATION_REQUIRED) must call trackCreatedAccount()
+// immediately after that confirmation. Tests whose account is rejected
+// before creation (BAD_ACCOUNT_NAME, WEAK_PASSWORD, INVALID_EMAIL, the
+// blocked half of the pipelined-REGISTER guard, the losing half of the
+// duplicate-name race) must NOT track -- there is nothing in Keycloak to
+// delete, and kcDeleteUserByUsername() no-ops on a missing user anyway, but
+// tracking only real creates keeps the afterAll's account count honest.
+// ---------------------------------------------------------------------------
+
+const mintedAccounts = new Set<string>();
+
+function trackCreatedAccount(acct: string): string {
+  mintedAccounts.add(acct);
+  return acct;
+}
+
+afterAll(async () => {
+  if (mintedAccounts.size === 0) return;
+
+  let token: string;
+  try {
+    token = await getKeycloakAdminToken();
+  } catch (err) {
+    // Best-effort: a cleanup failure must never fail an otherwise-passing
+    // suite. Log loudly so the leak is visible, but don't throw.
+    console.warn(
+      `account-registration cleanup: could not get a Keycloak admin token -- ` +
+        `${mintedAccounts.size} account(s) left behind: ${[...mintedAccounts].join(', ')}`,
+      err
+    );
+    return;
+  }
+
+  const accounts = [...mintedAccounts];
+  const results = await Promise.allSettled(accounts.map(acct => kcDeleteUserByUsername(token, acct)));
+
+  const failures = results
+    .map((r, i) => ({ r, acct: accounts[i] }))
+    .filter((x): x is { r: PromiseRejectedResult; acct: string } => x.r.status === 'rejected');
+
+  if (failures.length > 0) {
+    console.warn(
+      `account-registration cleanup: ${failures.length}/${accounts.length} account(s) failed to delete ` +
+        `(left behind in Keycloak/LDAP, re-run scripts/cleanup-tests.ts or delete manually):`
+    );
+    for (const { acct, r } of failures) console.warn(`  - ${acct}: ${(r as PromiseRejectedResult).reason}`);
+  } else {
+    console.log(`account-registration cleanup: deleted ${accounts.length} test account(s) from Keycloak/LDAP.`);
+  }
+});
 
 /** Poll until a Keycloak user with `username` exists (REGISTER's Keycloak
  * create is normally synchronous with the REGISTER SUCCESS reply, but this
@@ -298,6 +376,7 @@ describe('IRCv3 draft/account-registration (verification off — nefarious)', ()
         msg => msg.command === 'REGISTER' && msg.params[0] === 'SUCCESS',
         15000
       );
+      trackCreatedAccount(acct);
       expect(reply.params[1]).toBe(acct);
 
       // Keycloak state: user exists, scram_sha256_* attributes seeded.
@@ -348,6 +427,7 @@ describe('IRCv3 draft/account-registration (verification off — nefarious)', ()
     try {
       client1.send(`REGISTER ${acct} * ${PASSWORD}`);
       await client1.waitForParsedLine(msg => msg.command === 'REGISTER' && msg.params[0] === 'SUCCESS', 15000);
+      trackCreatedAccount(acct);
 
       client2.send(`REGISTER ${acct} * differentpw123`);
       const fail = await client2.waitForFail('REGISTER', 'ACCOUNT_EXISTS', 15000);
@@ -415,6 +495,7 @@ describe('IRCv3 draft/account-registration (verification off — nefarious)', ()
         msg => msg.command === 'REGISTER' && msg.params[0] === 'SUCCESS' && msg.params[1] === acct1,
         15000
       );
+      trackCreatedAccount(acct1);
     } finally {
       await quitAndClose(client);
     }
@@ -431,6 +512,7 @@ describe('IRCv3 draft/account-registration (verification off — nefarious)', ()
         msg => msg.command === 'REGISTER' && msg.params[0] === 'SUCCESS',
         15000
       );
+      trackCreatedAccount(acct);
       expect(reply.params[1]).toBe(acct);
 
       // Now finish connection registration. register_complete_success()
@@ -518,6 +600,7 @@ describe('IRCv3 draft/account-registration (verification on — nefarious2)', ()
           msg => msg.command === 'REGISTER' && msg.params[0] === 'VERIFICATION_REQUIRED',
           15000
         );
+        trackCreatedAccount(acct);
         expect(reply.params[1]).toBe(acct);
 
         const token = await getKeycloakAdminToken();
@@ -540,6 +623,7 @@ describe('IRCv3 draft/account-registration (verification on — nefarious2)', ()
         msg => msg.command === 'REGISTER' && msg.params[0] === 'VERIFICATION_REQUIRED',
         15000
       );
+      trackCreatedAccount(acct);
     } finally {
       await quitAndClose(regClient);
     }
