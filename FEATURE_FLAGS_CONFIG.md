@@ -51,12 +51,25 @@ Feature flags are configured in the `features {}` block of the IRCd config file.
 | `FEAT_CAP_chathistory` | TRUE | Enable `draft/chathistory` capability |
 | `FEAT_CAP_event_playback` | TRUE | Enable `draft/event-playback` capability |
 | `FEAT_CAP_message_redaction` | TRUE | Enable `draft/message-redaction` capability |
-| `FEAT_CAP_account_registration` | TRUE | Enable `draft/account-registration` capability |
+| `FEAT_CAP_draft_account_registration` | TRUE | Enable `draft/account-registration` capability |
 | `FEAT_REGISTER_SERVER` | "*" | Target server for REGISTER command routing (use `*` for auto-detect services) |
 | `FEAT_CAP_read_marker` | TRUE | Enable `draft/read-marker` capability |
 | `FEAT_CAP_channel_rename` | TRUE | Enable `draft/channel-rename` capability |
 | `FEAT_CAP_metadata` | TRUE | Enable `draft/metadata-2` capability |
 | `FEAT_CAP_webpush` | TRUE | Enable `draft/webpush` capability |
+
+### Account Registration Configuration (Nefarious, native REGISTER)
+
+Governs the native `draft/account-registration` REGISTER/VERIFY commands (distinct from the X3 AuthServ REGISTER flow documented under X3 Services Configuration below). Canonical reference: `nefarious/doc/readme.features`.
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `FEAT_REGISTER_VERIFY_EMAIL` | FALSE | Require e-mail verification before a REGISTER-created account is usable. When enabled, REGISTER creates the Keycloak account unverified and replies `REGISTER VERIFICATION_REQUIRED` instead of logging the client in; the CAP 302 value gains an `email-required` token. |
+| `FEAT_REGISTER_THROTTLE_LIMIT` | 3 | Max counted REGISTER attempts per client IP (per /64 for IPv6) within `REGISTER_THROTTLE_PERIOD`. Attempts are counted regardless of outcome (a duplicate-name refusal still counts), so name enumeration is rate-limited too. `0` disables the per-IP limiter. |
+| `FEAT_REGISTER_THROTTLE_PERIOD` | 3600 | Window, in seconds, shared by both the per-IP and global limiters. `0` disables both. |
+| `FEAT_REGISTER_THROTTLE_GLOBAL` | 60 | Server-wide cap on counted REGISTER attempts per `REGISTER_THROTTLE_PERIOD`, independent of source IP -- the backstop against a botnet spread across many addresses. Per-server, not per-network. `0` disables the global limiter. |
+
+A throttled client gets `FAIL REGISTER RATE_LIMITED`; IRC operators bypass the throttle entirely.
 
 ### Multiline Configuration
 
@@ -355,7 +368,7 @@ features {
     "CAP_multiline" = "TRUE";
     "CAP_chathistory" = "TRUE";
     "CAP_message_redaction" = "TRUE";
-    "CAP_account_registration" = "TRUE";
+    "CAP_draft_account_registration" = "TRUE";
     "CAP_read_marker" = "TRUE";
     "CAP_channel_rename" = "TRUE";
     "CAP_metadata" = "TRUE";
@@ -386,7 +399,7 @@ features {
     "AWAY_THROTTLE" = "0";             # Seconds between AWAY changes (0 = disabled)
 
     # Account Registration
-    "CAP_account_registration" = "TRUE";
+    "CAP_draft_account_registration" = "TRUE";
     "REGISTER_SERVER" = "*";           # Services server for REGISTER (* = auto-detect)
 };
 ```

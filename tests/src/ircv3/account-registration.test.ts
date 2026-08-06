@@ -740,6 +740,17 @@ async function createOperOn(server: ServerConfig, caps: string[] = []): Promise<
   return client;
 }
 
+// NOTE: this describe block (and the CAP-notify block further down) mutate
+// PRIMARY server state at runtime via SET REGISTER_THROTTLE_* -- they are
+// not scoped to a fixture or isolated server instance. Vitest runs test
+// FILES in parallel by default, so a hypothetical full-suite run could have
+// another file's REGISTER calls against PRIMARY land while these throttle
+// values are pinned to tight test limits (e.g. sasl.test.ts expecting
+// REGISTER to SUCCEED could instead observe RATE_LIMITED). This is accepted
+// because the project norm is targeted single-file runs -- CLAUDE.md already
+// forbids running the full suite (`npm test` with no filter) for unrelated
+// performance reasons, and that same rule happens to keep this hazard from
+// ever firing in practice.
 describe('REGISTER throttling (cross-connection)', () => {
   let oper: RawSocketClient;
   let seededAccount: string;
@@ -790,12 +801,18 @@ describe('REGISTER throttling (cross-connection)', () => {
   }, 30000);
 
   it('per-IP limit refuses the N+1th attempt and recovers after the window', async () => {
-    await setFeature('REGISTER_THROTTLE_PERIOD', '3');
+    // Each attemptRegister() here waits out a real async ACCOUNT_EXISTS
+    // resolution against Keycloak before the reply arrives, so a 3s period
+    // is too tight for the three round trips below plus the post-window
+    // recheck -- if any pair spans >3s the sliding window (re-anchored to
+    // e->last on every counted attempt) expires early and the test flakes.
+    // Match the global test below: give it real slack.
+    await setFeature('REGISTER_THROTTLE_PERIOD', '15');
     await setFeature('REGISTER_THROTTLE_LIMIT', '2');
     expect(await attemptRegister(seededAccount)).toBe('ACCOUNT_EXISTS'); // counted
     expect(await attemptRegister(seededAccount)).toBe('ACCOUNT_EXISTS'); // counted
     expect(await attemptRegister(seededAccount)).toBe('RATE_LIMITED');   // refused
-    await new Promise(r => setTimeout(r, 3500));                          // window elapses
+    await new Promise(r => setTimeout(r, 15500));                        // window elapses
     expect(await attemptRegister(seededAccount)).toBe('ACCOUNT_EXISTS'); // fresh budget
     await setFeature('REGISTER_THROTTLE_LIMIT', '0');
   }, 60000);
