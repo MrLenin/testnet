@@ -310,6 +310,20 @@ async function cleanup(): Promise<void> {
       'noemail*',    // account-registration tests
       'afterauth*',  // account-registration tests
       'duptest*',    // account-registration tests
+      // account-registration prefixes below were missing until 2026-08-06 —
+      // 'gate'/'prereg' accounts complete SASL registration and burst, so X3
+      // ldap_autocreates a handle the old pattern list never swept (the
+      // hardening Part-4 measurement caught ~13 stale handles).  The rest of
+      // the file's prefixes are included too: an unmatched SEARCH is one
+      // cheap AuthServ query, and prefixes have bitten us silently before.
+      'gate*',       // X3-recognition legs (fully-registered SASL burst)
+      'prereg*',     // before-connect REGISTER legs
+      'par*',        // SCRAM required-action parity legs
+      'thr*',        // REGISTER throttle legs
+      'pipe*',       // pipelined-REGISTER guard legs
+      'prn*',        // misc account-registration legs
+      'regv*',       // verification-on legs
+      'wpw*',        // weak-password legs
       'unreg*',      // keycloak tests
       'synerr*',     // keycloak tests
       'clvl*',       // keycloak tests
