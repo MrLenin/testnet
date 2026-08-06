@@ -66,13 +66,15 @@ if [ "$REALM_EXISTS" = "200" ]; then
   # Token lifetimes set at realm level — IRC sessions are long-lived.
   # Per-client overrides only work if SHORTER than realm, so realm must
   # be the ceiling. x3-services gets an explicit shorter override below.
-  # passwordPolicy: the x3Scram provider (keycloak-webhook-spi
+  # passwordPolicy: the scramSha256 provider (keycloak-webhook-spi
   # ScramPasswordPolicyProvider) derives scram_sha256_* attributes on
   # web-flow password changes.  Value read from the live realm 2026-08-06;
   # it was previously attached by hand in the UI and silently lost on any
-  # realm recreate.  When the SPI provider ID is renamed (scramSha256),
-  # update BOTH bodies -- Keycloak refuses a policy string naming a
-  # provider that is not loaded.
+  # realm recreate.  Provider was renamed from x3Scram -> scramSha256
+  # 2026-08-06 (coordinated live cutover via a transitional dual-ID SPI
+  # deploy); if the SPI provider ID is renamed again, update BOTH bodies
+  # -- Keycloak refuses a policy string naming a provider that is not
+  # loaded, and validates this at server boot, not just on write.
   curl -s -X PUT "$KEYCLOAK_URL/admin/realms/$REALM_NAME" \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
@@ -94,7 +96,7 @@ if [ "$REALM_EXISTS" = "200" ]; then
       "maxDeltaTimeSeconds": 43200,
       "failureFactor": 30,
       "requiredActions": [],
-      "passwordPolicy": "x3Scram",
+      "passwordPolicy": "scramSha256",
       "accessTokenLifespan": 604800,
       "ssoSessionIdleTimeout": 2592000,
       "ssoSessionMaxLifespan": 2592000,
@@ -126,7 +128,7 @@ else
       "maxDeltaTimeSeconds": 43200,
       "failureFactor": 30,
       "requiredActions": [],
-      "passwordPolicy": "x3Scram",
+      "passwordPolicy": "scramSha256",
       "accessTokenLifespan": 604800,
       "ssoSessionIdleTimeout": 2592000,
       "ssoSessionMaxLifespan": 2592000,
