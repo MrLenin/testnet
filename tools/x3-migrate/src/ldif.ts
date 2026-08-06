@@ -28,7 +28,7 @@ export interface LdapAccount {
 export function parseLdif(text: string): LdifEntry[] {
   const lines = text.split('\n');
   const entries: LdifEntry[] = [];
-  let currentEntry: Map<string, string[]> | null = null;
+  let currentEntry: Map<string, string[]> = new Map();
   let currentDn: string | null = null;
   let i = 0;
 
@@ -37,18 +37,27 @@ export function parseLdif(text: string): LdifEntry[] {
     i = 1;
   }
 
+  // Helper to add an attribute value to the current entry
+  function addAttr(name: string, value: string) {
+    const attrName = name.toLowerCase();
+    if (!currentEntry.has(attrName)) {
+      currentEntry.set(attrName, []);
+    }
+    currentEntry.get(attrName)!.push(value);
+  }
+
   while (i < lines.length) {
     const line = lines[i];
     i++;
 
     // Skip blank lines between entries
     if (line.trim() === '') {
-      if (currentEntry !== null && currentDn !== null) {
+      if (currentDn !== null) {
         entries.push({
           dn: currentDn,
           attrs: currentEntry,
         });
-        currentEntry = null;
+        currentEntry = new Map();
         currentDn = null;
       }
       continue;
@@ -89,27 +98,13 @@ export function parseLdif(text: string): LdifEntry[] {
       if (name.toLowerCase() === 'dn') {
         currentDn = decodedValue;
       } else {
-        if (currentEntry === null) {
-          currentEntry = new Map();
-        }
-        const attrName = name.toLowerCase();
-        if (!currentEntry.has(attrName)) {
-          currentEntry.set(attrName, []);
-        }
-        currentEntry.get(attrName)!.push(decodedValue);
+        addAttr(name, decodedValue);
       }
     } else if (rest.startsWith('<')) {
       // URL reference (unsupported, keep raw with url: prefix)
       const urlValue = 'url:' + rest.substring(1).trim();
       if (name.toLowerCase() !== 'dn') {
-        if (currentEntry === null) {
-          currentEntry = new Map();
-        }
-        const attrName = name.toLowerCase();
-        if (!currentEntry.has(attrName)) {
-          currentEntry.set(attrName, []);
-        }
-        currentEntry.get(attrName)!.push(urlValue);
+        addAttr(name, urlValue);
       }
     } else {
       // Regular value: name: value
@@ -118,20 +113,13 @@ export function parseLdif(text: string): LdifEntry[] {
       if (name.toLowerCase() === 'dn') {
         currentDn = value;
       } else {
-        if (currentEntry === null) {
-          currentEntry = new Map();
-        }
-        const attrName = name.toLowerCase();
-        if (!currentEntry.has(attrName)) {
-          currentEntry.set(attrName, []);
-        }
-        currentEntry.get(attrName)!.push(value);
+        addAttr(name, value);
       }
     }
   }
 
   // Don't forget the last entry if file doesn't end with blank line
-  if (currentEntry !== null && currentDn !== null) {
+  if (currentDn !== null) {
     entries.push({
       dn: currentDn,
       attrs: currentEntry,

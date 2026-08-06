@@ -37,6 +37,37 @@ describe('parseLdif', () => {
     const e = parseLdif('dn: x\na: 1\na: 2\n')[0]!;
     expect(e.attrs.get('a')).toEqual(['1', '2']);
   });
+  it('preserves dn-only entries with empty attrs', () => {
+    const entries = parseLdif([
+      'dn: uid=first,dc=example,dc=net',
+      'uid: first',
+      '',
+      'dn: cn=onlydn,dc=example,dc=net',
+      '',
+      'dn: uid=third,dc=example,dc=net',
+      'uid: third',
+      '',
+    ].join('\n'));
+    expect(entries).toHaveLength(3);
+    expect(entries[1]!.dn).toBe('cn=onlydn,dc=example,dc=net');
+    expect(entries[1]!.attrs.size).toBe(0);
+  });
+  it('unfolds folded base64 values by concatenating continuation lines', () => {
+    const entries = parseLdif([
+      'dn: x',
+      'data:: Zm9v',
+      ' YmFy',
+      '',
+    ].join('\n'));
+    // "Zm9v" + "YmFy" = "Zm9vYmFy" which decodes to "foobar"
+    expect(entries[0]!.attrs.get('data')).toEqual(['foobar']);
+  });
+  it('decodes base64 DN (dn::)', () => {
+    // "uid=alice,dc=example" in base64
+    const b64Dn = Buffer.from('uid=alice,dc=example').toString('base64');
+    const entries = parseLdif(`dn:: ${b64Dn}\nuid: alice\n`);
+    expect(entries[0]!.dn).toBe('uid=alice,dc=example');
+  });
 });
 
 describe('ldapAccounts', () => {
