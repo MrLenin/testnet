@@ -80,6 +80,14 @@ describe('comments and whitespace', () => {
   it('tolerates an unterminated block comment at EOF', () => {
     expect(ogetStr(root('"k" "v"; /* dangling'), 'k')).toBe('v');
   });
+  it('does not close a block comment early on an internal */ inside a run of stars', () => {
+    // A discarded '*' is never re-examined as a fresh star candidate (recdb.c:346-354):
+    // the comment only closes at the SECOND '*/', consuming the whole 'a**/b*/' body.
+    expect(ogetStr(root('/*a**/b*/"k" "v";'), 'k')).toBe('v');
+  });
+  it('closes a block comment ending in a run of stars then a slash (***/ )', () => {
+    expect(ogetStr(root('/*a***/"k" "v";'), 'k')).toBe('v');
+  });
 });
 
 describe('EOF and errors', () => {

@@ -28,6 +28,18 @@ function isHexDigit(c: string): boolean {
 export function parseDb(text: string): ParseResult {
   const diagnostics: ParseDiagnostic[] = [];
 
+  // Per-object set of already-seen folded keys, so duplicate-key detection is
+  // O(1) amortized per insertion rather than an O(n) scan of target.entries
+  // (which would make a flat object with n keys cost O(n^2) overall — real
+  // x3.db objects can be thousands of keys wide). Scoped to this parseDb
+  // call; not exposed, so it's GC'd with the closure once parsing finishes.
+  const foldedKeysByObject = new Map<RObject, Set<string>>();
+  function foldedKeysFor(target: RObject): Set<string> {
+    let seen = foldedKeysByObject.get(target);
+    if (!seen) { seen = new Set(); foldedKeysByObject.set(target, seen); }
+    return seen;
+  }
+
   // --- cursor state -------------------------------------------------
   let pos = 0, line = 1, col = 1;
 
@@ -67,14 +79,26 @@ export function parseDb(text: string): ParseResult {
       const mark = here();
       const d = advance();
       if (d === '*') {
-        // block comment: consume up to '*/', or silently to EOF.
+        // Block comment: consume up to '*/', or silently to EOF.
+        //
+        // Mirrors x3/src/recdb.c's parse_skip_ws literally (recdb.c:346-354):
+        // an outer loop repeatedly (a) consumes chars until a '*' is seen, then
+        // (b) unconditionally consumes the NEXT char and tests it for '/'. If
+        // that char is not '/', it is discarded outright — even if it is
+        // itself '*' — and the star-search resumes from the char after it.
+        // A discarded '*' is never re-examined as a fresh candidate, so a run
+        // like '**/' only closes at the star immediately preceding the '/',
+        // and 'a**/b*/' does not close until the SECOND '*/' (the middle '*'
+        // gets consumed-and-discarded by the '/' test, not re-tried as a star).
         for (;;) {
-          if (atEnd()) return undefined;
-          const e = advance();
-          if (e === '*') {
+          // inner: consume until '*' or EOF
+          for (;;) {
             if (atEnd()) return undefined;
-            if (peek() === '/') { advance(); break; }
+            if (advance() === '*') break;
           }
+          if (atEnd()) return undefined;
+          if (advance() === '/') break; // closes the block comment
+          // else: this char is discarded, even if it was itself '*'.
         }
         continue;
       } else if (d === '/') {
@@ -251,13 +275,11 @@ export function parseDb(text: string): ParseResult {
     }
 
     const wantFold = ircFold(name);
-    let isDup = false;
-    for (const k of target.entries.keys()) {
-      if (ircFold(k) === wantFold) { isDup = true; break; }
-    }
-    if (isDup) {
+    const seenFolds = foldedKeysFor(target);
+    if (seenFolds.has(wantFold)) {
       diagnostics.push({ line: nameMark.line, col: nameMark.col, kind: 'duplicate-key', detail: `duplicate key "${name}"` });
     }
+    seenFolds.add(wantFold);
     target.entries.set(name, value);
     return true;
   }
