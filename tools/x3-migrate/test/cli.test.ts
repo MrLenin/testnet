@@ -19,10 +19,16 @@ const CLEAN_DB = join(dir, 'clean.db');
 const DIRTY_DB = join(dir, 'dirty.db');
 const BAD_DB = join(dir, 'bad.db');
 const LDIF = join(dir, 'x.ldif');
+const SECTION_GOOD = join(dir, 'section-good.db');
+const SECTION_BAD = join(dir, 'section-bad.db');
+const SECTION_DUP = join(dir, 'section-dup.db');
 writeFileSync(CLEAN_DB, '"NickServ" { "u1" { "passwd" "0123456789abcdef0123456789abcdef"; }; };\n');
 writeFileSync(DIRTY_DB, '"NickServ" { "u1" { "passwd" "junk"; }; };\n');
 writeFileSync(BAD_DB, '"NickServ" { broken\n');
 writeFileSync(LDIF, 'dn: uid=u1,ou=u,dc=x\nuid: u1\nuserPassword: {SSHA}h\n');
+writeFileSync(SECTION_GOOD, '"u1" { "passwd" "0123456789abcdef0123456789abcdef"; };\n');
+writeFileSync(SECTION_BAD, '"u2" { broken\n');
+writeFileSync(SECTION_DUP, '"u1" { "passwd" "0123456789abcdef0123456789abcdef"; }; "u1" { "passwd" "0123456789abcdef0123456789abcdef"; };\n');
 
 describe('census subcommand', () => {
   it('exit 0 and GO on a clean db+ldif', () => {
@@ -58,6 +64,18 @@ describe('census subcommand', () => {
     const r = run(['census', '--section', 'NickServ=' + NS, '--ldif', LDIF]);
     expect(r.code).toBe(0);
     expect(r.stdout).toContain('GO');
+  });
+  it('a parse failure in the SECOND --section file exits 1 with location', () => {
+    const r = run(['census', '--section', 'NickServ=' + SECTION_GOOD, '--section', 'ChanServ=' + SECTION_BAD]);
+    expect(r.code).toBe(1);
+    expect(r.stdout).toMatch(/line|:\d+/i);
+  });
+  it('a per-file parser diagnostic survives the --section merge into anomalies', () => {
+    const out = join(dir, 'dup.json');
+    const r = run(['census', '--section', 'NickServ=' + SECTION_DUP, '--json', out]);
+    expect(r.code).toBe(2);
+    const j = JSON.parse(readFileSync(out, 'utf8'));
+    expect(j.anomalies.some((a: string) => a.includes('duplicate-key'))).toBe(true);
   });
 });
 
