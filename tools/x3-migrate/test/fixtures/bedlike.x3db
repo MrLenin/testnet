@@ -1,0 +1,55 @@
+"gline" {
+};
+
+"shun" {
+};
+
+"sendmail" {
+"prohibited" { };
+};
+
+"OpServ" {
+"routingplan_options" {
+"KARMA_TIMER" "1700000000";
+};
+"max_clients" { "max" "26"; "time" "1700000001"; };
+};
+
+"NickServ" {
+"alice" {
+"passwd" "0123456789abcdef0123456789abcdef";
+"registered" "1600000000";
+"lastseen" "1700000000";
+"flags" "";
+};
+"bob" {
+"passwd" "$a1b2c3d4FEDCBA9876543210FEDCBA9876543210";
+"registered" "1500000000";
+"lastseen" "1500000100";
+};
+"carol[away]" {
+"passwd" "not-a-hash";
+"registered" "1400000000";
+};
+};
+
+"ChanServ" {
+"#test" {
+"registered" "1600000500";
+"owner" "alice";
+"users" {
+"alice" { "level" "500"; "seen" "1700000000"; };
+"BOB" { "level" "200"; "seen" "1650000000"; };
+"ghost" { "level" "100"; "seen" "1400000000"; };
+};
+"bans" {
+"*!*@spam.example" { "owner" "alice"; "reason" "spam"; "expires" "0"; };
+};
+};
+};
+
+"modcmd" {
+"bots" {
+"OpServ" { "aliases" ("op", "deop"); };
+};
+};
