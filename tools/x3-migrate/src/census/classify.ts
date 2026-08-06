@@ -72,12 +72,23 @@ export function activityBucket(lastseenEpochStr: string | undefined, now: number
  * by silently reclassifying the account as 'neither' (which would hide it
  * from credential-migration planning).
  */
-export function classifyAccounts(nickserv: RObject, ldap: LdapAccount[] | null, now: number): AccountCensus[] {
+export function classifyAccounts(
+  nickserv: RObject,
+  ldap: LdapAccount[] | null,
+  now: number,
+): { accounts: AccountCensus[]; anomalies: string[] } {
   const ldapFolds = ldap === null ? null : new Set(ldap.map(a => ircFold(a.uid)));
 
   const out: AccountCensus[] = [];
+  const sectionAnomalies: string[] = [];
   for (const [handle, value] of nickserv.entries) {
-    if (value.kind !== 'object') continue;
+    if (value.kind !== 'object') {
+      // Every NickServ-section entry whose value isn't an object is surfaced,
+      // never silently skipped — the "zero unexplained records" rule. It is
+      // NOT counted as an account (counting semantics unchanged).
+      sectionAnomalies.push(`NickServ: record "${handle}" is a ${value.kind}, not an object — not counted`);
+      continue;
+    }
     const passwd = ogetStr(value, 'passwd');
     const lastseen = ogetStr(value, 'lastseen');
 
@@ -105,5 +116,5 @@ export function classifyAccounts(nickserv: RObject, ldap: LdapAccount[] | null, 
 
     out.push({ handle, credState, hashFormat, activity, anomalies });
   }
-  return out;
+  return { accounts: out, anomalies: sectionAnomalies };
 }

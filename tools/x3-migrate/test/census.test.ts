@@ -49,15 +49,22 @@ describe('classifyAccounts (fixture world)', () => {
     const ldap = ldapAccounts(parseLdif(
       'dn: uid=alice,ou=users,dc=x\nuid: alice\nuserPassword: {SSHA}h\n\n' +
       'dn: uid=zoe,ou=users,dc=x\nuid: zoe\nuserPassword: {SSHA}h\n'));
-    const c = classifyAccounts(ns, ldap, NOW);
+    const { accounts: c } = classifyAccounts(ns, ldap, NOW);
     const by = Object.fromEntries(c.map(a => [a.handle, a]));
     expect(by['alice']!.credState).toBe('both');            // hash + LDAP
     expect(by['bob']!.credState).toBe('local-hash-only');
     expect(by['carol[away]']!.credState).toBe('local-hash-only'); // malformed still counts as local cred material
   });
   it('without an LDIF: two-way split only', () => {
-    const c = classifyAccounts(ns, null, NOW);
+    const { accounts: c } = classifyAccounts(ns, null, NOW);
     expect(new Set(c.map(a => a.credState))).toEqual(new Set(['local-hash-only']));
+  });
+  it('a non-object NickServ entry is surfaced as an anomaly, not silently skipped, and is not counted', () => {
+    const db = parseDb('"NickServ" { "bob" ("list", "not", "object"); "alice" { "passwd" "0123456789abcdef0123456789abcdef"; }; };');
+    const world = ogetObj(db.root, 'NickServ')!;
+    const { accounts, anomalies } = classifyAccounts(world, null, NOW);
+    expect(accounts.map(a => a.handle)).toEqual(['alice']);
+    expect(anomalies).toContain('NickServ: record "bob" is a list, not an object — not counted');
   });
 });
 
@@ -81,8 +88,19 @@ describe('buildReport (fixture world)', () => {
   it('finds the dangling users-key ref', () => {
     expect(r.danglingRefs).toContainEqual({ kind: 'users-key', channel: '#test', name: 'ghost' });
   });
-  it('matches owner refs case-insensitively (no false dangling)', () => {
-    expect(r.danglingRefs.filter(d => d.kind === 'owner')).toHaveLength(0);
+  it('matches registrar refs case-insensitively (no false dangling)', () => {
+    // fixture's #test carries "registrar" "alice", which resolves against the
+    // "alice" handle — chanserv.c never writes a channel-level "owner".
+    expect(r.danglingRefs.filter(d => d.kind === 'registrar')).toHaveLength(0);
+  });
+  it('finds a dangling registrar ref', () => {
+    const db = parseDb(
+      '"NickServ" { "alice" { "passwd" "0123456789abcdef0123456789abcdef"; }; };' +
+      '"ChanServ" { "channels" { "#orphan" { "registrar" "nosuchhandle"; }; }; };',
+    );
+    const r2 = buildReport(db, null, NOW);
+    expect(r2.danglingRefs).toContainEqual({ kind: 'registrar', channel: '#orphan', name: 'nosuchhandle' });
+    expect(r2.clean).toBe(false);
   });
   it('is not clean (dangling ref + malformed hash present)', () => {
     expect(r.clean).toBe(false);
@@ -97,6 +115,37 @@ describe('buildReport (fixture world)', () => {
     const text = renderReport(r);
     expect(text).toMatch(/NO-GO|GO/);
     expect(text).toContain('local-hash-only');
+  });
+});
+
+describe('non-object records are surfaced, never silently dropped (zero-unexplained-records rule)', () => {
+  it('a non-object NickServ record is an anomaly and is not counted as an account', () => {
+    const db = parseDb('"NickServ" { "bob" ("a", "list"); "alice" { "passwd" "0123456789abcdef0123456789abcdef"; }; };');
+    const r = buildReport(db, null, NOW);
+    expect(r.anomalies).toContain('NickServ: record "bob" is a list, not an object — not counted');
+    expect(r.accounts.total).toBe(1);
+    expect(r.clean).toBe(false);
+  });
+  it('a non-object ChanServ.channels record is an anomaly and is not counted as a channel', () => {
+    const db = parseDb('"ChanServ" { "channels" { "#ghost" "a string, not an object"; }; };');
+    const r = buildReport(db, null, NOW);
+    expect(r.anomalies).toContain('ChanServ.channels: record "#ghost" is a string, not an object — not counted');
+    expect(r.chanserv.channels).toBe(0);
+    expect(r.clean).toBe(false);
+  });
+  it('a non-object ban record is an anomaly and is not counted as a ban', () => {
+    const db = parseDb('"ChanServ" { "channels" { "#test" { "bans" { "*!*@x" ("not", "an", "object"); }; }; }; };');
+    const r = buildReport(db, null, NOW);
+    expect(r.anomalies).toContain('ChanServ.channels.#test.bans: record "*!*@x" is a list, not an object — not counted');
+    expect(r.chanserv.banRecords).toBe(0);
+    expect(r.clean).toBe(false);
+  });
+  it('a non-object users VALUE is still counted as a user record but flagged as an anomaly', () => {
+    const db = parseDb('"ChanServ" { "channels" { "#test" { "users" { "someone" "not-an-object"; }; }; }; };');
+    const r = buildReport(db, null, NOW);
+    expect(r.anomalies).toContain('ChanServ.channels.#test.users: record "someone" is a string, not an object — counted as a user record');
+    expect(r.chanserv.userRecords).toBe(1); // keys still count regardless of value kind
+    expect(r.clean).toBe(false);
   });
 });
 

@@ -14,7 +14,7 @@ export interface CensusReport {
     activityByCredState: Record<CredState, Record<ActivityBucket, number>>;
   };
   chanserv: { channels: number; userRecords: number; banRecords: number };
-  danglingRefs: { kind: 'owner' | 'users-key' | 'ban-owner' | 'ldap-only-uid'; channel?: string; name: string }[];
+  danglingRefs: { kind: 'registrar' | 'users-key' | 'ban-owner' | 'ldap-only-uid'; channel?: string; name: string }[];
   anomalies: string[]; // flat, human-readable, includes parser diagnostics
   clean: boolean; // danglingRefs empty AND anomalies empty
 }
@@ -48,7 +48,8 @@ export function buildReport(parse: ParseResult, ldap: LdapAccount[] | null, now:
 
   // -- accounts --
   const nickserv = ogetObj(root, 'NickServ') ?? { kind: 'object', entries: new Map() } as RObject;
-  const accounts: AccountCensus[] = classifyAccounts(nickserv, ldap, now);
+  const { accounts, anomalies: nickservAnomalies } = classifyAccounts(nickserv, ldap, now);
+  for (const msg of nickservAnomalies) anomalies.push(msg);
 
   const byCredState = zeroRecord(CRED_STATES);
   const byHashFormat = zeroRecord(HASH_FORMATS);
@@ -74,18 +75,35 @@ export function buildReport(parse: ParseResult, ldap: LdapAccount[] | null, now:
   const channelsSection = chanserv ? ogetObj(chanserv, 'channels') : undefined;
   if (channelsSection) {
     for (const [chanName, chanValue] of channelsSection.entries) {
-      if (chanValue.kind !== 'object') continue;
+      if (chanValue.kind !== 'object') {
+        anomalies.push(
+          `ChanServ.channels: record "${chanName}" is a ${chanValue.kind}, not an object — not counted`,
+        );
+        continue;
+      }
       channels++;
 
-      const owner = ogetStr(chanValue, 'owner');
-      if (owner !== undefined && !handleFolds.has(ircFold(owner))) {
-        danglingRefs.push({ kind: 'owner', channel: chanName, name: owner });
+      // chanserv.c never writes a channel-level "owner" — the per-channel
+      // handle ref X3 actually emits is "registrar" (ban records DO carry
+      // "owner", handled separately below).
+      const registrar = ogetStr(chanValue, 'registrar');
+      if (registrar !== undefined && !handleFolds.has(ircFold(registrar))) {
+        danglingRefs.push({ kind: 'registrar', channel: chanName, name: registrar });
       }
 
       const users = ogetObj(chanValue, 'users');
       if (users) {
-        for (const [uname] of users.entries) {
+        for (const [uname, uval] of users.entries) {
+          // Keys ARE the handle names regardless of value shape (schema),
+          // so they still count as user records and still get a dangling
+          // check by key — but a non-object value is surfaced too, since
+          // it's not the object-with-level/seen shape X3 writes.
           userRecords++;
+          if (uval.kind !== 'object') {
+            anomalies.push(
+              `ChanServ.channels.${chanName}.users: record "${uname}" is a ${uval.kind}, not an object — counted as a user record`,
+            );
+          }
           if (!handleFolds.has(ircFold(uname))) {
             danglingRefs.push({ kind: 'users-key', channel: chanName, name: uname });
           }
@@ -94,8 +112,13 @@ export function buildReport(parse: ParseResult, ldap: LdapAccount[] | null, now:
 
       const bans = ogetObj(chanValue, 'bans');
       if (bans) {
-        for (const [, banValue] of bans.entries) {
-          if (banValue.kind !== 'object') continue;
+        for (const [banName, banValue] of bans.entries) {
+          if (banValue.kind !== 'object') {
+            anomalies.push(
+              `ChanServ.channels.${chanName}.bans: record "${banName}" is a ${banValue.kind}, not an object — not counted`,
+            );
+            continue;
+          }
           banRecords++;
           const banOwner = ogetStr(banValue, 'owner');
           if (banOwner !== undefined && !handleFolds.has(ircFold(banOwner))) {

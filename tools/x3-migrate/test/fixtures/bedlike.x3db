@@ -38,7 +38,7 @@
 "channels" {
 "#test" {
 "registered" "1600000500";
-"owner" "alice";
+"registrar" "alice";
 "users" {
 "alice" { "level" "500"; "seen" "1700000000"; };
 "BOB" { "level" "200"; "seen" "1650000000"; };
