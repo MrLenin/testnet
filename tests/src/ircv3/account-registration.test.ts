@@ -48,6 +48,7 @@ import {
   getKeycloakAdminToken,
   authenticateSaslPlain,
   sendSaslPayload,
+  IRC_OPER,
   type ServerConfig,
   type IRCMessage,
 } from '../helpers/index.js';
@@ -720,4 +721,219 @@ describe('IRCv3 draft/account-registration (verification on — nefarious2)', ()
       await quitAndClose(scramClient);
     }
   });
+});
+
+// =============================================================================
+// Task 6: REGISTER throttle, SCRAM-parity regression, CAP-value notification
+// =============================================================================
+
+/** Registered + opered raw connection (file-level helper — the CAP-notify
+ * block reuses it).  connectPreReg leaves CAP negotiation open and never
+ * registers, so this closes negotiation and registers a nick first. */
+async function createOperOn(server: ServerConfig, caps: string[] = []): Promise<RawSocketClient> {
+  const client = await connectPreReg(server, caps);
+  client.capEnd();
+  client.register(`op${uniqueId().slice(0, 6)}`);
+  await client.waitForNumeric('001', 15000);
+  client.send(`OPER ${IRC_OPER.name} ${IRC_OPER.password}`);
+  await client.waitForNumeric('381', 5000);
+  return client;
+}
+
+describe('REGISTER throttling (cross-connection)', () => {
+  let oper: RawSocketClient;
+  let seededAccount: string;
+
+  async function setFeature(name: string, value: string): Promise<void> {
+    oper.send(`SET ${name} ${value}`);
+    // Server confirms with a NOTICE; a brief settle is enough (pattern from
+    // chathistory-strict-presence.test.ts).
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  /** One REGISTER attempt on a fresh pre-reg connection; returns the FAIL
+   * code or 'SUCCESS'. */
+  async function attemptRegister(account: string): Promise<string> {
+    const client = await connectPreReg(PRIMARY_SERVER, ['draft/account-registration']);
+    try {
+      client.send(`REGISTER ${account} * regthrpass1`);
+      const reply = await client.waitForParsedLine(
+        msg =>
+          (msg.command === 'REGISTER' && msg.params[0] === 'SUCCESS') ||
+          (msg.command === 'FAIL' && msg.params[0] === 'REGISTER'),
+        15000
+      );
+      return reply.command === 'FAIL' ? reply.params[1] : 'SUCCESS';
+    } finally {
+      await quitAndClose(client);
+    }
+  }
+
+  beforeAll(async () => {
+    // Seed one real account (tracked for cleanup); all throttle attempts
+    // then reuse its name so they fail ACCOUNT_EXISTS and mint nothing.
+    seededAccount = trackCreatedAccount(uniqueAccount('thr'));
+    const first = await attemptRegister(seededAccount);
+    expect(first).toBe('SUCCESS');
+
+    oper = await createOperOn(PRIMARY_SERVER);
+  }, 60000);
+
+  afterAll(async () => {
+    // Restore the bed's pinned-off state even on failure.
+    if (oper) {
+      await setFeature('REGISTER_THROTTLE_LIMIT', '0');
+      await setFeature('REGISTER_THROTTLE_GLOBAL', '0');
+      await setFeature('REGISTER_THROTTLE_PERIOD', '3600');
+      await quitAndClose(oper);
+    }
+  }, 30000);
+
+  it('per-IP limit refuses the N+1th attempt and recovers after the window', async () => {
+    await setFeature('REGISTER_THROTTLE_PERIOD', '3');
+    await setFeature('REGISTER_THROTTLE_LIMIT', '2');
+    expect(await attemptRegister(seededAccount)).toBe('ACCOUNT_EXISTS'); // counted
+    expect(await attemptRegister(seededAccount)).toBe('ACCOUNT_EXISTS'); // counted
+    expect(await attemptRegister(seededAccount)).toBe('RATE_LIMITED');   // refused
+    await new Promise(r => setTimeout(r, 3500));                          // window elapses
+    expect(await attemptRegister(seededAccount)).toBe('ACCOUNT_EXISTS'); // fresh budget
+    await setFeature('REGISTER_THROTTLE_LIMIT', '0');
+  }, 60000);
+
+  it('global backstop trips independently of the per-IP limiter', async () => {
+    // Unlike the per-IP limiter (a sliding window re-anchored to e->last on
+    // every counted attempt), the global backstop is a FIXED window anchored
+    // to the first attempt (reg_global_start in register_throttle.c) -- it
+    // does not slide, so all N+1 attempts below must land inside one
+    // `period`. Each attemptRegister() here waits out a real async
+    // ACCOUNT_EXISTS resolution against Keycloak before the reply arrives,
+    // so a 3s period (fine for the per-IP test, which refreshes its window
+    // every attempt) is too tight for two full round trips plus a third --
+    // give it real slack.
+    await setFeature('REGISTER_THROTTLE_PERIOD', '15');
+    await setFeature('REGISTER_THROTTLE_GLOBAL', '2');
+    expect(await attemptRegister(seededAccount)).toBe('ACCOUNT_EXISTS');
+    expect(await attemptRegister(seededAccount)).toBe('ACCOUNT_EXISTS');
+    expect(await attemptRegister(seededAccount)).toBe('RATE_LIMITED');
+    await setFeature('REGISTER_THROTTLE_GLOBAL', '0');
+    await new Promise(r => setTimeout(r, 15500));  // let the global window drain
+  }, 60000);
+
+  it('opers bypass the throttle', async () => {
+    await setFeature('REGISTER_THROTTLE_PERIOD', '60');
+    await setFeature('REGISTER_THROTTLE_LIMIT', '1');
+    // The opered connection REGISTERs repeatedly; never RATE_LIMITED.
+    for (let i = 0; i < 3; i++) {
+      oper.send(`REGISTER ${seededAccount} * regthrpass1`);
+      const reply = await oper.waitForParsedLine(
+        msg => msg.command === 'FAIL' && msg.params[0] === 'REGISTER',
+        15000
+      );
+      expect(reply.params[1]).not.toBe('RATE_LIMITED'); // ACCOUNT_EXISTS expected
+    }
+    await setFeature('REGISTER_THROTTLE_LIMIT', '0');
+    await setFeature('REGISTER_THROTTLE_PERIOD', '3600');
+  }, 60000);
+});
+
+describe('SCRAM verification gate: required-action parity', () => {
+  let secondaryReachable = false;
+  const warnUnreachable = () =>
+    console.warn(
+      `Skipping: nefarious2 (${SECONDARY_SERVER.host}:${SECONDARY_SERVER.port}) not reachable. ` +
+        'Run scripts/dc.sh -l up -d, or set IRC_HOST2/IRC_PORT2.'
+    );
+
+  beforeAll(async () => {
+    secondaryReachable = await isSecondaryServerAvailable();
+    if (!secondaryReachable) warnUnreachable();
+  });
+
+  // legacy-shaped: emailVerified=false AND no pending required action.
+  it('legacy-shaped account authenticates via SCRAM with the policy ON', async () => {
+    if (!secondaryReachable) return warnUnreachable();
+    const account = trackCreatedAccount(uniqueAccount('par'));
+    const password = 'paritypass1';
+    const client = await connectPreReg(SECONDARY_SERVER, ['sasl', 'draft/account-registration']);
+    client.send(`REGISTER ${account} ${account}@example.test ${password}`);
+    await client.waitForParsedLine(
+      msg => msg.command === 'REGISTER' && msg.params[0] === 'VERIFICATION_REQUIRED', 15000);
+    await quitAndClose(client);
+
+    const token = await getKeycloakAdminToken();
+    const user = await waitForKcUser(token, account);
+    // Strip the action but leave emailVerified=false: exactly a legacy account.
+    const res = await fetch(`${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/users/${user.id}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ emailVerified: false, requiredActions: [] }),
+    });
+    expect(res.ok).toBe(true);
+
+    // THE regression assertion: SCRAM must succeed (pre-fix it was refused).
+    const scram = await connectPreReg(SECONDARY_SERVER, ['sasl']);
+    const result = await scramSha256Login(scram, account, password);
+    expect(result.success).toBe(true);   // ScramResult { success, numeric, failMsg? }
+    await quitAndClose(scram);
+  }, 60000);
+
+  it('daemon-born unverified account is refused on SCRAM until verified, then allowed', async () => {
+    if (!secondaryReachable) return warnUnreachable();
+    const account = trackCreatedAccount(uniqueAccount('par'));
+    const password = 'paritypass1';
+    const client = await connectPreReg(SECONDARY_SERVER, ['draft/account-registration']);
+    client.send(`REGISTER ${account} ${account}@example.test ${password}`);
+    await client.waitForParsedLine(
+      msg => msg.command === 'REGISTER' && msg.params[0] === 'VERIFICATION_REQUIRED', 15000);
+    await quitAndClose(client);
+
+    const refused = await connectPreReg(SECONDARY_SERVER, ['sasl']);
+    const r1 = await scramSha256Login(refused, account, password);
+    expect(r1.success).toBe(false);      // VERIFICATION_REQUIRED path
+    await quitAndClose(refused);
+
+    const token = await getKeycloakAdminToken();
+    const user = await waitForKcUser(token, account);
+    await kcSetVerification(token, user.id, true);
+
+    const allowed = await connectPreReg(SECONDARY_SERVER, ['sasl']);
+    const r2 = await scramSha256Login(allowed, account, password);
+    expect(r2.success).toBe(true);
+    await quitAndClose(allowed);
+  }, 60000);
+});
+
+describe('CAP value notification on policy flip', () => {
+  it('flipping REGISTER_VERIFY_EMAIL sends CAP NEW with the updated value', async () => {
+    const watcher = await connectPreReg(PRIMARY_SERVER, ['cap-notify']);
+    watcher.capEnd();
+    watcher.register(`capw${uniqueId().slice(0, 5)}`);
+    await watcher.waitForNumeric('001', 15000);
+
+    const oper = await createOperOn(PRIMARY_SERVER);
+
+    try {
+      oper.send('SET REGISTER_VERIFY_EMAIL TRUE');
+      const capNew = await watcher.waitForParsedLine(
+        msg => msg.command === 'CAP' && msg.params[1] === 'NEW'
+            && msg.params[2].includes('draft/account-registration='),
+        10000
+      );
+      expect(capNew.params[2]).toContain('email-required');
+
+      oper.send('SET REGISTER_VERIFY_EMAIL FALSE');
+      const capNew2 = await watcher.waitForParsedLine(
+        msg => msg.command === 'CAP' && msg.params[1] === 'NEW'
+            && msg.params[2].includes('draft/account-registration='),
+        10000
+      );
+      expect(capNew2.params[2]).not.toContain('email-required');
+      expect(capNew2.params[2]).toContain('min-password-length=5');
+    } finally {
+      oper.send('SET REGISTER_VERIFY_EMAIL FALSE');  // restore even on assert failure
+      await new Promise(r => setTimeout(r, 300));
+      await quitAndClose(oper);
+      await quitAndClose(watcher);
+    }
+  }, 60000);
 });
