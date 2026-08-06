@@ -23,10 +23,16 @@ CREATE INDEX IF NOT EXISTS idx_user_attribute_name
 CREATE INDEX IF NOT EXISTS idx_user_attribute_user_name
   ON user_attribute (user_id, name);
 
--- Partial index for SCRAM attributes (queried together during SASL)
+-- Partial index for SCRAM attributes (queried together during SASL).
+-- Covers both prefixes: scram_sha256_* is written at REGISTER time by the
+-- ircd (kc_cred_derive.c) and by the webhook SPI on web-flow password
+-- changes; legacy accounts keep x3_scram_* until their next password
+-- change.  DROP first so re-running the init container upgrades the old
+-- x3_scram_%-only predicate in place (IF NOT EXISTS alone would keep it).
+DROP INDEX IF EXISTS idx_user_attribute_scram;
 CREATE INDEX IF NOT EXISTS idx_user_attribute_scram
   ON user_attribute (user_id, name)
-  WHERE name LIKE 'x3_scram_%';
+  WHERE name LIKE 'scram_sha256_%' OR name LIKE 'x3_scram_%';
 
 -- Value index for fingerprint lookups (SASL EXTERNAL)
 -- Speeds up: "Find user with x509_fingerprints = 'AA:BB:...'"
