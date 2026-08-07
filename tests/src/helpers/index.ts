@@ -146,6 +146,13 @@ export {
 } from './p10-protocol.js';
 
 export {
+  // Service nicknames (configurable in x3.conf -- NOT the conventional names;
+  // ChanServ is "X3" and OpServ is "O3" by entrypoint default). Must be
+  // re-exported here: tests import from this barrel, and a missing name
+  // resolves to undefined at runtime rather than failing to compile.
+  CHANSERV_NICK,
+  OPSERV_NICK,
+  NICKSERV_NICK,
   // X3 service client
   X3Client,
   createX3Client,

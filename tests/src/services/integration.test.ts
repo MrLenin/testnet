@@ -10,6 +10,9 @@
 
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import {
+  CHANSERV_NICK,
+  OPSERV_NICK,
+  NICKSERV_NICK,
   X3Client,
   createX3Client,
   createAuthenticatedX3Client,
@@ -376,19 +379,19 @@ describe('Services Integration', () => {
       await new Promise(r => setTimeout(r, 1500));
 
       // AuthServ
-      const authLines = await client.serviceCmd('AuthServ', 'HELP');
+      const authLines = await client.serviceCmd(NICKSERV_NICK, 'HELP');
       expect(authLines.length, 'AuthServ should respond to HELP').toBeGreaterThan(0);
       expect(authLines.some(l => l.includes('NOTICE')), 'AuthServ should use NOTICE').toBe(true);
       expect(authLines.some(l => /help|command|auth/i.test(l)), 'AuthServ HELP should contain relevant content').toBe(true);
 
       // ChanServ
-      const chanLines = await client.serviceCmd('ChanServ', 'HELP');
+      const chanLines = await client.serviceCmd(CHANSERV_NICK, 'HELP');
       expect(chanLines.length, 'ChanServ should respond to HELP').toBeGreaterThan(0);
       expect(chanLines.some(l => l.includes('NOTICE')), 'ChanServ should use NOTICE').toBe(true);
       expect(chanLines.some(l => /help|command|chan/i.test(l)), 'ChanServ HELP should contain relevant content').toBe(true);
 
       // OpServ (O3)
-      const opLines = await client.serviceCmd('O3', 'HELP');
+      const opLines = await client.serviceCmd(OPSERV_NICK, 'HELP');
       expect(opLines.length, 'O3 should respond to HELP').toBeGreaterThan(0);
       expect(opLines.some(l => l.includes('NOTICE')), 'O3 should use NOTICE').toBe(true);
       expect(opLines.some(l => /help|command|o3|opserv|privileged/i.test(l)), 'O3 HELP should contain relevant content').toBe(true);
@@ -407,14 +410,14 @@ describe('Services Integration', () => {
       const responses: string[][] = [];
 
       // Use longer timeout for service commands that may be slow
-      responses.push(await client.serviceCmd('AuthServ', 'HELP', 15000));
-      responses.push(await client.serviceCmd('ChanServ', 'HELP', 15000));
-      responses.push(await client.serviceCmd('O3', 'HELP', 15000));
+      responses.push(await client.serviceCmd(NICKSERV_NICK, 'HELP', 15000));
+      responses.push(await client.serviceCmd(CHANSERV_NICK, 'HELP', 15000));
+      responses.push(await client.serviceCmd(OPSERV_NICK, 'HELP', 15000));
 
       // All should get responses with relevant help content
       expect(responses.length, 'Should get all 3 responses').toBe(3);
       for (let i = 0; i < responses.length; i++) {
-        const serviceName = ['AuthServ', 'ChanServ', 'O3'][i];
+        const serviceName = [NICKSERV_NICK, CHANSERV_NICK, OPSERV_NICK][i];
         expect(responses[i].length, `${serviceName} should respond`).toBeGreaterThan(0);
         expect(responses[i].some(l => /help|command|privileged|service/i.test(l)), `${serviceName} should return help content`).toBe(true);
       }
@@ -429,9 +432,9 @@ describe('Services Integration', () => {
       await new Promise(r => setTimeout(r, 1500));
 
       // Invalid commands to each service
-      const authError = await client.serviceCmd('AuthServ', 'INVALIDCMD');
-      const chanError = await client.serviceCmd('ChanServ', 'INVALIDCMD');
-      const opError = await client.serviceCmd('O3', 'INVALIDCMD');
+      const authError = await client.serviceCmd(NICKSERV_NICK, 'INVALIDCMD');
+      const chanError = await client.serviceCmd(CHANSERV_NICK, 'INVALIDCMD');
+      const opError = await client.serviceCmd(OPSERV_NICK, 'INVALIDCMD');
 
       // All should return error responses with error-related content
       expect(authError.length, 'AuthServ should respond to invalid cmd').toBeGreaterThan(0);

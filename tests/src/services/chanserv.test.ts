@@ -23,6 +23,9 @@
 
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import {
+  CHANSERV_NICK,
+  OPSERV_NICK,
+  NICKSERV_NICK,
   X3Client,
   createX3Client,
   getTestAccount,
@@ -476,7 +479,7 @@ describe('ChanServ (X3)', () => {
     it('should respond to HELP command', async () => {
       const client = trackClient(await createX3Client());
 
-      const lines = await client.serviceCmd('ChanServ', 'HELP');
+      const lines = await client.serviceCmd(CHANSERV_NICK, 'HELP');
       console.log('X3 HELP response (first 5):', lines.slice(0, 5));
 
       expect(lines.length).toBeGreaterThan(0);
@@ -493,7 +496,7 @@ describe('ChanServ (X3)', () => {
       await client.registerChannel(channel);
 
       // Get channel info
-      const lines = await client.serviceCmd('ChanServ', `INFO ${channel}`);
+      const lines = await client.serviceCmd(CHANSERV_NICK, `INFO ${channel}`);
       console.log('INFO response:', lines);
 
       expect(lines.length).toBeGreaterThan(0);

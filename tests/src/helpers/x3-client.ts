@@ -21,6 +21,22 @@
  *   500+:    Owner - Full control
  */
 
+/**
+ * Service nicknames.
+ *
+ * These are CONFIGURABLE in x3.conf and are NOT the conventional names: the
+ * entrypoint defaults ChanServ to "X3" and OpServ to "O3" (see
+ * x3/docker/dockerentrypoint.sh X3_CHANSERV_NICK / X3_OPSERV_NICK /
+ * X3_NICKSERV_NICK). Read the same variables with the same defaults so the
+ * helpers follow whatever the deployment is actually running -- messaging a
+ * nick that does not exist produces no error, just a silent 401 and a helper
+ * that can only ever hit its timeout.
+ */
+export const CHANSERV_NICK = process.env.X3_CHANSERV_NICK || 'X3';
+export const OPSERV_NICK = process.env.X3_OPSERV_NICK || 'O3';
+export const NICKSERV_NICK = process.env.X3_NICKSERV_NICK || 'AuthServ';
+
+
 import { RawSocketClient, createRawSocketClient, PRIMARY_SERVER, IRCMessage, isFromService } from './ircv3-client.js';
 import { uniqueId, retryAsync, waitForCondition } from './cap-bundles.js';
 import { checkoutPoolAccount, checkinPoolAccount, isPoolInitialized, wipePoolAccountMetadata, type PoolAccount } from './account-pool.js';
@@ -205,7 +221,7 @@ export class X3Client extends RawSocketClient {
    * Use registerAndActivate() for automatic activation via cookie scraping.
    */
   async registerAccount(account: string, password: string, email: string): Promise<ServiceResponse> {
-    const lines = await this.serviceCmd('AuthServ', `REGISTER ${account} ${password} ${email}`);
+    const lines = await this.serviceCmd(NICKSERV_NICK, `REGISTER ${account} ${password} ${email}`);
     const success = lines.some(l =>
       l.includes('has been registered') ||
       l.includes('successfully') ||
@@ -243,7 +259,7 @@ export class X3Client extends RawSocketClient {
   async activateAccount(account: string, cookie: string, password: string): Promise<ServiceResponse> {
     // Keycloak async flow: token validation -> user lookup -> account update
     // This can take 10-15s, so use 20s timeout instead of default 10s
-    const lines = await this.serviceCmd('AuthServ', `COOKIE ${account} ${cookie} ${password}`, 20000);
+    const lines = await this.serviceCmd(NICKSERV_NICK, `COOKIE ${account} ${cookie} ${password}`, 20000);
     const success = lines.some(l =>
       l.includes('activated') ||
       l.includes('Account activated') ||
@@ -386,7 +402,7 @@ export class X3Client extends RawSocketClient {
    * Authenticate via AuthServ.
    */
   async auth(account: string, password: string, timeout?: number): Promise<ServiceResponse> {
-    const lines = await this.serviceCmd('AuthServ', `AUTH ${account} ${password}`, timeout);
+    const lines = await this.serviceCmd(NICKSERV_NICK, `AUTH ${account} ${password}`, timeout);
     const success = lines.some(l =>
       l.includes('recognized') ||
       l.includes('authenticated') ||
@@ -434,7 +450,7 @@ export class X3Client extends RawSocketClient {
    * @param timeout - Optional timeout for the ACCOUNTINFO command (default 10s)
    */
   async checkAuth(timeout?: number): Promise<{ authenticated: boolean; account?: string }> {
-    const lines = await this.serviceCmd('AuthServ', 'ACCOUNTINFO', timeout);
+    const lines = await this.serviceCmd(NICKSERV_NICK, 'ACCOUNTINFO', timeout);
 
     // Check for explicit "not authenticated" or similar messages
     const notAuthLine = lines.find(l =>
@@ -475,7 +491,7 @@ export class X3Client extends RawSocketClient {
    * Set a user setting via AuthServ SET command.
    */
   async setUserOption(setting: string, value: string): Promise<ServiceResponse> {
-    const lines = await this.serviceCmd('AuthServ', `SET ${setting} ${value}`);
+    const lines = await this.serviceCmd(NICKSERV_NICK, `SET ${setting} ${value}`);
     const success = lines.some(l =>
       l.includes('set to') ||
       l.includes('changed') ||
@@ -488,7 +504,7 @@ export class X3Client extends RawSocketClient {
    * Add a hostmask for authentication.
    */
   async addMask(mask: string): Promise<ServiceResponse> {
-    const lines = await this.serviceCmd('AuthServ', `ADDMASK ${mask}`);
+    const lines = await this.serviceCmd(NICKSERV_NICK, `ADDMASK ${mask}`);
     const success = lines.some(l =>
       l.includes('added') ||
       l.includes('hostmask')
@@ -509,7 +525,7 @@ export class X3Client extends RawSocketClient {
    */
   async registerChannel(channel: string): Promise<ServiceResponse> {
     this.clearRawBuffer();
-    this.send(`PRIVMSG ChanServ :REGISTER ${channel}`);
+    this.send(`PRIVMSG ${CHANSERV_NICK} :REGISTER ${channel}`);
 
     // Small delay to let the command reach the server
     await new Promise(r => setTimeout(r, 100));
@@ -525,19 +541,19 @@ export class X3Client extends RawSocketClient {
     while (Date.now() - startTime < timeout) {
       try {
         const line = await this.waitForLine(
-          /ChanServ.*(JOIN|NOTICE)/i,
+          new RegExp(`${CHANSERV_NICK}.*(JOIN|NOTICE)`, 'i'),
           Math.min(3000, timeout - (Date.now() - startTime))
         );
 
         // Success: ChanServ joins the channel
-        if (line.includes('ChanServ') && line.includes('JOIN')) {
+        if (line.includes(CHANSERV_NICK) && line.includes('JOIN')) {
           success = true;
           lines.push(line);
           break;
         }
 
         // ChanServ NOTICE response (may be success or error)
-        if (line.includes('ChanServ') && line.includes('NOTICE')) {
+        if (line.includes(CHANSERV_NICK) && line.includes('NOTICE')) {
           lines.push(line);
 
           // Check for success messages
@@ -572,7 +588,7 @@ export class X3Client extends RawSocketClient {
     if (!success && !error && lines.length > 0) {
       error = lines[lines.length - 1];
     } else if (!success && !error) {
-      error = 'No response from ChanServ (timeout)';
+      error = `No response from ${CHANSERV_NICK} (timeout)`;
     }
 
     return { lines, success, error };
@@ -583,7 +599,7 @@ export class X3Client extends RawSocketClient {
    */
   async unregisterChannel(channel: string, confirm = ''): Promise<ServiceResponse> {
     const cmd = confirm ? `UNREGISTER ${channel} ${confirm}` : `UNREGISTER ${channel}`;
-    const lines = await this.serviceCmd('ChanServ', cmd);
+    const lines = await this.serviceCmd(CHANSERV_NICK, cmd);
     const success = lines.some(l =>
       l.includes('unregistered') ||
       l.includes('no longer registered')
@@ -602,7 +618,7 @@ export class X3Client extends RawSocketClient {
    */
   async addUser(channel: string, account: string, level: number): Promise<ServiceResponse> {
     // Use *account syntax to specify account name instead of nick
-    const lines = await this.serviceCmd('ChanServ', `ADDUSER ${channel} *${account} ${level}`, 15000);
+    const lines = await this.serviceCmd(CHANSERV_NICK, `ADDUSER ${channel} *${account} ${level}`, 15000);
 
     // Check for error patterns first
     const errorLine = lines.find(l => {
@@ -633,7 +649,7 @@ export class X3Client extends RawSocketClient {
    * Uses *account syntax to specify by account name.
    */
   async clvl(channel: string, account: string, level: number): Promise<ServiceResponse> {
-    const lines = await this.serviceCmd('ChanServ', `CLVL ${channel} *${account} ${level}`);
+    const lines = await this.serviceCmd(CHANSERV_NICK, `CLVL ${channel} *${account} ${level}`);
 
     // Check for explicit error patterns first
     const hasError = lines.some(l => {
@@ -666,7 +682,7 @@ export class X3Client extends RawSocketClient {
    * Uses *account syntax to specify by account name.
    */
   async delUser(channel: string, account: string): Promise<ServiceResponse> {
-    const lines = await this.serviceCmd('ChanServ', `DELUSER ${channel} *${account}`);
+    const lines = await this.serviceCmd(CHANSERV_NICK, `DELUSER ${channel} *${account}`);
     const success = lines.some(l =>
       l.toLowerCase().includes('removed') ||
       l.toLowerCase().includes('deleted') ||
@@ -687,7 +703,7 @@ export class X3Client extends RawSocketClient {
   async getAccess(channel: string, account?: string): Promise<Array<{ account: string; level: number }>> {
     // Use ACCESS for specific user, or USERS to list all
     const cmd = account ? `ACCESS ${channel} *${account}` : `USERS ${channel}`;
-    const lines = await this.serviceCmd('ChanServ', cmd);
+    const lines = await this.serviceCmd(CHANSERV_NICK, cmd);
 
     // Map role names to numeric levels
     const roleToLevel: Record<string, number> = {
@@ -745,7 +761,7 @@ export class X3Client extends RawSocketClient {
     const settingLower = setting.toLowerCase();
     const isModesSetting = settingLower === 'modes';
 
-    const lines = await this.serviceCmd('ChanServ', cmd);
+    const lines = await this.serviceCmd(CHANSERV_NICK, cmd);
 
     // X3 responds to successful SET by echoing the setting name and value
     // e.g., "Modes       +tn" - so we also check if the setting name appears
@@ -782,7 +798,7 @@ export class X3Client extends RawSocketClient {
   async ban(channel: string, target: string, reason?: string): Promise<ServiceResponse> {
     // X3 uses ADDLAMER command to add bans
     const cmd = reason ? `ADDLAMER ${channel} ${target} ${reason}` : `ADDLAMER ${channel} ${target}`;
-    const lines = await this.serviceCmd('ChanServ', cmd);
+    const lines = await this.serviceCmd(CHANSERV_NICK, cmd);
     const success = lines.some(l =>
       l.includes('LAMER') ||
       l.includes('banned') ||
@@ -795,7 +811,7 @@ export class X3Client extends RawSocketClient {
    * Remove a ban from channel.
    */
   async unban(channel: string, target: string): Promise<ServiceResponse> {
-    const lines = await this.serviceCmd('ChanServ', `UNBAN ${channel} ${target}`);
+    const lines = await this.serviceCmd(CHANSERV_NICK, `UNBAN ${channel} ${target}`);
     const success = lines.some(l =>
       l.includes('removed') ||
       l.includes('unbanned')
@@ -812,7 +828,7 @@ export class X3Client extends RawSocketClient {
    * Requires oper access.
    */
   async gline(mask: string, duration: string, reason: string): Promise<ServiceResponse> {
-    const lines = await this.serviceCmd('O3', `GLINE ${mask} ${duration} ${reason}`);
+    const lines = await this.serviceCmd(OPSERV_NICK, `GLINE ${mask} ${duration} ${reason}`);
     // Check for errors first
     const error = lines.find(l =>
       l.toLowerCase().includes('denied') ||
@@ -835,7 +851,7 @@ export class X3Client extends RawSocketClient {
    * Remove a G-line.
    */
   async ungline(mask: string): Promise<ServiceResponse> {
-    const lines = await this.serviceCmd('O3', `UNGLINE ${mask}`);
+    const lines = await this.serviceCmd(OPSERV_NICK, `UNGLINE ${mask}`);
     const success = lines.some(l =>
       l.includes('removed') ||
       l.includes('deleted')
@@ -849,7 +865,7 @@ export class X3Client extends RawSocketClient {
    */
   async forceJoin(target: string, channel: string): Promise<ServiceResponse> {
     // O3 SVSJOIN command: SVSJOIN <target> <channel>
-    const lines = await this.serviceCmd('O3', `SVSJOIN ${target} ${channel}`);
+    const lines = await this.serviceCmd(OPSERV_NICK, `SVSJOIN ${target} ${channel}`);
     // Check for errors first - catch all possible error responses
     const error = lines.find(l =>
       l.toLowerCase().includes('denied') ||
@@ -873,7 +889,7 @@ export class X3Client extends RawSocketClient {
    * Returns the oper level (0-1000) for the authenticated user.
    */
   async myAccess(): Promise<number> {
-    const lines = await this.serviceCmd('O3', 'ACCESS');
+    const lines = await this.serviceCmd(OPSERV_NICK, 'ACCESS');
     for (const line of lines) {
       // Match "has X access" format from O3
       const match = line.match(/has\s+(\d+)\s+access/i);
