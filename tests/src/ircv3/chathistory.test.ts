@@ -981,6 +981,29 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
   });
 
   describe('PM Chathistory Opt-Out', () => {
+    // chathistory.pm is account metadata: it persists on the pool account
+    // across tests AND runs, and a stranded `0` turns every later PM test
+    // on that account into gap markers.  Every `SET chathistory.pm * :0`
+    // below pushes its client here; optIn() undoes it before the test's
+    // QUIT, and afterEach undoes whatever an assertion failure skipped
+    // (the socket is still open then — the QUIT never went out).
+    const optedOut: X3Client[] = [];
+    const optIn = async (client: X3Client) => {
+      const i = optedOut.indexOf(client);
+      if (i >= 0) optedOut.splice(i, 1);
+      client.send('METADATA * SET chathistory.pm * :1');
+      await client.waitForNumeric('761', 3000).catch(() => {});
+    };
+    afterEach(async () => {
+      for (const client of optedOut.splice(0)) {
+        try {
+          await optIn(client);
+        } catch {
+          // socket already gone; nothing more we can do here
+        }
+      }
+    });
+
     it('PM history stored by default for authenticated users', async () => {
       const { client: client1, account: account1, fromPool: fromPool1, nick: nick1 } = await createAuthedHistoryClient(['draft/metadata-2']);
       trackClient(client1);
@@ -1050,6 +1073,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Sender opts out — MUST get 761 response
       client1.send('METADATA * SET chathistory.pm * :0');
+      optedOut.push(client1);
       const metaResponse = await client1.waitForNumeric('761', 3000);
       expect(metaResponse.command).toBe('761');
       await new Promise(r => setTimeout(r, 300));
@@ -1076,14 +1100,18 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
         );
         if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
         // Filter out gap markers — only count real messages
-        if (msg.command === 'PRIVMSG' && !msg.raw.includes('+draft/chathistory-gap')) {
+        if (msg.command === 'PRIVMSG' && !msg.raw.includes('chathistory-gap')) {
           messages.push(msg.raw);
         }
       }
 
-      // Sender opted out — no real messages stored (only gap markers)
-      expect(messages.length).toBe(0);
+      // Sender opted out — THIS message must not be stored (only a gap
+      // marker).  Assert on the unique id, not on an empty page: the
+      // pair key is shared across runs and accumulates rows.
+      expect(messages.some(m => m.includes(testId)),
+             'message sent after the sender opted out was stored').toBe(false);
 
+      await optIn(client1);
       client1.send('QUIT');
       client2.send('QUIT');
     });
@@ -1099,6 +1127,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Recipient opts out — MUST get 761 response
       client2.send('METADATA * SET chathistory.pm * :0');
+      optedOut.push(client2);
       const metaResponse = await client2.waitForNumeric('761', 3000);
       expect(metaResponse.command).toBe('761');
       await new Promise(r => setTimeout(r, 300));
@@ -1124,14 +1153,17 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
           3000
         );
         if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
-        if (msg.command === 'PRIVMSG' && !msg.raw.includes('+draft/chathistory-gap')) {
+        if (msg.command === 'PRIVMSG' && !msg.raw.includes('chathistory-gap')) {
           messages.push(msg.raw);
         }
       }
 
-      // Recipient opted out — no real messages stored
-      expect(messages.length).toBe(0);
+      // Recipient opted out — THIS message must not be stored (id-based,
+      // the pair key is shared across runs)
+      expect(messages.some(m => m.includes(testId)),
+             'message sent after the recipient opted out was stored').toBe(false);
 
+      await optIn(client2);
       client1.send('QUIT');
       client2.send('QUIT');
     });
@@ -1147,6 +1179,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Client2 opts out — MUST get 761 response
       client2.send('METADATA * SET chathistory.pm * :0');
+      optedOut.push(client2);
       const metaResponse = await client2.waitForNumeric('761', 3000);
       expect(metaResponse.command).toBe('761');
       await new Promise(r => setTimeout(r, 300));
@@ -1172,14 +1205,17 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
           3000
         );
         if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
-        if (msg.command === 'PRIVMSG' && !msg.raw.includes('+draft/chathistory-gap')) {
+        if (msg.command === 'PRIVMSG' && !msg.raw.includes('chathistory-gap')) {
           messages.push(msg.raw);
         }
       }
 
-      // Either party opting out prevents storage
-      expect(messages.length).toBe(0);
+      // Either party opting out prevents storage of THIS message
+      // (id-based, the pair key is shared across runs)
+      expect(messages.some(m => m.includes(testId)),
+             'message sent while the recipient was opted out was stored').toBe(false);
 
+      await optIn(client2);
       client1.send('QUIT');
       client2.send('QUIT');
     });
@@ -1201,6 +1237,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Client2 opts out — MUST get 761 response
       client2.send('METADATA * SET chathistory.pm * :0');
+      optedOut.push(client2);
       const revokeResponse = await client2.waitForNumeric('761', 3000);
       expect(revokeResponse.command).toBe('761');
       await new Promise(r => setTimeout(r, 300));
@@ -1226,19 +1263,20 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
         );
         if (msg.command === 'BATCH' && msg.params[0]?.startsWith('-')) break;
         // Filter out gap markers
-        if (msg.command === 'PRIVMSG' && !msg.raw.includes('+draft/chathistory-gap')) {
+        if (msg.command === 'PRIVMSG' && !msg.raw.includes('chathistory-gap')) {
           messages.push(msg.raw);
         }
       }
 
       // Pre-opt-out message should be stored
-      const hasBeforeMsg = messages.some(m => m.includes('Before optout'));
+      const hasBeforeMsg = messages.some(m => m.includes(msg1));
       expect(hasBeforeMsg).toBe(true);
 
       // Post-opt-out message should NOT be stored
-      const hasAfterMsg = messages.some(m => m.includes('After optout'));
+      const hasAfterMsg = messages.some(m => m.includes(msg2));
       expect(hasAfterMsg).toBe(false);
 
+      await optIn(client2);
       client1.send('QUIT');
       client2.send('QUIT');
     });
@@ -1250,6 +1288,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Set opt-out — MUST get 761 response
       client.send('METADATA * SET chathistory.pm * :0');
+      optedOut.push(client);
       const setResponse = await client.waitForNumeric('761', 3000);
       expect(setResponse.command).toBe('761');
       await new Promise(r => setTimeout(r, 200));
@@ -1263,6 +1302,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Value should be '0' — verify the opt-out value is returned
       expect(getResponse.trailing).toBe('0');
 
+      await optIn(client);
       client.send('QUIT');
     });
 
@@ -1277,6 +1317,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
 
       // Client2 sets opt-out — MUST get 761 response
       client2.send('METADATA * SET chathistory.pm * :0');
+      optedOut.push(client2);
       const setResponse = await client2.waitForNumeric('761', 3000);
       expect(setResponse.command).toBe('761');
       await new Promise(r => setTimeout(r, 300));
@@ -1290,6 +1331,7 @@ describe('IRCv3 Chathistory (draft/chathistory)', () => {
       // Verify other user's opt-out value is visible
       expect(getResponse.trailing).toBe('0');
 
+      await optIn(client2);
       client1.send('QUIT');
       client2.send('QUIT');
     });

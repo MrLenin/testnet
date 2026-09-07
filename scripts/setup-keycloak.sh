@@ -735,6 +735,11 @@ TOKEN=$(get_admin_token)
 EXISTING_LDAP=$(curl -s -H "Authorization: Bearer $TOKEN" \
   "$KEYCLOAK_URL/admin/realms/$REALM_NAME/components?name=openldap&type=org.keycloak.storage.UserStorageProvider")
 
+# editMode WRITABLE + syncRegistrations: Keycloak-created accounts (ircd REGISTER
+# via kc_user_create) are written through to LDAP, so X3 sees them (ldap_autocreate)
+# and no orphan accounts form.  Verified end-to-end 2026-07-30 (Gate 1b,
+# x3-merge-sequencing.md): user lands at uid=<u>,ou=users as inetOrgAnonAccount,
+# ldapwhoami bind works, AuthServ AUTH auto-creates the handle.
 LDAP_CONFIG='{
   "name": "openldap",
   "providerId": "ldap",
@@ -749,8 +754,8 @@ LDAP_CONFIG='{
     "rdnLDAPAttribute": ["uid"],
     "uuidLDAPAttribute": ["entryUUID"],
     "userObjectClasses": ["inetOrgAnonAccount"],
-    "editMode": ["READ_ONLY"],
-    "syncRegistrations": ["false"],
+    "editMode": ["WRITABLE"],
+    "syncRegistrations": ["true"],
     "importEnabled": ["true"],
     "batchSizeForSync": ["1000"],
     "fullSyncPeriod": ["3600"],

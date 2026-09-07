@@ -76,6 +76,7 @@ Defined optional tokens:
 | `attach`         | Server supports `PERSISTENCE ATTACH` (and the `PROFILE` model)|
 | `detach`         | Server supports `PERSISTENCE DETACH`                          |
 | `list`           | Server supports `PERSISTENCE LIST` or `PERSISTENCE PROFILE LIST` |
+| `attach-cursor`  | `PERSISTENCE ATTACH <profile> [<msgid>]` — optional last-seen msgid anchors the server-driven catch-up replay (unknown msgid → `FAIL PERSISTENCE CURSOR_UNKNOWN` + fallback to last-activity). Supplying the cursor is consent to **unsolicited `chathistory`-type batches** (standard `CHATHISTORY AFTER` response shape, no command issued), wrapped in an outer `evilnet.github.io/bouncer-replay` batch when `batch` is negotiated: channel batches first (read-marker-advanced), then PM correspondents; per-buffer cap default 100 with newest-biased truncation (gap sits after the cursor — detect by msgid discontinuity, backfill with `CHATHISTORY AFTER`); may interleave with live traffic at batch boundaries — order by `server-time`, dedup by `msgid`. Applies to `draft/chathistory`-capable clients only when a cursor is supplied; gated by server auto-replay policy and the user's `PERSISTENCE REPLAY` setting |
 
 Clients MUST tolerate unknown tokens in the value and MUST NOT assume the absence of a token implies the absence of a feature; the value is a hint, not an authoritative inventory.
 
@@ -137,10 +138,10 @@ where `<context>` identifies the offending subcommand or argument and `<descript
 
 ```
 PERSISTENCE STATUS                             ; client to server
-:server PERSISTENCE STATUS <state>             ; server to client
+:server PERSISTENCE STATUS <client-setting> <effective-setting>  ; server to client
 ```
 
-`<state>` is one of `ON` or `OFF` and reflects the effective persistence state for the calling connection.
+`<client-setting>` is one of `ON`, `OFF`, or `DEFAULT` and reflects what the client has explicitly requested (`DEFAULT` when no explicit preference is stored).  `<effective-setting>` is one of `ON` or `OFF` and reflects the effective persistence state for the calling connection.  (This matches PR #503; an earlier revision of this document described a one-argument form, which the implementation followed until 2026-08-28 — both are now on the two-argument form.)
 
 The server MUST send an unsolicited `PERSISTENCE STATUS` to a connection that has negotiated `draft/persistence` and is authenticated.  This unsolicited message MUST be sent after the final `005` (`RPL_ISUPPORT`) and before `376` (`RPL_ENDOFMOTD`) or `422` (`ERR_NOMOTD`).
 
@@ -170,10 +171,10 @@ The server MUST reply with both:
 
 ```
 :server PERSISTENCE SET <argument>
-:server PERSISTENCE STATUS <effective>
+:server PERSISTENCE STATUS <client-setting> <effective-setting>
 ```
 
-The reply MAY appear in either order; the `STATUS` line reflects the new effective state, which need not match `<argument>` (e.g. when server policy enforces `ON`).
+The reply MAY appear in either order; the `STATUS` line carries the stored client setting (which after a successful SET equals `<argument>`) and the new effective state, which need not match it (e.g. when server policy enforces `ON`).
 
 ### REPLAY (REQUIRED if `replay-control` advertised)
 
@@ -557,3 +558,28 @@ None at time of publication.
 [batch]: ../extensions/batch.html
 [message-tags]: ../extensions/message-tags.html
 [metadata2]: ../extensions/metadata-2.html
+
+## Residue from #104 (2026-08-28) — CLOSED same day
+
+Both items below were implemented later on 2026-08-28 (PERSISTENCE LIST
+subcommand + `list` token restored; truncation signaled by presence/
+absence of `draft/chathistory-end` on the inner batch opener, limit+1
+probe, spec'd in areas/draft-persistence-spec.md "Auto-replay
+completeness"). Federated legs CLOSED
+too (same day, later): `CH E <reqid> <count> [T]` P10 flag from the
+storage server -> requester ORs across servers -> chathistory-end
+presence on the client batch (autoreplay-fed + on-demand fed paths).
+
+- **PERSISTENCE LIST unimplemented** — spec defines it (SESSION/ENDOFLIST
+  replies, valid post-SASL pre-CAP-END for pre-registration session
+  enumeration; MUST also work post-registration) but m_persistence has no
+  subcommand. The misleading `list` CAP token was DROPPED (`d38a5a1`);
+  re-add it when LIST lands. Spec-conformant meanwhile (extension is
+  gated on the advertisement).
+- **Auto-replay truncation is silent** — replay caps per target at
+  FEAT_BOUNCER_AUTO_REPLAY_LIMIT (default 100, floored at 100) and
+  nothing on the wire distinguishes complete from truncated; a client
+  that missed >limit in one channel has an undetectable hole. Rubin
+  suggests a marker on the inner batch or a count in the closing NOTICE
+  so clients can backfill via CHATHISTORY. Protocol/spec decision —
+  NOT built, awaiting design call.

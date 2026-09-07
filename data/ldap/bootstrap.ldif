@@ -1,0 +1,9 @@
+dn: ou=users,dc=fractalrealities,dc=net
+objectClass: organizationalUnit
+ou: users
+
+dn: uid=testuser,ou=users,dc=fractalrealities,dc=net
+objectClass: inetOrgAnonAccount
+uid: testuser
+mail: testuser@example.com
+userPassword: testpass

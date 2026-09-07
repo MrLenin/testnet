@@ -4,7 +4,7 @@ Implementation of `draft/message-redaction` IRCv3 extension in Nefarious IRCd.
 
 ## Overview
 
-Message redaction allows users to delete their own messages or channel operators to delete messages in channels they moderate. Redacted messages are removed from chathistory and marked as redacted for clients that have already received them.
+Message redaction allows users to delete their own messages or channel operators to delete messages in channels they moderate. Clients that already received the message get a `REDACT` notification. In chathistory the redacted message is kept as a placeholder followed by a `REDACT` context row (the spec's second option for history; since `d04840b`, 2026-04-12), so replays show that a message existed and was redacted without showing its content.
 
 ## Client Commands
 
@@ -45,9 +45,16 @@ ABAAB RD #channel AB123-456 :Removing spam
 
 ## Chathistory Interaction
 
-- Redacted messages are removed from LMDB chathistory storage
-- Clients receive `REDACT` notification for messages already delivered
-- History queries after redaction won't include the removed message
+- The redacted message stays in the store as a placeholder; a `REDACT` context row referencing
+  its msgid is stored next to it (reply index parent → child), and replays splice that row in
+  after the message. Context rows do not count towards the requested limit.
+- Clients receive a `REDACT` notification for messages already delivered.
+- A repeat `REDACT` of an already-redacted msgid is an idempotent success: the requester gets
+  the `REDACT` echo (with `echo-message`), nothing is stored again, and nothing is repeated to
+  the channel or the network. The spec defines `UNKNOWN_MSGID` as "does not exist or is too
+  old" and is silent on repeats; the placeholder still exists, so a FAIL would be wrong.
+- A repeat arriving over the network (two servers or two users redacting the same message) is
+  shown to local members and relayed, but stores no second context row.
 
 ## Client Capability
 

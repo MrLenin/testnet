@@ -261,7 +261,7 @@ describe('draft/persistence — Phase 2 batch wrapping', () => {
       expect(
         inner,
         `inner chathistory BATCH start should carry @batch=${outerId}: ${inner}`,
-      ).toMatch(new RegExp(`batch=${outerId}\\b`));
+      ).toMatch(new RegExp(`batch=${outerId.replace(/[\\[\\]]/g, '\\$&')}(?=[; ]|$)`));   /* ids can end in [ or ]: \b never matches there */
     }
 
     await bouncerDisableHold(aClient2);

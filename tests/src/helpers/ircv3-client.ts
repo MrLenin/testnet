@@ -1489,10 +1489,16 @@ export const PRIMARY_SERVER: ServerConfig = {
   name: 'primary',
 };
 
-/** Secondary IRC server (leaf) - only available with 'linked' profile */
+/** Secondary IRC server (leaf) - only available with 'linked' profile.
+ * Default follows how the primary is addressed: a host-side run
+ * (IRC_HOST=localhost) reaches the secondary through the compose port map
+ * on localhost:6668, while an in-network run uses the service name. Without
+ * this, host runs silently resolve the secondary to an unreachable
+ * docker-internal name and every cross-server test soft-skips green. */
+const primaryIsLocal = ['localhost', '127.0.0.1', '::1'].includes(PRIMARY_SERVER.host);
 export const SECONDARY_SERVER: ServerConfig = {
-  host: process.env.IRC_HOST2 ?? 'nefarious2',
-  port: parseInt(process.env.IRC_PORT2 ?? '6667', 10),
+  host: process.env.IRC_HOST2 ?? (primaryIsLocal ? PRIMARY_SERVER.host : 'nefarious2'),
+  port: parseInt(process.env.IRC_PORT2 ?? (primaryIsLocal ? '6668' : '6667'), 10),
   name: 'secondary',
 };
 

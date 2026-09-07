@@ -47,6 +47,14 @@ No existing IRCv3 tag, draft, or vendor convention fits — see research summary
 
 **`afternet.org/sid=<6-char base64>`** — emitted everywhere on the wire (client-facing and S2S)
 
+> **AMENDED 2026-08-29:** namespace corrected to **`evilnet.github.io/sid=`**
+> per the vendor convention (extensions namespace under the upstream org
+> that emits them — `feedback_vendor_prefix_evilnet`; same host as the
+> `evilnet.github.io/bouncer-replay` batch). The auth check accepts both
+> forms (legacy records carry `afternet.org/sid=`), and BOTH namespaces
+> are reserved from client tags at capture (`is_reserved_vendor_tag`).
+> The `afternet.org/sid` mentions below are the original design text.
+
 - Server-injected on PRIVMSG/NOTICE/TAGMSG **only when the sender is non-account**
 - Strictly complementary to the standard `account` tag (one or the other, never both — present indicates the source of identity)
 - Emitted on chathistory replay messages whose stored sender was ephemeral, allowing clients to distinguish anon-session-A from anon-session-B

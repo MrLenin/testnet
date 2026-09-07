@@ -18,18 +18,18 @@
 "NickServ" {
 "alice" {
 "passwd" "0123456789abcdef0123456789abcdef";
-"registered" "1600000000";
+"register" "1600000000";
 "lastseen" "1700000000";
 "flags" "";
 };
 "bob" {
 "passwd" "$a1b2c3d4FEDCBA9876543210FEDCBA9876543210";
-"registered" "1500000000";
+"register" "1500000000";
 "lastseen" "1500000100";
 };
 "carol[away]" {
 "passwd" "not-a-hash";
-"registered" "1400000000";
+"register" "1400000000";
 };
 };
 

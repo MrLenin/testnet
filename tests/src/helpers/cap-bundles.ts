@@ -289,6 +289,11 @@ export async function waitForChathistory(
       cmd = `CHATHISTORY BETWEEN ${target} timestamp=${timestamp} timestamp=${timestamp2} ${limit}`;
     } else if (subcommand === 'LATEST') {
       cmd = `CHATHISTORY LATEST ${target} ${timestamp} ${limit}`;
+    } else if (timestamp.startsWith('msgid=') || timestamp.startsWith('timestamp=')) {
+      // Caller passed a fully-typed message reference (e.g. msgid=...):
+      // emit it verbatim -- blindly prefixing timestamp= produced
+      // `timestamp=msgid=...` and an INVALID_PARAMS rejection.
+      cmd = `CHATHISTORY ${subcommand} ${target} ${timestamp} ${limit}`;
     } else {
       cmd = `CHATHISTORY ${subcommand} ${target} timestamp=${timestamp} ${limit}`;
     }
@@ -300,6 +305,14 @@ export async function waitForChathistory(
       const batchStart = await client.waitForLine(/BATCH \+\S+ chathistory/i, 3000);
       if (!batchStart) continue;
 
+      // The chathistory batch may NEST inner batches (a replayed
+      // multiline message arrives as a draft/multiline sub-batch), so
+      // we must break only on the close of the OUTER batch ref -- a
+      // bare 'BATCH -' check terminated collection at the first inner
+      // close and silently dropped everything after it.
+      const refMatch = batchStart.match(/BATCH \+(\S+) chathistory/i);
+      const outerRef = refMatch ? refMatch[1] : null;
+
       // Collect messages in batch
       const messages: string[] = [];
       const collectStart = Date.now();
@@ -309,7 +322,7 @@ export async function waitForChathistory(
       while (Date.now() - collectStart < 5000) {
         try {
           const line = await client.waitForLine(eventPattern, 1000);
-          if (line.includes('BATCH -')) break;
+          if (outerRef ? line.includes(`BATCH -${outerRef}`) : line.includes('BATCH -')) break;
           if (eventMatch.test(line)) messages.push(line);
         } catch {
           break; // Timeout = no more messages

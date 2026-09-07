@@ -48,7 +48,11 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
 
     const client = trackClient(await createRawSocketClient());
     await client.capLs();
-    await client.capReq(['sasl', 'draft/message-redaction', ...extraCaps]);
+    // message-tags is required to receive msgid on the echo (the server
+    // only emits tags to clients that negotiated it), and REDACT needs
+    // the msgid.  Without it every echo came back bare and the suite
+    // failed on "No msgid in echo" (found 2026-09-02).
+    await client.capReq(['sasl', 'draft/message-redaction', 'message-tags', ...extraCaps]);
 
     const result = await authenticateSaslPlain(client, account, password);
     if (!result.success) {
@@ -72,8 +76,11 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
   ): Promise<string> {
     client.send(`PRIVMSG ${channel} :${message}`);
 
+    // Not a replayed line: the pool account's bouncer replays the previous
+    // attempt's identical message inside a batch on reconnect, and its
+    // msgid belongs to another channel.
     const echo = await client.waitForParsedLine(
-      msg => msg.command === 'PRIVMSG' && msg.raw.includes(message),
+      msg => msg.command === 'PRIVMSG' && msg.raw.includes(message) && !/(^|;)batch=/.test(msg.raw),
       5000
     );
 
@@ -243,12 +250,21 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
       client.send('QUIT');
     });
 
-    it('REDACT same message twice returns error on second attempt', { retry: 2 }, async () => {
+    it('REDACT same message twice is an idempotent success on the second attempt', { retry: 2 }, async () => {
+      // Since d04840b (REDACT-as-context) a redacted message is kept as a
+      // placeholder with a REDACT context row, the spec's second option
+      // for history; the spec is silent on repeats.  The server answers a
+      // repeat with the REDACT echo (a client that missed the first one
+      // gets a consistent reply) and stores nothing new, so the history
+      // page carries exactly one REDACT context row for the message.
       const client = await createAuthClient('redtwice1', ['echo-message', 'standard-replies']);
+      const observer = await createAuthClient('redtwobs1', ['batch', 'server-time', 'draft/chathistory', 'draft/event-playback']);
 
       const channel = uniqueChannel('redtwice');
       client.send(`JOIN ${channel}`);
+      observer.send(`JOIN ${channel}`);
       await client.waitForJoin(channel);
+      await observer.waitForJoin(channel);
 
       const msgid = await sendAndCaptureMsgid(client, channel, 'Double redact test');
 
@@ -261,17 +277,33 @@ describe('IRCv3 Message Redaction (draft/message-redaction)', () => {
 
       await new Promise(r => setTimeout(r, 300));
 
-      // Second redact of same message - should fail
+      // Second redact of the same message - success again, never a FAIL
       client.clearRawBuffer();
       client.send(`REDACT ${channel} ${msgid}`);
 
       const secondResponse = await client.waitForParsedLine(
-        msg => msg.command === 'FAIL' || /^4\d\d$/.test(msg.command),
+        msg => msg.command === 'REDACT' || msg.command === 'FAIL' || /^4\d\d$/.test(msg.command),
         5000
       );
-      expect(secondResponse.command === 'FAIL' || /^4\d\d$/.test(secondResponse.command)).toBe(true);
+      expect(secondResponse.command, `second REDACT answered: ${secondResponse.raw}`).toBe('REDACT');
+
+      // Exactly one REDACT context row for the message in history.
+      await new Promise(r => setTimeout(r, 500));
+      observer.clearRawBuffer();
+      observer.send(`CHATHISTORY LATEST ${channel} * 50`);
+      const redacts: string[] = [];
+      while (true) {
+        const m = await observer.waitForParsedLine(
+          l => l.command === 'REDACT' || (l.command === 'BATCH' && l.params[0]?.startsWith('-')),
+          5000
+        );
+        if (m.command === 'BATCH') break;
+        if (m.params.includes(msgid)) redacts.push(m.raw);
+      }
+      expect(redacts, 'history must carry exactly one REDACT for the message').toHaveLength(1);
 
       client.send('QUIT');
+      observer.send('QUIT');
     });
   });
 

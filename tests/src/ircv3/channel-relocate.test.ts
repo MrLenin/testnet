@@ -52,9 +52,9 @@ import {
  *    to what the LOCAL server sends the client, and never to the absence of
  *    an unrelated MODE on the tombstone.
  *  - `501 <letter> :Unknown user MODE flag` echoes back from the unmodified
- *    upstream server for any fork-only umode (+F, +M, ...) while it is
- *    linked. Case 5 asserts the umode took effect (MODE reply / 221), not
- *    the absence of that numeric.
+ *    upstream server for any fork-only umode (+M, ...) while it is linked.
+ *    Relocation itself no longer defines a umode: design "D" (2026-08-03)
+ *    withdrew the +F follow flag, so following is a member's own JOIN.
  */
 
 const X3_SERVICE = 'X3';
@@ -311,7 +311,7 @@ describe('evilnet/channel-relocate (consent-based channel renaming)', () => {
   }, 30000);
 
   // ------------------------------------------------------------------
-  it('case 5: plumbing — CAP LS advertises the cap, ISUPPORT carries RELOCATE=<grace>, umode +F is settable', async () => {
+  it('case 5: plumbing — CAP LS advertises the cap and ISUPPORT carries RELOCATE=<grace>', async () => {
     const nick = `rlplumb${uniqueId().slice(0, 5)}`;
     const client = track(await connectClient(nick, [RELOCATE_CAP]));
 
@@ -332,65 +332,41 @@ describe('evilnet/channel-relocate (consent-based channel renaming)', () => {
     ).toBeDefined();
     expect(relocateToken).toBe(`RELOCATE=${GRACE_SECONDS}`);
 
-    // umode +F (FLAG_RELOCATE_FOLLOW) is freely user-settable and readable.
-    client.clearRawBuffer();
-    client.send(`MODE ${nick} +F`);
-    const modeEcho = await client.waitForParsedLine(
-      (m) =>
-        m.command === 'MODE' &&
-        m.params[0]?.toLowerCase() === nick.toLowerCase() &&
-        (m.params[1] ?? '').includes('F'),
-      10000
-    );
-    expect(modeEcho.params[1]).toContain('+F');
-
-    client.clearRawBuffer();
-    client.send(`MODE ${nick}`);
-    const umodes = await client.waitForNumeric('221', 10000);
-    expect(
-      umodes.params[1] ?? umodes.trailing ?? '',
-      'RPL_UMODEIS does not show +F after setting it'
-    ).toMatch(/F/);
+    // There is no follow umode (design "D", 2026-08-03): following is the
+    // member's own JOIN, not a server-side flag. Cases 2/3/7 exercise it.
   }, 60000);
 
   // ------------------------------------------------------------------
-  it('case 1: the member partition — issuer and +F move, relocate-cap and no-cap members stay and are notified per class', async () => {
+  it('case 1: the member partition — only the issuer moves; a rename-cap non-issuer, a relocate-cap member, and a no-cap member all STAY and are notified per class', async () => {
     const oldName = uniqueChannel('rlpart');
     const newName = uniqueChannel('rlpartn');
     const sfx = uniqueId().slice(0, 5);
 
-    // Class 1: the issuer, holding draft/channel-rename.
+    // Class 1 ("alice"): the issuer, holding draft/channel-rename — the ONLY
+    // member the server moves (issuing the rename IS consent).
     const issuerNick = `rliss${sfx}`;
     const issuer = track(await connectClient(issuerNick, [RENAME_CAP]));
-    // Class 2: umode +F, deliberately WITHOUT draft/channel-rename, to
-    // exercise the legacy PART+JOIN presentation of a move.
-    const followNick = `rlfol${sfx}`;
-    const follower = track(await connectClient(followNick, null));
-    // Class 3: evilnet/channel-relocate — must NOT be moved.
+    // Class 2 ("bob"): holds draft/channel-rename but is NOT the issuer. Under
+    // design "D" the rename cap governs move *presentation* only, and a
+    // non-issuer does not move — so bob is an ordinary stayer and gets the
+    // fallback NOTICE, never a RENAME (which would falsely assert a move).
+    const bobNick = `rlbob${sfx}`;
+    const bob = track(await connectClient(bobNick, [RENAME_CAP]));
+    // Class 3 ("carol"): evilnet/channel-relocate — must NOT be moved, gets RELOCATE.
     const relocNick = `rlrel${sfx}`;
     const relocClient = track(await connectClient(relocNick, [RELOCATE_CAP]));
-    // Class 4: no relevant caps at all — NOTICE fallback, must NOT be moved
-    // and must NOT see a RENAME.
+    // Class 4 ("dan"): no relevant caps at all — NOTICE fallback, must NOT be
+    // moved and must NOT see a RENAME.
     const plainNick = `rlpln${sfx}`;
     const plain = track(await connectClient(plainNick, null));
 
-    follower.clearRawBuffer();
-    follower.send(`MODE ${followNick} +F`);
-    await follower.waitForParsedLine(
-      (m) =>
-        m.command === 'MODE' &&
-        m.params[0]?.toLowerCase() === followNick.toLowerCase() &&
-        (m.params[1] ?? '').includes('F'),
-      10000
-    );
-
-    for (const c of [issuer, follower, relocClient, plain]) {
+    for (const c of [issuer, bob, relocClient, plain]) {
       c.send(`JOIN ${oldName}`);
       await c.waitForJoin(oldName, undefined, 10000);
     }
     await settle(800);
 
-    for (const c of [issuer, follower, relocClient, plain]) c.clearRawBuffer();
+    for (const c of [issuer, bob, relocClient, plain]) c.clearRawBuffer();
 
     await renameOrThrow(issuer, oldName, newName, 'moving day', 'case 1');
     await settle(3000);
@@ -402,25 +378,26 @@ describe('evilnet/channel-relocate (consent-based channel renaming)', () => {
     expect(issuerRename!.params[1]?.toLowerCase()).toBe(newName.toLowerCase());
     expect(issuerRename!.trailing).toBe('moving day');
 
-    // --- +F follower: moved, told with the legacy PART+JOIN pair.
-    expect(
-      sawPartFrom(follower, oldName, followNick),
-      '+F member never received its own PART of the old name'
-    ).toBe(true);
-    const followPart = follower.allParsedLines.find(
-      (m) =>
-        m.command === 'PART' &&
-        m.params[0]?.toLowerCase() === oldName.toLowerCase() &&
-        m.source?.nick?.toLowerCase() === followNick.toLowerCase()
+    // --- rename-cap non-issuer (bob): NOT moved, gets the fallback NOTICE,
+    // and must NEVER see a RENAME (the design "D" keystone: holding the
+    // rename cap does not move a non-issuer, and RENAME would lie).
+    const bobNotice = bob.allParsedLines.find(
+      (m) => m.command === 'NOTICE' && m.params[0]?.toLowerCase() === oldName.toLowerCase()
     );
-    expect(followPart!.trailing ?? '').toMatch(new RegExp(`renamed to ${newName}`, 'i'));
     expect(
-      sawOwnJoin(follower, newName, followNick),
-      '+F member never received its own JOIN of the new name'
-    ).toBe(true);
+      bobNotice,
+      'rename-cap non-issuer never received the fallback channel NOTICE'
+    ).toBeDefined();
+    expect(bobNotice!.trailing ?? '').toMatch(
+      new RegExp(`${oldName} has moved to ${newName}`, 'i')
+    );
     expect(
-      follower.allParsedLines.some((m) => m.command === 'RENAME'),
-      '+F member without draft/channel-rename received a RENAME message'
+      bob.allParsedLines.some((m) => m.command === 'RENAME'),
+      'rename-cap non-issuer received a RENAME message (it falsely asserts a move that did not happen)'
+    ).toBe(false);
+    expect(
+      sawOwnJoin(bob, newName, bobNick),
+      'rename-cap non-issuer was moved into the new channel without consenting'
     ).toBe(false);
 
     // --- relocate-cap member: NOT moved, gets RELOCATE.
@@ -462,9 +439,13 @@ describe('evilnet/channel-relocate (consent-based channel renaming)', () => {
       'no-cap member was moved into the new channel without consenting'
     ).toBe(false);
 
-    // --- stayers must see the movers leave (Task 2 finding M1): without this
-    // their nick lists keep two ghosts for the whole grace period.
+    // --- stayers must see the sole mover (the issuer) leave (Task 2 finding
+    // M1): without this their nick lists keep a ghost for the whole grace
+    // period. Under design "D" the issuer is the ONLY member who moves, so it
+    // is the only PART a stayer should see — bob, a rename-cap non-issuer, must
+    // stay put and must NOT be seen leaving.
     for (const [c, who] of [
+      [bob, 'rename-cap non-issuer'],
       [relocClient, 'relocate-cap'],
       [plain, 'no-cap'],
     ] as const) {
@@ -473,9 +454,9 @@ describe('evilnet/channel-relocate (consent-based channel renaming)', () => {
         `${who} stayer never saw the issuer PART the tombstone`
       ).toBe(true);
       expect(
-        sawPartFrom(c, oldName, followNick),
-        `${who} stayer never saw the +F mover PART the tombstone`
-      ).toBe(true);
+        sawPartFrom(c, oldName, bobNick),
+        `${who} stayer saw bob (a non-issuer) PART — no non-issuer should move under design "D"`
+      ).toBe(false);
     }
 
     // --- the tombstone's redirect is announced to whoever is left in it.

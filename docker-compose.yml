@@ -66,6 +66,7 @@ services:
      - ./nefcores:/home/nefarious/ircd/cores  # Core dump directory
     ports:
       - 0.0.0.0:6667:6667
+      - 0.0.0.0:6675:6675
       - 0.0.0.0:6697:6697
       - 0.0.0.0:4497:4497
       - 0.0.0.0:9998:9998
@@ -223,8 +224,8 @@ services:
      - gitsync_data:/home/nefarious/ircd/gitsync
      - ssl_data3:/home/nefarious/ircd/ssl
     ports:
-      - 127.0.0.1:6669:6667
-      - 127.0.0.1:6699:6697
+      - 0.0.0.0:6669:6667
+      - 0.0.0.0:6699:6697
     env_file:
       - .env
       - .env.local
@@ -303,8 +304,8 @@ services:
      - gitsync_data:/home/nefarious/ircd/gitsync
      - ssl_data4:/home/nefarious/ircd/ssl
     ports:
-      - 127.0.0.1:6670:6667
-      - 127.0.0.1:6700:6697
+      - 0.0.0.0:6670:6667
+      - 0.0.0.0:6700:6697
     env_file:
       - .env
       - .env.local
@@ -383,8 +384,8 @@ services:
      - gitsync_data:/home/nefarious/ircd/gitsync
      - ssl_data5:/home/nefarious/ircd/ssl
     ports:
-      - 127.0.0.1:6672:6667
-      - 127.0.0.1:6702:6697
+      - 0.0.0.0:6672:6667
+      - 0.0.0.0:6702:6697
     env_file:
       - .env
       - .env.local
@@ -463,8 +464,8 @@ services:
      - gitsync_data:/home/nefarious/ircd/gitsync
      - ssl_data6:/home/nefarious/ircd/ssl
     ports:
-      - 127.0.0.1:6673:6667
-      - 127.0.0.1:6703:6697
+      - 0.0.0.0:6673:6667
+      - 0.0.0.0:6703:6697
     env_file:
       - .env
       - .env.local
@@ -543,8 +544,8 @@ services:
      - gitsync_data:/home/nefarious/ircd/gitsync
      - ssl_data7:/home/nefarious/ircd/ssl
     ports:
-      - 127.0.0.1:6674:6667
-      - 127.0.0.1:6704:6697
+      - 0.0.0.0:6674:6667
+      - 0.0.0.0:6704:6697
     env_file:
       - .env
       - .env.local
@@ -833,6 +834,10 @@ services:
     networks:
       irc_net:
         ipv4_address: 172.29.0.13
+    ports:
+      # Loopback-only publish for host-side directory browsers / ldapsearch.
+      # Plain ldap:// (no TLS configured), so keep this bound to 127.0.0.1.
+      - "127.0.0.1:3389:389"
     healthcheck:
       test: ["CMD-SHELL", "ldapsearch -x -H ldap://localhost:389 -s base -b '' >/dev/null 2>&1"]
       interval: 10s
@@ -1007,9 +1012,18 @@ volumes:
   webpush_data5:
   webpush_data6:
   webpush_data7:
+  # Account-bearing volumes are EXTERNAL: `down -v` must never be able to delete
+  # them (2026-06-27 a `down -v` wiped x3_data and every registered account).
+  # On a fresh host, create them once: docker volume create testnet_<name>
   x3_data:
+    external: true
+    name: testnet_x3_data
   ldap_data:
+    external: true
+    name: testnet_ldap_data
   ldap_config:
+    external: true
+    name: testnet_ldap_config
 
 networks:
   irc_net:

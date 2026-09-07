@@ -161,6 +161,50 @@ convergence or a real `metadata_burst_channel`), after which the loader gets bot
 (materialize-with-+R) and something worth loading. Symmetric gap with
 [[project_ephemeral_metadata_burst_gap]]; this is the channel half of what F2-b did for users.
 
+**ORIGINAL DESIGN INTENT (per user, 2026-07-24) + current reality — reframes "proper treatment":**
+The metadata cache was designed as PER-NODE store + LAZY PULL, NOT convergence: each server keeps its
+own store; SET is explicitly shared (broadcast); a newly-linked/needy node does NOT get all metadata
+bursted — it QUERIES (MDQ) the authoritative holder on a miss and CACHES the reply (TTL-bounded), so
+each node "slowly builds it as needed." **BUT the query-on-miss half was dismantled:** the GET miss
+path no longer sends an MDQ — it returns "Nefarious is authoritative — no X3 query, just report not
+set" (m_metadata.c:511/558). `ms_metadataquery` still ANSWERS an incoming MDQ from local store
+(:1319) and `ms_metadata` still CACHES replies (:1590), but nothing TRIGGERS the query. So the lazy
+pull-cache loop is broken in the middle (responders live, trigger gone) — the dead `metadata_channel_
+load` is a symptom of the same half-built subsystem. **This means the design fork for channels is NOT
+"doc-converge vs not" — it is:**
+  (A) COMPLETE THE ORIGINAL PULL-CACHE: restore MDQ-on-miss for channel (and user offline) metadata,
+      cache replies with TTL, hydrate chptr->metadata on materialize via a query if not cached. Honors
+      the original intent (no full burst), and TTL + re-query naturally sidesteps the channel-identity/
+      reuse problem (stale cache expires + re-queries fresh) — making the "reap on -R vs epoch"
+      question largely MOOT. Lighter, but no live cross-node convergence (eventual via TTL/re-query).
+  (B) DOC-CONVERGE (F2-b parity for +R channels): push into the CRDT doc, gated on +R, reap on -R /
+      epoch-scope. Full partition-tolerant convergence, but "converges everything" — the opposite of
+      the original avoid-bursting-all intent, and carries the identity/reap complexity.
+**HISTORY CORRECTION (user, 2026-07-24) — the fork above is FALSE:** the pull-cache design belonged
+to the ABANDONED architecture: metadata was originally to live on Keycloak with X3 authoritative, and
+each nef node kept only a per-node cache + MDQ pull from X3. That path was dropped (long-term goal =
+merge X3 into Nefarious, [[project_x3_nefarious_merge]]), metadata moved INTO nef completely — but the
+conversion was never finished. Every catalogued oversight is a shard of that half-migration: MDQ
+responders with no sender, TTL "cache" stamps on an authoritative store, ms_metadata "caching"
+broadcasts, channel persistence without restore/convergence, visibility not persisted for users,
+attach-path load gaps, dead metadata_channel_load/_get_client_cached/_burst stubs. Option A (complete
+the pull-cache) is therefore completing the WRONG ERA. The coherent era-2 model on crdt-mesh: the DOC
+is the metadata authority (F2-b already does this for users); per-node stores materialize the doc;
+memory materializes the store for online entities; +R channels join the doc; unregistered channels go
+memory-only-ephemeral (no store writes → no leak, no identity problem); MDQ retired to a legacy-interop
+responder. User verdict on current state: "not behaving correctly by any measure of correctly."
+
+**2026-07-24 full-subsystem audit + approved spec supersede the sketch above.** Audits (file:line
+grounded): `.claude/para/resources/metadata-audit-{storage,wire}-2026-07-24.md`. Spec:
+`metadata-era2-completion.md` (two-tier model approved). Corrections to earlier text in THIS file:
+(a) burst polarity was inverted — the `metadata_burst_*` stubs are uncalled decoys, the REAL burst
+is inline (`s_serv.c:545` users / `channel.c:1645` channels); the CHANNEL burst works, the USER
+burst has been broken since birth (numnick target vs FindUser receiver, ca033ea) — so the F2-b doc
+is the ONLY working late-link user-metadata backfill, not additive redundancy. (b) MDQ gets full
+retirement, not a legacy-interop responder — X3 contains no MD/MDQ code at all; no consumer exists.
+(c) F3's mechanism confirmed: visibility is never persisted for user rows and the three restore
+paths disagree (list→PUBLIC, get-promotion→PRIVATE, cmd-fallback→PUBLIC-and-serve).
+
 ## Harness lessons burned into the scenarios
 - **Convergence oracle = mdigest** (GC-invariant). The raw doc digest legitimately flaps
   during per-node GC / expiry-tombstone waves; asserting on it gives false FAILs.

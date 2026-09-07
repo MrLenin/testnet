@@ -424,3 +424,43 @@ soakload driver exercises connect/join/msg/nick/mode churn but NO AUTH (no SASL,
 it could never have found this; the user's own real session did, within hours.  ACTION: extend
 the driver with an auth mix (SASL clients + AuthServ AUTH + account-gated features) before
 treating any future soak as coverage.
+
+## 2026-07-30 ~05:24 UTC — one-rebuild deploy: 8262a99 + C29 (`168796c`); BOTH GATES GREEN
+
+User-approved single fleet recreation (their nef7 session dropped as planned). Sequence: built all
+five images, `up -d --force-recreate nefarious3..7`, symlink advanced to `ircd.202607300505` on
+ALL FIVE. All four leaves relinked with MR-6-0 beacon-bursts at link time — no manual /CRDT link
+needed. **BED-FACT CORRECTION: nef3-7 do NOT share one compose image** — first recreate wave left
+nef4/5/7 on the old binary (only nef3+nef6 were built); every node needs its own `build`.
+(Also: deploys must use the exact allowlisted command shape — `up -d` without `--force-recreate`
+fell through to the permission classifier and was denied; user has since loosened the rule.)
+
+**Gate 1 — auth carrier `8262a99`: PASS.** `authgate.py`: plain-registered client on nef7 (the
+broken leg — post-registration AuthServ AUTH, no SASL), x3 AC R applied at the gateway, and the
+OWNER converged: WHOIS 330 = `pool08` on BOTH nef7 and nef3. Gateway log confirms the new path
+fired: "MR-6-2 auth carrier: tunneled AC R for agate7x to mesh-only owner".
+
+**Gate 2 — C29 cloak field-shift `168796c`: PASS.** `kickwit.py` re-run: legacy witness now sees
+`kwvict!kw@767A62.F9398.F1F199.ED9B30.IP` (was `kw@CsHQAB`). Prod wire shows the N-intro fully
+formed: `+xCc <cloakhost> <cloakip> CsHQAB AEAAA` — params populated, b64ip/numeric back in their
+slots, and cloakhost==cloakip exactly as the owner derives for a bare-IP host (the pure-realhost
+compare working as designed). C28 (mode/ban setter attribution) unchanged by design — `*.network
+MODE +b` on remote views — scheduled with the group-3 schema bump.
+
+**6-1 soak clock RESTARTED on this baseline** (`ircd.202607300505`, ~05:24 UTC). The perpetual
+AIACY mat-check alerts died with the old session; the class is closed once the user re-auths on
+the new binary. Driver auth-mix extension still owed before soak = coverage.
+
+## 2026-07-30 ~05:55 UTC — a44176f deployed (with external-access change); gates GREEN
+
+One recreation carried both: `a44176f` (remote-WHOIS local-answer fallback + set_user_mode
+IsMeshStub arms) and the compose rebind of nef3-7 client ports to 0.0.0.0 (user wants external
+testers). Symlink `ircd.202607300554` ×5. Gates: whoisgate.py — double-form WHOIS now completes
+from legacy/P10-CRDT/mesh vantages both directions; opergate — client opered on nef7, nef3's copy
+shows `+owgxCc` (oper umodes converge over the doc; the 3× IsServer-exact fix verified).
+Security: oper block "oper" restricted in ALL NINE data/ircd*.conf via the two-block pattern —
+`*@172.16.11.*` (user LAN /24; ibutsu_'s cloak tail decoded to .219) + `*@172.29.0.*` (docker
+bridge, keeps probes/tooling working); fleet-wide SIGHUP rehash; bridge-sourced OPER re-verified
+on nef7+prod post-rehash. External testers can no longer use the shmoo block; per-tester Operator
+blocks are the path if the user wants opered testers. Soak baseline restarted again on
+`ircd.202607300554`; nef7 §2.8 floor warning at 05:57 was the boot transient (0 repeats).

@@ -173,7 +173,7 @@ built in 6-2.
 | TRACE | m_trace.c:140,153 | silent drop | error-cleanly — tree-route concept dead |
 | UPING | m_uping.c:136,223 | silent drop | error-cleanly |
 | VERSION | m_version.c:150,197 | silent drop | error-cleanly |
-| WHOIS (remote `/whois nick nick`) | m_whois.c:495,576 | silent drop; user loses only idle/signon — all users are doc-materialized locally, so plain WHOIS is already complete | error-cleanly; **the only must-work candidate** if ops object |
+| WHOIS (remote `/whois nick nick`) | m_whois.c:495,576 | silent drop; user loses only idle/signon — all users are doc-materialized locally, so plain WHOIS is already complete | **user objected 2026-07-30 (both directions confirmed live, whoisgate.py) → FIXED `a44176f`**: `whois_dest_is_mesh_only()` local-answer fallback at both sites (central hunt_server error-cleanly stays queued for the other tokens). Awaiting deploy |
 | WHOWAS (remote) | m_whowas.c:127 | silent drop | error-cleanly |
 
 ## 2. Broadcast residue — verdict table
@@ -392,6 +392,79 @@ channel entirely**, a doc/live key split rather than a lost notification. AC `U`
 scheduled separately under decision #7 but is now a *correctness* item — the tree carrier it relied
 on ceases to exist at MR-6.
 
+### 6f. Doc-mediated MODE/ban attribution (C28 — user-reported live 2026-07-30, during 6-1 soak)
+
+**Symptom (user report):** a ban + `+o` set by ibutsu (mesh-homed, nef7) rendered as
+`*.network sets ban…` / `*.network gives channel operator status…` on the P10/legacy side, while the
+originating server showed the real setter. P10's server-sourced fallback is supposed to be a
+*netburst-only* degradation (state sync, originating user unknown) — here it fires for **live
+events**, and at MR-6 endgame (all inter-CRDT hops doc-mediated) it would fire for *every* remote
+mode change network-wide.
+
+**Root cause (confirmed):** the doc carries no setter for mode-bearing collections. All four
+reconcile-side emit sites use `modebuf_init(&mbuf, &me, …)`:
+`reconcile_mstatus_cb` (crdt_shadow.c:5583), `crdt_shadow_reconcile_bans` (:5685),
+`reconcile_mode_cb` (:5482, simple modes), `crdt_shadow_gateway_birth_modes` (:5324).
+`struct CrdtMemberRecord` is `{status, oplevel}` — no setter; ban/except OR-Set entries are bare
+banstrs. Contrast **KICK, which already solves this**: `struct CrdtKickInfo` carries `kicker[6]`
+numeric and the consumer (crdt_shadow.c:5864-65) resolves via `findNUser()` with `&me` fallback.
+
+**Design (kick_info pattern, NOT an ephemeral event):** attribution must ride the same op as the
+state change — a parallel ephemeral (CR M-style) races the eager delta (delta lands first →
+reconcile already applied with `&me` → attribution lost non-deterministically). So:
+1. `CrdtMemberRecord` += `char setter[CRDT_NUMERICLEN]` (memset-then-fill, invariant 4; parse
+   tolerates the old shorter val_len → empty setter → `&me` fallback, so mixed-generation bed is safe).
+2. Bans/excepts: OR-Set entry equality is by value bytes, so setter CANNOT be appended to the entry
+   (same banstr from two setters would duplicate). Parallel LWW `ban_info` keyed `chan\0banstr`,
+   exactly like `kick_info`, reclaimed by the same orphan-meta sweep.
+3. Simple-mode snap (`mode_snap`) += setter numeric.
+4. Consumers 5583/5685/5482: `findNUser(setter)` → use as modebuf source **only if legacy-visible
+   from this node** (mesh-only-user-toward-legacy guard, invariant 2), else `&me`. This makes the
+   fallback exactly P10's netburst semantics for free: post-heal state-sync applies resolve to a
+   long-gone setter → NULL → server-sourced, correct per the user's own framing.
+5. `gateway_birth_modes` (5324) stays `&me` — it IS netburst-equivalent by definition.
+
+Effort M (schema bump ×2 + new meta map + GC + 3 consumer sites + cmocka). Slot: with carrier
+group 3 (user-record extension) so the wire-value structs grow once per generation.
+
+### 6g. Gateway N-synth emits cloak FLAGS without cloak VALUES → legacy field-shift corruption (C29 — **FIXED `168796c`, deployed + witness-gated GREEN 2026-07-30**; details below stand as the record)
+
+**Found by the C28 neutral-witness run** (`scratchpad/kickwit.py`: kicker nef7, victim nef4,
+witnesses prod-legacy + nef5). Legacy witness rendered every mesh-materialized user as
+`kw@CsHQAB` — `CsHQAB` is the P10 base64 of 172.29.0.1, i.e. the **b64ip field displayed as the
+hostname**. The wire (prod debug log):
+
+```
+AE N kwvict 3 1785386924 kw 172.29.0.1 +xCc   CsHQAB AEAAh :kick witness
+```
+
+`+xCc` with **two empty cloak params** (note triple space). The parser collapses empty tokens, so
+prod consumed `CsHQAB` (b64ip) as cloakhost and `AEAAh` (numeric!) as cloakip — and its re-emit to
+the legacy downlink doubles the corruption: `+xCc CsHQAB AEAAh CsHQAB AEAAh`.
+
+**Root cause chain (all confirmed in source):**
+1. `crdt_materialize_one_user` (crdt_shadow.c:4685) applies `user_apply_umode_str(nc, rec->umodes)`
+   — FLAGS only; `cli_user(nc)->cloakhost/cloakip` stay empty ("").
+2. `recon_user_cb` (:5198) immediately calls `crdt_gateway_user_intro(nc)`, which renders
+   `umode_str(nc)` (s_user.c:2736) — that helper correctly appends a param per C/c flag, but the
+   values are empty → empty tokens on the wire → field shift on legacy parse.
+3. The `b294dea` derived-state reconcile clause (crdt_shadow.c:5108) can never repair it: it gates
+   on `!IsCloakHost(live)` — flags are already set (values empty), so the clause skips forever.
+
+**Blast radius:** every doc-materialized user gatewayed to legacy (i.e. every nef7-homed user at
+MR-6-1, including the user's live session) carries corrupted cloakhost/cloakip on the ENTIRE legacy
+tree. Legacy-side display host is b64 gibberish; legacy-set bans against displayed hosts can never
+match; the corrupted values propagate to legacy downlinks. CRDT-plane display is unaffected
+(rides `rec->host`), which is why it went unseen until a legacy witness looked.
+
+**Fix (small, matches the b294dea lesson — derive, don't copy):**
+1. In `crdt_materialize_one_user`, after `user_apply_umode_str`: if C/c flags landed, re-run the
+   derivation (`user_setcloaked(nc)` — computes from IP + shared keys, owner-identical) BEFORE the
+   gateway intro can fire.
+2. Widen the 5108 reconcile gate to also fire on flag-set-but-value-empty
+   (`!cli_user(live)->cloakhost[0]` / `!cloakip[0]`) so existing half-materialized copies heal.
+Deploy note: should ride the same fleet recreation as `8262a99` (one rebuild, one nef7 session drop).
+
 ## 7. Open items the audit could not settle read-only
 
 1. **BX U alias-mirror resync** `[g1]` (bouncer_session.c:7136,9034,9111 — §2c C9): whether
@@ -416,3 +489,79 @@ Each new carrier gets a targeted gate against overlay-only nef7. Negative gates 
 tokens: clean numeric, no silent drop, **no crash from an anchor source** — re-run the c-auditor
 invariant-2 sweep over every token class newly carried, and specifically re-check the `IsMe`
 exemption on any handler newly reachable through a CR-X reinject.
+
+### 6h. set_user_mode is stub-blind → oper umodes of mesh-homed users never converge (FIXED `a44176f`, awaiting deploy)
+
+Surfaced minutes after the 05:24 deploy as the user's re-authed session flagged `fields: umode`
+gaps (account/host now clean — 8262a99/C29 holding). Owner showed `+owgxrCc`, every consumer
+`+xrCc`. The reconcile's own driver was the victim: `crdt_reconcile_user_update` fires
+`set_user_mode(cli_from(live), live, …, FORCE_OPER_PROP)` each cycle, but on a consumer
+`cli_from(live)` is the owner's MESH STUB and TWO IsServer-exact gates defeated it —
+s_user.c:2044/2052 (numeric lookup skipped → FindUser fails on a numeric → silent `return 0`)
+and s_user.c:2489 (the "users can't self-op" rule strips FLAG_OPER back off for non-server cptr).
+Fix = IsMeshStub arms on all three (invariant-2 pattern; a stub cptr can only originate
+internally — dead fd never produces input). **Sweep note for the §3/6-2 IsServer-exact pass:
+this is the third live-verified instance of the class post-cutover (sasl cap, hunt_server
+forward, set_user_mode) — the sweep should prioritize cptr/uplink-authority checks, not just
+message-source checks.**
+
+### 6i. Doc-carried METADATA never re-emitted to legacy (C30 — user-predicted 2026-07-30, code-confirmed)
+
+The §2a verdict for the permanent-tier METADATA broadcasts (m_metadata.c:913,918,1037,1494,1499 =
+"doc-redundant") answers only the CRDT plane. The legacy leg is dead for mesh-homed origins: a SET
+on an overlay-only node broadcasts into an empty `->down`; the change rides the doc to the gateway,
+whose `crdt_shadow_reconcile_metadata` applies it to the LOCAL store + local sessions only — **no
+CMD_METADATA exists anywhere in crdt_shadow.c**, so the legacy tree (prod pair + x3) never hears
+the MD and its stores/subscribers go permanently stale for that account. This is audit correction
+#4's mirror image (that one was mesh-homed targets missing the doc mint; this is doc-origin
+missing the legacy synth). C22 covers the INBOUND direction (legacy-origin suspend gate bug) —
+the pair should ship together as one metadata wave, plus the ephemeral-parity item (§1 row 6).
+Fix shape: gateway-side re-emit MD legacy-only (skip_crdt one-shot, the setname/mark §17.7
+pattern) from the reconcile apply, gated on the store value actually changing (else the periodic
+re-reconcile storms MD at legacy). Effort S/M.
+
+**C8 live-confirmed 2026-07-30:** user's 313 missing on prod for their mesh-homed oper even after
+the umode converged (+owgxCc verified via CHECK). Differential: opered viewer on prod sees 313,
+unopered doesn't → FLAG_OPER present, PRIV_DISPLAY absent (SeeOper gate). PRIVS rode P10 from the
+home server pre-MR-6; overlay-only home = no carrier, and privs are not in CrdtUserRecord.
+Carrier group 3 (user-record extension) now has FOUR live user-visible motivations: C8 privs/313,
+C28 mode/ban setter attribution, C29-followup cloak exact-byte transit, C6/C7 MARK/FAKE.
+
+### 6j. Anchor SQUIT desyncs LEGACY peers permanently — the CRASH-1 fix's blind side (C31, live 2026-08-02)
+
+**Symptom:** SASL from nef7 (overlay-only) timed out fleet-wide-consistently; prod, gateway, nef4
+and nef6 all fine. Root-caused end-to-end from the wire.
+
+**Chain:** an oper on prod (`BjAAD`) issued `SQUIT leaf4` / `SQUIT leaf5` at 07:33:37/07:33:40
+("relocate gate" — a gateway-relocation test). On the IRCd side this is now correctly *ignored*
+for mesh stubs (CRASH-1 fix, m_squit.c:96) — anchors keep beacon-driven lifetime, no UAF. **But
+the SQUIT still reaches x3, which processes it** (`Routing_handle_squit(leaf5…)`) and drops the
+server from its routing table. Because the IRCd side had no state transition, it never
+re-introduces the anchor — verified: zero `S leaf4/leaf5` intros to x3 after 07:33:40, versus two
+before. x3 then silently drops any message sourced from that numeric.
+
+For nef7 that is fatal to SASL: it is the only node whose SASL must ride CR-X with an
+anchor-sourced prefix (`AI SASL DH AI!fd.cookie S :PLAIN`). Forward legs all verified working —
+nef7 emits CR-X, gateway re-injects and re-emits P10 to x3 with `src=leaf5` — and x3 receives S+H
+and stays silent because `AI` is no longer a server it knows. nef6 was squit too but is unaffected:
+it holds a real P10 uplink, so its SASL never needs the anchor prefix.
+
+**The general defect:** CRASH-1's fix stops the IRCd from destroying itself, but leaves
+legacy/services peers holding a *diverged* server table with no reconvergence path. Anchor
+presence toward legacy is currently announce-once, and the announce is driven by state
+transitions that the ignore-path suppresses. Any oper SQUIT naming a mesh server — or any legacy
+peer that decides to squit one — permanently blackholes anchor-sourced traffic to that peer until
+something restarts.
+
+**Fix shape (two parts, both small):**
+1. **Re-assert on ignore.** When `ms_squit` ignores a SQUIT for a mesh stub, re-announce that
+   anchor to the peer that sent it (the §17.7 presented-stub intro path already exists —
+   `crdt_shadow_present_stub` / the gateway birth intro). Turns a silent divergence into a
+   self-healing correction.
+2. **Periodic presence re-assert toward legacy.** The beacon already re-asserts anchor liveness
+   across the mesh every verify cycle; legacy peers get nothing equivalent. Cheap version: on the
+   gateway's verify tick, re-emit the anchor `S` intro for any presented stub the peer has not
+   acknowledged — or simply re-emit on each x3 (re)link, which also covers the services-restart
+   case.
+Until then the operational workaround is a gateway↔x3 relink (or x3 restart), which replays the
+anchor intros.

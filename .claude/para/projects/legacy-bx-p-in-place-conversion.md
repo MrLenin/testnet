@@ -261,8 +261,22 @@ Integration test additions to `tests/src/ircv3/lusers-announced-count.test.ts`
   for those peers.  Capability detection covers this automatically
   (peer is "BX-aware" → only gets BX C).  No deprecation churn.
 
-- **Client-side ghost on in-place conversion (open follow-up):** on
-  the receive side, when `bounce_alias_create`'s convert-in-place
+- **Client-side ghost on in-place conversion — RESOLVED 2026-06-28**
+  (`73f0ed4` crdt-mesh, `3868b34` nefarious/ircv3.2-upgrade, both pushed;
+  testnet ptrs `2e49777` / `6d26b59`).  Implemented the mitigation below:
+  before the relabel in `bounce_alias_create`'s convert branch, emit
+  `sendcmdto_common_channels_butone(alias, CMD_QUIT, NULL, ":Session converging")`
+  when the nick actually changes — local-only (each server cleans up its own
+  clients on its own BX C; no upstream dependency), skipped on same-nick.
+  KEY SCOPE FINDING from the fix: this is the ONLY convert/promote ghost —
+  aliases SHARE the primary's nick (both `bounce_setup_local_alias` and the
+  convert branch set `cli_name(alias)=cli_name(primary)`) + memberships transfer
+  on promote, so the COMMON promote / alias-exit paths are already SEAMLESS (no
+  ghost).  This branch is a rare burst-ordering edge, kept dead in steady state by
+  the `s_serv.c` IsBouncerAlias N-burst filter — defensive fix, verified to
+  compile + not regress (0-assert churn), can't be triggered in the testnet.
+  (Original analysis follows.)
+  On the receive side, when `bounce_alias_create`'s convert-in-place
   branch fires (the burst-ordering case — peer received `N` for the
   would-be-alias before its `BX C`), the conversion is silent on
   the wire — no `QUIT`, `NICK`, or `PART` is emitted to the alias's
@@ -286,6 +300,24 @@ Integration test additions to `tests/src/ircv3/lusers-announced-count.test.ts`
   channel members whose WHO output includes a nick that doesn't
   have a server-side Client struct anymore) before adding more
   wire.
+
+  **Canary + harness (2026-06-06):** an `SNO_NETWORK` snotice
+  was added at the convert-branch entry in
+  [bouncer_session.c](nefarious/ircd/bouncer_session.c) —
+  `"BX C convert-in-place fired: alias_numeric=… old_nick=… …"`.
+  Prod-test opers subscribed to SNO_NETWORK will see this fire
+  every time the branch runs.
+  Coverage harness at
+  [bouncer-convert-branch-ghost.test.ts](tests/src/ircv3/bouncer-convert-branch-ghost.test.ts)
+  exercises 6 multi-server scenarios (local primary attach, hold/revive,
+  cross-server attach both directions, primary-QUIT cross-server
+  promote, rapid alias churn) with witness opers on BOTH servers
+  watching for the canary.  Verified harness pass + witnesses
+  receiving 5+3 NOTICE traffic (so the test isn't hollow).  The
+  `s_serv.c:358` `IsUser(acptr) && !IsBouncerAlias(acptr)` burst
+  filter is the structural reason this branch stays dead in
+  steady-state.  Mitigation work is gated on a real firing — the
+  canary is the trigger.
 
 ## Not blocking
 

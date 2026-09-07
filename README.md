@@ -145,8 +145,9 @@ files and rebuild the IRCd normally:
 scripts/dc.sh build nefarious
 ```
 
-It is compiled only under `./configure --enable-keycloak` (which is what
-`nefarious/Dockerfile` passes) and needs `libcurl` and `libjansson`.
+It is compiled automatically whenever `libcurl` and `libjansson` are found
+(`--enable-keycloak` makes a missing one a hard error, which is what
+`nefarious/Dockerfile` passes; `--disable-keycloak` leaves it out).
 `ircd/kc/` may not include IRCd headers; it reaches the IRCd only via the
 `kc_event_ops` / `kc_log_ops` adapters in `ircd/ircd_kc_adapter.c`. The
 rule is enforced by `make check-kc-boundary`, a prerequisite of the IRCd

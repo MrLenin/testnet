@@ -55,8 +55,10 @@ current truth, reconciled against `git log` on branch `crdt-mesh`. **The promoti
   (`bd14966`/`1cb06e1`). 5-5c CH-federation skip-mesh-only band-aid (`3cd3861`).
 - **Nick-collision resolver — BUILT + wired** (`crdt_resolve_nick_collision` / `crdt_nick_force_rename`,
   crdt_shadow.c:3099). Live-validation under a concurrent-claim partition: unconfirmed (test gap).
-- **Orphan-reap milestone — Inc 1 detector landed** (`5aeb86e`); Inc 2 destructive reap gated/deferred.
-  See `crdt-orphan-reap-milestone.md`.
+- **Orphan-reap milestone — Inc 1 detector landed** (`5aeb86e`); **Inc-2 CHARACTERIZED 2026-07-26:
+  class-1 user ghost no longer reproduces (destructive user reap DROPPED); gate-2 false-death PASS
+  under churn + full multi-link isolation. Successors: partition-cycle member-ORSet residue leak
+  (deterministic repro) + Fix-A tombstone-GC-skew snapshot storm.** See `crdt-orphan-reap-milestone.md`.
 
 **OPEN (genuine remaining work, by value):**
 1. **Tier C remaining tokens** — **F1 COMPLETE** (minus ACCOUNT, reclassified to Tier B): F1-a

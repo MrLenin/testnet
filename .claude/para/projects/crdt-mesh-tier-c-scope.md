@@ -6,6 +6,24 @@
 > retirement.md` §9 (5-5e/5-5f) into one actionable plan. **Scope only — no code this turn.**
 > Tier C = the **P1 band** (gate for CRDT carrying PROD traffic; P10 still present as fallback).
 
+> **STATUS 2026-06-28 (reconciled vs `git log`):**
+> - **F1 — PARTIAL.** DONE over the mesh: **AWAY** (`d97c6e5`), **SVSIDENT + SWHOIS** (`f3fb20c`),
+>   **SETNAME/realname** (`5a2b073`) — all via the setter-hook → CrdtUserRecord pattern below.
+>   **F1-b SVSINFO + MARK (realname/version/sslclifp/geoip) DONE 2026-06-29** (`00b048f`, ptr
+>   `1fa8a3a`; spec `crdt-mesh-tier-c-f1b.md`). **ACCOUNT reclassified to Tier B** (services-auth,
+>   with CI). **F1-c SILENCE DONE 2026-06-29** (`57c6575`, ptr `601f8f4`): global OR-Set keyed
+>   usernumeric\0mask, mirror at forward_silences + materialize/reconcile sync, exception '~' encoding,
+>   ADDITIVE (P10 token not suppressed). Live: cross-node source-side suppression + removal, 0 crash.
+>   **⇒ F1 COMPLETE (minus ACCOUNT→Tier B). Next Tier C: F2 (MD/MR/RD), then F3/F4/F5.**
+> - **C1 multiline — DONE** (channel `bd14966` + DM-target `1cb06e1`).
+> - **5-5c CH-federation skip-mesh-only band-aid — DONE** (`3cd3861`); the real fix (5-5f, reroute
+>   CH Q/W over CR) remains, user-deferred.
+> - **BS / 5-5e bouncer — DONE.** Headline finding #1 below (BS doesn't converge on a partial mesh)
+>   was the M5-era measurement; the full doc-native cutover (M2→M6d, the lease kernel, gateway BS/BX
+>   synthesis) landed 2026-06-22..27. The CR 'B' carrier was NOT built — superseded by the doc-native
+>   model. See `crdt-mesh-5-5e-bouncer.md`. **Disregard the "5-5e is open" framing in §0 below.**
+> - **F2/F3/F4/F5 — all still OPEN** as scoped.
+
 ## 0. Headline findings (read first)
 
 1. **★ The bouncer gap is BIGGER than the audit recorded: BS session-state convergence is ALSO

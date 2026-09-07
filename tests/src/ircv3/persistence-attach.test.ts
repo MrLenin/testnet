@@ -16,6 +16,7 @@ import { authenticateSaslPlain } from '../helpers/sasl.js';
  *
  * Wire surface under test:
  *   PERSISTENCE ATTACH <profile>          (pre-CAP-END only)
+ *   PERSISTENCE LIST                      (pre-CAP-END and after)
  *
  * Validates:
  *   - ATTACH between SASL success and CAP END pins the active profile
@@ -276,4 +277,154 @@ describe('draft/persistence — Phase 4 / M2 ATTACH + active profile', () => {
     );
     expect(sb.params[1]).toBe('OFF');
   });
+  it('ATTACH accepts an optional catch-up cursor msgid', async () => {
+    const account = await getTestAccount();
+    poolAccounts.push(account.account);
+    const client = await createRawSocketClient(
+      PRIMARY_SERVER.host,
+      PRIMARY_SERVER.port,
+    );
+    clients.push(client);
+    await client.capLs();
+    await client.capReq(['sasl', 'draft/persistence']);
+    await authenticateSaslPlain(client, account.account, account.password);
+
+    client.clearRawBuffer();
+    // Cursor arg is any msgid string; unknown ones are resolved (and
+    // FAILed as CURSOR_UNKNOWN) at replay-trigger time, not at ATTACH.
+    client.send('PERSISTENCE ATTACH default 1700000000123-aaaabbbb');
+    const ack = await client.waitForParsedLine(
+      m => m.command === 'PERSISTENCE' && m.params[0] === 'ATTACH',
+      5_000,
+    );
+    expect(ack.params[1]).toBe('default');
+
+    // Registration must proceed normally with the cursor pinned.
+    client.capEnd();
+    client.register(uniqueNick('prc'));
+    await client.waitForNumeric('001');
+  });
+
+  it('ATTACH rejects an oversized cursor msgid', async () => {
+    const account = await getTestAccount();
+    poolAccounts.push(account.account);
+    const client = await createRawSocketClient(
+      PRIMARY_SERVER.host,
+      PRIMARY_SERVER.port,
+    );
+    clients.push(client);
+    await client.capLs();
+    await client.capReq(['sasl', 'draft/persistence']);
+    await authenticateSaslPlain(client, account.account, account.password);
+
+    client.clearRawBuffer();
+    client.send(`PERSISTENCE ATTACH default ${'x'.repeat(80)}`);
+    const fail = await client.waitForParsedLine(
+      m => m.command === 'FAIL' && m.params[0] === 'PERSISTENCE',
+      5_000,
+    );
+    expect(fail.params[1]).toBe('INVALID_PARAMETERS');
+  });
+
+  // The CURSOR_UNKNOWN fallback (bogus cursor -> FAIL after 001 when a
+  // held session resumes and auto-replay fires) needs a full
+  // hold/revive harness; covered when the revive-path suites run on a
+  // live bed. Documented in persistence-reattach-pipeline.md.
+  //
+  // Same harness gap defers the multi-device marker test: replay must
+  // NOT be pruned by the account read marker (removed 2026-08-30 after
+  // Rubin's phone lost a day of history his desktop had "read" -- the
+  // attach-cursor replay floor was fast-forwarded to the marker).  A
+  // proper pin needs: attach A, advance MARKREAD, detach+reattach B
+  // with a cursor, assert the marker-shadowed span replays.
+
+  // ---- PERSISTENCE LIST (session enumeration, `list` CAP token) ----
+  // Written per spec against aebf7cd; NOT live-run yet (bed predates the
+  // subcommand). Wire: PERSISTENCE SESSION <sessid> <state> <nick>
+  // <channels> :<info> (0+), then PERSISTENCE ENDOFLIST.
+
+  it('LIST pre-CAP-END with no sessions returns bare ENDOFLIST', async () => {
+    const account = await getTestAccount();
+    poolAccounts.push(account.account);
+    const client = await connectSaslOnly(account.account, account.password);
+    clients.push(client);
+
+    client.clearRawBuffer();
+    client.send('PERSISTENCE LIST');
+    const end = await client.waitForParsedLine(
+      m => m.command === 'PERSISTENCE'
+        && (m.params[0] === 'ENDOFLIST' || m.params[0] === 'SESSION'),
+      5_000,
+    );
+    // Fresh pool account: no sessions expected.
+    expect(end.params[0]).toBe('ENDOFLIST');
+    await completeRegistration(client);
+  });
+
+  it('LIST shows a HELD session pre-CAP-END (enumerate-then-attach flow)', async () => {
+    const account = await getTestAccount();
+    poolAccounts.push(account.account);
+
+    // Session setup: register, opt into hold, disconnect -> HELD ghost.
+    const setup = await connectFull(account.account, account.password);
+    clients.push(setup);
+    setup.send('PERSISTENCE SET ON');
+    await setup.waitForParsedLine(
+      m => m.command === 'PERSISTENCE' && m.params[0] === 'SET', 5_000,
+    ).catch(() => { /* ack shape may vary; session creation is the effect */ });
+    setup.send('QUIT :hold me');
+    setup.close();
+    clients.pop();
+    await new Promise(r => setTimeout(r, 1_000));
+
+    // Second connection: SASL only, enumerate before CAP END.
+    const client = await connectSaslOnly(account.account, account.password);
+    clients.push(client);
+    client.clearRawBuffer();
+    client.send('PERSISTENCE LIST');
+    const session = await client.waitForParsedLine(
+      m => m.command === 'PERSISTENCE' && m.params[0] === 'SESSION',
+      5_000,
+    );
+    expect(session.params[1]).toBeTruthy();           // sessid
+    expect(session.params[2]).toBe('HELD');
+    await client.waitForParsedLine(
+      m => m.command === 'PERSISTENCE' && m.params[0] === 'ENDOFLIST',
+      5_000,
+    );
+    // Completing registration resumes the held session; afterEach
+    // (bouncerDisableHold) tears it down.
+    await completeRegistration(client);
+  });
+
+  it('LIST without SASL fails ACCOUNT_REQUIRED', async () => {
+    const client = await createRawSocketClient(
+      PRIMARY_SERVER.host,
+      PRIMARY_SERVER.port,
+    );
+    clients.push(client);
+    await client.capLs();
+    await client.capReq(['draft/persistence']);
+    client.clearRawBuffer();
+    client.send('PERSISTENCE LIST');
+    const fail = await client.waitForParsedLine(
+      m => m.command === 'FAIL' && m.params[0] === 'PERSISTENCE',
+      5_000,
+    );
+    expect(fail.params[1]).toBe('ACCOUNT_REQUIRED');
+  });
+
+  it('LIST works post-registration too', async () => {
+    const account = await getTestAccount();
+    poolAccounts.push(account.account);
+    const client = await connectFull(account.account, account.password);
+    clients.push(client);
+    client.clearRawBuffer();
+    client.send('PERSISTENCE LIST');
+    await client.waitForParsedLine(
+      m => m.command === 'PERSISTENCE' && m.params[0] === 'ENDOFLIST',
+      10_000,
+    );
+  });
+
 });

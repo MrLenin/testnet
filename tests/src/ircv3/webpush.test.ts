@@ -56,6 +56,9 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
       client.capEnd();
       client.register('wpreg1');
       await client.waitForNumeric('001');
+      // Let the welcome burst (005 etc.) land before clearing and sending,
+      // or the first line read back is an ISUPPORT numeric (seen 2026-09-03).
+      await new Promise(r => setTimeout(r, 300));
 
       client.clearRawBuffer();
 
@@ -84,6 +87,9 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
       client.capEnd();
       client.register('wpunreg1');
       await client.waitForNumeric('001');
+      // Let the welcome burst (005 etc.) land before clearing and sending,
+      // or the first line read back is an ISUPPORT numeric (seen 2026-09-03).
+      await new Promise(r => setTimeout(r, 300));
 
       // First register
       client.send('WEBPUSH REGISTER https://push.example.com/test dummy-key dummy-auth');
@@ -119,6 +125,9 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
       client.capEnd();
       client.register('wplist1');
       await client.waitForNumeric('001');
+      // Let the welcome burst (005 etc.) land before clearing and sending,
+      // or the first line read back is an ISUPPORT numeric (seen 2026-09-03).
+      await new Promise(r => setTimeout(r, 300));
 
       client.clearRawBuffer();
 
@@ -146,6 +155,9 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
       client.capEnd();
       client.register('wpauth1');
       await client.waitForNumeric('001');
+      // Let the welcome burst (005 etc.) land before clearing and sending,
+      // or the first line read back is an ISUPPORT numeric (seen 2026-09-03).
+      await new Promise(r => setTimeout(r, 300));
 
       client.clearRawBuffer();
 
@@ -174,6 +186,9 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
       client.capEnd();
       client.register('wpinv1');
       await client.waitForNumeric('001');
+      // Let the welcome burst (005 etc.) land before clearing and sending,
+      // or the first line read back is an ISUPPORT numeric (seen 2026-09-03).
+      await new Promise(r => setTimeout(r, 300));
 
       client.clearRawBuffer();
 
@@ -200,6 +215,9 @@ describe('IRCv3 WebPush (draft/webpush)', () => {
       client.capEnd();
       client.register('wpnoexist1');
       await client.waitForNumeric('001');
+      // Let the welcome burst (005 etc.) land before clearing and sending,
+      // or the first line read back is an ISUPPORT numeric (seen 2026-09-03).
+      await new Promise(r => setTimeout(r, 300));
 
       client.clearRawBuffer();
 
@@ -276,6 +294,9 @@ describe('IRCv3 Event Playback (draft/event-playback)', () => {
       client.capEnd();
       client.register('ephistory1');
       await client.waitForNumeric('001');
+      // Let the welcome burst (005 etc.) land before clearing and sending,
+      // or the first line read back is an ISUPPORT numeric (seen 2026-09-03).
+      await new Promise(r => setTimeout(r, 300));
 
       // Let server finish sending welcome notices before AUTH
       await new Promise(r => setTimeout(r, 500));

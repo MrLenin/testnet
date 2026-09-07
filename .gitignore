@@ -22,3 +22,13 @@ perf-*.txt
 
 # leak-soak harness JSONL snapshots (per-run output, not source)
 tests/leak-soak-results/
+
+# Bed artifacts that keep landing in the tree
+c1.pem
+ircd.20*
+.claude/output.log
+__pycache__/
+backups/
+.superpowers/
+tests/tests/leak-soak-results/
+data/.x3_admin_created_*

@@ -56,7 +56,26 @@ Feature flags are configured in the `features {}` block of the IRCd config file.
 | `FEAT_CAP_read_marker` | TRUE | Enable `draft/read-marker` capability |
 | `FEAT_CAP_channel_rename` | TRUE | Enable `draft/channel-rename` capability |
 | `FEAT_CAP_metadata` | TRUE | Enable `draft/metadata-2` capability |
-| `FEAT_CAP_webpush` | TRUE | Enable `draft/webpush` capability |
+| `FEAT_CAP_draft_webpush` | FALSE | Enable `draft/webpush` capability (the bed and prod set it TRUE; the cap value carries `vapid=<key>` only once a key is provisioned) |
+
+### Web Push Configuration (Nefarious, `draft/webpush`)
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `FEAT_WEBPUSH_DB` | "webpush" | Directory of the RocksDB webpush store (subscriptions + the VAPID key ring) |
+| `FEAT_WEBPUSH_DB_AUTOGROW` | TRUE | Let the store grow on demand |
+| `FEAT_WEBPUSH_VAPID_PRIVKEY` | "" | Manual VAPID key: P-256 private scalar (base64url). Set on ONE server, it joins the replicated key ring at generation max+1 and becomes the network's current key; empty = keys are generated and rotated automatically. Clearing (`RESET`) demotes the key to automatic; it stays in the ring |
+| `FEAT_WEBPUSH_KEY_ROTATE` | 7776000 | Seconds before the current key's origin server mints the next generation (90 days; 0 = never). Manual keys are never auto-rotated. Old keys stay in the ring while subscriptions reference them |
+| `FEAT_WEBPUSH_IDLE` | 900 | Push only when the account is unattended: no connection is connected, not away, and has spoken within this many seconds. Held, away and idle connections all count as unattended. Per-account override: `draft/webpush/idle` metadata (seconds). 0 = only held or away connections count |
+| `FEAT_WEBPUSH_NOTIFY` | TRUE | Send pushes at all (PM/NOTICE to held sessions, highlights, read-marker relays) |
+| `FEAT_WEBPUSH_COOLDOWN` | 60 | Seconds between pushes for one (account, sender or channel); read-marker relays use a fixed 3 s coalescing window instead |
+| `FEAT_WEBPUSH_HIGHLIGHTS` | TRUE | Push channel messages that mention a held member |
+| `FEAT_WEBPUSH_EXPIRE` | 15552000 | Seconds a subscription may go without a re-REGISTER before the hourly sweep removes it (180 days; 0 disables). The arming time replicates with the record (`WP R`/`WP B`) and the sweep broadcasts `WP U`, so all servers age it from the same instant |
+| `FEAT_WEBPUSH_MAX_REGISTRATIONS` | 10 | Endpoints one account may hold; the next `REGISTER` gets `FAIL WEBPUSH MAX_REGISTRATIONS`; re-registering a held endpoint never counts (0 = unlimited) |
+
+Per-account client-settable metadata: `draft/webpush/payload` = `full` (default) / `route` / `ping`;
+`draft/webpush/mute` = `target:until;…` (`*` global, `0` or negative indefinite; names compare with
+the casemapping; a PM mute may name the sender's nick or account).
 
 ### Account Registration Configuration (Nefarious, native REGISTER)
 
@@ -218,12 +237,14 @@ METADATA * SET chathistory.pm * :0     # Explicit opt-out (blocks storage in all
 METADATA * CLEAR chathistory.pm        # Clear preference (use server default)
 ```
 
-**PM Policy Advertisement** (CHATHISTORY_ADVERTISE_PM): When enabled, adds `pm=<mode>` to the `draft/chathistory` capability value:
-```
-draft/chathistory=limit=100,pm=multi
-draft/chathistory=limit=100,pm=single
-draft/chathistory=limit=100,pm=global
-```
+**Capability value**: the cap is advertised as `draft/chathistory=<CHATHISTORY_MAX>` — a bare
+integer, the per-request row limit (also `ISUPPORT CHATHISTORY=<n>`). The spec defines no value;
+it is kept deliberately because goguma pages a target's backlog by comparing each page's length
+against this value (a bare cap reads as 1000 there, so against our clamp every full page would
+look short and goguma would fetch one page per target). Audited 2026-09-06 against goguma's
+source; do not drop it without re-checking that client. PM policy is *not* carried in the cap
+value (the older `limit=…,pm=…` form no longer exists); see the ISUPPORT tokens and the
+`chathistory.pm` metadata above.
 
 **Connection Notice** (CHATHISTORY_PM_NOTICE): When enabled, sends a NOTE (standard-replies) or NOTICE on connect informing users of the PM storage policy and how to opt-in/out.
 
@@ -372,7 +393,7 @@ features {
     "CAP_read_marker" = "TRUE";
     "CAP_channel_rename" = "TRUE";
     "CAP_metadata" = "TRUE";
-    "CAP_webpush" = "TRUE";
+    "CAP_draft_webpush" = "TRUE";   # the parser logs "Unknown feature" for any other spelling
 
     # Limits
     "MULTILINE_MAX_BYTES" = "4096";
@@ -790,7 +811,7 @@ metadata.timezone = "America/New_York"
 
 **Web Push Subscriptions**:
 ```
-webpush.{hash} = "endpoint|p256dh_base64|auth_base64"
+webpush.{hash} = "endpoint|p256dh_base64|auth_base64|armed_unix_seconds"   (armed absent on records written before 2026-09; such records never expire until re-armed)
 ```
 
 **Read Markers**:

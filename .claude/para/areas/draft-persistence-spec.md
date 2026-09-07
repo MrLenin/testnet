@@ -46,6 +46,7 @@ If no value is provided, the server supports only the base protocol (STATUS, GET
 |-------|---------|
 | `list` | Server supports `PERSISTENCE LIST` |
 | `attach` | Server supports `PERSISTENCE ATTACH` |
+| `attach-cursor` | `PERSISTENCE ATTACH` accepts an optional last-seen msgid for server-driven catch-up |
 
 Clients MUST tolerate unknown tokens in the value.
 
@@ -144,8 +145,21 @@ When the server advertises `attach` in the CAP value, clients may select which s
 ### PERSISTENCE ATTACH (client to server)
 
 ```
-PERSISTENCE ATTACH <session-id>
+PERSISTENCE ATTACH <session-id> [<msgid>]
 ```
+
+The optional `<msgid>` is the client's globally newest last-seen message id (any buffer). When supplied, the server anchors the post-attach catch-up replay at that message (resolved through its msgid index) instead of the server-derived last-activity point, and performs the server-driven replay even for clients that negotiated `draft/chathistory` (the explicit cursor is an explicit request; clients de-duplicate by msgid). If the msgid is unknown or evicted the server sends `FAIL PERSISTENCE CURSOR_UNKNOWN <msgid>` and falls back to the server-derived point.
+
+#### Catch-up delivery (wire format)
+
+Supplying the cursor is consent to receive **unsolicited chathistory batches** — the catch-up arrives without the client issuing any `CHATHISTORY` command:
+
+- When `batch` is negotiated, everything is wrapped in one outer `BATCH` of vendor type `evilnet.github.io/bouncer-replay` (unknown batch types pass through per the batch spec). **Known client bug (2026-09-03):** irc-framework (The Lounge, Kiwi) tolerates unknown batch *types* but discards the *contents of nested batches* — the inner `BATCH +id` is buffered inside the outer instead of opening, so every inner-tagged line is dropped and the replay arrives empty. Nesting is spec-legal; the fix belongs in irc-framework, not here.
+- Inside it, one standard **`chathistory`-type batch per buffer** — identical in shape to a `CHATHISTORY AFTER` response — channels first (one batch per joined channel with activity after the anchor), then up to 50 private-message correspondents. Every line carries `server-time` and `msgid` tags.
+- Channel batches skip content already read elsewhere: the anchor is advanced past the account's read-marker per channel when the marker is newer. PM batches do not consult read-markers.
+- Per-buffer content is capped (server-configured, default 100) with **newest-biased truncation**: an over-limit buffer delivers the latest N and the gap sits immediately after the cursor. A client detects this by msgid discontinuity and MAY backfill that buffer with a targeted `CHATHISTORY AFTER`.
+- Delivery is flow-controlled against the client's send queue and MAY interleave with newly-arriving live traffic at batch boundaries; clients order by `server-time` and de-duplicate by `msgid`.
+- The whole mechanism is additionally gated by server policy (auto-replay enabled) and the user's `PERSISTENCE REPLAY` setting; a client that supplies no cursor and negotiated `draft/chathistory` receives no server-driven catch-up (unchanged prior behavior).
 
 Sent after `PERSISTENCE LIST`, before `CAP END`. Instructs the server to resume the specified session instead of auto-selecting.
 
@@ -405,3 +419,25 @@ The CAP alone (without any PERSISTENCE commands) satisfies the minimal "don't au
 2. **Pre-registration LIST** — Allowing LIST before CAP END is powerful but unusual. Should it require a specific capability token (e.g., `pre-reg-list`) or is gating on `list` sufficient?
 
 3. **Interaction with MONITOR/WATCH** — MONITOR visibility is governed by the session's effective away state, not raw connection events. A connection that negotiates `draft/pre-away` and sets `AWAY *` "does not exist" for presence purposes per the pre-away spec — attaching such a connection MUST NOT trigger a MONITOR online/away transition. Only connections that change the effective away state (i.e., a connection that is present, or sets a human-readable away message) should produce MONITOR notifications.
+
+## Auto-replay completeness (2026-08-28 addition)
+
+The automatic missed-message replay batches (the
+`evilnet.github.io/bouncer-replay` wrapper's inner `chathistory`
+batches) are capped per target by server configuration.  Each inner
+`BATCH` start line carries the `draft/chathistory-end` tag when the
+replay for that target is **complete** (everything since the resume
+point fits within the cap).  When the tag is **absent**, the leg may
+have been truncated at the server limit: the client SHOULD treat the
+oldest replayed message's position as a potential gap boundary and
+backfill with `CHATHISTORY BEFORE <target> ...` if it needs the full
+interval.  (This reuses the draft/chathistory-end pagination tag's
+exact meaning — "no more pages" — rather than minting a new marker.)
+
+Federated replay legs carry the same signal end-to-end (2026-08-28):
+the storage server probes limit+1 and flags a truncated result on the
+`CH E` federation terminator (`E <reqid> <count> [T]`, P10 layer); the
+requesting server ORs the flag across responding storage servers and
+emits/withholds `draft/chathistory-end` on the client-facing batch
+opener accordingly (a truncated contributor always withholds it, even
+when merge-dedup shrinks the total under the cap).

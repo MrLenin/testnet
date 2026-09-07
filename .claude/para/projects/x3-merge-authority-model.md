@@ -14,6 +14,15 @@ and `x3` @ `master`, deliberately without consulting prior planning docs.
 > name-keyed access rows producing a live privilege-escalation path once the daemon
 > can rename accounts), and Keycloak as identity authority (the deployment already
 > federates Keycloak from the LDAP directory that X3 writes to and binds against).
+>
+> **2026-08-04: both forcing functions are now relieved without the merge**, and the
+> program is PARKED (sequencing doc, "Reconciliation pass 2026-08-04"). (a)
+> Registration works end-to-end via Keycloak's WRITABLE LDAP federation (Gate 1b,
+> adopted); (b) §0's rename misparse is fixed in place — X3 discriminates the
+> `AC ... R ... RENAME` query (`x3/src/proto-p10.c:1738-1762`) and answers it,
+> owner-gated (`chanserv_rename_allowed()`, `chanserv.c:8552`). §0 and §5.2 read as
+> history of the 2026-07-30 state; the entity/authority *design* is unaffected and
+> remains the target model.
 
 Forcing functions: (a) `draft/account-registration` (`ircd/m_register.c`),
 (b) `draft/channel-rename` for +R channels (`ircd/m_rename.c`). Both are blocked

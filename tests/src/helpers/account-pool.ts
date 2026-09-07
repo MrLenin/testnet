@@ -423,9 +423,48 @@ export async function wipePoolAccountMetadata(account: string): Promise<void> {
   for (const key of POOL_CLEANUP_KEYS) {
     client.send(`METADATA *${account} SET ${key}`);
   }
+  await killHeldSessions(client, account);
   // Brief settle so the operations land before getTestAccount returns
   // and the next test connects with this account.
   await new Promise(r => setTimeout(r, 100));
+}
+
+/**
+ * Destroy the account's held bouncer session(s), if any.
+ *
+ * A pool account keeps its bouncer session across QUIT, and every
+ * test that borrows the account adds its unique channels to that
+ * session.  Nothing parted them, so after enough runs a checkout
+ * revived onto a 50-channel session, every JOIN answered 405 "too
+ * many channels", and the suite failed on missing echoes (2026-09-06,
+ * pool01: 50 channels from the redaction/replay suites).  The oper
+ * KILL of the held ghost is the whole-session teardown by design
+ * (bouncer invariant 6), which is exactly the reset a checkout wants;
+ * the oper-scoped session kill was never built as a command.
+ *
+ * The account is checked out exclusively, so anything WHO finds on it
+ * here is a leftover ghost from an earlier test, never a live client
+ * of the caller.
+ */
+async function killHeldSessions(client: RawSocketClient, account: string): Promise<void> {
+  for (let round = 0; round < 3; round++) {
+    const start = client.allLines.length;
+    client.send(`WHO ${account} a%na`);
+    try {
+      await client.waitForNumeric('315', 5000);
+    } catch {
+      return; // WHO did not complete; leave the session alone
+    }
+    const nicks = client.allLines.slice(start)
+      .map(l => l.split(' '))
+      .filter(p => p[1] === '354' && p[4] === account)
+      .map(p => p[3]);
+    if (nicks.length === 0) return;
+    for (const nick of nicks) {
+      client.send(`KILL ${nick} :pool account checkout`);
+    }
+    await new Promise(r => setTimeout(r, 300));
+  }
 }
 
 /** Test-only: tear down the cleanup client (e.g. in a global teardown). */

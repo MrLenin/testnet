@@ -94,7 +94,9 @@ describe('draft/persistence — Phase 1', () => {
     );
     expect(line.command).toBe('PERSISTENCE');
     expect(line.params[0]).toBe('STATUS');
-    expect(['ON', 'OFF']).toContain(line.params[1]);
+    // Two-param form per PR #503: <client-setting> <effective-setting>
+    expect(['ON', 'OFF', 'DEFAULT']).toContain(line.params[1]);
+    expect(['ON', 'OFF']).toContain(line.params[2]);
   });
 
   it('PERSISTENCE STATUS returns current effective state on demand', async () => {
@@ -115,7 +117,8 @@ describe('draft/persistence — Phase 1', () => {
       5_000,
     );
     expect(reply.params[0]).toBe('STATUS');
-    expect(['ON', 'OFF']).toContain(reply.params[1]);
+    expect(['ON', 'OFF', 'DEFAULT']).toContain(reply.params[1]);
+    expect(['ON', 'OFF']).toContain(reply.params[2]);
   });
 
   it('PERSISTENCE GET is an alias for STATUS', async () => {
@@ -135,7 +138,8 @@ describe('draft/persistence — Phase 1', () => {
       5_000,
     );
     expect(reply.params[0]).toBe('STATUS');
-    expect(['ON', 'OFF']).toContain(reply.params[1]);
+    expect(['ON', 'OFF', 'DEFAULT']).toContain(reply.params[1]);
+    expect(['ON', 'OFF']).toContain(reply.params[2]);
   });
 
   it('PERSISTENCE SET ON enables hold, STATUS reflects ON', async () => {
@@ -160,7 +164,8 @@ describe('draft/persistence — Phase 1', () => {
       m => m.command === 'PERSISTENCE' && m.params[0] === 'STATUS',
       5_000,
     );
-    expect(statusReply.params[1]).toBe('ON');
+    expect(statusReply.params[1]).toBe('ON');  // client-setting
+    expect(statusReply.params[2]).toBe('ON');  // effective
   });
 
   it('PERSISTENCE SET OFF disables hold, STATUS reflects OFF', async () => {
@@ -193,7 +198,8 @@ describe('draft/persistence — Phase 1', () => {
       m => m.command === 'PERSISTENCE' && m.params[0] === 'STATUS',
       5_000,
     );
-    expect(statusReply.params[1]).toBe('OFF');
+    expect(statusReply.params[1]).toBe('OFF');  // client-setting
+    expect(statusReply.params[2]).toBe('OFF');  // effective
   });
 
   it('PERSISTENCE SET DEFAULT clears preference', async () => {
@@ -228,7 +234,8 @@ describe('draft/persistence — Phase 1', () => {
       m => m.command === 'PERSISTENCE' && m.params[0] === 'STATUS',
       5_000,
     );
-    expect(['ON', 'OFF']).toContain(statusReply.params[1]);
+    expect(statusReply.params[1]).toBe('DEFAULT');  // client-setting cleared
+    expect(['ON', 'OFF']).toContain(statusReply.params[2]);  // effective = server default
   });
 
   it('PERSISTENCE SET BADARG → FAIL INVALID_PARAMETERS', async () => {

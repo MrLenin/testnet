@@ -696,7 +696,22 @@ The S2S format is optimized for efficiency (single-char subcmd, compact referenc
 
 **Query** - Request history from other servers:
 ```
-[SERVER] CH Q <target> <subcmd> <ref> <limit> <reqid>
+[SERVER] PN <account> <channel> <start> <end>
+         Closed strict-presence interval, replicated readmarker-style. <start>/<end> are
+         PRESENCE TIME (2026-09-02): the event's HLC packed as (epoch_ms << 16) | logical,
+         so events inside one millisecond still order. Formerly epoch seconds; receivers
+         recognize older values by magnitude (< 1e11 seconds, < 1e15 milliseconds) and scale.
+         A message's history row and its live @time carry the origin's stamp (the S2S tag
+         time, else the HLC mint time of its msgid), never the receiving server's clock.
+
+[SERVER] CH Q <target> <subcmd> <ref> <limit> <reqid> [<dest_numeric> [<ref2> [<requester>]]]
+         <ref2>       second reference (BETWEEN/W); "*" when absent but <requester> follows
+         <requester>  P<yxx> | F<yxx> — the requesting client's numeric (2026-09-02, presence-aware
+                      paging): a storage server walks with that client's replicated ACCOUNT
+                      presence so its limit+1 truncation probe counts visible rows; F = the
+                      client asked for ":full" (responder applies has_ops_override itself).
+                      Session-anchored or unresolvable requesters get the unfiltered walk and
+                      the origin post-filters. Older responders ignore both trailing params.
 ```
 
 **Response** - Send messages back to requester:
@@ -718,7 +733,13 @@ Final:       [SERVER] CH B <reqid> <msgid> :<b64>
 
 **End** - Signal end of response:
 ```
-[SERVER] CH E <reqid> <count>
+[SERVER] CH E <reqid> <count> [T]
+
+The optional trailing `T` on `CH E` (2026-08-28) marks the responding
+server's result as TRUNCATED at the requested limit (it probed limit+1
+internally); requesters propagate this to the end client as the absence
+of `@draft/chathistory-end` on the delivery batch.  Older parsers
+(including X3's) ignore the extra parameter.
 ```
 
 #### S2S Subcmd Codes
@@ -729,11 +750,9 @@ Final:       [SERVER] CH B <reqid> <msgid> :<b64>
 | `B` | BEFORE | Messages before reference |
 | `A` | AFTER | Messages after reference |
 | `R` | AROUND | Messages around reference |
-| `W` | BETWEEN | Messages between two references (local only¹) |
-| `T` | TARGETS | Channels with recent activity (local only¹) |
+| `W` | BETWEEN | Messages between two references (federated 2026-08-30: second ref rides after dest numeric) |
+| `T` | TARGETS | Channels with recent activity (federated; latest may exceed the window as a veto row, see 2026-09-01 notes) |
 | `X` | EXACT | Exact message lookup by msgid (for federated REDACT) |
-
-¹ W (BETWEEN) and T (TARGETS) are only handled in the client-facing command handler. They are **not** implemented in the S2S federation path (`ms_chathistory` CH Q dispatch) and cannot be federated to other servers.
 
 #### S2S Reference Format
 
@@ -1392,54 +1411,108 @@ Each intermediate server:
 
 ### WEBPUSH (WP) - Phase 30
 
-**Purpose**: Web push notification support via X3 services.
+**Purpose**: Web push (`draft/webpush`) subscription and VAPID key replication between
+Nefarious servers.  Subscriptions are stored per **account** on every server; the server
+holding a session pushes for it, so every server needs every subscription *and* every key a
+subscription may be bound to.  (An earlier design routed pushes through X3 with `WP P`/`WP E`;
+that never shipped — the ircd posts to the push service itself.)
 
 **IRCv3 Spec**: https://github.com/ircv3/ircv3-specifications/pull/471
 
+#### The key ring (2026-09-03)
+
+The spec says servers SHOULD rotate VAPID keys and keep old keys for existing
+subscriptions.  Every server holds a **ring** of keys: `(id = base64url public key, private
+scalar, generation, created, origin server, manual flag)`.  Rings merge by **union** (`WP K`
+is idempotent by id and only a key not already held propagates, which terminates the flood).
+The **current** key — the one in the `VAPID` ISUPPORT token, used for new registrations — is
+never on the wire; every server computes it from its ring with one rule: *highest generation,
+then oldest `created`, then id bytes*.  A freshly linked server's boot key (generation 0)
+therefore never displaces the network's key; a deliberate rotation mints generation `max+1`
+and wins everywhere once it replicates; two sides of a split that both rotated converge on
+the older key.  Keys not current are *retired*: they keep signing for the subscriptions bound
+to them and are pruned locally once nothing references them past a one-day grace (or past
+`FEAT_WEBPUSH_EXPIRE`).
+
+Each subscription is **bound** to the key its client saw: every ISUPPORT emission records the
+`VAPID` token's key id on the connection, and `WEBPUSH REGISTER` binds to that (not to the key
+current at REGISTER time, which differs across a rotation).  Delivery signs with the bound key.
+
 #### P10 Format
 
-**VAPID Key Broadcast** (X3 → Nefarious):
+**Key ring entry** (link burst, one per key, before the subscriptions; and on every mint —
+scheduled rotation or `WEBPUSH_VAPID_PRIVKEY` import — to all IRCv3-aware peers).  Carries
+the **private** scalar: P10 links already carry credentials and are TLS where configured; a
+hub fans it out like any burst.
 ```
-[X3] WP V :[VAPID_PUBKEY_BASE64URL]
+[SERVER] WP K [KEY_ID] [GENERATION] [CREATED] [ORIGIN_SERVER] [MANUAL] :[PRIVKEY_BASE64URL]
+```
+A key whose private scalar does not derive its id is dropped without propagation.
+
+**Register Subscription** (the server the client registered on → all):
+```
+[SERVER] WP R [ACCOUNT] [ENDPOINT] [P256DH] [AUTH] [ARMED] [KEY_ID|-]
 ```
 
-**Register Subscription** (Nefarious → X3):
+**Unregister Subscription** (→ all; also sent by the stale-subscription sweep for every record
+it reaps, by delivery after three HTTP 403s in a row, and by PERSISTENCE DETACH for every
+endpoint of the account):
 ```
-[SERVER] WP R [USER_NUMERIC] [ENDPOINT] [P256DH] [AUTH]
-```
-
-**Unregister Subscription** (Nefarious → X3):
-```
-[SERVER] WP U [USER_NUMERIC] [ENDPOINT]
+[SERVER] WP U [ACCOUNT] [ENDPOINT]
 ```
 
-**Push Request** (Nefarious → X3):
+**Burst** (on link, one per stored subscription; **relayed onward** since 2026-09-03 so servers
+behind the peer learn a split-off leaf's registrations — idempotent at every hop, newer
+`ARMED` wins):
 ```
-[SERVER] WP P [ACCOUNT_NAME] :[MESSAGE]
+[SERVER] WP B [ACCOUNT] [ENDPOINT] [P256DH] [AUTH] [ARMED] [KEY_ID|-]
 ```
 
-**Error Response** (X3 → Nefarious):
+**Advertised key** (legacy, advisory): still sent when the current key changes, for peers
+that predate the ring.  Ring servers never adopt it — a key you cannot sign with must never be
+advertised, or clients register subscriptions nobody can push to.
 ```
-[X3] WP E [USER_NUMERIC] [CODE] :[MESSAGE]
+[SERVER] WP V :[VAPID_PUBKEY_BASE64URL]
 ```
+
+`ARMED` is the unix second of the client's last `WEBPUSH REGISTER`; the receiver keeps the
+newer of its own stamp and the peer's, so a burst never re-arms a record the expiry sweep
+(`FEAT_WEBPUSH_EXPIRE`, default 180 days) has removed.  `KEY_ID` is the bound key (`-` when
+unbound: a pre-ring record, or a connection that never saw a token).  Peers that predate a
+field read the shorter prefix and ignore the rest.
+Stored form on every server: `endpoint|p256dh|auth|armed|keyid`; pre-ring records are
+stamped with the migrated single key at the first boot of the ring code.
 
 #### Subcommand Codes
 
 | Code | Direction | Description |
 |------|-----------|-------------|
-| `V` | X3→Nef | VAPID public key broadcast |
-| `R` | Nef→X3 | Register push subscription |
-| `U` | Nef→X3 | Unregister push subscription |
-| `P` | Nef→X3 | Request push delivery |
-| `E` | X3→Nef | Error response to client |
+| `K` | burst + server→servers | One ring key, private half included; propagated only when new |
+| `V` | server→servers | Advertised public key (legacy, advisory; fanned out, never adopted) |
+| `R` | server→servers | Register push subscription (`ARMED`, `KEY_ID`) |
+| `U` | server→servers | Unregister push subscription (client, expiry sweep, 403 reap, DETACH) |
+| `B` | link burst, relayed | One stored subscription per line (`ARMED`, `KEY_ID`) |
+
+#### Operations
+
+- `STATS webpush` (oper): store state, current key, every ring key with generation / created /
+  origin / manual / references / loaded, rotation period, config-key state, last error.
+- `SET WEBPUSH_VAPID_PRIVKEY <b64url scalar>` on **one** server rotates the whole network to
+  that key (imported at generation `max+1`, flagged manual); `RESET` demotes it to automatic.
+- `FEAT_WEBPUSH_KEY_ROTATE` (default 90 days) — the current key's origin server (or anyone once
+  the origin is gone) mints the next generation; manual keys are never auto-rotated.
+- A persisted key that fails to load is quarantined under `bad/<name>.<time>` in the store's
+  config CF and the next source takes over; setup errors also go to the `SNO_OLDSNO` snomask.
 
 #### Security
 
 - Endpoints must be HTTPS
 - Internal/private IPs blocked (localhost, 10.x, 192.168.x, etc.)
-- Subscriptions stored in Keycloak as `webpush.*` attributes
+- Subscriptions stored per account in the ircd's RocksDB webpush store (every server holds
+  every subscription; `FEAT_WEBPUSH_MAX_REGISTRATIONS` caps endpoints per account)
 - RFC 8291 encryption (ECDH + AES-128-GCM)
-- RFC 8292 VAPID signing (ECDSA P-256)
+- RFC 8292 VAPID signing (ECDSA P-256), with the key the subscription was registered under
+- `WP K` carries private keys: link trust = key trust (hub fan-out included)
 
 ---
 
@@ -2168,7 +2241,7 @@ SIGN is `+` to add an alias's CHFL_ALIAS membership to a channel, `-` to remove.
 | NICK | String(NICKLEN) | IRC nickname |
 | NEW_NICK | String(NICKLEN) | New nick on a BX N nick-sync |
 | TS | Number | Unix timestamp (used by N for nick-change ordering) |
-| FIELD=VALUE | String | Identity-update key/value (BX U). Currently `away`, `caps`, `last_active` |
+| FIELD=VALUE | String | Identity-update key/value (BX U). `host`/`realhost`/`realname`/`fakehost`/`cloakhost`/`cloakip`/`username`/`account` (identity mirroring), `caps=<hex>` (BX_CAP_* bitmask), `profile=<name>` (active persistence profile), `la=<unix ts>` (activity, 2026-09-03: emitted by a connection's own server on its first message after 5 min quiet; the numeric may name an ALIAS or the PRIMARY — receivers update `ba_last_active` or `hs_last_active` and forward; it is handled before the alias guard so a primary's numeric is never deferred). Consumers: promotion (most recently active alias wins), session-wide WHOIS idle, oper CHECK per-connection idle, webpush attention |
 | TOK | String | IRC verb (`PRIVMSG`, `NOTICE`) on echo paths |
 | MSGID | String | IRCv3 message id for echo dedup |
 | PM_TARGET / TARGET_NICK | String | Original PM destination nick on the echo path |
@@ -2512,11 +2585,10 @@ In a network with mixed old/new servers:
 
 | Subcmd | Format | Purpose |
 |--------|--------|---------|
-| `V` | `[X3] WP V :[vapid_key]` | VAPID broadcast |
-| `R` | `[SERVER] WP R [user] [endpoint] [p256dh] [auth]` | Register |
-| `U` | `[SERVER] WP U [user] [endpoint]` | Unregister |
-| `P` | `[SERVER] WP P [account] :[message]` | Push request |
-| `E` | `[X3] WP E [user] [code] :[message]` | Error |
+| `V` | `[SERVER] WP V :[vapid_key]` | VAPID broadcast |
+| `R` | `[SERVER] WP R [account] [endpoint] [p256dh] [auth] [armed]` | Register (armed = unix s of the last REGISTER; newer wins on receipt) |
+| `U` | `[SERVER] WP U [account] [endpoint]` | Unregister (client, expiry sweep, DETACH) |
+| `B` | `[SERVER] WP B [account] [endpoint] [p256dh] [auth] [armed]` | Link burst, not propagated |
 
 ### GITSYNC Subcmds
 
@@ -2622,3 +2694,56 @@ In a network with mixed old/new servers:
 ---
 
 *This document is part of the Nefarious IRCd IRCv3.2+ upgrade project.*
+
+## PN (PRESENCE) — strict-presence interval replication
+
+S2S-only token (no client command). Replicates chathistory strict-presence
+closed intervals network-wide (metadata-layer replication; readmarker MR
+pattern).
+
+```
+<source> PN <account> <channel> <start> <end>
+```
+
+### CH Q updates (2026-08-30)
+- `CH Q <target> W <ref1> <limit> <reqid> <dest> [<ref2>]` — BETWEEN
+  federation: W carries an optional trailing second reference (T`<ts>` or
+  M`<msgid>`) after the destination numeric. Responders without W support
+  answer `E <reqid> 0` (safe mixed-version degradation); the multi-hop
+  forward preserves the extra parameter.
+- PM (identity pair-key) targets are now valid in CH Q: the origin server
+  participant-checks its requester before querying; responders trust
+  linked servers (P10 model). Previously responders returned `E 0` for
+  any non-channel target.
+
+### CH updates (2026-09-01)
+- **`CH C <reqid> <parent_msgid> <child_msgid>`** — context-child
+  declaration. A responder attaches context children (reactions,
+  redacts — #526) to its query result before emitting; each child row
+  is preceded by a `CH C` naming its parent. The requester splices the
+  child after its parent (after any locally-attached context run),
+  uncounted, deduplicated by msgid against the local attach. Older
+  requesters ignore the unknown subcommand and see the child as an
+  ordinary row; older responders simply never send it.
+- **TARGETS veto rows**: `CH Q * T` responders now query with
+  `include_newer` — targets whose local latest lies ABOVE the requested
+  window are returned as rows too. #565 latest-message matching is a
+  network-wide property: a newer remote latest disqualifies the target,
+  so the requester takes the per-target max across servers and
+  re-filters the merged list to the window before answering the client
+  (`filter_targets_window`). Old responders omit veto rows, degrading
+  to the previous (admit-too-much) behavior.
+
+- `<start>`/`<end>`: epoch seconds of a CLOSED presence interval for
+  `<account>` in `<channel>`.
+- Emitted by the server that closes an account-anchored interval
+  (PART/QUIT/deauth transfer), feature-gated on
+  `CHATHISTORY_STRICT_PRESENCE`; flooded butone like MR.
+- At end-of-burst, each server additionally syncs its stored closed
+  intervals to the newly linked peer (`presence_burst_sync`) — this heals
+  windows closed during a split, whose live broadcasts were lost.
+- Receivers union-merge (sorted insert, overlap/30s-adjacency coalescing,
+  FIFO cap) — idempotent and order-independent, so repeated floods and
+  relink re-syncs are harmless. Applied regardless of the receiver's local
+  feature setting (data stays warm); no-op without the metadata LMDB.
+- Session-anchored (unauthed) presence never replicates — connection-local.

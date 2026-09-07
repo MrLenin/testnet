@@ -517,6 +517,75 @@ my_new_cmocka: my_new_cmocka.c test_stub.o
 
 ---
 
+### Chathistory / strict-presence scenario traps (learned 2026-09-02)
+
+- **Presence coalesces a part/rejoin gap of ≤30s into one interval.** A "user was absent"
+  scenario needs the absence held for >30s (`chathistory-presence-paging.test.ts` waits 32s once
+  in `beforeAll` and shares the scenario across its `it` blocks) or the "hidden" rows are visible.
+- **JOIN/PART/etc. event rows are stored and count toward a chathistory limit** even though they
+  are only emitted with `draft/event-playback`. Pick limits with the event rows included, and
+  never take "the first row" of a page as a PRIVMSG.
+- **Pool accounts get bouncer sessions**: their PART is not echoed like a plain part (waiting
+  for the echo times out) — settle on time after `PART` instead (the strict-presence tests use
+  300ms; presence-paging uses 2.5s), and call `bouncerDisableHold(client)` in cleanup so the
+  held session does not contaminate the next test.
+- **Federated completeness needs an ACCOUNT requester**: on the linked bed the leaf stores every
+  channel it sees, so any page shorter than the limit federates; only an account anchor
+  (presence replicates by observation) gets the responder-side presence walk that makes the
+  remote truncation flag — and therefore `draft/chathistory-end` — trustworthy. A session-anchored
+  (unauthenticated) requester gets conservative completeness over federation by design, so never
+  assert the end tag for one when a storage peer holds the channel.
+- **Presence is HLC-exact since 2026-09-02** (it used to be whole seconds with inclusive edges,
+  which made a witness's JOIN or a pre-join message in the requester's join second count as
+  visible and forced >1s spacing in scenarios). Presence time is the event's HLC stamp
+  (`ms << 16 | logical`), taken from the msgid; rows share the same stamp, so two events in one
+  millisecond still order. Spacing is no longer needed for correctness;
+  `chathistory-presence-subsecond.test.ts` pins the back-to-back case.
+- **Strict presence is flipped globally** by these files (`SET CHATHISTORY_STRICT_PRESENCE` via
+  oper); never run two of them concurrently against the same bed — the second file's `afterAll`
+  turns the gate off under the first.
+- The custom reporter hides hook failures (a failing `beforeAll` shows as "collected N tests"
+  and nothing else); rerun with `--reporter=verbose` to see the error.
+- The harness's global cleanup bot stalls ~2 minutes after the tests finish (the ChanServ-nick
+  helper gap); budget `timeout 400` for a single-file run.
+- **Multi-file runs share one account pool per process.** Pass several files to ONE `npm test`
+  invocation with `--no-file-parallelism` (Vitest ≥1.1; the bed has 1.6.1). Two concurrent
+  `npm test` processes each believe they own `pool00..`, and Vitest's default parallel workers do
+  the same, so pool tests collide and the "expected X to be Y" nick mismatches look like server
+  bugs. Don't start a second run while one is in its cleanup stall either.
+- **Settle after 001 before `clearRawBuffer()`.** The welcome burst (005 ISUPPORT, LUSERS, MOTD)
+  keeps arriving after the 001 numeric; a test that clears the buffer and sends its command
+  immediately reads a `005` back as the "reply". Every helper in this tree waits ~300 ms after
+  001 for that reason; four January webpush tests did not and failed on 2026-09-03 with
+  "Should get WEBPUSH, FAIL, or error numeric, got: 005".
+- **Let a valgrind restart settle before starting a run.** "Server Ready" lands ~8 s after the
+  container starts, but RocksDB compaction keeps the ircd at 100 % CPU for a minute or two
+  afterwards; a run started then times out the whole pool health check (`[AccountPool] Error
+  checking poolNN: Timeout waiting for CAP LS`) and every later test fails on "Could not find
+  activation cookie". Wait until `docker stats` shows the ircd idle, then run.
+- **Stale PM opt-out on pool accounts.** `chathistory.pm` is account metadata: a
+  `METADATA * SET chathistory.pm * :0` on a pool account persists across tests and runs. Until
+  2026-09-02 the opt-out tests never restored it (not even on success), so every later PM test that
+  drew the account stored *gap markers* ("[message not stored]") instead of messages: the ephemeral
+  own-PM test then fails with `FAIL CHATHISTORY INVALID_TARGET` (no sid-tagged row to authorize it)
+  and authed PM tests come back missing rows. The opt-out group in `chathistory.test.ts` now records
+  every opt-out in an `optedOut` list, restores it with `optIn()` before the test's QUIT, and an
+  `afterEach` restores whatever an assertion failure skipped (the socket is still open then). Any
+  new test that opts an account out must do the same — the outer `afterEach` only closes sockets, so
+  a restore placed after the QUIT never goes out. Manual recovery if it happens anyway: auth as each
+  `poolNN` / `poolpassNN` and send `METADATA * SET chathistory.pm * :1`. Fingerprint in a query: a
+  `+draft/chathistory-gap` row where a message was expected.
+- **PM pair-key contamination across runs.** PM history is keyed by the `account1:account2` pair
+  and persists in RocksDB. Pool accounts are reused, so any PM test that asserts an *empty* page
+  (`messages.length` toBe(0)) or a batch containing *only* today's id accumulates stale DMs from
+  earlier runs and fails with counts like "expected 8 to be 0" or a batch stamped days ago (seen
+  2026-09-02: four PM-opt-out + one fed-DM, all pre-existing, on code that never touched PM
+  storage). Fingerprint: the paired "expect ≥1" PM tests pass while the "expect exactly 0 /
+  contains fresh id" ones fail. Not a server regression — the PM store has no per-run reset. Write
+  PM assertions against the unique id you just sent (present / absent), never against the page
+  size: the `chathistory.pm` opt-out tests were rewritten that way on 2026-09-02. When triaging a
+  PM-history failure, check the returned timestamps for staleness before suspecting the diff.
+
 ## Part 3: irctest Conformance Harness
 
 [`irctest`](https://github.com/progval/irctest) is a Python protocol conformance suite for IRCds — spins up our server in temp dirs and verifies responses match Modern / RFC / IRCv3 specs. Complements the Vitest integration tests on the protocol-correctness axis.

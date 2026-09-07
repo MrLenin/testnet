@@ -1,10 +1,108 @@
 # X3-into-Nefarious — Sequencing Under Big-Bang-Per-Phase Deployment
 
-**PLAN OF RECORD.** Rewritten 2026-07-30, replacing the prior sequencing document
-wholesale; corrected in a reconciliation pass the same day (see "Corrections applied"
-below). The prior plan assumed live coexistence of both systems (dual writers, orphan
-firewall, RELAY/LOCAL runtime toggles, live reconciliation). Those constraints were
-wrong and none of that machinery appears here.
+**PLAN OF RECORD — UNPARKED 2026-08-06** (user decision — pursuing self-contained
+deployment on its own schedule, the second listed unpark trigger). Unpark-sequence
+status: survey delta re-run 2026-08-06 (see the survey doc's §"Delta addendum
+2026-08-06"); Phase 0 started. Decisions taken at unpark: **converter/census tool
+lives in testnet `tools/x3-migrate/`** (migration tooling beside the bed data and
+test infra, retires with the migration); **Gate 1 has no production-access path
+for now** (the user personally has no access to the production X3 conf; the facts
+would have to come via upstream/Rubin) → the credential track is planned on BOTH
+D1 branches (federation AND one-time import) until production's
+`ldap_enable`/hash-scheme facts surface — the census and converter skeleton
+proceed on bed data regardless. Also stated at unpark: **the Keycloak→X3 webhook
+path is dead** (user report 2026-08-06; bed logs show delivery to
+`x3:9080/keycloak-webhook` failing/retrying) — X3-as-webhook-consumer is not a
+live integration the demotion package needs to preserve; survey delta to confirm
+the X3-side listener state. Delivered-early
+update: account-registration HARDENING also landed 2026-08-06 (throttle, SCRAM
+required-action parity, SPI `scramSha256` rename deployed live) — see
+`project_account_registration_shipped` memory; Phase 3's demotion surface narrows
+further (SASL-only daemon-born accounts now have abuse-throttled registration).
+
+**Gate 1 facts (2026-08-06, user + source; supersedes the "no prod access" posture
+above for these items):**
+- **Gate 1(a) CLOSED (user):** production runs `ldap_enable` with **writeback and
+  autocreate** — and the directory is **shared identity infrastructure**: X3
+  accounts also drive dokuwiki access and a web-based account-creation flow (the
+  latter currently broken/dormant). "Without those settings, nothing works."
+- **Gate 1(b) CLOSED from source — expect a MIXED-scheme directory:** X3's
+  writeback writes RFC 2307 **`{MD5}`** and always has (since the original 2007
+  LDAP work; `git log -S'SMD5'` over the whole lineage: zero hits) —
+  `cryptpass()` is plain unsalted lowercase-hex MD5 (`x3/src/md5.c:633-635`;
+  the `$`-seeded form survives only in `checkpass` verify for legacy rows), and
+  `make_password()` packs that hex to raw bytes and emits `{MD5}<base64>`
+  (`x3/src/x3ldap.c:281-296`). The user's directory-browser recollection of
+  `{SMD5}` is NOT thereby wrong: slapd stores pre-hashed values verbatim but
+  applies its `password-hash` config (`olcPasswordHash`, commonly `{SMD5}` in
+  old deployments) to cleartext arriving via the Password-Modify extended op —
+  so web-flow/admin-tool-born entries plausibly carry `{SMD5}` alongside X3's
+  `{MD5}`. All standard schemes; bind-agnostic either way. A `slapcat`-prefix
+  count settles the actual proportions when access exists (and the import
+  branch, if ever chosen, would need only stock providers per scheme found).
+  **Bed-confirmed empirically 2026-08-06** (user, directory browser over the
+  new loopback publish): `{MD5}` on X3-originated entries, `{SSHA}` on
+  Keycloak-originated ones — both writers behave exactly as derived from
+  source. Production's expected picture: the same `{MD5}` cohort plus the
+  web-flow-era `{SMD5}` cohort.
+  Note: on the bed, a Keycloak-side password change under WRITABLE writes
+  `{SSHA}` — so under federation, weak `{MD5}` rows strengthen organically on
+  password change.
+- **Cheap-verify item closed (2026-08-06, user): production Keycloak exists but
+  is not really set up or accessible yet.** So Window 1's pre-work is
+  *configuring* the existing instance (realm provisioning, WRITABLE LDAP
+  federation, rehearsal realm), not standing up infra — and the now-provisioned
+  `scripts/setup-keycloak.sh` (passwordPolicy included since 2026-08-06) is the
+  direct template for that configuration.
+- **Cheap-verify item closed (2026-08-06, user): production runs current
+  evilnet master** — which is `052d6e0`, i.e. **exactly the survey baseline**
+  (verified: origin/master == the survey commit; our working branch is 26
+  commits ahead). Consequences: the survey-inventory doc describes production
+  by construction; none of the fork's 2026 surface (rename arbitration,
+  relocate/tombstones, R/z, type 9) exists in production, so Window 1 parity is
+  against the survey alone, and the converter's primary input shape is
+  master-shaped saxdb (fork-grown state like rename-DNRs exists only on the
+  bed). Caveat: master moves and deploy cadence is unknown — re-check the
+  commit at window time.
+- **Last cheap-verify item, nearly closed: `sync.log`** — identified as the
+  PRE-LDAP website-sync feed (SirVulcan 2004: flat-file account-lifecycle log,
+  `sync_log` conf gate, consumed by the old website's account import; includes
+  crypted passwords in plaintext). The user has never heard of it — strong
+  evidence it is defunct. Remaining check when access exists: `sync_log` in
+  prod x3.conf / a recently-touched sync.log next to x3.db. If enabled, disable
+  on hygiene grounds regardless of the merge.
+- **D1 consequence (reshapes the recommendation):** the import branch's
+  end-state "the directory retires at Window 1" would break dokuwiki and the web
+  flow — the directory cannot retire while it serves non-IRC consumers. The
+  **federation branch** (exactly what the bed already runs: Keycloak WRITABLE
+  federation + syncRegistrations over the shared directory) matches production's
+  real constraints with zero hash work, and the bind path is scheme-agnostic so
+  `{MD5}` needs no provider at all. The self-contained-deployment qualifier
+  softens accordingly: the directory persists because it is shared
+  infrastructure, not as an IRC-architecture wart. **Retirement path made
+  concrete (2026-08-06, user): dokuwiki supports OAuth2 and can read users from
+  Keycloak** — so the end-state resolves into a two-stage strategy rather than
+  a branch choice: (stage 1, D1 for the merge) federation, zero credential
+  work, directory keeps serving the wiki through every window; (stage 2,
+  follow-on program on its own schedule) wiki → Keycloak OAuth2, account
+  creation already Keycloak-native (native /REGISTER; Keycloak registration
+  page can replace the dead web flow), then the hash migration runs at leisure
+  decoupled from any window — export `{MD5}`/`{SMD5}` hashes, import behind
+  small stock-scheme PasswordHashProvider SPIs (deploy path proven),
+  rehash-on-first-login, reset campaign for stragglers, LDAP decommissions.
+  **D1 RATIFIED 2026-08-06 (user): the two-stage strategy above is the
+  decision** — stage 1 federation for the merge windows; stage 2 directory
+  retirement as a follow-on program. The X3 dual-format MD5 hash provider is
+  only needed if the census finds an active local-hash-only cohort (it is never
+  needed for stage 1, and stage 2 uses stock schemes).
+
+Previously PARKED 2026-08-04 (see "Reconciliation pass 2026-08-04" below for the
+deltas found then and the unpark triggers). Rewritten 2026-07-30,
+replacing the prior sequencing document wholesale; corrected in a reconciliation pass
+the same day (see "Corrections applied" below). The prior plan assumed live
+coexistence of both systems (dual writers, orphan firewall, RELAY/LOCAL runtime
+toggles, live reconciliation). Those constraints were wrong and none of that
+machinery appears here.
 
 ## Document set
 
@@ -15,7 +113,9 @@ wrong and none of that machinery appears here.
   verb chokepoint). Written before the big-bang-per-phase constraint was known, so
   read its migration and replication remarks through this document; its *design* is
   unaffected — the entity model does not change with deployment style.
-- `x3-merge-survey-inventory.md` — what X3 does and stores. Pure reference, accurate.
+- `x3-merge-survey-inventory.md` — what X3 does and stores. Pure reference, accurate
+  as of its 2026-07-30 survey date (X3 master @ `052d6e0`); see its 2026-08-04
+  addendum for state X3 has grown since (rename arbitration, relocate, R/z, type 9).
 
 ## Corrections applied in the reconciliation pass (2026-07-30)
 
@@ -38,6 +138,97 @@ Each is marked inline where it lands:
    Gate 1b): Keycloak's LDAP federation is `editMode: READ_ONLY`, which is the exact
    mechanism behind "X3 can't see Keycloak-only accounts". Test the `WRITABLE` flip
    before scoping Phase 1.
+
+## Reconciliation pass 2026-08-04 — status: PARKED
+
+A second reconciliation against the codebase five days on (nefarious
+`feature/channel-relocate` @ `89fe66a`, x3 `feature/channel-relocate-testnet` @
+`a2ad2f0`). Outcome ratified by the user: **the docs are updated and the program is
+deliberately parked** — current bandwidth stays on relocate follow-ups, the X3
+env-interpolation implementation, and the mode-budget audit. The design and
+sequencing below remain the plan of record for whenever it unparks.
+
+### Deltas found (each marked inline where it lands)
+
+1. **The rename forcing-function is resolved without the merge.** The authority
+   model's "`AC ... R` misparsed — one token letter, three meanings, zero working
+   paths" pathology no longer exists. X3 now gates the `R` subcommand on
+   `argc >= 7 && argv[5] == "RENAME"` (`x3/src/proto-p10.c:1738-1762`), so the
+   legacy 4-arg account stamp still falls through to `call_account_func()`
+   untouched, and answers `AC <cookie> A RENAME` / `AC <cookie> D RENAME :<reason>`
+   (cookie first, explicit discriminator). Authorization ladder:
+   `chanserv_rename_allowed()` (`x3/src/chanserv.c:8552`) — authed + registered +
+   not protected/suspended + **`UL_OWNER`** + badchan/DNR/name-free checks. The
+   ircd side parks a `PendingRename` (10s, `m_rename.c:60`; emit now at
+   `m_rename.c:2149` — the file grew to 2337 lines with the relocate engine) and
+   routes replies at `m_account.c:336-352`. Live-gated GREEN since 2026-08-01.
+   Consequences: Phase 2's "clean new S2S token" item is **optional cleanup, not a
+   correctness fix**; `FEAT_RENAME_SERVICES` defaults **off**
+   (`ircd_features.c:1216`) so the wire path is opt-in per deployment.
+2. **Both original forcing functions are now relieved** (registration by Gate 1b's
+   WRITABLE adoption; rename by delta 1). The program stands purely on its
+   strategic merits — X3 as link SPOF (Rubin has endorsed the same instinct, see
+   the env-interpolation spec's closing section), self-contained deployment,
+   channel-authority locality. That is the healthy posture §9 hoped for, and it is
+   also why parking is cheap: nothing user-visible is waiting on the merge.
+3. **X3 grew state and behavior the survey/converter do not cover.** Since the
+   survey (master @ `052d6e0`): rename arbitration (delta 1); the channel-relocate
+   consent split (`RN <old> <new> C :<reason>` positional marker,
+   `proto-p10.c:2603` → `RelocateChannel()`, `hash.c:797`) with tombstone husks,
+   husk sweeps + burst re-arm keyed on the `"Channel was renamed"` DNR fingerprint
+   (`chanserv.c:2254`), service-bot follow, and **saxdb-persisted rename-DNRs**
+   (`rename_dnr_duration`, default 86400 — new ownership-adjacent state the
+   converter must carry or consciously drop); the R/z registered-mode redesign
+   (X3 now emits `+R` unconditionally on register/unregister/move/DB-load;
+   `+z` = new `MODE_PERSIST`, only under `off_channel>0` — the sequencing doc's
+   "cheap verify item" on this is resolved); P10 `server.type 9` (was silently 8
+   forever); and the approved-but-unimplemented env-interpolation config redesign
+   (retires `x3.conf-dist` + entrypoint sed). Survey addendum added in that doc.
+4. **Registration end-state clarified; ircd side untouched.** `m_register.c` still
+   relays RG into the void; `kc_user_create` remains implemented with zero
+   callers. The working path today is AuthServ REGISTER → `ldap_do_add` →
+   directory → Keycloak WRITABLE federation. Phase 1's native-REGISTER item is
+   unchanged and remains the first real merge code.
+5. **The "X3 stays minimal" premise has eroded in practice.** Five days produced
+   PR #57/#58/#59, relocate, R/z, type 9, and the env-interp design. Each X3
+   feature investment enlarges Phase 2's parity surface and the converter's input.
+   **Policy on unpark: re-run a survey delta first, and adopt a feature-freeze
+   line for ChanServ-owned semantics once Phase 2 development starts** (new
+   ChanServ-owned state added after the freeze needs an explicit converter/parity
+   line item before it merges).
+
+### Hygiene flags surfaced (independent of the merge, not blocked on it)
+
+- The ircd advertises `draft/account-registration` in CAP while `/REGISTER`
+  dead-ends (RG relayed, no responder; the E2E test for it is `.skip`ed at
+  `tests/src/ircv3/sasl.test.ts:288`). Client-visible lie — either gate the CAP
+  advert off until a responder exists, or wire the responder.
+- The relocate deployment gates (every v3 server relocation-aware before
+  `RENAME_CONSENT`; CRDT doc-driven peers re-assert cleared bits) are the live
+  template for the kind of rollout gating Window 1 will need.
+
+### Delivered-early items (checked off against Phase 1 on unpark)
+
+- **Native REGISTER on every daemon — SHIPPED 2026-08-06** (spec
+  `docs/superpowers/specs/2026-08-05-account-registration-design.md`, nefarious
+  `feature/account-registration`): `m_register` → `kc_user_create_full` with
+  in-house-derived credentials (PBKDF2 import + SCRAM-SHA-256 attributes, no
+  plaintext in the create payload), link-based email verification as Keycloak
+  policy (`FEAT_REGISTER_VERIFY_EMAIL`), RG/VF/RR relay deleted. Notable for
+  the merge: daemon-born accounts get **no bindable LDAP `userPassword`**
+  (federation hash-import writes none) — they are SASL-only, and the AuthServ
+  `AUTH` bind path does not work for them (narrows the legacy-auth surface
+  Phase 3 must demote). Phase 1's remaining scope is account *authority*
+  (registry env, UUID directory), not the REGISTER verb.
+
+### Unpark triggers
+
+Any of: channel-authority pain X3 cannot serve (relocate/rename follow-ups hitting
+X3's data-model limits); a decision to pursue self-contained deployment on its own
+schedule; Rubin/upstream actively driving the services-in-ircd direction; or the
+LDAP/libmdbx-class dependency pressures (`project_libmdbx_migration_driver`)
+forcing a persistence rework anyway. On unpark: re-verify deltas 3/5 (survey
+delta), then Phase 0 as written.
 
 ## Deployment model (the corrected constraints, restated as rules)
 
@@ -196,10 +387,11 @@ env and answers all authority questions.** Leaves behave exactly as today:
 
 - REGISTER/VERIFY relay to the `+s`-flagged server already exists client-side
   (`m_register.c:114-137`); the hub daemon becomes the responder instead of X3.
-- Rename authorization relays likewise, but the misparsed `AC ... R` query
-  (authority model §0) is **replaced with a clean dedicated token**, since we now
-  control both ends. The 10s `PendingRename` timeout machinery stays for leaves; on
-  the hub the decision is local and synchronous.
+- Rename authorization relays likewise. *(2026-08-04: the misparse is fixed in
+  place — X3 now discriminates the rename query and answers it, see reconciliation
+  delta 1 — so the "clean dedicated token" is optional cleanup, no longer a
+  correctness requirement.)* The 10s `PendingRename` timeout machinery stays for
+  leaves; on the hub the decision is local and synchronous.
 - Automode/enforcement: the hub daemon observes joins/modes via normal P10 and emits
   modes network-wide — wire-identical behavior to ChanServ today, same availability
   profile, but in-process, Keycloak-anchored, RocksDB-persisted.
@@ -310,8 +502,15 @@ windows. Each phase lists what it develops, what proves it, and confidence.
   `ldap_enable 1`, (b) the directory stores RFC 2307 `{SMD5}`. Confirm both from
   production config / a directory read **before any credential work is scoped**.
   Everything below branches on the answer.
-- **Decision D1 — Keycloak↔LDAP federation vs one-time import** (must be surfaced
-  and ratified; the window's credential step depends on it):
+- **Decision D1 — Keycloak↔LDAP federation vs one-time import** — **RATIFIED
+  2026-08-06 (user): FEDERATION for the merge windows**, as stage 1 of the
+  two-stage strategy in the header's "Gate 1 facts" block (stage 2 = directory
+  retirement as a follow-on program: dokuwiki→OAuth2, hash import via stock
+  providers, at leisure). The original analysis below is retained for the
+  record; note its federation con ("directory stays permanently... contradicts
+  the end-state") was written before the 2026-08-06 facts that the directory is
+  shared infrastructure (dokuwiki/web-flow) AND that dokuwiki can move to
+  Keycloak OAuth2 — retirement is deferred, not forfeited:
   - *Federation*: Keycloak's native LDAP user federation verifies credentials by
     bind against the same directory X3 uses today. Zero hash work, lowest-risk
     window step — but the directory stays in the architecture permanently as the
@@ -382,12 +581,96 @@ windows. Each phase lists what it develops, what proves it, and confidence.
   schedule pressure, so the merge proceeds on its own merits (self-contained
   deployment, channel authority).
 
-  *Bed state: restored to `READ_ONLY` / `syncRegistrations: false`; both test users
-  deleted from Keycloak and verified gone from LDAP. Caveat: an X3 saxdb handle
-  autocreated during step 5 was not removed — harmless on the bed, but note that
-  under WRITABLE, deleting a Keycloak user removes the LDAP entry while leaving the
-  X3 handle behind. Not yet examined: what WRITABLE does on account **rename** and
-  **deletion** at scale, which is the same name-reuse territory as §2.3.*
+  *Bed state: initially restored to `READ_ONLY` / `syncRegistrations: false`; both
+  test users deleted from Keycloak and verified gone from LDAP. Caveat: an X3 saxdb
+  handle autocreated during step 5 was not removed — harmless on the bed, but note
+  that under WRITABLE, deleting a Keycloak user removes the LDAP entry while leaving
+  the X3 handle behind. ~~Not yet examined: what WRITABLE does on account **rename**
+  and **deletion** at scale, which is the same name-reuse territory as §2.3.~~*
+
+  **★ RENAME/DELETION PROBE RUN 2026-08-06 — the caveat above is now CLOSED, and it
+  resolved to a live production hazard, not a merge-time one.** Full reports:
+  `.superpowers/probes/2026-08-06-writable-rename-delete-probe.md` (6 scenarios) and
+  `.superpowers/probes/2026-08-06-writable-probe-s5-chanserv-followup.md` (the
+  escalation test run to completion). Bed only, `wprobe*` names, zero residue
+  verified across all three stores. Headline results:
+
+  1. **[HIGH — live today] Name-reuse privilege inheritance is CONFIRMED end-to-end.**
+     Deleting a user via Keycloak admin REST cascades the LDAP entry away
+     synchronously but **strands the X3 handle indefinitely** — X3 has no way to
+     observe a Keycloak/LDAP-side deletion (the webhook consumer does not exist; see
+     survey §9). Re-creating the same username in Keycloak with a **different
+     password** then lets a brand-new person `AUTH` straight into the **old handle**.
+     Directly observed: original registration date and nickname history retained; the
+     stranded handle's ChanServ **Owner (500)** record on its channel survived intact;
+     the new identity was **auto-opped on join** and successfully ran **`ADDUSER`**, a
+     Manager-gated (300+) command a genuinely fresh account cannot invoke.
+     **Mechanism** — `x3/src/nickserv.c:2510` (`cmd_auth`): when `ldap_enable` is true
+     (it is, in prod per Gate 1(a)), the local `checkpass()` against `hi->passwd` is
+     **never consulted**; the only gate is whether the LDAP bind succeeded. Any
+     successful bind against *any* entry with the matching `uid` calls
+     `set_user_handle_info(user, hi, 1)` unconditionally, with **no revalidation of
+     who owns that identity**. Everything hanging off `handle_info` travels with it —
+     ChanServ access (observed), OpServ level (same object, code-path proven),
+     hostmasks, ignores. Requires no elevated access and no coordination: with
+     `registrationAllowed: true`, anyone who can create a Keycloak user named after a
+     previously-deleted-elsewhere X3 handle inherits it. **This is §2.3's escalation
+     vector, and it is exploitable in production today** — the merge is the eventual
+     structural fix, not the thing that introduces the exposure.
+  2. **[MEDIUM] X3 `RENAME` never notifies Keycloak at all** (no `kc_*` call anywhere
+     in `nickserv.c`). LDAP gets a correct `ldap_modrdn2_s` and X3 updates its dict
+     atomically, but Keycloak keeps indexing the account under the **old** username
+     with its `LDAP_ENTRY_DN` silently repointed at the new DN — a genuine split-brain
+     until the next periodic sync (not resolved within 15s; bounded by
+     `changedSyncPeriod` 60s / `fullSyncPeriod` 3600s). Keycloak-mediated login (SASL
+     ROPC) for the new name fails in that window while X3 and LDAP both accept it.
+  3. **[MEDIUM] X3 `UNREGISTER` leaves a ~60s Keycloak residue window** — a
+     backing-less, attribute-stripped KC user object stays queryable after both LDAP
+     and X3 have forgotten the account. `removeInvalidUsersEnabled` is a sync-cycle
+     sweep, not an on-delete reaction.
+  4. **[INFO] Keycloak admin-REST username `PUT` is correctly refused** under
+     `editUsernameAllowed: false` (`400 error-user-attribute-read-only`), with no LDAP
+     or X3 side effects. Not a vector under current config.
+  5. **[LOW, orthogonal bed bug] OpServ `ACCESS` is silently broken** —
+     `oper_try_set_access()` (`x3/src/nickserv.c:3657`) calls `ldap_do_oslevel()`,
+     which always errors "Undefined attribute type" on this bed; since
+     `target->opserv_level` is assigned only *after* that write succeeds, the grant
+     fails closed and the level silently stays 0. Unrelated to the merge; worth its
+     own look.
+  6. **[MEDIUM, test infra] `tests/src/helpers/x3-client.ts` talks to a nick that
+     doesn't exist.** Every ChanServ convenience method hardcodes the literal target
+     `ChanServ` (`registerChannel` :512, `unregisterChannel` :586, `addUser` :605,
+     `clvl` :636, `delUser` :669, `getAccess` :690, `set` :748, `ban` :785,
+     `unban` :798, plus the match predicates at :528/:533/:540) — but on this bed
+     ChanServ answers to **`X3`** (`x3.conf:420-421`), and `WHOIS ChanServ` returns
+     `401 :No such nick` (verified). Those helpers can therefore only ever reach their
+     timeout path. `tests/src/services/chanserv.test.ts` and
+     `tests/src/services/integration.test.ts` both build on them — check whether those
+     suites pass vacuously or are simply red. (`channel-rename-services.test.ts` is
+     unaffected; it uses file-local `registerChannelX3` helpers.) Classic
+     `feedback_tests_may_be_wrong`. **Caution:** the same nick confusion produced a
+     false "ChanServ is offline" conclusion in the probe's first run, which nearly
+     downgraded finding 1 to inference — verify service nicks against `x3.conf`, never
+     against the conventional name.
+
+  **Mitigations available without the merge** (none adopted yet — user decision):
+  narrowing who can delete Keycloak users, adding an X3-side consumer for the
+  deletion event (the webhook SPI already emits; the X3 listener is the missing half),
+  or making `cmd_auth` revalidate handle ownership rather than trusting a bare
+  successful bind under `ldap_enable`.
+
+  **ADOPTED PERMANENTLY 2026-07-30** (user decision: "register is going to register
+  in keycloak"): live component flipped to `WRITABLE` + `syncRegistrations: true`
+  and `scripts/setup-keycloak.sh:741-742` updated to match, so reprovisioning
+  preserves it. Realm already has `verifyEmail: false` (no mail server) and
+  `registrationAllowed: true`. The remaining piece of the registration flow is
+  **code, not config**: `m_register.c` still relays RG into the void — it must call
+  `kc_user_create()` (vendored client, `include/kc/kc_keycloak.h:156`, currently
+  zero ircd callers) as §"Native REGISTER/VERIFY on the registrar" below describes.
+  The WRITABLE rename/deletion probe above is now *live-exposure* territory, not
+  hypothetical — ~~schedule it~~ **RUN 2026-08-06; it confirmed a HIGH, exploitable-
+  today name-reuse privilege-inheritance path. See the ★ block above.** Registered-channel RENAME near-term path is scoped
+  separately in [[x3-channel-rename]] (X3 patch; does not wait for the merge).
 
 - Original analysis, retained for context — **Gate 1b as originally scoped.** Keycloak's
   LDAP federation is configured `editMode: READ_ONLY` with `syncRegistrations: false`
@@ -408,9 +691,11 @@ windows. Each phase lists what it develops, what proves it, and confidence.
   land in a form the directory accepts on bind (bind is scheme-agnostic, so likely,
   but "likely" is load-bearing); and DN case (`ou=users` vs older `ou=Users`) wants
   confirming. **An afternoon's experiment; run it before Phase 1 is scoped.**
-- **Cheap verify items** (hour-scale, do first): the `+z` vs `+R` registered-mode
-  wire-letter question (X3 emits `+z`, `proto-p10.c:3911`; nefarious binds
-  `MODE_REGISTERED` to `'R'`, `channel.c:2402` — confirm what actually flows);
+- **Cheap verify items** (hour-scale, do first): ~~the `+z` vs `+R` registered-mode
+  wire-letter question~~ *(RESOLVED 2026-08-01 — X3 never emitted either
+  (`off_channel` gate); redesigned: `R` = registered emitted unconditionally,
+  `z` = `MODE_PERSIST` only when `off_channel>0`; see
+  `registered-mode-z-to-r-transition.md`)*;
   whether any prod tooling still consumes `sync.log` (survey §6); production's
   current Keycloak status (**guess: not deployed in production yet** — if so,
   standing up Keycloak infra happens ahead of Window 1, inert, with rehearsal
@@ -425,6 +710,33 @@ afternoon for Gate 1b's `WRITABLE` experiment). **Confidence: high on mechanics,
 medium until Gate 1 confirms production's `ldap_enable` and hash scheme.**
 
 ### Phase 1 — Account authority in the daemon (dev)
+
+> **★ NOTE (2026-08-07) — the UUID-primary decision in authority model §1.1/§1.3
+> is what closes X3's name-reuse escalation. Do not weaken it.**
+>
+> X3's escalation (see the probe block under Phase 0) exists precisely because
+> saxdb's `handle_info` and the directory are joined on the handle *name*: delete
+> the identity in Keycloak and whoever registers the name next inherits the
+> handle's channel access and oper level. Fixed in X3 by binding each handle to
+> the LDAP `entryUUID` (`x3` branch `feature/ldap-identity-binding`) — an interim
+> control that **retires with X3**.
+>
+> The merged model already avoids it by construction: authority model §1.1 makes
+> Account UUID-primary with `name → uuid` as a secondary index, §1.2 gives
+> RegisteredChannel a stable minted id, and §1.3 keys grants on
+> `(channel_id, account_uuid)`. That is the fix, decided independently and for the
+> same reason (§1.1's rationale cites rename-orphaned grants). Recorded here only
+> so the escalation has a visible line to the design decision that resolves it —
+> the risk is a later "simplify to name-keyed grants" change that would silently
+> reintroduce a known-exploited path.
+>
+> Corollary for the converter (part A): the hard rule that **no grant can exist
+> before Keycloak has issued the UUID** is what makes the one-time migration the
+> moment the old name→identity mapping must be resolved, since it is the last
+> point at which that mapping is still authoritative and verifiable.
+>
+> X3's trust-on-first-use adopt gate was deliberately NOT built for the same
+> reason: retirement supersedes it.
 
 - `registry` env, account CFs (`acct`, `acct_by_name`) per authority model §4.
 - Native REGISTER/VERIFY on the registrar: `m_register` keeps local validation, calls
@@ -467,9 +779,11 @@ confidence inherits Phase 0's Gate-1 status.
   (data carried, read-only surface later). **Dropped consciously:** toys, karma,
   seen/events (decide at converter time; per no-silent-defer, the drop list is written
   into the converter report).
-- Registered-channel RENAME: local `chan_authorize(CV_RENAME)` on the hub; clean new
-  S2S token replacing the colliding `AC ... R` query; `PendingRename` retained for
-  leaf-origin requests.
+- Registered-channel RENAME: local `chan_authorize(CV_RENAME)` on the hub;
+  `PendingRename` retained for leaf-origin requests. *(2026-08-04: the `AC ... R`
+  collision is fixed in place and X3 answers it today — reconciliation delta 1; a
+  dedicated token is optional cleanup. Threshold parity note: X3's live ladder gates
+  rename at `UL_OWNER`, not the authority model's proposed 400.)*
 - Converter **part B**: chanserv db → channel rows + grants (handle→UUID via part A's
   map; unresolvable handles → quarantine CF, never live), lvlOpts → per-channel verb
   overrides, lamers, suspensions, giveownership history; **modcmd db** per-command
