@@ -190,7 +190,19 @@ row of that channel stamped with the losing creationtime (`history_purge_incarna
 called from `m_burst.c`). Every store that held them is on the losing side, so
 all of them prune; the read-time filter stays as belt and braces. Prune, not
 tombstone: the only person who could ever have reported those rows is a
-bystander who saw them live, so an audit trail nobody can find is not one. A same-incarnation split (both sides kept the
+bystander who saw them live, so an audit trail nobody can find is not one.
+
+**Open (2026-09-08): identity across cold starts.** A channel's creation
+timestamp is its incarnation, and today two paths mint a fresh one on a
+network-wide cold start: X3 bursts registered channels at its own start time,
+and the bouncer restore recreates held ghosts' channels at boot time. A whole-
+network restart would therefore hide all stamped history (rows stamped before
+this change count as current). Agreed direction with upstream: X3 captures the
+channel's timestamp at registration and bursts it thereafter (the registered
+channel's key becomes name + timestamp, like accounts), the bouncer record
+persists the creation time for held channels, and unregistered unheld channels
+are ephemeral: their history dies with the incarnation (purge on destruct, to
+follow). Losing that history on a full-network crash is accepted. A same-incarnation split (both sides kept the
 channel) merges normally: those rows are that channel's history and everyone
 present on the surviving side sees them, ops included, and can REDACT.
 
