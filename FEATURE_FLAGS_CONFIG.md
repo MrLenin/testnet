@@ -212,6 +212,8 @@ AB MK <numeric> SSLCLIEXP :<timestamp>
 
 **Retention Purge**: Messages older than `CHATHISTORY_RETENTION` days are automatically deleted via an hourly timer (`history_purge_callback`). Set to 0 to disable automatic purging.
 
+**Retention advertisement** (fork extension): storage servers advertise `evilnet/CHATHISTORYRETENTION=<seconds>` (days × 86400) in ISUPPORT next to the spec's `CHATHISTORY=<limit>` (vendor-prefixed, as IRCv3 does with `draft/ICON`), so clients can stop paging past the horizon. Hint only; requests past it are still answered. Re-announced through `draft/extended-isupport` when the value or `CHATHISTORY_STORE` changes. See `docs/features/chathistory.md`.
+
 **Federation**: When enabled, if local RocksDB results are incomplete (fewer messages than requested or gaps detected), the server will query all other servers for additional messages. Results are merged and deduplicated by msgid before returning to the client. This allows clients to access history even if their connected server was down when messages were sent.
 
 **Write Forwarding (Phase 4)**: When `CHATHISTORY_WRITE_FORWARD` is enabled and `CHATHISTORY_STORE` is disabled, non-storage servers forward incoming messages to storage servers via CH W/WB tokens. This creates a hub-and-spoke architecture where leaf servers relay to hub storage servers.

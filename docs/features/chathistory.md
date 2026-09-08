@@ -94,6 +94,31 @@ CHATHISTORY TARGETS <timestamp> <timestamp> <limit>
 - **Timestamp**: `timestamp=2024-01-15T10:30:00.000Z`
 - **Message ID**: `msgid=ABC123-DEF456`
 
+### ISUPPORT tokens
+
+| Token | Source | Meaning |
+|---|---|---|
+| `CHATHISTORY=<n>` | draft/chathistory spec | Maximum rows per request (`CHATHISTORY_MAX`). |
+| `MSGREFTYPES=timestamp,msgid` | draft/chathistory spec | Reference types accepted. |
+| `evilnet/CHATHISTORYRETENTION=<seconds>` | **fork extension** | This server does not retain history older than `now - seconds` (`CHATHISTORY_RETENTION` days × 86400). Storage servers only. |
+
+`evilnet/CHATHISTORYRETENTION` is a hint, not a permission. A client should not page
+past the horizon it names: a request past it still gets an honest answer (an
+empty batch with `draft/chathistory-end`, or `FAIL CHATHISTORY MESSAGE_ERROR`
+for an anchor msgid the store cannot place), it is just wasted round trips.
+Federated peers may keep more or less; the token describes the server the
+client is connected to. The value follows a rehash or `SET
+CHATHISTORY_RETENTION` and is re-announced to clients that negotiated
+`draft/extended-isupport`. Why an ISUPPORT token and not a capability:
+every client keeps an ISUPPORT map and no negotiation is needed. Why the
+`evilnet/` prefix: IRCv3 prefixes work-in-progress ISUPPORT names the same
+way it prefixes capabilities (the network-icon draft mandates `draft/ICON`
+and reserves bare `ICON` for the final spec), so a fork-only token belongs
+under the vendor namespace. The fork's older bare `RELOCATE` predates this
+rule (`VAPID` is the draft/webpush spec's own token, not a fork one). Motivating case
+(2026-09-08): a client kept paging a PM buffer back to May using a pre-repack
+msgid, four months past a 7-day retention.
+
 ### Example
 
 ```
