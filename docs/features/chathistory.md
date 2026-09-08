@@ -129,6 +129,82 @@ CHATHISTORY LATEST #channel * 50
 :server BATCH -abc
 ```
 
+### Completeness: the `evilnet.github.io/chathistory-partial` batch tag
+
+Stores can only diverge through a netsplit: every storage server records every
+message it sees while linked, so two stores disagree exactly over windows in
+which one of them was not linked. A query is answered by the local store plus a
+fan-out to the storage servers currently linked, and the fan-out only happens
+when the local page is short. Two things follow, and the tag covers both:
+
+1. **A store that is split is not consulted and, until now, forgotten.** The
+   server keeps an *absence interval* per storage server it has ever seen
+   advertise (`[SQUIT time, relink time)`, open while the server is away,
+   pruned once older than retention). A query whose span overlaps an absence
+   interval of a server that is **still absent** is answered `partial`.
+2. **After a relink a full local page hides the other side's rows.** A query
+   whose span overlaps a *closed* absence interval always fans out, even when
+   the local page is full, so the merged answer really covers the span.
+
+The span of a query is the rows returned when the page was full (that is what
+the answer covers), else the requested window with open ends at `now` and
+`now - retention`.
+
+`evilnet.github.io/chathistory-partial` is set on the `chathistory` batch
+opener when any of these held when the answer was assembled:
+
+- a storage server whose absence interval overlaps the span is still absent;
+- a responder was still outstanding when the federation timeout fired or when
+  it was SQUIT mid-query;
+- the aggregate federation cap dropped rows from the merge;
+- no federation slot was free and the page fell back to local-only.
+
+When the tag is set `draft/chathistory-end` is withheld, so a client that does
+not know the tag keeps its existing safe behaviour. When the tag is absent the
+rows are a durable answer for the span they cover, whether or not the end tag
+is present (the end tag still means only "the walk was exhausted"). A local
+scan-cap truncation is not partial: it stops early but leaves no hole inside
+the rows returned.
+
+Limits: the absence table is per origin, so a server that never saw a store's
+ad cannot flag its absence (wave-3 re-flooding makes that rare after the first
+link cycle); and a window older than a store's own advertised retention is
+complete without that store by design, not partial.
+
+Motivation (2026-09-08): a client-side coverage map ("verified spans") needs to
+know whether an answer can be trusted durably; without this bit it has to guess
+splits from QUIT floods.
+
+#### Companions: incarnation filter and gate-derived storage
+
+Forcing the fan-out over split windows would surface a hole that already exists
+today: a channel recreated on the split side (new creation timestamp; the burst
+wipes it on relink) is a different incarnation, and its rows must not become
+the surviving channel's history just because a main-side member's presence
+record for that name was open. Every channel row records the channel's creation
+timestamp at store time; the local walk and the federated responder drop rows
+whose incarnation is not the live channel's (rows without a stamp, from before
+this change, count as current). The losing side also **prunes** them: the burst
+wipeout is the moment a server learns its incarnation lost, so it deletes every
+row of that channel stamped with the losing creationtime (`history_purge_incarnation`,
+called from `m_burst.c`). Every store that held them is on the losing side, so
+all of them prune; the read-time filter stays as belt and braces. Prune, not
+tombstone: the only person who could ever have reported those rows is a
+bystander who saw them live, so an audit trail nobody can find is not one. A same-incarnation split (both sides kept the
+channel) merges normally: those rows are that channel's history and everyone
+present on the surviving side sees them, ops included, and can REDACT.
+
+Storage follows the retrieval policy: a row that no enabled gate would ever let
+anyone retrieve is not stored. This is existing behaviour (channel.c /
+ircd_relay.c storage gate): with `CHATHISTORY_REQUIRE_AUTH` on, a row sent into
+a channel with no authenticated member (`authusers == 0`) is skipped unless the
+channel is `+H` public-history. Strict presence never gates storage: every
+connection has a presence anchor (account or ephemeral session), so someone
+present can always retrieve. The sender counts as a member, so a user alone in
+a scratchpad channel keeps their own history. There is no sole-member cull: it
+would make history incomplete and break single-user channels. Policy changes
+are not retroactive: rows skipped while a gate was on are gone.
+
 ## P10 Federation Protocol
 
 ### Token: `CH` (CHATHISTORY)
