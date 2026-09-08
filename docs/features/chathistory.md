@@ -199,10 +199,14 @@ and the bouncer restore recreates held ghosts' channels at boot time. A whole-
 network restart would therefore hide all stamped history (rows stamped before
 this change count as current). Agreed direction with upstream: X3 captures the
 channel's timestamp at registration and bursts it thereafter (the registered
-channel's key becomes name + timestamp, like accounts), the bouncer record
-persists the creation time for held channels, and unregistered unheld channels
-are ephemeral: their history dies with the incarnation (purge on destruct, to
-follow). Losing that history on a full-network crash is accepted. A same-incarnation split (both sides kept the
+channel's key becomes name + timestamp, like accounts); every other channel
+takes its identity from the running network. The bouncer restore deliberately
+recreates held channels at boot time so a restored copy always loses the burst
+and adopts the network's incarnation: a persisted (older) timestamp would win
+the burst and let a dead incarnation wipe a live one. Unregistered unheld
+channels are ephemeral: their history dies with the incarnation (purge on
+destruct, to follow X3). Losing that history on a full-network crash is
+accepted. A same-incarnation split (both sides kept the
 channel) merges normally: those rows are that channel's history and everyone
 present on the surviving side sees them, ops included, and can REDACT.
 
