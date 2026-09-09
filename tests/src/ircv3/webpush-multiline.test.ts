@@ -15,7 +15,7 @@ async function operUp(host?: string, port?: number): Promise<RawSocketClient> {
 }
 async function sent(o: RawSocketClient): Promise<number> {
   o.clearRawBuffer(); o.send('STATS webpush'); let n = -1;
-  for (;;) { const m = await o.waitForParsedLine(x => x.command === '249' || x.command === '219', 5000); if (m.command === '219') break;
+  for (;;) { const m = await o.waitForParsedLine(x => x.command === '249' || x.command === '219', 30000)   /* each push = ECDH + ES256; ~2 s under valgrind */; if (m.command === '219') break;
     const r = /Pushes since boot: (\d+) sent/.exec(m.params[m.params.length - 1]); if (r) n = parseInt(r[1], 10); }
   expect(n).toBeGreaterThanOrEqual(0); return n;
 }
@@ -41,12 +41,21 @@ describe('draft/webpush: multiline batches push (PR 107)', () => {
     // local sender, 5-line batch -> capped to 3 pushes
     const s = await createRawSocketClient(); clients.push(s); await s.capLs(); await s.capReq(['batch', 'draft/multiline', 'message-tags']); s.capEnd(); s.register(uniqueNick('mls'));
     await s.waitForNumeric('001'); await sleep(300);
+    // The "sent" counter is per SUBSCRIPTION and there is no WEBPUSH LIST to
+    // clear a pool account's stale endpoints (three of them made a 3-push
+    // batch count 9, 2026-09-09): measure the factor with one single push
+    // first, then expect multiples of it.
+    const cA = await sent(oper);
+    s.send(`PRIVMSG ${p.nick} :calibrate`); await sleep(2500);
+    const subs = (await sent(oper)) - cA;
+    expect(subs, 'a single PM pushes once per subscription').toBeGreaterThanOrEqual(1);
+    await sleep(4000);   /* idle again */
     const c0 = await sent(oper);
     s.send(`BATCH +m1 draft/multiline ${p.nick}`);
     for (let i = 1; i <= 5; i++) s.send(`@batch=m1 PRIVMSG ${p.nick} :line ${i}`);
     s.send('BATCH -m1'); await sleep(3000);
     const c1 = await sent(oper);
-    expect(c1 - c0, 'local 5-line batch with cap 3').toBe(3);
+    expect(c1 - c0, 'local 5-line batch with cap 3').toBe(3 * subs);
     // remote sender on the leaf, 2-line batch -> 2 pushes
     await sleep(4000);
     const r = await createRawSocketClient(SECONDARY_SERVER.host, SECONDARY_SERVER.port); clients.push(r);
@@ -56,10 +65,10 @@ describe('draft/webpush: multiline batches push (PR 107)', () => {
     r.send(`BATCH +m2 draft/multiline ${p.nick}`); r.send(`@batch=m2 PRIVMSG ${p.nick} :remote one`); r.send(`@batch=m2 PRIVMSG ${p.nick} :remote two`); r.send('BATCH -m2');
     await sleep(3000);
     const c3 = await sent(oper);
-    expect(c3 - c2, 'remote 2-line batch').toBe(2);
+    expect(c3 - c2, 'remote 2-line batch').toBe(2 * subs);
     // single PM still one push
     await sleep(4000);
     const c4 = await sent(oper); s.send(`PRIVMSG ${p.nick} :single`); await sleep(2500);
-    expect((await sent(oper)) - c4).toBe(1);
+    expect((await sent(oper)) - c4).toBe(subs);
   }, 120000);
 });
