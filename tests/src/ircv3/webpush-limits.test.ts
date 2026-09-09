@@ -8,6 +8,9 @@ import {
   setupTestAccount,
   releaseTestAccount,
   bouncerDisableHold,
+  createRawSocketClient,
+  RawSocketClient,
+  IRC_OPER,
 } from '../helpers/index.js';
 
 /**
@@ -18,6 +21,9 @@ import {
  * A re-REGISTER of an endpoint already held re-arms it and never counts.
  */
 
+// The server default is 30 (FEAT_WEBPUSH_MAX_REGISTRATIONS) and the bed
+// does not override it, so the test SETs the cap it asserts (found 2026-09-09:
+// the hardcoded 10 was a stale assumption and the suite was red).
 const MAX = 10;
 
 function keys(): string {
@@ -41,7 +47,9 @@ describe('draft/webpush registration cap', () => {
   const poolAccounts: string[] = [];
   const registered: { c: X3Client; endpoints: string[] }[] = [];
 
+  let resetCap: (() => void) | null = null;
   afterEach(async () => {
+    if (resetCap) { try { resetCap(); } catch { /* */ } resetCap = null; await new Promise(r => setTimeout(r, 300)); }
     for (const r of registered) {
       for (const e of r.endpoints) {
         try { r.c.send(`WEBPUSH UNREGISTER ${e}`); } catch { /* */ }
@@ -72,6 +80,16 @@ describe('draft/webpush registration cap', () => {
     c.clearRawBuffer();
     const { account, fromPool } = await setupTestAccount(c);
     if (fromPool) poolAccounts.push(account);
+
+    const oper: RawSocketClient = await createRawSocketClient();
+    clients.push(oper as unknown as X3Client);
+    await oper.capLs(); oper.capEnd(); oper.register(uniqueNick('wplop'));
+    await oper.waitForNumeric('001'); await new Promise(r => setTimeout(r, 300));
+    oper.send(`OPER ${IRC_OPER.name} ${IRC_OPER.password}`);
+    await oper.waitForNumeric('381', 20000);
+    oper.send(`SET WEBPUSH_MAX_REGISTRATIONS ${MAX}`);
+    resetCap = () => oper.send('RESET WEBPUSH_MAX_REGISTRATIONS');
+    await new Promise(r => setTimeout(r, 300));
 
     // Start from a clean slate: the pool account may hold endpoints from
     // earlier runs.  There is no LIST, so unregister what this run will
