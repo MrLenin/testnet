@@ -66,9 +66,11 @@ Feature flags are configured in the `features {}` block of the IRCd config file.
 | `FEAT_AUTHTOKEN_EXPIRE` | 600 | Seconds a `TOKEN GENERATE` token stays valid |
 | `FEAT_AUTHTOKEN_MAX` | 4096 | Outstanding tokens per server (oldest evicted); one user holds at most 16 |
 
-Services are `Authtoken "<key>" { url; description; pass; host; }` blocks (see
-`docs/features/authtoken.md`); a `FILEHOST` service also publishes the
-`draft/FILEHOST` / `soju.im/FILEHOST` ISUPPORT tokens.
+Services are `Authtoken "<key>" { url; description; pass; host; key; }` blocks (see
+`docs/features/authtoken.md`); a block with a `key` (P-256 scalar) issues ES256
+JWTs the service verifies itself (`STATS authtoken` prints the public key); a
+`FILEHOST` service also publishes the `draft/FILEHOST` / `soju.im/FILEHOST`
+ISUPPORT tokens.
 
 ### Web Push Configuration (Nefarious, `draft/webpush`)
 

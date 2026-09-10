@@ -33,7 +33,15 @@ pastes today, an image/video component exists but is not fully integrated yet); 
   plan below: no `client-batch` (tokens are one line), tokens replicate via P10
   `TK G/U` (validator may hit any server), validator PASS survives registration
   (per-connection service bitmask), +s channels hidden from claims unless scoped.
-- NEXT: the shim (needs a paste.boxlabs.uk API key from its operator), then Seance.
+- 2026-09-10 (later): user asked whether the paste server could "speak normal web"
+  instead of a shim holding an IRC connection -> JWT services SHIPPED `b8c054e`
+  (spec's self-validating variant; `key` in the block; ES256; STATS authtoken shows
+  the PEM; TOKEN VALIDATE still accepts the JWT), bed 7/7. The shim is no longer
+  needed if boxlabss/PASTE gains a FILEHOST endpoint that verifies the JWT
+  (contract in docs/features/authtoken.md). A paste.boxlabs.uk API key was
+  provided (kept in .env.local, PASTE_API_KEY, never committed) -- useful for
+  a fallback shim that posts to api.php, or for probing the API.
+- NEXT: PASTE-side FILEHOST endpoint (PR to boxlabss/PASTE), then Seance.
 
 ## Ircd (ours)
 1. `draft/authtoken` cap (+ `client-batch`), TOKEN command (3 subcommands), batch type,

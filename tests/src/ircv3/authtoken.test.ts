@@ -9,7 +9,8 @@
  * IRC passwords never reach the external service.
  *
  * Bed config (data/ircd.conf):
- *   Authtoken "FILEHOST"         -- pass = "fh-validator-secret" (PASSWDLEN is 20)
+ *   Authtoken "FILEHOST"         -- type = "jwt", key = <P-256 scalar>, pass = "fh-validator-secret"
+ *   Authtoken "evilnet/OPAQUE"   -- default type, pass = "fh-validator-secret" (PASSWDLEN is 20)
  *   Authtoken "evilnet/HOSTONLY" -- host = "172.29.0.0/16" (the docker net)
  *   Authtoken "evilnet/NOWHERE"  -- host = "10.255.255.0/24" (never matches)
  *
@@ -20,9 +21,16 @@
  *   - a validator's PASS is remembered across registration so a shim can
  *     keep one long-lived connection;
  *   - client-initiated draft/authtoken batches are NOT accepted (no
- *     `client-batch` cap token; random tokens fit one line).
+ *     `client-batch` cap token; random tokens fit one line);
+ *   - a `type = "jwt"` service gets an ES256 JWT instead of a random
+ *     string (the spec's self-validating variant): iss = network, aud =
+ *     service url, sub = account, name, scope, iat, exp, jti; the service
+ *     verifies it with the public key shown by STATS authtoken and tracks
+ *     jti itself, no IRC connection needed.  TOKEN VALIDATE still works on
+ *     the JWT (jti is the table key), so both paths coexist.
  */
 import { describe, it, expect, afterEach } from 'vitest';
+import { createPublicKey, verify as cryptoVerify } from 'node:crypto';
 import {
   createRawSocketClient, RawSocketClient, PRIMARY_SERVER, SECONDARY_SERVER,
   isSecondaryServerAvailable, IRC_OPER, uniqueNick, uniqueChannel,
@@ -98,7 +106,7 @@ async function generate(c: RawSocketClient, service: string, scope?: string): Pr
   expect(m.command, m.raw).toBe('TOKEN');
   expect(m.params[1]).toBe(service);
   const token = m.params[2];
-  expect(token, 'one-line random token').toMatch(/^[A-Za-z0-9]{32,}$/);
+  expect(token, 'one-line token').toMatch(/^[A-Za-z0-9._-]{32,}$/);
   return token;
 }
 
@@ -302,6 +310,77 @@ describe('draft/authtoken', () => {
     u.send('BATCH +ab draft/authtoken FILEHOST');
     const f = await u.waitForFail('BATCH', 'UNKNOWN_TYPE');
     expect(f.params[2]).toBe('draft/authtoken');
+  });
+
+  it('a jwt service mints an ES256 token the service can verify with the published key', async () => {
+    const acc = await getTestAccount(); if (acc.fromPool) pool.push(acc.account);
+    const nick = uniqueNick('atj');
+    const u = track(await accountClient(acc.account, acc.password, nick));
+    const chan = uniqueChannel('atjw');
+    u.send(`JOIN ${chan}`); await u.waitForJoin(chan);
+
+    // The public key, as PEM, from STATS authtoken (the operator hands
+    // this to the upload host).
+    oper = track(await plainClient(uniqueNick('atjo')));
+    oper.send(`OPER ${IRC_OPER.name} ${IRC_OPER.password}`);
+    await oper.waitForNumeric('381', 8000);
+    oper.send('STATS authtoken');
+    await oper.waitForNumeric('219', 8000);
+    const statLines = oper.allLines.filter(l => / 249 /.test(l)).map(l => l.replace(/^(@\S+ )?:\S+ 249 \S+ A :/, ''));
+    const fhIdx = statLines.findIndex(l => /^FILEHOST\b/.test(l));
+    expect(fhIdx, 'FILEHOST listed').toBeGreaterThanOrEqual(0);
+    const pemLines: string[] = [];
+    for (let i = fhIdx + 1; i < statLines.length; i++) {
+      const l = statLines[i].trim();
+      if (/^-----BEGIN PUBLIC KEY-----$/.test(l) || pemLines.length) pemLines.push(l);
+      if (/^-----END PUBLIC KEY-----$/.test(l)) break;
+    }
+    expect(pemLines.length, 'PEM public key printed').toBeGreaterThan(2);
+    const pubkey = createPublicKey(pemLines.join('\n') + '\n');
+    expect(pubkey.asymmetricKeyType).toBe('ec');
+
+    const token = await generate(u, 'FILEHOST', chan);
+    const parts = token.split('.');
+    expect(parts.length, 'compact JWT').toBe(3);
+    const b64 = (x: string) => Buffer.from(x.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+    const header = JSON.parse(b64(parts[0]).toString());
+    expect(header).toEqual({ alg: 'ES256', typ: 'JWT' });
+    const payload = JSON.parse(b64(parts[1]).toString());
+    expect(payload.aud).toBe(FILEHOST_URL);
+    expect(payload.sub).toBe(acc.account);
+    expect(payload.name).toBe(nick);
+    expect(payload.scope).toBe(chan);
+    expect(typeof payload.iss).toBe('string');
+    expect(payload.jti).toMatch(/^[0-9a-f]{48}$/);
+    const now = Math.floor(Date.now() / 1000);
+    expect(Math.abs(payload.iat - now)).toBeLessThan(120);
+    expect(payload.exp - payload.iat).toBe(600);
+    const ok = cryptoVerify('sha256', Buffer.from(`${parts[0]}.${parts[1]}`), { key: pubkey, dsaEncoding: 'ieee-p1363' }, b64(parts[2]));
+    expect(ok, 'ES256 signature verifies with the published key').toBe(true);
+    const tampered = cryptoVerify('sha256', Buffer.from(`${parts[0]}.${parts[1]}x`), { key: pubkey, dsaEncoding: 'ieee-p1363' }, b64(parts[2]));
+    expect(tampered).toBe(false);
+
+    // A validator that does keep an IRC connection can still hand the JWT
+    // to TOKEN VALIDATE: claims are live, and the jti is consumed.
+    const shim = track(await validator(VALIDATOR_PASS));
+    const r = await validate(shim, 'FILEHOST', token);
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    if (r.ok) { expect(r.claims.account).toBe(acc.account); expect(r.claims.operator_of.split(' ')).toContain(chan); }
+    const r2 = await validate(shim, 'FILEHOST', token);
+    expect(r2.ok).toBe(false);
+    // A forged signature is refused even with a plausible shape.
+    const t2 = await generate(u, 'FILEHOST');
+    const p2 = t2.split('.');
+    const forged = `${p2[0]}.${p2[1]}.${parts[2]}`;
+    const r3 = await validate(shim, 'FILEHOST', forged);
+    expect(r3.ok).toBe(false);
+    if (!r3.ok) expect(r3.fail[1]).toBe('INVALID_TOKEN');
+
+    // The opaque path is unchanged for services without a key.
+    const op = await generate(u, 'evilnet/OPAQUE');
+    expect(op).toMatch(/^[0-9a-f]{48}$/);
+    const r4 = await validate(shim, 'evilnet/OPAQUE', op);
+    expect(r4.ok).toBe(true);
   });
 
   it('a token generated on one server validates on another', async () => {
