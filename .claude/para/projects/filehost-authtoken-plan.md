@@ -180,4 +180,10 @@ A (PHP) with B alongside so A is tested before it is sent; then C.
   on 6668 from the host fails (restart the leaf instead).
 - Behaviour note: the jti is recorded before size/type checks, so a 413/415/429
   spends the token (strict single use; clients mint again).
-- C (Seance) NEXT.
+- C DONE: Seance PR https://github.com/evilnet/seance/pull/50 (branch
+  MrLenin/seance feat/filehost-authtoken `1df882a`): irc/authtoken.ts, handlers/token.ts,
+  FAIL TOKEN routing, serverOptions.FILEHOST, uploadFilehost + FilehostSource in
+  upload.ts, paperclip gate; 16 mocha cases, build/lint/tsc clean. Browser-level run
+  pending an https host (client refuses http over wss, per spec).
+- A PR opened as DRAFT: https://github.com/boxlabss/PASTE/pull/20 (questions on EXIF,
+  /img/ store, placement). User to un-draft when the wording suits.
