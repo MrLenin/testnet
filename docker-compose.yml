@@ -979,6 +979,62 @@ services:
       pdns-recursor:
         condition: service_healthy
 
+  # ---------------------------------------------------------------------------
+  # PASTE (boxlabss/PASTE, fork branch filehost) -- the bed's FILEHOST upload
+  # host.  `scripts/dc.sh --profile paste up -d paste`.  The ircd's Authtoken
+  # "FILEHOST" url must equal FILEHOST_URL (token audience); the public key is
+  # derived from the key in data/ircd.conf by the entrypoint.
+  # ---------------------------------------------------------------------------
+  paste-db:
+    image: mariadb:11
+    container_name: paste-db
+    profiles: ["paste"]
+    environment:
+      - MARIADB_ROOT_PASSWORD=paste-root
+      - MARIADB_DATABASE=paste
+      - MARIADB_USER=paste
+      - MARIADB_PASSWORD=paste
+    volumes:
+      - paste_db:/var/lib/mysql
+      - ./paste/docs/paste.mysqlschema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./paste/upgrade/2.1-to-2.2-filehost.sql:/docker-entrypoint-initdb.d/02-filehost.sql:ro
+      - ./docker/paste/seed.sql:/docker-entrypoint-initdb.d/03-seed.sql:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks:
+      irc_net:
+        ipv4_address: 172.29.0.30
+
+  paste:
+    build: ./docker/paste
+    container_name: paste
+    profiles: ["paste"]
+    ports:
+      - "8089:80"
+    environment:
+      - DB_HOST=paste-db
+      - DB_USER=paste
+      - DB_PASSWORD=paste
+      - DB_NAME=paste
+      - PASTE_BASEURL=http://localhost:8089/
+      - FILEHOST_URL=http://localhost:8089/filehost
+      - FILEHOST_ISSUER=Network
+      - FILEHOST_MAX_BYTES=2097152
+      - FILEHOST_PER_HOUR=200
+    volumes:
+      - ./paste:/var/www/html
+      - ./data/ircd.conf:/bed-ircd.conf:ro
+      - paste_files:/var/filehost
+    depends_on:
+      paste-db:
+        condition: service_healthy
+    networks:
+      irc_net:
+        ipv4_address: 172.29.0.31
+
 volumes:
   keycloak_data:
   keycloak_providers:
@@ -1012,6 +1068,8 @@ volumes:
   webpush_data5:
   webpush_data6:
   webpush_data7:
+  paste_db:
+  paste_files:
   # Account-bearing volumes are EXTERNAL: `down -v` must never be able to delete
   # them (2026-06-27 a `down -v` wiped x3_data and every registered account).
   # On a fresh host, create them once: docker volume create testnet_<name>

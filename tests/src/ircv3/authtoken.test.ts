@@ -38,7 +38,7 @@ import {
 } from '../helpers/index.js';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-const FILEHOST_URL = 'https://paste.boxlabs.uk/filehost';
+const FILEHOST_URL = 'http://localhost:8089/filehost';
 const VALIDATOR_PASS = 'fh-validator-secret';
 
 function isupport(lines: string[]): Record<string, string> {

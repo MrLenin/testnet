@@ -22,3 +22,7 @@
 	path = nefarious-crdt
 	url = git@github.com:MrLenin/nefarious2.git
 	branch = crdt-mesh
+[submodule "paste"]
+	path = paste
+	url = https://github.com/MrLenin/PASTE.git
+	branch = filehost

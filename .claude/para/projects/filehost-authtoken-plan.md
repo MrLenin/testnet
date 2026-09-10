@@ -166,3 +166,18 @@ X3 ACL-derived roles.
 
 ### Order
 A (PHP) with B alongside so A is tested before it is sent; then C.
+
+### Status 2026-09-10 evening
+- A DONE on MrLenin/PASTE branch `filehost` (`3b5e12a`): filehost.php, jwt + store
+  includes, SQL, .htaccess/nginx rules, config example, docs/filehost.md. PR to
+  boxlabss/PASTE not yet opened (user's call on timing/wording).
+- B DONE: `paste` submodule + docker/paste (Dockerfile, entrypoint deriving the PEM
+  from data/ircd.conf via perl+openssl, gen-config.php, seed.sql) + compose profile
+  `paste` (172.29.0.30/.31, port 8089) + tests/src/ircv3/filehost-e2e.test.ts 3/3.
+  TRAP: `sed -i` on data/ircd.conf breaks the bind mount (new inode) -- the running
+  ircd kept the old url until the file was rewritten in place (`docker exec -u root
+  sh -c 'cat > local.conf'`) and rehashed; leaf oper block has a host mask so REHASH
+  on 6668 from the host fails (restart the leaf instead).
+- Behaviour note: the jti is recorded before size/type checks, so a 413/415/429
+  spends the token (strict single use; clients mint again).
+- C (Seance) NEXT.

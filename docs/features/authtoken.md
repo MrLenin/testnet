@@ -192,12 +192,21 @@ follow rehash through `draft/extended-isupport`.
   config time rather than silently truncated.
 * `+s` channels are hidden from `member_of` / `operator_of` unless scoped.
 
-## Not done
+## The paste side (done, pending upstream)
 
-* The paste-host side (FILEHOST endpoint verifying the JWT; see above) —
-  a PR to boxlabss/PASTE, or failing that a shim in our compose that turns
-  the FILEHOST POST into `api.php` / `/img/` calls with a service API key.
-  See `.claude/para/projects/filehost-authtoken-plan.md`.
+`paste/` is a submodule of MrLenin/PASTE, branch `filehost` (PR to
+boxlabss/PASTE to follow): `filehost.php` + `includes/filehost_jwt.php` +
+`includes/filehost_store.php` + `upgrade/2.1-to-2.2-filehost.sql`, documented
+in `paste/docs/filehost.md`. The bed runs it as docker-compose profile
+`paste` (`scripts/dc.sh --profile paste up -d paste`: php:8.3-apache with the
+tree bind-mounted plus MariaDB; the entrypoint derives the public key from the
+`key` in `data/ircd.conf`, so the test key has one home; port 8089). The bed's
+`Authtoken "FILEHOST"` url is therefore `http://localhost:8089/filehost`.
+`tests/src/ircv3/filehost-e2e.test.ts` (3 cases, skips when the container is
+down) drives OPTIONS, text and PNG uploads, GET/HEAD/Range, replay, Basic,
+forged and tampered tokens, HTML/exe/oversize refusals.
+
+## Not done
 * Client support: Seance PR; goguma only speaks Basic/Bearer with stored
   credentials, and the shim will refuse Basic.
 * `role` claims (service-defined roles): nothing defines them yet.
