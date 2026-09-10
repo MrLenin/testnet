@@ -126,6 +126,44 @@ describe('FILEHOST end to end (bed ircd + paste container)', () => {
     expect((await p2.arrayBuffer()).byteLength).toBe(8);
   });
 
+  it('strips EXIF/XMP/text metadata losslessly from JPEG and PNG (on by default)', async () => {
+    if (!available) return;
+    const acc = await getTestAccount(); if (acc.fromPool) pool.push(acc.account);
+    const u = track(await accountClient(acc.account, acc.password));
+
+    // A minimal JPEG: SOI, APP0 JFIF, APP1 Exif (with GPS-looking bytes), DQT, SOS + data, EOI.
+    const seg = (marker: number, payload: Buffer) => Buffer.concat([Buffer.from([0xff, marker, (payload.length + 2) >> 8, (payload.length + 2) & 0xff]), payload]);
+    const jfif = seg(0xe0, Buffer.from('JFIF\0\x01\x01\x00\x00\x01\x00\x01\x00\x00', 'binary'));
+    const exif = seg(0xe1, Buffer.concat([Buffer.from('Exif\0\0MM\0*\0\0\0\x08', 'binary'), Buffer.from('GPSLatitude 51.5N 0.1W SECRET')]));
+    const dqt = seg(0xdb, Buffer.concat([Buffer.from([0]), Buffer.alloc(64, 1)]));
+    const sos = Buffer.concat([seg(0xda, Buffer.from([1, 1, 0, 0, 0x3f, 0])), Buffer.from([0x12, 0x34, 0xff, 0x00, 0x56]), Buffer.from([0xff, 0xd9])]);
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8]), jfif, exif, dqt, sos]);
+    const expectJpeg = Buffer.concat([Buffer.from([0xff, 0xd8]), jfif, dqt, sos]);
+
+    const r1 = await upload(await generate(u), jpeg, 'image/jpeg', 'gps.jpg');
+    expect(r1.status, r1.text).toBe(201);
+    expect(r1.json?.size).toBe(expectJpeg.length);
+    const g1 = await fetch(r1.location!);
+    const got1 = Buffer.from(await g1.arrayBuffer());
+    expect(got1.includes('SECRET')).toBe(false);
+    expect(got1.equals(expectJpeg), 'only the APP1 segment is gone').toBe(true);
+
+    // A PNG with a tEXt chunk between IHDR and IDAT.
+    const crc = (buf: Buffer) => { let c = ~0; for (const b of buf) { c ^= b; for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1)); } return (~c) >>> 0; };
+    const chunk = (type: string, data: Buffer) => { const td = Buffer.concat([Buffer.from(type), data]); const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const cc = Buffer.alloc(4); cc.writeUInt32BE(crc(td)); return Buffer.concat([len, td, cc]); };
+    const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const ihdr = chunk('IHDR', Buffer.from([0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0]));
+    const text = chunk('tEXt', Buffer.from('Comment\0taken at SECRET place'));
+    const idat = chunk('IDAT', Buffer.from('78da63f8cfc00000030001', 'hex'));
+    const iend = chunk('IEND', Buffer.alloc(0));
+    const png = Buffer.concat([sig, ihdr, text, idat, iend]);
+    const r2 = await upload(await generate(u), png, 'image/png', 'note.png');
+    expect(r2.status, r2.text).toBe(201);
+    const got2 = Buffer.from(await (await fetch(r2.location!)).arrayBuffer());
+    expect(got2.includes('SECRET')).toBe(false);
+    expect(got2.equals(Buffer.concat([sig, ihdr, idat, iend]))).toBe(true);
+  });
+
   it('refuses what it must: no token, Basic, forged signature, wrong audience, expired, bad type, oversize', async () => {
     if (!available) return;
     const acc = await getTestAccount(); if (acc.fromPool) pool.push(acc.account);
