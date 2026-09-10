@@ -43,8 +43,12 @@ pastes today, an image/video component exists but is not fully integrated yet); 
 ## Site shim (ours to write, operator's to run)
 FILEHOST on the outside (OPTIONS with Accept-Post, POST with Bearer -> 201 + Location),
 `TOKEN VALIDATE` over an IRC connection on the inside (PASS = validator credential), then
-`api.php?action=paste` with ONE service API key for text; images/video routed to the engine's
-media component when integrated. GET/HEAD = the paste URL. Runs in the testnet compose against
+`api.php?action=paste` with ONE service API key for text; images/video to the site's
+`/img/` uploader (observed 2026-09-10: multipart POST to `/img/` itself with `images[]` +
+`strip_exif=1`, JSON reply `{results:[{success,name,filePath,size,...}]}`, accepts
+`image/*,video/*`, no visible auth on the page, not yet in the public boxlabss/PASTE tree) --
+the shim converts the raw FILEHOST body into that multipart form and returns `filePath` as
+Location. GET/HEAD = the paste / file URL. Runs in the testnet compose against
 the bed for development; delivered as a container or a PR to boxlabss/PASTE.
 
 ## Clients
