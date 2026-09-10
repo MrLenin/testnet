@@ -58,6 +58,18 @@ Feature flags are configured in the `features {}` block of the IRCd config file.
 | `FEAT_CAP_metadata` | TRUE | Enable `draft/metadata-2` capability |
 | `FEAT_CAP_draft_webpush` | FALSE | Enable `draft/webpush` capability (the bed and prod set it TRUE; the cap value carries `vapid=<key>` only once a key is provisioned) |
 
+### Authentication Tokens (Nefarious, `draft/authtoken`)
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `FEAT_CAP_draft_authtoken` | TRUE | Enable `draft/authtoken`; listed in `CAP LS` only while an `Authtoken` block exists (the `TOKEN` command never needs the cap) |
+| `FEAT_AUTHTOKEN_EXPIRE` | 600 | Seconds a `TOKEN GENERATE` token stays valid |
+| `FEAT_AUTHTOKEN_MAX` | 4096 | Outstanding tokens per server (oldest evicted); one user holds at most 16 |
+
+Services are `Authtoken "<key>" { url; description; pass; host; }` blocks (see
+`docs/features/authtoken.md`); a `FILEHOST` service also publishes the
+`draft/FILEHOST` / `soju.im/FILEHOST` ISUPPORT tokens.
+
 ### Web Push Configuration (Nefarious, `draft/webpush`)
 
 | Feature | Default | Description |
@@ -470,6 +482,7 @@ Capabilities are defined in `include/capab.h` and automatically advertised based
 | `CAP_DRAFT_CHANRENAME` | 26 | `draft/channel-rename` |
 | `CAP_DRAFT_METADATA2` | 27 | `draft/metadata-2` |
 | `CAP_DRAFT_WEBPUSH` | 28 | `draft/webpush` |
+| `CAP_DRAFT_AUTHTOKEN` | — | `draft/authtoken` (listed only while a service is configured) |
 
 ---
 
@@ -1106,6 +1119,7 @@ The following ISUPPORT tokens are advertised:
 | Token | Source | Description |
 |-------|--------|-------------|
 | `VAPID` | X3 → Nefarious | VAPID public key for web push |
+| `draft/FILEHOST`, `soju.im/FILEHOST` | `Authtoken "FILEHOST"` block | Upload URL for IRCv3 FILEHOST (PR #562); the soju spelling is goguma's key |
 
 The VAPID token is set dynamically when X3 connects and broadcasts its VAPID key.
 

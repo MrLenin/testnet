@@ -26,6 +26,15 @@ pastes today, an image/video component exists but is not fully integrated yet); 
 - #597 extoidc/OBJECTSTORAGE: heavier predecessor (CIBA + tus); SKIP unless a client needs it.
 - #612 extended-isupport value concatenation: housekeeping for long ISUPPORT values.
 
+## Status
+- 2026-09-10: ircd half SHIPPED on the fork (`7fd9ef8` authtoken + `891f2a1` batch
+  UNKNOWN_TYPE), bed 6/6 (`tests/src/ircv3/authtoken.test.ts`), valgrind clean.
+  Docs: `docs/features/authtoken.md`, FEATURE_FLAGS_CONFIG.md. Deviations from the
+  plan below: no `client-batch` (tokens are one line), tokens replicate via P10
+  `TK G/U` (validator may hit any server), validator PASS survives registration
+  (per-connection service bitmask), +s channels hidden from claims unless scoped.
+- NEXT: the shim (needs a paste.boxlabs.uk API key from its operator), then Seance.
+
 ## Ircd (ours)
 1. `draft/authtoken` cap (+ `client-batch`), TOKEN command (3 subcommands), batch type,
    config block per service (key, url, description, validator credential: PASS and/or
