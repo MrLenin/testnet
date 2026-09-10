@@ -73,3 +73,96 @@ the bed for development; delivered as a container or a PR to boxlabss/PASTE.
 - goguma: Basic/Bearer only today; needs authtoken upstream (issue/patch) -- the shim does NOT
   accept Basic (that is the password transit we are avoiding).
 - HexDroid: Sean's call.
+
+## PASTE-side scope (2026-09-10, after JWT services shipped)
+
+Facts from the boxlabss/PASTE tree (`2e08296`): PHP >= 8.1, PDO + MySQL/MariaDB only,
+openssl ext required, no composer (no php-jwt: verify ES256 with `openssl_verify`
+directly, r||s -> DER is ~15 lines), pastes live in the DB (text only; slug or id
+URLs; raw at `/raw/<slug>` via nginx rewrite), `includes/functions.php` has
+`generateUniquePasteSlug`, `is_banned(ip)`; the live `/img/` uploader (images/video,
+multipart, strip_exif) is NOT in the public tree.
+
+### Deliverable A — PR to boxlabss/PASTE: `filehost.php` (self-contained module)
+
+Endpoint `https://paste.boxlabs.uk/filehost` (nginx: `location = /filehost` ->
+filehost.php; `location /filehost/` -> static files dir, or filehost.php?f= for HEAD/GET
+with the stored Content-Type). Files:
+1. `filehost.php` — OPTIONS / POST / GET / HEAD.
+   - OPTIONS: 204, `Allow: OPTIONS, POST`, `Accept-Post: <FILEHOST_ACCEPT>`, CORS
+     (`Access-Control-Allow-Origin: *`, `-Methods: POST, OPTIONS`, `-Headers:
+     Authorization, Content-Type, Content-Disposition`, `Access-Control-Expose-Headers:
+     Location`, `-Max-Age`). Browser clients (Seance) need every one of these.
+   - POST: `Authorization: Bearer <jwt>` only (Basic -> 401 `WWW-Authenticate: Bearer
+     realm="filehost"`; that is the password transit we refuse). Verify: alg ES256,
+     signature with FILEHOST_PUBKEY (PEM from `STATS authtoken`), `iss` ==
+     FILEHOST_ISSUER, `aud` == FILEHOST_URL byte for byte, `exp` > now-60, `iat` <=
+     now+60, `jti` =~ /^[0-9a-f]{48}$/ and unseen (INSERT into `filehost_jti`; duplicate
+     key = replay -> 401). Then `is_banned($ip)` -> 403; Content-Length > FILEHOST_MAX_BYTES
+     -> 413; MIME (Content-Type, cross-checked with finfo on the body) not in
+     FILEHOST_ACCEPT -> 415; per-account hourly cap from `filehost_files` -> 429.
+   - Storage: `text/*` -> a paste row (member = FILEHOST_MEMBER service user, title =
+     Content-Disposition filename or "IRC upload", syntax from MIME/extension via the
+     existing shebang/extension helpers, visibility unlisted, expiry FILEHOST_EXPIRY);
+     Location = the raw URL. Everything else -> file `FILEHOST_DIR/<slug>.<ext>` (ext from
+     a MIME->ext table, never from the client), mode 0640, `filehost_files` row;
+     Location = `<baseurl>filehost/<slug>.<ext>`. 201 + `Location` (absolute) +
+     JSON body `{url, size, type, expires}` for humans.
+   - GET/HEAD `/filehost/<slug>.<ext>`: `Content-Type` from the row, `Content-Length`,
+     `Content-Disposition: inline; filename=`, `X-Content-Type-Options: nosniff`,
+     `Cache-Control: public, max-age=…`; text raw is the existing paste raw path.
+2. `includes/filehost_jwt.php` — `filehost_verify_jwt(string $jwt, string $pem, string
+   $iss, string $aud, int $now): array|string` (claims or error code). Constant-time
+   nothing needed (public-key verify), but reject `alg` != ES256 before anything else.
+3. `includes/filehost_store.php` — the two storage paths + MIME table + jti sweep
+   (`DELETE FROM filehost_jti WHERE exp < ?` on every POST, cheap).
+4. `upgrade/2.1-to-2.2-filehost.sql` — `filehost_jti(jti CHAR(48) PK, exp INT, account
+   VARCHAR(64), created DATETIME)`, `filehost_files(id, slug VARCHAR(16) UNIQUE, account,
+   network, mime VARCHAR(127), size INT, ext VARCHAR(8), paste_id INT NULL, ip, created,
+   expires DATETIME NULL)`; add to `docs/paste.mysqlschema.sql`; install step optional.
+5. `docs/config.example.php`: `FILEHOST_ENABLED`, `FILEHOST_URL`, `FILEHOST_PUBKEY`,
+   `FILEHOST_ISSUER`, `FILEHOST_DIR`, `FILEHOST_MAX_BYTES` (10 MiB), `FILEHOST_ACCEPT`
+   (`image/*, video/*, text/*`), `FILEHOST_MEMBER`, `FILEHOST_EXPIRY` (paste expiry
+   letter), `FILEHOST_PER_HOUR` (20). Admin-panel toggle deferred (constants first).
+6. `docs/filehost.md` — operator guide: get the PEM from `STATS authtoken`, set
+   `Authtoken "FILEHOST" { url = FILEHOST_URL; key = …; }` on the ircd, nginx snippet,
+   retention/cron (`filehost.php?cron=1` or a CLI script to unlink expired files).
+7. `docs/nginx.example.conf` additions.
+
+Open for the maintainer: (a) EXIF stripping — their `/img/` does it; either expose
+that function for `filehost_store.php` to call or accept a GD re-encode for JPEG/PNG
+(lossy for JPEG); v1 ships WITHOUT it and says so in the response header
+`X-Filehost-Exif: kept`. (b) Whether binary uploads should go through `/img/`'s
+store instead of a new dir. (c) Abuse: takedown = delete the row + file; the
+`account` + `network` columns identify the uploader for the ircd operators.
+
+Deviations from #562 to state in the PR: Bearer carries an authtoken JWT, not an
+OAUTHBEARER token (authtoken postdates FILEHOST); Basic is refused on purpose.
+
+Estimate: ~450 lines PHP + SQL + docs; one working day; no dependencies.
+
+### Deliverable B — testnet: run PASTE in the bed and gate end to end
+
+`docker compose --profile paste`: `paste` (php:8.3-apache or nginx+fpm from the
+boxlabss/PASTE tree, bind-mounted, `mod_rewrite`) + `paste-db` (mariadb, schema +
+upgrade SQL + a seeded service user and the FILEHOST constants; FILEHOST_PUBKEY
+generated from the bed's Authtoken key at container start by a tiny script so the
+test key stays in one place). Vitest `tests/src/ircv3/filehost-e2e.test.ts`: TOKEN
+GENERATE FILEHOST on the bed -> OPTIONS (Accept-Post, CORS) -> POST text and a PNG
+with Bearer -> 201 + Location -> GET/HEAD match -> replay -> 401 -> Basic -> 401 ->
+tampered/expired JWT -> 401 -> 413/415 shapes. Estimate: half a day. Also a good
+fixture for reviewing the PR before sending it.
+
+### Deliverable C — Seance
+
+`TOKEN GENERATE FILEHOST <current buffer>` on attach/drop/paste of a file -> `POST
+<draft/FILEHOST or soju.im/FILEHOST>` with `Authorization: Bearer` (fetch; CORS from A)
+-> insert Location into the composer; progress + error toast; refuse when the
+ISUPPORT URL is `http:` on a TLS connection (spec). Half a day; PR to evilnet/seance.
+
+### Not in scope now
+goguma (Basic only; needs authtoken upstream), resumable uploads, per-channel quotas,
+X3 ACL-derived roles.
+
+### Order
+A (PHP) with B alongside so A is tested before it is sent; then C.
