@@ -78,8 +78,10 @@ describe('draft/webpush attention trigger', () => {
   const track = <T extends X3Client | RawSocketClient>(c: T): T => { clients.push(c); return c; };
   let oper: RawSocketClient | null = null;
   let endpointOwner: { c: X3Client; endpoint: string } | null = null;
+  let idleOverrideOwner: RawSocketClient | null = null;
 
   afterEach(async () => {
+    if (idleOverrideOwner) { try { idleOverrideOwner.send('METADATA * SET draft/webpush/idle'); } catch { /* */ } await new Promise(r => setTimeout(r, 300)); idleOverrideOwner = null; }
     if (endpointOwner) {
       try { endpointOwner.c.send(`WEBPUSH UNREGISTER ${endpointOwner.endpoint}`); } catch { /* */ }
       endpointOwner = null;
@@ -224,7 +226,7 @@ describe('draft/webpush attention trigger', () => {
     const acc = await getTestAccount();
     if (acc.fromPool) poolAccounts.push(acc.account);
     const p = await createBouncerClient(acc.account, acc.password, {
-      nick: uniqueNick('wpaw'), extraCaps: ['draft/webpush'],
+      nick: uniqueNick('wpaw'), extraCaps: ['draft/webpush', 'draft/metadata-2'],
     });
     track(p.client);
     const nick = p.nick;
@@ -243,7 +245,15 @@ describe('draft/webpush attention trigger', () => {
     oper = track(await operUp());
     oper.send('SET WEBPUSH_IDLE 5');
     oper.send('SET WEBPUSH_COOLDOWN 0');
-    await new Promise(r => setTimeout(r, 500));
+    // SET is per server and the leaf's window would stay at 900 s, so the
+    // leaf would keep replicating activity once per 300 s.  The account
+    // override is metadata, replicated everywhere: both servers then use
+    // the same 5 s window (and the 2 s activity emit interval it implies).
+    idleOverrideOwner = p.client;   // cleared in afterEach whatever happens below
+    p.client.send('METADATA * SET draft/webpush/idle :5');
+    // An unchanged value (a pool account that kept it) is not echoed.
+    await p.client.waitForParsedLine(m => (m.command === 'METADATA' && m.params[1] === 'draft/webpush/idle') || m.command === 'FAIL', 2000).catch(() => undefined);
+    await new Promise(r => setTimeout(r, 1000));
     const sender = await createRawSocketClient();
     track(sender);
     await sender.capLs(); sender.capEnd(); sender.register(uniqueNick('wpsnd'));
@@ -273,9 +283,17 @@ describe('draft/webpush attention trigger', () => {
     const c2 = await statsCounters(oper);
     expect(c2.sent, 'AWAY * on the leaf must release the push on the hub').toBeGreaterThan(c1.sent);
 
-    // (No "back" phase: a remote connection's activity reaches this server
-    // only on a quiet-to-active transition, at most once per 300 s (BX U
-    // la=), so after AWAY it reads as idle here whatever it says next.
-    // The local-connection case above covers the return to attending.)
+    // Back and talking: attends again.  Its activity crosses servers once
+    // per quiet period = min(300 s, half the idle window) -- 2 s here --
+    // so the message after AWAY reaches the hub before the ping.
+    a.client.send('AWAY');
+    await a.client.waitForNumeric('305', 5000);
+    await new Promise(r => setTimeout(r, 2500));
+    a.client.send(`PRIVMSG ${nick} :back`);
+    await new Promise(r => setTimeout(r, 800));
+    sender.send(`PRIVMSG ${nick} :ping after the leaf came back`);
+    await new Promise(r => setTimeout(r, 1500));
+    const c3 = await statsCounters(oper);
+    expect(c3.sent, 'pushed after the leaf connection came back').toBe(c2.sent);
   }, 90000);
 });
