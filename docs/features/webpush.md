@@ -22,6 +22,10 @@ Web push enables IRC servers to send push notifications to mobile apps and web b
 └─────────┘                    └─────────┘
 ```
 
+## Attention
+
+A push goes out only when nobody attends the account: every connection is held, away, or has not spoken within `WEBPUSH_IDLE` (per-account `draft/webpush/idle`). "Spoke recently" is a poor signal right after you spoke and switched apps, so clients report attention themselves with `draft/pre-away`: a hidden page sends `AWAY *` (away for an unspecified reason, per connection, never overriding a real away elsewhere) and `AWAY` when it returns; Seance does this. Each connection's own state crosses servers as `BX U aw=` (2026-09-11), so the subscription owner's server judges a connection on another server by what it said, not by the session's aggregate.
+
 ## Feature Flags
 
 | Flag | Default | Description |

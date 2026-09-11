@@ -12,6 +12,8 @@ import {
   createSaslBouncerClient,
   bouncerDisableHold,
   createRawSocketClient,
+  SECONDARY_SERVER,
+  isSecondaryServerAvailable,
 } from '../helpers/index.js';
 
 /**
@@ -213,4 +215,67 @@ describe('draft/webpush attention trigger', () => {
     expect(c3.sent, 'an away connection must not block the push').toBeGreaterThan(c2.sent);
     a.client.send('AWAY');
   }, 60000);
+  it('AWAY * on a connection hosted by another server does not block the push (per-connection away replicates)', async () => {
+    // draft/pre-away: a client that is not looking says `AWAY *` (Seance
+    // does on a hidden page).  The push decision runs on the subscription
+    // owner's server, so the other server's connection must replicate its
+    // own away state (BX U aw=), not just the session's aggregate.
+    if (!(await isSecondaryServerAvailable())) return;
+    const acc = await getTestAccount();
+    if (acc.fromPool) poolAccounts.push(acc.account);
+    const p = await createBouncerClient(acc.account, acc.password, {
+      nick: uniqueNick('wpaw'), extraCaps: ['draft/webpush'],
+    });
+    track(p.client);
+    const nick = p.nick;
+    const a = await createSaslBouncerClient(acc.account, acc.password, {
+      host: SECONDARY_SERVER.host, port: SECONDARY_SERVER.port,
+    });
+    track(a.client);
+    await new Promise(r => setTimeout(r, 1500));
+    const endpoint = `https://webhook.site/${uniqueId()}-awaystar`;
+    p.client.clearRawBuffer();
+    p.client.send(`WEBPUSH REGISTER ${endpoint} ${pushKeys()}`);
+    const ack = await p.client.waitForParsedLine(
+      m => (m.command === 'WEBPUSH' && m.params[0] === 'REGISTER') || m.command === 'FAIL', 5000);
+    expect(ack.command, ack.raw).toBe('WEBPUSH');
+    endpointOwner = { c: p.client, endpoint };
+    oper = track(await operUp());
+    oper.send('SET WEBPUSH_IDLE 5');
+    oper.send('SET WEBPUSH_COOLDOWN 0');
+    await new Promise(r => setTimeout(r, 500));
+    const sender = await createRawSocketClient();
+    track(sender);
+    await sender.capLs(); sender.capEnd(); sender.register(uniqueNick('wpsnd'));
+    await sender.waitForNumeric('001');
+    // The attach itself counted as activity; let the hub-side primary go idle.
+    await new Promise(r => setTimeout(r, 6000));
+
+    // The leaf connection speaks: it attends (spoke inside the window).
+    a.client.send(`PRIVMSG ${nick} :hello from the leaf`);
+    await new Promise(r => setTimeout(r, 800));
+    const c0 = await statsCounters(oper);
+    expect(c0.idleWindow, 'SET WEBPUSH_IDLE 5 did not take').toBe(5);
+    sender.send(`PRIVMSG ${nick} :ping while the leaf attends`);
+    await new Promise(r => setTimeout(r, 1500));
+    const c1 = await statsCounters(oper);
+    expect(c1.sent, 'pushed while the leaf connection attended').toBe(c0.sent);
+
+    // Spoke a moment ago, then went away for an unspecified reason (the
+    // page was hidden): still inside the idle window, so only the
+    // replicated AWAY * can release the push.
+    a.client.send(`PRIVMSG ${nick} :one more, then I hide`);
+    a.client.send('AWAY *');
+    await a.client.waitForNumeric('306', 5000);
+    await new Promise(r => setTimeout(r, 800));
+    sender.send(`PRIVMSG ${nick} :ping while the leaf is AWAY *`);
+    await new Promise(r => setTimeout(r, 1500));
+    const c2 = await statsCounters(oper);
+    expect(c2.sent, 'AWAY * on the leaf must release the push on the hub').toBeGreaterThan(c1.sent);
+
+    // (No "back" phase: a remote connection's activity reaches this server
+    // only on a quiet-to-active transition, at most once per 300 s (BX U
+    // la=), so after AWAY it reads as idle here whatever it says next.
+    // The local-connection case above covers the return to attending.)
+  }, 90000);
 });
