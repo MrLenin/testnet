@@ -71,6 +71,7 @@ services:
       - 0.0.0.0:4497:4497
       - 0.0.0.0:9998:9998
       - 0.0.0.0:8444:8444  # WebSocket (SSL)
+      - 0.0.0.0:8067:8067  # WebSocket (plain; browser e2e against the http: paste host)
     env_file:
       - .env
       - .env.local
