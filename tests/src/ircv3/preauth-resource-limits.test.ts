@@ -66,7 +66,9 @@ async function pushesSent(o: RawSocketClient): Promise<number> {
   o.send('STATS webpush');
   let sent = -1;
   for (;;) {
-    const m = await o.waitForParsedLine(x => x.command === '249' || x.command === '219', 5000);
+    // Generous: a pool account can carry stale endpoints from other runs, and
+    // under valgrind each push costs ~2 s of server time before STATS answers.
+    const m = await o.waitForParsedLine(x => x.command === '249' || x.command === '219', 20000);
     if (m.command === '219') break;
     const r = /Pushes since boot: (\d+) sent/.exec(m.params[m.params.length - 1]);
     if (r) sent = parseInt(r[1], 10);
@@ -118,6 +120,46 @@ describe('pre-auth resource limits', () => {
       ws.sendRaw(Buffer.concat(Array.from({ length: 2000 }, () => one)));
       await ws.waitForDisconnect(10000);
       expect(ws.isConnected()).toBe(false);
+    } finally {
+      ws.disconnect();
+    }
+  }, 30000);
+
+  it('control frames have their own meter: pings before registration do not delay the registration burst', async () => {
+    const ws = new WebSocketTestClient(undefined, WS_PORT);
+    await ws.connect();
+    try {
+      // Eight PINGs before registering: well inside the control-frame
+      // budget, but 16 s of debt if they were charged to fakelag, which
+      // would stall the pipelined registration below for several seconds
+      // (pre-registration is deliberately fakelag-free: OAUTHBEARER).
+      for (let i = 0; i < 8; i++) ws.sendFrame(Buffer.from(`p${i}`), WS_OPCODE.PING);
+      for (let i = 0; i < 8; i++) await ws.waitForPong(5000);
+
+      const nick = uniqueNick('prlpre');
+      const t0 = Date.now();
+      ws.send('CAP LS 302');
+      ws.send(`NICK ${nick}`);
+      ws.send(`USER ${nick} 0 * :control-frame meter`);
+      ws.send('CAP END');
+      await ws.waitForText(/ 001 /, 4000);
+      expect(Date.now() - t0, 'registration was delayed by the pings').toBeLessThan(4000);
+    } finally {
+      ws.disconnect();
+    }
+  }, 30000);
+
+  it('empty data frames count on the same meter (they put nothing on the recvQ either)', async () => {
+    // Reserved opcodes are not a case: the decoder already fails the
+    // connection on the first one (RFC 6455 5.2).
+    const ws = new WebSocketTestClient(undefined, WS_PORT);
+    await ws.connect();
+    try {
+      const one = buildFrame(Buffer.alloc(0), WS_OPCODE.TEXT);
+      ws.sendRaw(Buffer.concat(Array.from({ length: 2000 }, () => one)));
+      const close = await ws.waitForClose(10000);
+      expect(close.code).toBe(1008);
+      await ws.waitForDisconnect(5000);
     } finally {
       ws.disconnect();
     }

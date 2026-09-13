@@ -180,7 +180,7 @@ features {
 **Pre-auth resource limits (2026-09-13, after the UnrealIRCd 6.2.7 advisory):**
 
 - The upgrade request is capped at 8 KB per connection (`WS_HANDSHAKE_MAX`); frames at 16 KB (`WS_MAX_PAYLOAD`, Close 1009).
-- Client control frames (PING/PONG) are charged against fakelag like commands, since they are answered inside the frame decoder and never reach the recvQ. A client more than `WS_CONTROL_FLOOD_CEIL` (20 s) ahead gets Close 1008 and "Excess Flood". CLOSE is exempt.
+- Frames that put nothing on the recvQ (PING, PONG, empty data or continuation frames) are metered on their own debt clock, not fakelag: 2 s per frame (`WS_CONTROL_FLOOD_CHARGE`), Close 1008 and "Excess Flood" past 20 s (`WS_CONTROL_FLOOD_CEIL`), so ten in a burst and one every two seconds sustained. Kept off `cli_since` deliberately: pre-registration is fakelag-free (OAUTHBEARER pipelining) and a keepalive PONG must not cost a command slot. CLOSE and an empty FIN continuation are free. Reserved opcodes fail the connection on the first frame (RFC 6455 §5.2).
 - An accepted socket that sends nothing (no ClientHello, no HTTP request) must not spin the event loop. Writable interest is dropped while the TLS handshake or the WebSocket sniff/handshake is pending and re-armed when it resolves. Check by hand: `nc localhost <tls-or-ws-port>` idle for 10 s while watching `docker stats nefarious`; CPU must stay near 0% (it was a full core before the fix).
 
 ### Certificate Expiry Tracking
