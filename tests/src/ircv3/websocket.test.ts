@@ -513,10 +513,12 @@ describe('WebSocket Support', () => {
       // Send close frame without code/reason
       client.sendFrame(Buffer.alloc(0), WS_OPCODE.CLOSE);
 
-      // Server should still close cleanly
-      await client.waitForClose(5000).catch(() => ({}));
-      // Empty close is valid per RFC 6455
-      expect(client.isConnected()).toBe(true); // Connection still open until we read close
+      // Empty close is valid per RFC 6455: the server answers with an
+      // empty Close and drops the connection.
+      const resp = await client.waitForClose(5000);
+      expect(resp.code).toBeUndefined();
+      await client.waitForDisconnect(5000);
+      expect(client.isConnected()).toBe(false);
     });
 
     it('should handle CLOSE with code only (no reason)', async () => {

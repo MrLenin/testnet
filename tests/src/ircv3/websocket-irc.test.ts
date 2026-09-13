@@ -143,8 +143,9 @@ describe('IRC-over-WebSocket Protocol', () => {
       const newNick = uniqueNick('wsnew');
       client.send(`NICK ${newNick}`);
 
-      // Wait for NICK confirmation
-      const nickConfirm = await client.waitForText('NICK', 5000);
+      // Wait for the NICK echo itself (a plain 'NICK' match can land on a
+      // trailing 005 line carrying NICKLEN).
+      const nickConfirm = await client.waitForText(new RegExp(` NICK :?${newNick}\\b`), 5000);
       expect(nickConfirm).toContain(newNick);
     });
   });

@@ -168,12 +168,16 @@ describe('WebSocket Edge Cases', () => {
       // Note: IRC has its own limits, so this tests frame handling, not IRC
       const largeMsg = 'x'.repeat(70000);
 
-      // This should be accepted as a valid frame (even if IRC rejects it)
+      // The frame is well-formed, but far over WS_MAX_PAYLOAD (16 KB): the
+      // server answers Close 1009 (Message Too Big) and drops us.  (This
+      // used to assert "still connected" against a helper that never
+      // noticed the server closing the socket.)
       client.send(`PRIVMSG #test :${largeMsg}`);
 
-      // Connection should still be alive
-      await new Promise((r) => setTimeout(r, 500));
-      expect(client.isConnected()).toBe(true);
+      const close = await client.waitForClose(5000);
+      expect(close.code).toBe(1009);
+      await client.waitForDisconnect(5000);
+      expect(client.isConnected()).toBe(false);
     });
 
     it('should handle empty payload', async () => {
@@ -499,24 +503,27 @@ describe('WebSocket Edge Cases', () => {
   });
 
   describe('Rapid Frame Transmission', () => {
-    it('should handle rapid sequential frames', async () => {
+    it('should answer a few pings, then drop a ping flood as Excess Flood', async () => {
       client = await createWebSocketClient();
       const nick = uniqueNick('wsrapid');
       await client.register(nick);
 
-      // Send 100 pings rapidly
+      // Control frames are charged against fakelag like commands (they
+      // never reach the recvQ, so nothing else throttles them).  The
+      // first few PINGs are answered; 100 in a burst is a flood and the
+      // server sends Close 1008 and drops the connection.
       for (let i = 0; i < 100; i++) {
         client.ping(`ping${i}`);
       }
 
-      // Wait a bit and verify connection is still alive
-      await new Promise((r) => setTimeout(r, 2000));
-      expect(client.isConnected()).toBe(true);
+      const close = await client.waitForClose(5000);
+      expect(close.code).toBe(1008);
+      await client.waitForDisconnect(5000);
+      expect(client.isConnected()).toBe(false);
 
-      // Should have received many pongs
-      const frames = client.getFrames();
-      const pongs = frames.filter((f) => f.opcode === WS_OPCODE.PONG);
+      const pongs = client.getFrames().filter((f) => f.opcode === WS_OPCODE.PONG);
       expect(pongs.length).toBeGreaterThan(0);
+      expect(pongs.length).toBeLessThan(100);
     });
 
     it('should handle burst of text frames', async () => {

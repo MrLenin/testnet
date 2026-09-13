@@ -38,7 +38,7 @@ Feature flags are configured in the `features {}` block of the IRCd config file.
 | `FEAT_CAP_account_tag` | TRUE | Enable `account-tag` capability |
 | `FEAT_CAP_chghost` | TRUE | Enable `chghost` capability |
 | `FEAT_CAP_invite_notify` | TRUE | Enable `invite-notify` capability |
-| `FEAT_CAP_tls` | TRUE | Enable `tls` capability (advertises TLS connection info) |
+| `FEAT_CAP_tls` | FALSE | Offer the deprecated IRCv3 `tls` capability and the STARTTLS command. Off by default since 2026-09-13 (STS replaces it): STARTTLS answers 421 unless this is explicitly TRUE, and is refused over WebSocket in any case |
 
 ### Draft Extension Features
 
@@ -155,6 +155,7 @@ The multiline batch system includes comprehensive flood protection to prevent ab
 | `FEAT_DRAFT_WEBSOCKET` | TRUE | Enable WebSocket protocol support |
 | `FEAT_WEBSOCKET_RECVQ` | 8192 | Receive queue size for WebSocket clients (higher than regular clients since WS frames can bundle multiple IRC lines) |
 | `FEAT_WEBSOCKET_ORIGIN` | "" | Allowed WebSocket origins (space/comma separated, empty = allow all) |
+| `FEAT_WEBSOCKET_PING_INTERVAL` | 30 | Seconds between server keepalive PINGs to WebSocket clients (0 disables, floor 10) |
 
 **Origin Validation**: When `WEBSOCKET_ORIGIN` is non-empty, WebSocket connections must include an Origin header that matches one of the allowed patterns. Connections with missing or non-matching origins receive HTTP 403 Forbidden.
 
@@ -175,6 +176,12 @@ features {
 - Empty string (default) allows all origins - suitable for testing but not production
 - Wildcard patterns match suffix only (`*.example.com` matches `sub.example.com` but not `example.com`)
 - Origin validation helps prevent CSRF attacks against WebSocket endpoints
+
+**Pre-auth resource limits (2026-09-13, after the UnrealIRCd 6.2.7 advisory):**
+
+- The upgrade request is capped at 8 KB per connection (`WS_HANDSHAKE_MAX`); frames at 16 KB (`WS_MAX_PAYLOAD`, Close 1009).
+- Client control frames (PING/PONG) are charged against fakelag like commands, since they are answered inside the frame decoder and never reach the recvQ. A client more than `WS_CONTROL_FLOOD_CEIL` (20 s) ahead gets Close 1008 and "Excess Flood". CLOSE is exempt.
+- An accepted socket that sends nothing (no ClientHello, no HTTP request) must not spin the event loop. Writable interest is dropped while the TLS handshake or the WebSocket sniff/handshake is pending and re-armed when it resolves. Check by hand: `nc localhost <tls-or-ws-port>` idle for 10 s while watching `docker stats nefarious`; CPU must stay near 0% (it was a full core before the fix).
 
 ### Certificate Expiry Tracking
 

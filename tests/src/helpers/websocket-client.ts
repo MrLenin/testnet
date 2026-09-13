@@ -190,6 +190,7 @@ export class WebSocketTestClient {
   private frames: WebSocketFrame[] = [];
   private connected = false;
   private handshakeComplete = false;
+  private closeWaiters: (() => void)[] = [];
 
   constructor(
     private host = WS_HOST,
@@ -217,6 +218,12 @@ export class WebSocketTestClient {
       this.buffer = Buffer.concat([this.buffer, chunk]);
       this.processBuffer();
     });
+    this.socket.on('close', () => {
+      this.connected = false;
+      for (const r of this.closeWaiters) r();
+      this.closeWaiters = [];
+    });
+    this.socket.on('error', () => { /* surfaces as close */ });
 
     // Send handshake
     const headers = [
@@ -390,6 +397,18 @@ export class WebSocketTestClient {
    */
   clearFrames(): void {
     this.frames = [];
+  }
+
+  /**
+   * Resolve when the TCP connection is gone (the server dropped us),
+   * whether or not a CLOSE frame preceded it.
+   */
+  waitForDisconnect(timeout = 5000): Promise<void> {
+    if (!this.connected || !this.socket) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error(`still connected after ${timeout}ms`)), timeout);
+      this.closeWaiters.push(() => { clearTimeout(t); resolve(); });
+    });
   }
 
   /**

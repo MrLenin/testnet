@@ -31,6 +31,7 @@ A push goes out only when nobody attends the account: every connection is held, 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `FEAT_CAP_webpush` | TRUE | Enable `draft/webpush` capability |
+| `FEAT_WEBPUSH_COOLDOWN` | 60 | Seconds between pushes for one (account, origin). The origin of a PM is the sender's **session id** (2026-09-13; it was the nick, so a nick change was a fresh minute of pushes), of a highlight the channel |
 
 ## VAPID Keys
 
