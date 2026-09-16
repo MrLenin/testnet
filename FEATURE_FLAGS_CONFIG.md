@@ -323,7 +323,7 @@ cherry-pick. Application-level zstd (above) owns metadata value compression.
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `FEAT_PRESENCE_AGGREGATION` | FALSE | Enable multi-connection presence aggregation |
-| `FEAT_AWAY_STAR_MSG` | "Away" | Fallback message stored for away-star connections |
+| `FEAT_AWAY_STAR_MSG` | "Away" | What a client that did NOT negotiate draft/pre-away is shown for a user whose every connection said `AWAY *`: substituted at emission (away-notify, WHOIS, PRIVMSG/INVITE auto-reply, WHOWAS). The stored reason and the server-to-server wire are the star itself, and a draft/pre-away client receives the star, so it can treat the change as the attention signal it is and print nothing (2026-09-16; before, the word was stored and relayed, so every app switch announced away/back to everyone) |
 | `FEAT_AWAY_THROTTLE` | 0 | Minimum seconds between AWAY status changes (0 = disabled) |
 
 **Presence Aggregation**: When enabled, the IRCd tracks all connections per account and computes an "effective" presence using "most-present-wins" logic:
@@ -439,7 +439,7 @@ features {
 
     # Presence Aggregation
     "PRESENCE_AGGREGATION" = "FALSE";  # Enable for multi-connection presence
-    "AWAY_STAR_MSG" = "Away";          # Fallback for away-star storage
+    "AWAY_STAR_MSG" = "Away";          # shown to non-pre-away clients for a fully AWAY * user; pre-away clients get the star
     "AWAY_THROTTLE" = "0";             # Seconds between AWAY changes (0 = disabled)
 
     # Account Registration

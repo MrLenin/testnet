@@ -60,7 +60,9 @@ async function statsCounters(o: RawSocketClient): Promise<{ sent: number; attend
   o.send('STATS webpush');
   let sent = -1, attended = -1, notSubmitted = -1, idleWindow = -1;
   for (;;) {
-    const m = await o.waitForParsedLine(x => x.command === '249' || x.command === '219', 5000);
+    // Generous: a pool account can carry stale endpoints from other runs, and
+    // under valgrind each failed delivery costs seconds before STATS answers.
+    const m = await o.waitForParsedLine(x => x.command === '249' || x.command === '219', 20000);
     if (m.command === '219') break;
     const t = m.params[m.params.length - 1];
     let r = /Pushes since boot: (\d+) sent.* (\d+) not submitted/.exec(t);
