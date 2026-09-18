@@ -1562,7 +1562,7 @@ ABAAB A *
 
 #### Presence Aggregation (Multi-Connection)
 
-When `FEAT_PRESENCE_AGGREGATION` is enabled, the IRCd aggregates presence across all connections for the same account:
+For a connection that belongs to a bouncer session, the IRCd aggregates presence across every connection of that session (not optional since 2026-09-18; the `FEAT_PRESENCE_AGGREGATION` flag that gated it is gone -- a session member on the plain path broadcast a per-connection away from its own numeric, so its siblings saw their own nick go away while WHOIS said present):
 
 | Priority | State | Effective Presence |
 |----------|-------|-------------------|
@@ -1570,13 +1570,12 @@ When `FEAT_PRESENCE_AGGREGATION` is enabled, the IRCd aggregates presence across
 | 2 | Any connection AWAY (not away-star) | Account is AWAY |
 | 3 (lowest) | All connections AWAY-STAR | Account is hidden |
 
-**Broadcast Suppression**: With aggregation enabled, AWAY broadcasts only occur when the *effective* presence changes, not on every individual connection's state change.
+**Broadcast Suppression**: AWAY broadcasts only occur when the *effective* presence changes, not on every individual connection's state change.
 
 #### Feature Flags
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `FEAT_PRESENCE_AGGREGATION` | OFF | Enable multi-connection aggregation |
 | `FEAT_AWAY_STAR_MSG` | "Away" | Fallback message for away-star storage |
 
 #### Processing

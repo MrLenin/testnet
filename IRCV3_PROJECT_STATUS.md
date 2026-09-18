@@ -166,8 +166,7 @@ features {
     "METADATA_QUEUE_SIZE" = "1000";
     "METADATA_BURST" = "TRUE";
 
-    # Presence aggregation
-    "PRESENCE_AGGREGATION" = "FALSE";
+    # Presence (aggregated across a bouncer session, always)
     "AWAY_STAR_MSG" = "Away";
 };
 ```

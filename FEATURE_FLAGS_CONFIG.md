@@ -322,7 +322,6 @@ cherry-pick. Application-level zstd (above) owns metadata value compression.
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `FEAT_PRESENCE_AGGREGATION` | FALSE | Enable multi-connection presence aggregation |
 | `FEAT_AWAY_STAR_MSG` | "Away" | What a client that did NOT negotiate draft/pre-away is shown for a user whose every connection said `AWAY *`: substituted at emission (away-notify, WHOIS, PRIVMSG/INVITE auto-reply, WHOWAS). The stored reason and the server-to-server wire are the star itself, and a draft/pre-away client receives the star, so it can treat the change as the attention signal it is and print nothing (2026-09-16; before, the word was stored and relayed, so every app switch announced away/back to everyone) |
 | `FEAT_AWAY_THROTTLE` | 0 | Minimum seconds between AWAY status changes (0 = disabled) |
 
@@ -437,8 +436,7 @@ features {
     "COMPRESS_THRESHOLD" = "256";      # Compress values > 256 bytes
     "COMPRESS_LEVEL" = "3";            # zstd level (1-22)
 
-    # Presence Aggregation
-    "PRESENCE_AGGREGATION" = "FALSE";  # Enable for multi-connection presence
+    # Presence (aggregated across a bouncer session's connections, always)
     "AWAY_STAR_MSG" = "Away";          # shown to non-pre-away clients for a fully AWAY * user; pre-away clients get the star
     "AWAY_THROTTLE" = "0";             # Seconds between AWAY changes (0 = disabled)
 
