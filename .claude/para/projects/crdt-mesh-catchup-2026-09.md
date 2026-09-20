@@ -281,3 +281,54 @@ Still open after the merge (the mesh must learn these; ordered by value):
    gateway (memory: bouncer-stale-held-convergence side note).
 8. The CRDT init containers make a single self-signed cert; give them the
    fork's chain so tls-accept's precondition holds there too.
+
+### 2026-09-20 12:00-12:40 — post-merge items 1 and 2 SHIPPED
+
+1. **Absence table on the mesh** (`862788c`): a doc-known store is absent
+   while its CR H beacon is stale (or it is not a live P10 server here) and
+   back on a fresh beacon; `crdt_shadow` sweeps the storage collection every
+   verify tick and hooks the beacon receive path; `m_chathistory` keeps a
+   per-server reach state (0 unknown / 1 reachable / 2 absent) so only
+   transitions act, the absence is backdated to the last beacon seen, a store
+   never seen reachable cannot go absent (boot), and the retention token is
+   re-derived on both transitions.  Live gate (`scratchpad/absence_gate.py`):
+   `docker stop nefarious6` → hub2 pages carry the partial tag and no end tag
+   after 20 s; `docker start` → complete again after 56 s.  PASS.
+2. **Legacy stores into the doc** (`9da78dd`): the gateway publishes a legacy
+   server's storage capability on its behalf — eagerly on CH A S/R from a
+   non-CRDT-aware server, re-minted each verify tick from the legacy ads it
+   still holds, withdrawn when the server leaves the gateway's legacy link.
+   Two bugs surfaced on the way and are fixed: the CH E once-per-responder
+   guard keyed on `server_ad_index(sptr)`, which is -1 for anchored sources
+   and tunneled re-injects, so replies through the mesh were never guarded
+   (`d823d08`, tunnel dispatch now carries the CR-X source); and a reply the
+   gateway relays for a legacy responder toward a CRDT next hop went out as a
+   P10 line the peer had no Client for and silently dropped, so the origin
+   waited to the fed timeout and stamped the page partial (`4f38981`: relayed
+   replies toward a CRDT next hop ride the tunnel sourced by the responder).
+   Live gate: rows seeded on the legacy primary, read from leaf2 — before:
+   0 rows; after: 3 rows in 0.2–0.8 s, six responders credited, no partial.
+   DEBUG lines `CH fed dispatch` / `CH E: reqid` / `CH fed timeout` now name
+   the responders a request waits on.
+
+Remaining from the list: PN over the doc (3), BX U aw=/la= on the bconn
+record (4), TOKEN/RLO (5), SEARCH federation (6), AC re-emit (7), slot cert
+chain (8), and CRDT-bed variants of the three tree-specific suites.
+
+Later the same afternoon (`f434264`): hub2 itself never dispatched to the
+legacy primary — the bed's CRDT slot confs U-line `testnet` (data/ircd3–7
+`UWorld`; prod uses no UWorld block, so prod never saw this) and the store
+collector skipped U-lined servers.  An entry in that table exists only
+because the server sent CH A S, which services never do, so the U-line
+skip is gone from the ad-gated walks (kept on the write-forward and
+direct-link propagation paths, where it is about services).  Gate: rows
+seeded on the primary now read from hub2 (6 responders incl. Bj) and from
+leaf2 in 0.2–0.8 s.
+
+Regression on the mesh after items 1–2: federation 7/7, search 7/7,
+strict-presence 3/3, presence-paging 5/5 (when run right after the
+federation suite it fails 2/5 by design: that suite SQUITs the legacy leaf
+from hub2, which has no C-line for it, so the leaf stays split ~5 min and
+every page is honestly partial — order the suites accordingly).  Fleet on
+`f434264`: 0 valgrind errors, 0 asserts, 0 CRDT mismatches, mesh
+reachable=5.  crdt-mesh pushed to MrLenin/nefarious2.
