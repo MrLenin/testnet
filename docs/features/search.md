@@ -61,13 +61,36 @@ and returns the newest `limit` across them, each row addressed to its own
 channel. Private conversations are not included without `in=<nick>`: their
 keyspace is not enumerable per requester.
 
-## Not merged: storage peers
+## Storage peers
 
-Results come from the local store only; a storage peer holding the
-channel is not queried (single-server prod; the CHATHISTORY federation
-path is not reused here yet).
+Results are merged across the storage servers that hold the channel
+(2026-09-20). A search with `in=<channel>` fans out exactly as a
+CHATHISTORY page of the same window does: the origin runs its own scan,
+sends `CH Q <channel> S <before> <limit> <reqid> <dest> <after|*>
+P<requester> <mask> :<selectors>` (unix `sec.ms` references) to every storage server (the same
+trailing requester token and type mask as a page, so a responder walks
+with the requester's presence), merges the replies by msgid, keeps the
+newest `limit` and sends the batch. The selectors `from=` and `text=`
+travel as the trailing parameter, values escaped like client tags (`\s`
+for a space, `\\` for a backslash); the 512-byte server line bounds them,
+and an oversize text is refused with `INVALID_PARAMS` before any walk so
+local and federated behaviour agree.
+
+Each responder spends its own `SEARCH_SCAN_MAX` and says so on its end
+marker (`CH E <reqid> <n> T`); the spec has no marker for a cut scan, so
+the client is told nothing and narrows its window when a full `limit`
+comes back, as against a single server. A responder that does not answer
+within `CHATHISTORY_TIMEOUT` is dropped and the origin replies with what
+it has.
+
+Private conversations (`in=<nick>`) and a search without `in` are local
+only.
 
 ## Tests
 
 `tests/src/ircv3/search.test.ts`: text, from, limit, after/before, the
 empty batch, INVALID_PARAMS, the missing capability, and strict presence.
+`tests/src/ircv3/search-federation.test.ts` (linked bed): rows held by
+the other store only, dedup of shared rows, from/limit across servers, a
+text with spaces on the wire, the oversize refusal, and a store that is
+away.

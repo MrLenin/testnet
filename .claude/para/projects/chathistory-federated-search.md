@@ -1,11 +1,16 @@
-# Federated SEARCH — scope (not scheduled)
+# Federated SEARCH — SHIPPED 2026-09-20 (phase 1) — scope kept below
 
 Written 2026-09-20, the day local `SEARCH` (soju.im/search) shipped
 (fork `75fb365` + `c255136`, `docs/features/search.md`). Prod is a single
 server, so local search is complete for it today. This is the plan for the
 day a second storage server exists (the bed already has one: nefarious2
-stores every channel it sees). Scoped while the machinery was fresh; **not
-to be built now.**
+stores every channel it sees). Scoped while the machinery was fresh. **Phase 1 built the same day**
+(fork commit `786386d`, `in=<channel>` only, selectors in the trailing
+parameter with the 380-byte guard, responder via the factored
+`search_walk`, page merge keep-newest, no completeness marker = option 1;
+`tests/src/ircv3/search-federation.test.ts`). Open: phase 2 (a cut marker,
+if Seance wants one), phase 3 (PMs), and the mesh gate once merged into
+crdt-mesh (the tunnel path is the collector's, nothing search-specific).
 
 ## What local search is
 

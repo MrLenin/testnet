@@ -404,3 +404,20 @@ CRDT-bed variants of the tree-specific suites.
 Remaining: SEARCH federation (6), CRDT-bed variants of the tree-specific
 suites (partial, retention-isupport, stale-replica, presence-replication's
 split case).
+
+### 2026-09-20 14:50 — item 6 SHIPPED on the fork (`e05ca11`, both branches, both remotes)
+
+6. **Federated SEARCH** (fork `e05ca11`): `in=<channel>` searches ride the
+   CHATHISTORY federation path with letter `S` — bare unix references (a
+   `T` prefix reads as a msgid on the S2S wire, the first deploy's mistake),
+   the requester token and type mask a page carries, the selectors as the
+   trailing parameter (tag-escaped, 380-byte guard refused at the origin
+   before any walk), a shared `search_walk` for the local path and the
+   responder, merge by msgid keep-newest, `E … T` when a responder's scan
+   budget cut.  Legacy pair: `search-federation.test.ts` 5/5 (rows held by
+   the leaf only, dedup, from/limit across servers, spaces on the wire,
+   oversize refusal, a store away), `search.test.ts` 7/7.  Docs:
+   `docs/features/search.md` "Storage peers"; scope doc marked phase 1
+   shipped (PMs and a cut marker stay open).  Next: merge into crdt-mesh
+   (the origin fan-out must use the collector + tunnel there) and gate a
+   mesh-only store.
