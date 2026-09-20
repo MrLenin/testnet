@@ -357,3 +357,24 @@ reachable=5.  crdt-mesh pushed to MrLenin/nefarious2.
 
 Remaining: TOKEN/RLO (5), SEARCH federation (6), AC re-emit (7), slot cert
 chain (8), CRDT-bed variants of the tree-specific suites.
+
+### 2026-09-20 14:00 — item 5 SHIPPED (crdt-mesh `7f25581`, pushed, fleet on it)
+
+5. **TOKEN over the mesh** (`7f25581`): TK G/U (token issued / revoked)
+   also flood over CR M (letter `A`, target `*`, CI precedent) from every
+   origin emit and from the gateway edge when a TK arrives over a legacy
+   link; a mesh receiver learns/forgets locally (idempotent) and re-emits
+   real P10 to its legacy links only when the origin server has no tree
+   presence there (an overlay-only node's tokens reach legacy without a
+   dual-plane echo).  The CRDT slot confs now carry the primary's four
+   Authtoken services (bind-mounted; appended in place).  Gates: authtoken
+   suite 7/7 with both ends on the mesh; an opaque token generated on hub2
+   validates on leaf5 (overlay-only, no tree link) and on leaf2; the legacy
+   primary learned it via the tree copy and forgot it on the single-use
+   `TK U` that followed — correct.  **RLO stays gateway-only**: the relocate
+   cap is off by default and design D's follow-join is still pending across
+   fork/#96/X3; a unicast `RLO` toward a mesh-only user would ride the CR-X
+   unicast path like SVSJOIN when that design lands.
+
+Remaining: SEARCH federation (6), AC re-emit (7), slot cert chain (8),
+CRDT-bed variants of the tree-specific suites.
