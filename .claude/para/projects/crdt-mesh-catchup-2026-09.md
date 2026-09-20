@@ -451,7 +451,7 @@ one "Non-user sending MULTILINE" violation per leaf per test run.
 
 **The catch-up plan is complete.**
 
-### 2026-09-20 16:00-16:55 — after the plan: gate sweep + Tier C F5 + BURST drop (crdt-mesh `4387aac`, pushed)
+### 2026-09-20 16:00-18:05 — after the plan: gate sweep + Tier C F5 + BURST drop + SERVER guard (crdt-mesh `4981680`, pushed)
 
 - `f04879e` ML capability announce accepted from mesh anchors (the last
   per-run protocol violation; ML announces now arrive with 0 violations).
@@ -482,8 +482,26 @@ one "Non-user sending MULTILINE" violation per leaf per test run.
 - Fleet recreated on `4387aac` (ircd.202609202026 on all five): 0 mismatches,
   mesh reachable=5, 0 asserts, 0 violations; SNO gate leaf5→hub2+primary and
   fedprobe primary→leaf2 (0.2-0.8 s) green.  One-hour soak started 16:52
-  (`scratchpad/soak.sh` → `soak.log`, 12 × 5-min ticks); result recorded
-  below when it ends.
+  (`scratchpad/soak.sh` → `soak.log`, 12 × 5-min ticks).
+- **Soak on `4387aac` CLEAN**: 12/12 ticks 16:52-17:53, every node 0
+  mismatches / 0 asserts / 0 violations / 0 invalid, all containers running.
+  NOTE (not a regression): the gateway's `N servers` figure is the
+  beacon-fresh set; hub2 reads 5 in steady state and 8-9 only around link
+  time, because it emits the MR-3a proxy beacons for its legacy subtree and
+  never records them itself.  Legacy stores stay reachable there via the
+  P10 link (`ch_storage_reach_sweep_one` second clause); pages from hub2
+  against legacy-seeded rows complete in 0.2 s.  `mesh reachable=5` is the
+  metric.
+- `4981680` **SERVER from a mesh stub dropped** (last REVIEW item of the
+  sweep): unreachable with a well-behaved peer (T2-a retires the stub before
+  the SERVER line that re-creates it), so a stub-sourced SERVER means the
+  peer's tree and ours disagree → protocol_violation, never a server hung
+  under a linkless stub.  RPONG stays a diagnostic drop (an RPING toward a
+  mesh-only server dies at the dead-sink link; oper diagnostics over the
+  retired tree are not in scope).
+- Fleet recreated on `4981680` (ircd.202609202055): 0 mismatches, mesh
+  reachable=5, 0 asserts/violations; SNO gate leaf5→hub2+primary and
+  fedprobe primary→leaf2 green.  Sweep REVIEW list now empty.
 - Roadmap items left: M7 (retire the per-hop bouncer election, 27
   FEAT_CRDT_BOUNCER_DOC sites — deletes the doc-off fallback, user's call),
   nick-collision live validation (test gap), orphan-reap Inc 2 (deferred),
