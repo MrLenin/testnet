@@ -434,3 +434,19 @@ responder walked 3 rows); local search suite 7/7 on hub2/leaf2.
 **Every code item on the post-merge list is done.**  What remains is test
 work: CRDT-bed variants of the tree-specific suites (a tree split is not a
 store absence on the mesh; a real absence is a stopped node).
+
+### 2026-09-20 15:15 — CRDT-bed suite for the mesh's absence semantics
+
+`tests/src/ircv3/crdt-mesh-absence.test.ts` (run with `CRDT_BED=1
+IRC_HOST=localhost`; stops/starts container nefarious6 = leaf4 via
+docker, ~8 min): (1) a stopped store makes hub2's pages partial and
+end-tag-less, its return makes them complete again; (2) the retention
+token drops when the widest store leaves and rises when it is back.  Both
+green on `d43b6dc`.  TRAP: a client connected to a slot dies with the
+container -- oper up again after every restart.  Still tree-only:
+bouncer-stale-replica (SQUIT + KILL + relink of the legacy leaf) and
+presence-replication's split case; they need the same docker-driven shape
+if the mesh is ever to run them.  Residue seen in the logs, not chased:
+one "Non-user sending MULTILINE" violation per leaf per test run.
+
+**The catch-up plan is complete.**
