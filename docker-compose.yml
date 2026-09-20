@@ -1,6 +1,17 @@
+# Every container's stdout is kept by the json-file driver with no cap by
+# default; the ircd containers under valgrind with debug logging filled
+# /var/lib/docker/containers to 32 GB (2026-09-20). Applied to every service
+# below; takes effect when a container is recreated (`dc.sh up -d`).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
 
   nefarious-init:
+    logging: *default-logging
     container_name: nefarious-init
     build:
         context: ./nefarious
@@ -43,6 +54,7 @@ services:
       - ssl_data:/home/nefarious/ircd/ssl
 
   nefarious:
+    logging: *default-logging
     container_name: nefarious
     build:
         context: ./nefarious
@@ -100,6 +112,7 @@ services:
       start_period: 30s
 
   nefarious2-init:
+    logging: *default-logging
     container_name: nefarious2-init
     build:
         context: ./nefarious
@@ -127,6 +140,7 @@ services:
       - linked
 
   nefarious2:
+    logging: *default-logging
     container_name: nefarious2
     build:
         context: ./nefarious
@@ -182,6 +196,7 @@ services:
       - linked
 
   nefarious3-init:
+    logging: *default-logging
     container_name: nefarious3-init
     build:
         context: ./nefarious-crdt
@@ -208,6 +223,7 @@ services:
       - multi
 
   nefarious3:
+    logging: *default-logging
     container_name: nefarious3
     build:
         context: ./nefarious-crdt
@@ -262,6 +278,7 @@ services:
       - multi
 
   nefarious4-init:
+    logging: *default-logging
     container_name: nefarious4-init
     build:
         context: ./nefarious-crdt
@@ -288,6 +305,7 @@ services:
       - multi
 
   nefarious4:
+    logging: *default-logging
     container_name: nefarious4
     build:
         context: ./nefarious-crdt
@@ -342,6 +360,7 @@ services:
       - multi
 
   nefarious5-init:
+    logging: *default-logging
     container_name: nefarious5-init
     build:
         context: ./nefarious-crdt
@@ -368,6 +387,7 @@ services:
       - multi
 
   nefarious5:
+    logging: *default-logging
     container_name: nefarious5
     build:
         context: ./nefarious-crdt
@@ -422,6 +442,7 @@ services:
       - multi
 
   nefarious6-init:
+    logging: *default-logging
     container_name: nefarious6-init
     build:
         context: ./nefarious-crdt
@@ -448,6 +469,7 @@ services:
       - multi
 
   nefarious6:
+    logging: *default-logging
     container_name: nefarious6
     build:
         context: ./nefarious-crdt
@@ -502,6 +524,7 @@ services:
       - multi
 
   nefarious7-init:
+    logging: *default-logging
     container_name: nefarious7-init
     build:
         context: ./nefarious-crdt
@@ -528,6 +551,7 @@ services:
       - multi
 
   nefarious7:
+    logging: *default-logging
     container_name: nefarious7
     build:
         context: ./nefarious-crdt
@@ -582,6 +606,7 @@ services:
       - multi
 
   nefarious-upstream-init:
+    logging: *default-logging
     container_name: nefarious-upstream-init
     build:
         context: ./nefarious-upstream
@@ -605,6 +630,7 @@ services:
       - upstream
 
   nefarious-upstream:
+    logging: *default-logging
     container_name: nefarious-upstream
     build:
         context: ./nefarious-upstream
@@ -653,6 +679,7 @@ services:
       - upstream
 
   x3-init:
+    logging: *default-logging
     container_name: x3-init
     build:
       context: ./x3
@@ -669,6 +696,7 @@ services:
       - x3_data:/x3/data
 
   x3:
+    logging: *default-logging
     container_name: x3
     build:
       context: ./x3
@@ -713,6 +741,7 @@ services:
 
   # Auto-create X3 admin account after X3 starts (first oper gets olevel 1000)
   x3-admin-init:
+    logging: *default-logging
     container_name: x3-admin-init
     image: docker:cli
     # x3 may still be (re)connecting its uplink when this first runs; retry until AuthServ
@@ -745,6 +774,7 @@ services:
         bash /ensure-admin.sh
 
   integration-tests:
+    logging: *default-logging
     container_name: integration-tests
     build:
       context: ./tests
@@ -772,6 +802,7 @@ services:
 
   # PowerDNS Recursor for Consul DNS forwarding
   pdns-recursor:
+    logging: *default-logging
     container_name: pdns-recursor
     image: powerdns/pdns-recursor-master:latest
     networks:
@@ -788,6 +819,7 @@ services:
 
   # Build webhook SPI JAR for Keycloak
   keycloak-spi-build:
+    logging: *default-logging
     container_name: keycloak-spi-build
     image: maven:3.9-eclipse-temurin-17
     volumes:
@@ -800,6 +832,7 @@ services:
              echo 'Webhook SPI JAR built and copied to providers'"
 
   keycloak-init:
+    logging: *default-logging
     container_name: keycloak-init
     image: quay.io/keycloak/keycloak:26.4.7
     user: "0:0"  # Run as root to fix permissions
@@ -824,6 +857,7 @@ services:
   # KEEP THIS COMMITTED — it is NOT separately managed. A git reset that drops it breaks
   # Keycloak user federation (keycloak logs "UnknownHostException: openldap") and all auth.
   openldap:
+    logging: *default-logging
     container_name: openldap
     hostname: openldap
     build:
@@ -867,6 +901,7 @@ services:
   # safe to re-run on every `up`. openldap data now PERSISTS (ldap_data/ldap_config
   # volumes) so it survives restarts; the seed stays idempotent for a fresh `down -v`.
   openldap-seed:
+    logging: *default-logging
     container_name: openldap-seed
     image: startcodex/openldap:latest
     depends_on:
@@ -884,6 +919,7 @@ services:
     restart: "no"
 
   keycloak:
+    logging: *default-logging
     container_name: keycloak
     image: quay.io/keycloak/keycloak:26.4.7
     user: "1000:1000"  # keycloak user
@@ -939,6 +975,7 @@ services:
 
   # Auto-setup Keycloak realm, clients, and test users after Keycloak is healthy
   keycloak-setup:
+    logging: *default-logging
     container_name: keycloak-setup
     image: curlimages/curl:8.11.0
     networks:
@@ -965,6 +1002,7 @@ services:
 
   # Add PostgreSQL indexes for Keycloak user attributes (SCRAM, x509, etc.)
   keycloak-db-indexes:
+    logging: *default-logging
     container_name: keycloak-db-indexes
     image: postgres:16-alpine
     networks:
@@ -1001,6 +1039,7 @@ services:
   # derived from the key in data/ircd.conf by the entrypoint.
   # ---------------------------------------------------------------------------
   paste-db:
+    logging: *default-logging
     image: mariadb:11
     container_name: paste-db
     profiles: ["paste"]
@@ -1024,6 +1063,7 @@ services:
         ipv4_address: 172.29.0.30
 
   paste:
+    logging: *default-logging
     build: ./docker/paste
     container_name: paste
     profiles: ["paste"]
