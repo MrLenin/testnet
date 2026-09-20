@@ -332,3 +332,28 @@ from hub2, which has no C-line for it, so the leaf stays split ~5 min and
 every page is honestly partial — order the suites accordingly).  Fleet on
 `f434264`: 0 valgrind errors, 0 asserts, 0 CRDT mismatches, mesh
 reachable=5.  crdt-mesh pushed to MrLenin/nefarious2.
+
+### 2026-09-20 13:00-13:50 — items 3 and 4 SHIPPED (crdt-mesh `b16cb09`, pushed, fleet on it)
+
+3. **PN over the mesh** (`75f1ff9`): `presence_broadcast_close` also floods
+   the PN body over CR M (letter `S`, target `*`, the CI precedent);
+   receivers apply locally only (the origin's tree copy serves legacy; a P10
+   re-emit would echo across planes).  Gate (`scratchpad/pn_gate.py`): an
+   account's PART on hub2 → before: leaf2/leaf3 got the tree PN, leaf5
+   (overlay-only) nothing; after: all three apply the mesh copy, leaf5
+   included.  Presence cmocka harness stubs `generate_msgid` +
+   `crdt_gossip_message`.
+4. **Away + activity on the bconn record** (`b16cb09`): `CrdtBouncerConn`
+   gains `away`/`away_known` (sizeof 16→24, explicit zeroed padding); the
+   host fills the record from the connection, re-mints on an away change
+   and on the la= interval; the bconn reconcile now APPLIES last_active /
+   caps / away into the primary's and aliases' roster fields on every delta
+   (before this the record's fields were never consumed at all).  Gate
+   (`scratchpad/bconn_gate.py`): primary on hub2 with a bouncer session,
+   alias on leaf5 (overlay-only) sends `AWAY *` then `AWAY` → hub2 logs
+   `CRDT bconn: … alias AIAAB … away=2` then `away=0`.  Regression on the
+   mesh: presence-paging 5/5, strict 3/3, webpush-attention 3/3;
+   presence-replication 1/2 (the failing case SQUITs the legacy leaf by name).
+
+Remaining: TOKEN/RLO (5), SEARCH federation (6), AC re-emit (7), slot cert
+chain (8), CRDT-bed variants of the tree-specific suites.
