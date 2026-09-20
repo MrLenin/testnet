@@ -1,0 +1,150 @@
+# crdt-mesh catch-up with ircv3.2-hardening — plan (2026-09-20)
+
+Measured, not guessed: a dry-run `git merge --no-commit origin/ircv3.2-hardening`
+into a detached worktree of `crdt-mesh` @ `8956de7` (left in place, conflicted,
+at `scratchpad/wt-crdt-dry` for the resolver). Read this before touching either
+branch; `crdt-mesh` skill and `crdt-mesh-roadmap.md` ("Where we are") stay the
+truth for the CRDT side.
+
+## Size
+
+| | |
+|---|---|
+| merge base | `5c5b512` (2026-07-27; the last merge of hardening into crdt-mesh was `dbe0a83`) |
+| fork commits since | 221 |
+| crdt commits since | 266 (crdt-mesh last moved 2026-07-30, `8956de7`) |
+| files changed on both sides | 65 |
+| **auto-merged cleanly** | **151 files** |
+| **conflicted** | **21 files, 66 hunks**, no delete/modify or rename cases |
+| commits present on both sides under different hashes (cherry-picks) | 25 subjects |
+
+The 25 cherry-picked pairs matter: their hunks conflict only because the two
+copies sit on different bases; the resolution is "the same text once". They
+cover most of the metadata era-2 work (P0–P3), the epoll timer clamp, the
+metadata env close in `server_die`, the `m_rename` AC-R change, the cap-notify
+implication, and the bouncer `hs_client` recovery.
+
+## Conflicts, classified
+
+Hunk counts from the dry run; "fork" = ircv3.2-hardening, "crdt" = crdt-mesh.
+
+### A. Same change on both sides (take the text once) — low risk
+
+| file | hunks | note |
+|---|---|---|
+| `ircd/engine_epoll.c` | 1 | timer clamp on both; crdt adds the DEBUGMODE clock offset next to it |
+| `ircd/m_metadata.c` | 8 | era-2 P0–P3 on both (cherry-picked); the fork adds case-fold keys `4087e9b` and oper `*account` S2S `177caf7` on top |
+| `ircd/metadata.c` | 6 | era-2 on both; fork adds folded store keys `80c93e2`/`af31cc3` and the presence-aggregation removal `7b15d40`; crdt adds the dual-plane hold/`b` fix `d499f60` and doc-reconcile materialization |
+| `include/metadata.h` | 4 | era-2 on both; crdt has the doc-reconcile declarations |
+| `ircd/ircd.c` | 2 | metadata env close on both; fork adds `stop_listeners()` first (`7cae799`), presence boot heartbeat, webpush transport gating; crdt adds overlay liveness + clock offset. Union. |
+
+Method: for each hunk, diff the two sides ignoring whitespace; where identical
+keep one; where one side has extra lines, keep both.
+
+### B. Union of additions in tables and enums — low risk, tedious
+
+| file | hunks | note |
+|---|---|---|
+| `include/msg.h` | 1 | fork: SEARCH (`SH`), TOKEN, PN, RG/VF/RR removal, RLO; crdt: CR, overlay. Token letters must stay unique across both sets. |
+| `ircd/parse.c` | 2 | fork: SEARCH, TOKEN, PN, tag namespaces; crdt: CRDT/CRDTMESH, MFLG_NOSHUN on CAP, beyond-horizon sources. Both tables merge additively. |
+| `include/ircd_features.h` | 1 | fork: CAP_soju_search, PRESENCE_AGGREGATION removed, authtoken, webpush; crdt: CRDT_OVERLAY_PRIMARY, CRDT_BOUNCER_DOC, METADATA_CACHE removal (also cherry-picked to the fork). Enum order is not on the wire. |
+| `ircd/test/Makefile.in` | 3 | both add cmocka suites; union of the lists. |
+
+### C. One side dominant, re-apply the other's small change — low/medium
+
+| file | hunks | dominant | re-apply |
+|---|---|---|---|
+| `ircd/m_webpush.c` | 2 | fork (+1768: payloads, attention, key ring, control-frame meter) | crdt Tier C F2-c subscription convergence over the mesh (`aaeb657`, 32 lines) |
+| `ircd/m_register.c` | 1 | fork (+463: local Keycloak flow, throttle) | crdt eager metadata load at attach (`31a0401`, 6 lines) |
+| `ircd/m_rename.c` | 3 | fork (+1887: relocate design D, GLINE_BADCHAN) | crdt `8956de7` is cherry-picked on both already — check the hunk is the pair |
+| `ircd/m_server.c` | 2 | crdt (+212: overlay link parity, MR-5 tree retirement) | fork's RN routing by rename-capable flag (`9d9efdb`, 3 lines) |
+| `ircd/s_serv.c` | 1 | crdt (+64: beacon burst, stub backfill, tree retirement) | fork's WP burst gate `70b7473`, WEBSOCKET mark `218c2f9`; the netburst-by-nick fix is a pair |
+
+### D. Semantic, both sides changed the same logic — medium
+
+| file | hunks | what collides |
+|---|---|---|
+| `ircd/bouncer_session.c` | 4 | fork: BX U `aw=`/`la=` replication, session-record lifetime `841f3ce`, echo-message gating, convergence chooser; crdt: doc mirror eager-mint, `bounce_destroy_owned`, CR-X alias echo, hs_client recovery (pair). Sites mostly differ; the 4 hunks are where both touched the same helpers. Resolve with the bouncer invariants list open (skill). |
+| `ircd/channel.c` | 6 | fork: one-time-per-event stamps, presence hooks on add/remove, join_msgid zeroing, +L/+l; crdt: mesh anchor never `exit_client`ed, stub-source tolerance, ±R metadata hooks (pair). Keep fork's event/presence stamping *and* crdt's anchor guards. |
+| `ircd/m_kick.c`, `ircd/m_tagmsg.c`, `ircd/m_account.c` | 3+2+1 | fork: HLC-stamped events, unconditional storage, one time per event, s2s tag override lifetime; crdt: KICK via CRDT (`a8e065f`), TAGMSG over CR-M/mesh unicast, ACCOUNT via CR-X tunnel. In each, the fork changed *how a row is stamped/stored*, crdt changed *how the command is routed*; both belong. |
+| `ircd/s_user.c` | 3 | fork: retention ISUPPORT (`chathistory_update_retention_isupport`), away star per viewer, authtoken; crdt: mesh WHOIS, cloak gateway synth, user-mirror reconcile. Different functions mostly; the hunks are in `register_user` / 005 build. |
+
+### E. The one to design before resolving — high risk
+
+| file | hunks | what collides |
+|---|---|---|
+| `ircd/m_chathistory.c` | 10 | fork +2287/-437: presence-aware paging (row hook, boundary seeks), requester token on CH Q, partial/absence table, federation merge fixes, incarnation, SEARCH, retention widest-over-stores. crdt +487/-166: 5-5f B2 doc-aware federation dispatch + CR-X tunnel for mesh-only stores, B4 legacy-ward capability synth. **Both rewrote how a query fans out.** |
+
+Do not resolve E hunk by hunk. Read `crdt-mesh-5-5f-chathistory-scope.md` and the
+fork's `chathistory-presence-paging.md` / `chathistory-partial` notes first, then
+decide the shape: the fork's `start_fed_query` (requester token, absence-driven
+fan-out, `FedRequest` partial/cut flags) is the newer and tested one; crdt's B2
+adds *where a responder is found* (doc collection + CR-X tunnel when the store is
+mesh-only). The likely resolution is fork's request/merge logic with crdt's
+responder discovery and transport substituted at the fan-out and reply-routing
+points. Budget this as its own session with the bed's 5-node topology up.
+
+## Order of work
+
+1. **Prepare**: rebuild the CRDT 5-node bed images last known good (`crdt-mesh`
+   @ `8956de7`, nefarious3–7) and run the crdt live gates (p2_chreg, p2_restart,
+   leafauth, `/CRDT status` stub count) so the baseline is green before the merge.
+   Note the cmocka gate: 368 tests, Docker-gated, must stay green.
+2. **Merge in the dry-run worktree**, classes A → B → C → D, committing nothing
+   until E is done; keep a running list of every hunk where a fork behaviour was
+   re-applied by hand (those are the ones to re-test).
+3. **Class E** as its own session (see above).
+4. **Build + cmocka** in Docker; then the fork's testnet suites that touch merged
+   files, on the CRDT bed: chathistory (presence paging, strict presence, partial,
+   between-bounds, retention, search), bouncer (stale-replica, activity,
+   away-persistence), webpush attention, tls-accept, preauth. Then the crdt live
+   gates again, then a soak.
+5. **Merge commit** on `crdt-mesh` (a merge, not a rebase: 266 commits of history
+   with live-validated milestones behind them), pushed to `MrLenin/nefarious-crdt`
+   only; the CRDT branch has no evilnet mirror.
+
+## After the merge: what the fork added that the mesh must learn
+
+The fork's new S2S surfaces ride P10 tokens; among CRDT peers the P10 tree is
+retired (MR-5), so each needs a mesh path or an explicit "tunnel via gateway"
+decision:
+
+- `PN` — strict-presence intervals replicated network-wide (`603d161`). Presence
+  is per (account, channel) and account-anchored: a natural doc collection, or
+  CR-X tunnel first.
+- `CH A S/R` store advertisements + the new widest-retention ISUPPORT
+  (`7ce0cfe`): crdt 5-5f B2 already keeps storage capability as a doc
+  collection; the retention value should come from that collection on CRDT
+  peers, and `chathistory_retention_advertised()` must read both sources.
+- `BX U aw= / la=` (per-connection away and activity, `571caac`/`346a1c0`): the
+  bouncer-over-mesh work (5-5e) mirrors bconns in the doc; the two fields belong
+  on the bconn record.
+- `TOKEN`/authtoken S2S (`7fd9ef8`) and `RLO`/relocate (`fe0a842`): gateway-only
+  until designed.
+- SEARCH federation: scoped, not scheduled
+  (`chathistory-federated-search.md`); on the mesh it rides the same 5-5f
+  responder discovery once E is resolved.
+
+## What was already missing on crdt-mesh (from the roadmap and memory)
+
+- Tier C partial: F3/F4 not done; F2-c webpush convergence exists but predates
+  the fork's key ring and attention model (will need re-alignment after C).
+- Deferred: M6-trim, m15-incarnation-anchor (`project_crdt_review_2026_07`).
+- Services bridge B3 REGISTER/VERIFY blocked on X3; B4/B6/B7 optional.
+- "Not-yet-on-CRDT transport gaps" section of the roadmap (next expansion class).
+- Metadata era-2 "prod-fork cherry-pick subset": largely done (the 25 pairs);
+  verify nothing of P1/P2 is fork-only after the merge.
+- Soak since the 2026-07-30 deploy was interrupted by the fork work; a fresh soak
+  follows the merge.
+
+## Risks and rules
+
+- One-commit-per-PR and "never stack" apply to evilnet; `crdt-mesh` is a fork
+  branch with a merge history, so a merge commit is right here.
+- `bouncer-architecture` invariants and the `crdt-mesh` hard invariants are the
+  checklist for classes D and E; run the c-auditor on any stub-as-source path
+  the merge touches.
+- Freshness trap (NB6): verify the `ircd.YYYYMMDDHHMM` symlink advances on every
+  slot after a rebuild; build all five CRDT images before recreating the fleet.
+- Bed disk: check `df` first; the docker log cap in compose (`64bd535`) applies
+  only to recreated containers.
