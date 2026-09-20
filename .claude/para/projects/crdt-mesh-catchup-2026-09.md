@@ -421,3 +421,16 @@ split case).
    shipped (PMs and a cut marker stay open).  Next: merge into crdt-mesh
    (the origin fan-out must use the collector + tunnel there) and gate a
    mesh-only store.
+
+### 2026-09-20 15:00 — item 6 on the mesh (crdt-mesh `d43b6dc`, pushed, fleet on it)
+
+Federated SEARCH merged into crdt-mesh with its fan-out on the collector
+(mesh-only stores over the CR-X tunnel, same body) and the responder's
+replies through the tunnel-aware emitter.  Gates: rows seeded on the
+legacy primary found from leaf2 (six responders, Bj via the tunnel, 0.8 s);
+rows seeded on leaf5 (overlay-only) found from hub2 (0.2 s, leaf5's
+responder walked 3 rows); local search suite 7/7 on hub2/leaf2.
+
+**Every code item on the post-merge list is done.**  What remains is test
+work: CRDT-bed variants of the tree-specific suites (a tree split is not a
+store absence on the mesh; a real absence is a stopped node).
