@@ -451,7 +451,7 @@ one "Non-user sending MULTILINE" violation per leaf per test run.
 
 **The catch-up plan is complete.**
 
-### 2026-09-20 16:00-16:30 — after the plan: gate sweep + Tier C F5 (crdt-mesh `55df651`, pushed)
+### 2026-09-20 16:00-16:55 — after the plan: gate sweep + Tier C F5 + BURST drop (crdt-mesh `4387aac`, pushed)
 
 - `f04879e` ML capability announce accepted from mesh anchors (the last
   per-run protocol violation; ML announces now arrive with 0 violations).
@@ -472,8 +472,18 @@ one "Non-user sending MULTILINE" violation per leaf per test run.
   INVITE, JOIN, QUIT, SETNAME, TAGMSG now test `!IsUser`.  Left as REVIEW:
   stub-sourced BURST (drop vs admit with mode_parse parity), m_server.c:950
   stub introducer (believed unreachable), RPONG (diagnostic drop).
-- Soak: two clean 5-minute ticks on `f04879e` before the F5 deploy; the
-  one-hour soak restarts on the final binary of the day.
+- `4387aac` **stub-sourced BURST dropped** at ms_burst entry (the REVIEW
+  item above resolved as "drop": a mesh anchor's channel state is doc-owned,
+  like its NICK; admitting it would re-run mode_parse with no parity gain).
+- Regression 7 on `55df651`, both ends on the mesh (6669/6670): bouncer-
+  activity 2/2, webpush-attention 3/3, authtoken 7/7, search 7/7, presence-
+  paging 5/5, strict-presence 3/3, federation 7/7, away-persistence 1/1,
+  preauth 5/5, tls-accept 4/4 — all green, 0 violations.
+- Fleet recreated on `4387aac` (ircd.202609202026 on all five): 0 mismatches,
+  mesh reachable=5, 0 asserts, 0 violations; SNO gate leaf5→hub2+primary and
+  fedprobe primary→leaf2 (0.2-0.8 s) green.  One-hour soak started 16:52
+  (`scratchpad/soak.sh` → `soak.log`, 12 × 5-min ticks); result recorded
+  below when it ends.
 - Roadmap items left: M7 (retire the per-hop bouncer election, 27
   FEAT_CRDT_BOUNCER_DOC sites — deletes the doc-off fallback, user's call),
   nick-collision live validation (test gap), orphan-reap Inc 2 (deferred),
