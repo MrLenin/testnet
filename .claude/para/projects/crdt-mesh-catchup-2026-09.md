@@ -450,3 +450,32 @@ if the mesh is ever to run them.  Residue seen in the logs, not chased:
 one "Non-user sending MULTILINE" violation per leaf per test run.
 
 **The catch-up plan is complete.**
+
+### 2026-09-20 16:00-16:30 — after the plan: gate sweep + Tier C F5 (crdt-mesh `55df651`, pushed)
+
+- `f04879e` ML capability announce accepted from mesh anchors (the last
+  per-run protocol violation; ML announces now arrive with 0 violations).
+- `04104e6` **Tier C F5 closed**: SNO (letter `O`, minted by
+  sendto_opmask_butone_global + ms_sno at the gateway edge), SMO (`M`, ms_smo
+  at the gateway edge; no local origin), DESYNCH (`D`, sendwallto_group_butone
+  + ms_desynch at the gateway edge); receivers deliver locally from the
+  source server and re-emit real P10 to legacy links only for tree-absent
+  origins.  WEBPUSH has no ephemeral token (all its subcommands are state,
+  converged by F2-c).  Gate (`scratchpad/sno_gate.py`, TEMPSHUN's SNO_GLINE
+  notice): before, leaf5 (overlay-only) missed hub2's notice and leaf5's own
+  reached nobody; after, hub2→leaf5/leaf2/primary and leaf5→hub2/primary all
+  GOT it, no duplicates.
+- `55df651` **source-gate sweep** (c-auditor over all 97 handlers): anchors
+  admitted at MODE-user, KICK ×4, GLINE/SHUN/ZLINE FORCE, SASL agent checks
+  ×3, EB (MyConnect branch only for a real link) / EA (anchor's BurstAck
+  cleared), TOPIC setter; the "servers cannot" early returns in AWAY, CREATE,
+  INVITE, JOIN, QUIT, SETNAME, TAGMSG now test `!IsUser`.  Left as REVIEW:
+  stub-sourced BURST (drop vs admit with mode_parse parity), m_server.c:950
+  stub introducer (believed unreachable), RPONG (diagnostic drop).
+- Soak: two clean 5-minute ticks on `f04879e` before the F5 deploy; the
+  one-hour soak restarts on the final binary of the day.
+- Roadmap items left: M7 (retire the per-hop bouncer election, 27
+  FEAT_CRDT_BOUNCER_DOC sites — deletes the doc-off fallback, user's call),
+  nick-collision live validation (test gap), orphan-reap Inc 2 (deferred),
+  MR-6 endgame, multi-gateway live test, PN/TK partition catch-up (parity
+  with the tree).
