@@ -208,10 +208,23 @@ services:
     command:
       - |
         chown -R 1234:1234 /home/nefarious/ircd/history /home/nefarious/ircd/metadata /home/nefarious/ircd/webpush /home/nefarious/ircd/ssl
-        if [ ! -f /home/nefarious/ircd/ssl/ircd.pem ]; then
-          openssl req -new -x509 -days 365 -nodes -out /home/nefarious/ircd/ssl/ircd.pem -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -keyout /home/nefarious/ircd/ssl/ircd.pem -subj "/CN=hub2.fractalrealities.net/"
+        # Certificate: an ECDSA leaf under a two-certificate RSA chain, the
+        # same shape as the primary's (see nefarious-init), so the server's
+        # handshake flight exceeds the 4 KB client send buffer and
+        # tests/src/tls-accept.test.ts exercises the write path on this
+        # slot too.  Regenerates a pre-chain single-certificate file.
+        if [ "$$(grep -c 'BEGIN CERTIFICATE' /home/nefarious/ircd/ssl/ircd.pem 2>/dev/null)" -lt 3 ]; then
+          d=$$(mktemp -d)
+          printf 'basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n' > $$d/ca.ext
+          openssl req -x509 -newkey rsa:4096 -nodes -days 3650 -keyout $$d/root.key -out $$d/root.pem -subj "/CN=testnet root" -addext "basicConstraints=critical,CA:TRUE" 2>/dev/null
+          openssl req -newkey rsa:4096 -nodes -keyout $$d/int.key -out $$d/int.csr -subj "/CN=testnet intermediate" 2>/dev/null
+          openssl x509 -req -in $$d/int.csr -CA $$d/root.pem -CAkey $$d/root.key -CAcreateserial -days 3650 -extfile $$d/ca.ext -out $$d/int.pem 2>/dev/null
+          openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout $$d/leaf.key -out $$d/leaf.csr -subj "/CN=hub2.fractalrealities.net/" 2>/dev/null
+          openssl x509 -req -in $$d/leaf.csr -CA $$d/int.pem -CAkey $$d/int.key -CAcreateserial -days 365 -out $$d/leaf.pem 2>/dev/null
+          cat $$d/leaf.pem $$d/int.pem $$d/root.pem $$d/leaf.key > /home/nefarious/ircd/ssl/ircd.pem
+          rm -rf $$d
           chown 1234:1234 /home/nefarious/ircd/ssl/ircd.pem
-          echo "Generated new ECDSA SSL certificate"
+          echo "Generated new SSL certificate chain"
         fi
         echo "Nefarious3 volume permissions fixed"
     volumes:
@@ -290,10 +303,23 @@ services:
     command:
       - |
         chown -R 1234:1234 /home/nefarious/ircd/history /home/nefarious/ircd/metadata /home/nefarious/ircd/webpush /home/nefarious/ircd/ssl
-        if [ ! -f /home/nefarious/ircd/ssl/ircd.pem ]; then
-          openssl req -new -x509 -days 365 -nodes -out /home/nefarious/ircd/ssl/ircd.pem -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -keyout /home/nefarious/ircd/ssl/ircd.pem -subj "/CN=leaf2.fractalrealities.net/"
+        # Certificate: an ECDSA leaf under a two-certificate RSA chain, the
+        # same shape as the primary's (see nefarious-init), so the server's
+        # handshake flight exceeds the 4 KB client send buffer and
+        # tests/src/tls-accept.test.ts exercises the write path on this
+        # slot too.  Regenerates a pre-chain single-certificate file.
+        if [ "$$(grep -c 'BEGIN CERTIFICATE' /home/nefarious/ircd/ssl/ircd.pem 2>/dev/null)" -lt 3 ]; then
+          d=$$(mktemp -d)
+          printf 'basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n' > $$d/ca.ext
+          openssl req -x509 -newkey rsa:4096 -nodes -days 3650 -keyout $$d/root.key -out $$d/root.pem -subj "/CN=testnet root" -addext "basicConstraints=critical,CA:TRUE" 2>/dev/null
+          openssl req -newkey rsa:4096 -nodes -keyout $$d/int.key -out $$d/int.csr -subj "/CN=testnet intermediate" 2>/dev/null
+          openssl x509 -req -in $$d/int.csr -CA $$d/root.pem -CAkey $$d/root.key -CAcreateserial -days 3650 -extfile $$d/ca.ext -out $$d/int.pem 2>/dev/null
+          openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout $$d/leaf.key -out $$d/leaf.csr -subj "/CN=leaf2.fractalrealities.net/" 2>/dev/null
+          openssl x509 -req -in $$d/leaf.csr -CA $$d/int.pem -CAkey $$d/int.key -CAcreateserial -days 365 -out $$d/leaf.pem 2>/dev/null
+          cat $$d/leaf.pem $$d/int.pem $$d/root.pem $$d/leaf.key > /home/nefarious/ircd/ssl/ircd.pem
+          rm -rf $$d
           chown 1234:1234 /home/nefarious/ircd/ssl/ircd.pem
-          echo "Generated new ECDSA SSL certificate"
+          echo "Generated new SSL certificate chain"
         fi
         echo "Nefarious4 volume permissions fixed"
     volumes:
@@ -372,10 +398,23 @@ services:
     command:
       - |
         chown -R 1234:1234 /home/nefarious/ircd/history /home/nefarious/ircd/metadata /home/nefarious/ircd/webpush /home/nefarious/ircd/ssl
-        if [ ! -f /home/nefarious/ircd/ssl/ircd.pem ]; then
-          openssl req -new -x509 -days 365 -nodes -out /home/nefarious/ircd/ssl/ircd.pem -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -keyout /home/nefarious/ircd/ssl/ircd.pem -subj "/CN=leaf3.fractalrealities.net/"
+        # Certificate: an ECDSA leaf under a two-certificate RSA chain, the
+        # same shape as the primary's (see nefarious-init), so the server's
+        # handshake flight exceeds the 4 KB client send buffer and
+        # tests/src/tls-accept.test.ts exercises the write path on this
+        # slot too.  Regenerates a pre-chain single-certificate file.
+        if [ "$$(grep -c 'BEGIN CERTIFICATE' /home/nefarious/ircd/ssl/ircd.pem 2>/dev/null)" -lt 3 ]; then
+          d=$$(mktemp -d)
+          printf 'basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n' > $$d/ca.ext
+          openssl req -x509 -newkey rsa:4096 -nodes -days 3650 -keyout $$d/root.key -out $$d/root.pem -subj "/CN=testnet root" -addext "basicConstraints=critical,CA:TRUE" 2>/dev/null
+          openssl req -newkey rsa:4096 -nodes -keyout $$d/int.key -out $$d/int.csr -subj "/CN=testnet intermediate" 2>/dev/null
+          openssl x509 -req -in $$d/int.csr -CA $$d/root.pem -CAkey $$d/root.key -CAcreateserial -days 3650 -extfile $$d/ca.ext -out $$d/int.pem 2>/dev/null
+          openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout $$d/leaf.key -out $$d/leaf.csr -subj "/CN=leaf3.fractalrealities.net/" 2>/dev/null
+          openssl x509 -req -in $$d/leaf.csr -CA $$d/int.pem -CAkey $$d/int.key -CAcreateserial -days 365 -out $$d/leaf.pem 2>/dev/null
+          cat $$d/leaf.pem $$d/int.pem $$d/root.pem $$d/leaf.key > /home/nefarious/ircd/ssl/ircd.pem
+          rm -rf $$d
           chown 1234:1234 /home/nefarious/ircd/ssl/ircd.pem
-          echo "Generated new ECDSA SSL certificate"
+          echo "Generated new SSL certificate chain"
         fi
         echo "Nefarious5 volume permissions fixed"
     volumes:
@@ -454,10 +493,23 @@ services:
     command:
       - |
         chown -R 1234:1234 /home/nefarious/ircd/history /home/nefarious/ircd/metadata /home/nefarious/ircd/webpush /home/nefarious/ircd/ssl
-        if [ ! -f /home/nefarious/ircd/ssl/ircd.pem ]; then
-          openssl req -new -x509 -days 365 -nodes -out /home/nefarious/ircd/ssl/ircd.pem -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -keyout /home/nefarious/ircd/ssl/ircd.pem -subj "/CN=leaf4.fractalrealities.net/"
+        # Certificate: an ECDSA leaf under a two-certificate RSA chain, the
+        # same shape as the primary's (see nefarious-init), so the server's
+        # handshake flight exceeds the 4 KB client send buffer and
+        # tests/src/tls-accept.test.ts exercises the write path on this
+        # slot too.  Regenerates a pre-chain single-certificate file.
+        if [ "$$(grep -c 'BEGIN CERTIFICATE' /home/nefarious/ircd/ssl/ircd.pem 2>/dev/null)" -lt 3 ]; then
+          d=$$(mktemp -d)
+          printf 'basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n' > $$d/ca.ext
+          openssl req -x509 -newkey rsa:4096 -nodes -days 3650 -keyout $$d/root.key -out $$d/root.pem -subj "/CN=testnet root" -addext "basicConstraints=critical,CA:TRUE" 2>/dev/null
+          openssl req -newkey rsa:4096 -nodes -keyout $$d/int.key -out $$d/int.csr -subj "/CN=testnet intermediate" 2>/dev/null
+          openssl x509 -req -in $$d/int.csr -CA $$d/root.pem -CAkey $$d/root.key -CAcreateserial -days 3650 -extfile $$d/ca.ext -out $$d/int.pem 2>/dev/null
+          openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout $$d/leaf.key -out $$d/leaf.csr -subj "/CN=leaf4.fractalrealities.net/" 2>/dev/null
+          openssl x509 -req -in $$d/leaf.csr -CA $$d/int.pem -CAkey $$d/int.key -CAcreateserial -days 365 -out $$d/leaf.pem 2>/dev/null
+          cat $$d/leaf.pem $$d/int.pem $$d/root.pem $$d/leaf.key > /home/nefarious/ircd/ssl/ircd.pem
+          rm -rf $$d
           chown 1234:1234 /home/nefarious/ircd/ssl/ircd.pem
-          echo "Generated new ECDSA SSL certificate"
+          echo "Generated new SSL certificate chain"
         fi
         echo "Nefarious6 volume permissions fixed"
     volumes:
@@ -536,10 +588,23 @@ services:
     command:
       - |
         chown -R 1234:1234 /home/nefarious/ircd/history /home/nefarious/ircd/metadata /home/nefarious/ircd/webpush /home/nefarious/ircd/ssl
-        if [ ! -f /home/nefarious/ircd/ssl/ircd.pem ]; then
-          openssl req -new -x509 -days 365 -nodes -out /home/nefarious/ircd/ssl/ircd.pem -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -keyout /home/nefarious/ircd/ssl/ircd.pem -subj "/CN=leaf5.fractalrealities.net/"
+        # Certificate: an ECDSA leaf under a two-certificate RSA chain, the
+        # same shape as the primary's (see nefarious-init), so the server's
+        # handshake flight exceeds the 4 KB client send buffer and
+        # tests/src/tls-accept.test.ts exercises the write path on this
+        # slot too.  Regenerates a pre-chain single-certificate file.
+        if [ "$$(grep -c 'BEGIN CERTIFICATE' /home/nefarious/ircd/ssl/ircd.pem 2>/dev/null)" -lt 3 ]; then
+          d=$$(mktemp -d)
+          printf 'basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n' > $$d/ca.ext
+          openssl req -x509 -newkey rsa:4096 -nodes -days 3650 -keyout $$d/root.key -out $$d/root.pem -subj "/CN=testnet root" -addext "basicConstraints=critical,CA:TRUE" 2>/dev/null
+          openssl req -newkey rsa:4096 -nodes -keyout $$d/int.key -out $$d/int.csr -subj "/CN=testnet intermediate" 2>/dev/null
+          openssl x509 -req -in $$d/int.csr -CA $$d/root.pem -CAkey $$d/root.key -CAcreateserial -days 3650 -extfile $$d/ca.ext -out $$d/int.pem 2>/dev/null
+          openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout $$d/leaf.key -out $$d/leaf.csr -subj "/CN=leaf5.fractalrealities.net/" 2>/dev/null
+          openssl x509 -req -in $$d/leaf.csr -CA $$d/int.pem -CAkey $$d/int.key -CAcreateserial -days 365 -out $$d/leaf.pem 2>/dev/null
+          cat $$d/leaf.pem $$d/int.pem $$d/root.pem $$d/leaf.key > /home/nefarious/ircd/ssl/ircd.pem
+          rm -rf $$d
           chown 1234:1234 /home/nefarious/ircd/ssl/ircd.pem
-          echo "Generated new ECDSA SSL certificate"
+          echo "Generated new SSL certificate chain"
         fi
         echo "Nefarious7 volume permissions fixed"
     volumes:

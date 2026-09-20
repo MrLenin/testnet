@@ -378,3 +378,29 @@ chain (8), CRDT-bed variants of the tree-specific suites.
 
 Remaining: SEARCH federation (6), AC re-emit (7), slot cert chain (8),
 CRDT-bed variants of the tree-specific suites.
+
+### 2026-09-20 14:20 — items 7 and 8 SHIPPED (crdt-mesh `a62300f`, pushed, fleet on it)
+
+7. **AC re-emit** (`44c7988` + `a62300f`): the bed's "ACCOUNT for already
+   registered user X (acct -> acct)" storm had two layers.  Between CRDT
+   peers the doc delta stamps a user before the tree copy of the same AC
+   lands, so the handler now treats a re-stamp with the SAME account as
+   idempotent (a different account is still a violation).  The bigger
+   source was the legacy primary complaining: the MR-6-2 auth carrier
+   tunnels an applied ACCOUNT toward a subject's home server when that
+   server is a mesh stub here — and the legacy primary is an anchor on
+   every inner CRDT peer, so each of them tunnelled every services stamp
+   back and the gateway re-emitted four copies as real P10.  The tunnel now
+   fires only where the change enters the mesh (an AC arriving over a
+   legacy server link).  Gates: violations 0 on hub2, leaf2 and the primary
+   across a full search-suite run (was ~100–200 per run); MR-6-2 still
+   works — an AuthServ AUTH from leaf5 (overlay-only) is stamped by X3,
+   tunnelled by hub2 and applied on leaf5.
+8. **Slot cert chain**: the five CRDT init containers now generate the same
+   ECDSA-leaf-under-RSA-chain as the primary's (regenerating a pre-chain
+   single-cert file), and the slot confs point SSL_CERTFILE/KEYFILE at it;
+   tls-accept passes 4/4 on hub2:6699.
+
+Remaining: SEARCH federation (6), CRDT-bed variants of the tree-specific
+suites (partial, retention-isupport, stale-replica, presence-replication's
+split case).
