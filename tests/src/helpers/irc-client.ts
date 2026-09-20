@@ -223,7 +223,7 @@ export async function createTestClient(
   const client = new TestIRCClient();
   await client.connect({
     host: config.host ?? 'nefarious',
-    port: config.port ?? 6667,
+    port: config.port ?? parseInt(process.env.IRC_PORT ?? '6667', 10),
     nick: config.nick,
     username: config.username,
     gecos: config.gecos,

@@ -148,3 +148,136 @@ decision:
   slot after a rebuild; build all five CRDT images before recreating the fleet.
 - Bed disk: check `df` first; the docker log cap in compose (`64bd535`) applies
   only to recreated containers.
+
+## Execution log
+
+### 2026-09-20 — merge done, host gates green, bed gates pending
+
+- Baseline `/CRDT status` on the 2026-07-30 fleet (nefarious6/7 restarted
+  ~20 min earlier; overlays not yet re-autoconnected): every node `0
+  mismatch(es)`, `mesh reachable=5`, `partitioned=YES` (tree split, mesh
+  whole — the routine bed state); hub2 `2 crdt, 4 legacy, 2 stub (2
+  presented)`, nef7 `OVERLAY-PRIMARY … 3 live overlay edge(s)`.
+- Merge commit `d5220b9` on `crdt-mesh` (local; parents `8956de7` +
+  `7ce0cfe`), built in `scratchpad/wt-crdt-dry` then fast-forwarded into
+  `nefarious-crdt`.  Not pushed yet.
+- Class E resolved as the plan predicted: the fork's request/merge/responder
+  logic on crdt's `collect_storage_targets` + CR-X tunnel + `ch_reply_out`.
+  Extra work the merge exposed, all in the merge commit: the trailing query
+  params (ref2, requester token, type mask) now ride every forward path
+  including the two tunnel re-wraps; the reply chunker subtracts a
+  `CH_TUNNEL_WRAP` (64 B) allowance from the fork's measured per-row budget
+  while a tunneled query is being answered; the CR-M witness store stamps
+  rows with `msgid_decode_time_ms` (fork rule: never the wall clock);
+  REGISTER/VERIFY/REGREPLY bridge cases retired; webpush peer-receive
+  returns the record for the doc mirror and the doc reconcile invalidates
+  the subs-count cache; `chathistory_retention_advertised()` walks the doc
+  collection (same reachability gate as the collector) and the verify tick
+  re-derives the ISUPPORT token.
+- Host build with the image's configure flags: clean; `make test` green;
+  cmocka 33 suites / 551 tests, 0 failed.
+- Next: five-image rebuild (+ init twins), fleet recreate, symlink freshness
+  check, then the fork suites on the CRDT bed and the crdt live gates.
+- First fleet boot on `d5220b9` died on every slot at the first feature
+  lookup (`ircd_features.c: features[feat].feat == feat`): the enum union
+  put `FEAT_BOUNCER_MAX_ALIASES` after the CRDT block while the auto-merged
+  `features[]` row sat before `CRDT_ENABLED`.  Fixed in `d2730e0` (enum
+  moved to table order + a `_Static_assert` on the row count).  LESSON: an
+  enum/table pair that must agree in order is a class-B "union" that the
+  build cannot check; after any such union, diff the two orders before
+  building images (the check is a 15-line python, see the session).
+- Bed gates, first pass (2026-09-20 03:00-03:44): the run was MIS-TARGETED —
+  `PRIMARY_SERVER.port` was hard-coded 6667, so every "primary" client sat on
+  the legacy fork primary and only `IRC_PORT2=6670` (leaf2) touched the merged
+  binary.  Fixed in the testnet helpers (PRIMARY_SERVER and the client
+  defaults now honour `IRC_PORT`).  What that pass still established: the
+  five slots boot clean on `d2730e0` (0 valgrind errors, 0 CONFIG errors,
+  storage capability published on each), `/CRDT status` = 0 mismatches,
+  mesh reachable=5 on every node; a hand probe (seed on hub2, read from
+  leaf2 after a late join) returns all rows in 0.2 s via CH Q to hub2 +
+  leaf4 and a CR-X tunnel to leaf5; tls-accept handshakes pass on hub2:6699
+  (its precondition fails only because the CRDT init containers make a
+  single self-signed cert, not the fork's chain).
+- Legacy-primary + CRDT-leaf federation (what the mis-targeted federation
+  suite measured): leaf2 never queries the legacy primary's store — it holds
+  no ad for it (legacy `CH A S` does not cross the gateway into the mesh;
+  only the mesh-ward B4 synth exists).  A real gap, the mirror of B4: the
+  gateway should publish legacy-known stores into the doc (or synth their
+  ads mesh-ward).  Added to the post-merge list.
+- Suites that SQUIT `leaf.fractalrealities.net` by name (partial,
+  retention-isupport, stale-replica, federation's first/last cases) are
+  tree-bed specific: from a CRDT node the CONNECT cannot heal that link.
+  Need CRDT-bed variants (SQUIT leaf2 from hub2), not fixes.
+- Eager retention publish + delta re-derive: `6204d08` (images rebuilt,
+  fleet recreate after the second test pass).
+- Second pass, retargeted (IRC_PORT=6669): every pool-backed suite stalled
+  ~8 min in beforeAll — AuthServ answered nothing from hub2/leaf2 (`401 No
+  such nick`).  Root cause was a class-C hand-merge slip, not the mesh: the
+  burst-time SERVER line in `s_serv.c` (the one that introduces already-
+  linked servers to a new peer) had seven flag `%s` slots for eight flag
+  arguments, so the `C` flag string became the server info and the real
+  info was dropped.  When the upstream slot linked to hub2 at 07:01:59 the
+  relayed introduction reached the legacy primary with an EMPTY info and
+  the primary answered `SQ … :No server info specified` — hub2 lost its
+  primary link (and with it X3, the leaf and the paste host) for the rest
+  of the session.  Fixed in `efda7f0`; an argument-count audit of all four
+  SERVER emitters is now clean.  LESSON: any hand-widened format string
+  gets an arg-count audit (a 10-line python) before the images build.
+
+### 2026-09-20 05:00 — DONE: merge on the fleet, gates green, pushed
+
+`crdt-mesh` = `100de7f` on MrLenin/nefarious2 (merge `d5220b9` + four
+follow-ups: `d2730e0` enum order, `6204d08` eager retention publish,
+`efda7f0` SERVER format, `100de7f` PN gate).  Fleet nefarious3–7 on it
+(binaries `ircd.202609200859`), 0 valgrind errors, 0 asserts, `/CRDT
+status` 0 mismatches + mesh reachable=5 on every node, services reachable
+from every CRDT node.
+
+Bed gates with BOTH ends on the mesh (`IRC_PORT=6669 IRC_PORT2=6670`,
+slot opers granted `set = yes`):
+
+| suite | result |
+|---|---|
+| chathistory-presence-paging | 5/5 |
+| chathistory-strict-presence | 3/3 |
+| chathistory-presence-transition | 1/1 |
+| chathistory-targets-presence | 1/1 |
+| chathistory-between-bounds | 1/1 |
+| chathistory-federation | 7/7 (incl. SQUIT/CONNECT of the legacy leaf from hub2) |
+| search | 7/7 |
+| bouncer-away-persistence | 1/1 |
+| bouncer-activity | 2/2 |
+| webpush-attention | 3/3 (cross-server AWAY * over the hub2↔leaf2 tree link) |
+| preauth-resource-limits | 5/5 |
+| tls-accept | 3/3 handshakes (precondition needs a chain cert on the slot) |
+
+Not run on the mesh (tree-bed specific, SQUIT `leaf.fractalrealities.net`
+by name and expect the tree-side semantics): chathistory-partial,
+chathistory-retention-isupport, bouncer-stale-replica.  They need CRDT-bed
+variants where the split is hub2↔leaf2 and "absent" means beacon-stale,
+not tree-split.
+
+Bed lessons (also in the crdt-mesh skill): PRIMARY_SERVER honours
+`IRC_PORT` now; slot confs are bind-mounted per file, so edit them IN
+PLACE or restart the container (an atomic rename leaves the container on
+the old inode and REHASH reloads nothing); slot opers need `set = yes` for
+the suites that SET features.
+
+Still open after the merge (the mesh must learn these; ordered by value):
+1. Absence table on the mesh: `absence_open` fires on SQUIT even when the
+   store stays beacon-reachable, and nothing closes it for a CRDT peer
+   (CH A S never re-arrives).  Absence should key on beacon staleness;
+   close on doc/beacon recovery.
+2. Legacy stores into the mesh: the gateway learns legacy `CH A S` but
+   never publishes them into the doc, so an inner node never queries the
+   legacy primary's store (the mirror of B4).
+3. PN presence intervals: now accepted from anchors, but they still ride
+   the P10 tree only; a doc collection (or CR-X tunnel) is needed for
+   overlay-only nodes.
+4. `BX U aw=/la=` and alias records on the bconn doc record (5-5e).
+5. `TOKEN`/authtoken and `RLO`/relocate: gateway-only until designed.
+6. SEARCH federation rides 5-5f once (1) is settled.
+7. Pre-existing: `ACCOUNT for already registered user` re-emits from the
+   gateway (memory: bouncer-stale-held-convergence side note).
+8. The CRDT init containers make a single self-signed cert; give them the
+   fork's chain so tls-accept's precondition holds there too.

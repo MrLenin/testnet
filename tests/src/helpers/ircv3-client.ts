@@ -687,7 +687,7 @@ export async function createIRCv3Client(
   const client = new IRCv3TestClient();
   await client.connect({
     host: config.host ?? 'nefarious',
-    port: config.port ?? 6667,
+    port: config.port ?? PRIMARY_SERVER.port,
     nick: config.nick,
     username: config.username,
     gecos: config.gecos,
@@ -708,7 +708,7 @@ export async function createRawIRCv3Client(
   const client = new IRCv3TestClient();
   await client.connectRaw({
     host: config.host ?? 'nefarious',
-    port: config.port ?? 6667,
+    port: config.port ?? PRIMARY_SERVER.port,
     nick: config.nick,
     username: config.username,
     gecos: config.gecos,
@@ -1482,10 +1482,13 @@ export interface ServerConfig {
   name: string;
 }
 
-/** Primary IRC server (hub) */
+/** Primary IRC server (hub).  IRC_PORT retargets a host-side run at another
+ * slot's mapped port (6669 = hub2 on the CRDT bed, with IRC_PORT2=6670 for
+ * leaf2), so the fork suites can be pointed at the mesh nodes; the default
+ * stays the compose primary. */
 export const PRIMARY_SERVER: ServerConfig = {
   host: process.env.IRC_HOST ?? 'nefarious',
-  port: 6667,
+  port: parseInt(process.env.IRC_PORT ?? '6667', 10),
   name: 'primary',
 };
 
