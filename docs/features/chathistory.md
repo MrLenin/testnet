@@ -100,15 +100,20 @@ CHATHISTORY TARGETS <timestamp> <timestamp> <limit>
 |---|---|---|
 | `CHATHISTORY=<n>` | draft/chathistory spec | Maximum rows per request (`CHATHISTORY_MAX`). |
 | `MSGREFTYPES=timestamp,msgid` | draft/chathistory spec | Reference types accepted. |
-| `evilnet/CHATHISTORYRETENTION=<seconds>` | **fork extension** | This server does not retain history older than `now - seconds` (`CHATHISTORY_RETENTION` days × 86400). Storage servers only. |
+| `evilnet/CHATHISTORYRETENTION=<seconds>` | **fork extension** | The widest retention over the stores this server can reach right now: itself when it stores, and every linked server advertising storage (`CHATHISTORY_RETENTION` days × 86400). `0` = a reachable store keeps history for good; absent = no store is reachable. |
 
 `evilnet/CHATHISTORYRETENTION` is a hint, not a permission. A client should not page
 past the horizon it names: a request past it still gets an honest answer (an
 empty batch with `draft/chathistory-end`, or `FAIL CHATHISTORY MESSAGE_ERROR`
 for an anchor msgid the store cannot place), it is just wasted round trips.
-Federated peers may keep more or less; the token describes the server the
-client is connected to. The value follows a rehash or `SET
-CHATHISTORY_RETENTION` and is re-announced to clients that negotiated
+Since 2026-09-20 the value is network-wide as seen from this server: the
+widest retention over the stores it can reach. It is recomputed and
+re-announced whenever a store links (`CH A S`), changes its retention (`CH A
+R`) or leaves (its entry goes with the link, with no grace: the store may not
+be back for a while, or ever), and after a rehash or `SET
+CHATHISTORY_RETENTION` here. So the horizon can rise again later; a client
+must treat it as current, never final (park a scrollback that reached it,
+do not kill it). It is re-announced to clients that negotiated
 `draft/extended-isupport`. Why an ISUPPORT token and not a capability:
 every client keeps an ISUPPORT map and no negotiation is needed. Why the
 `evilnet/` prefix: IRCv3 prefixes work-in-progress ISUPPORT names the same
