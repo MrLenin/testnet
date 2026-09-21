@@ -348,7 +348,7 @@ Verified at the cited lines; F3 verified LIVE (SNO from hub2 lands twice on leaf
 3. ~~M1 PN edge mint + SE-2 recv_ts + SE-4 synth-on-delta~~ DONE `deeac37`; ~~QUIT reason + SVSNOOP~~ DONE `474e60a`.
 4. M3 webpush tombstones (+ M3b key ring needs a small doc collection) and M2 REDACT (CR M letter with
    store-side apply) — the two data-integrity items.
-5. M4 FAKE/SETHOST mint, M5 SASL mech list (CR M), M8 PRIVS (doc field or CR M), M6 masked messages
+5. ~~M4 FAKE/SETHOST~~ DONE `b6df0ad` (record carries fakehost/sethost + schema size guard on every reader; ms_fake + 5 SETHOST sites mint; cmocka 103/103; bed: the login-time FAKE already converged via the +f umode mint side effect — `fake_gate.py` PASS before and after, SETHOST has no bed driver), M5 SASL mech list (CR M), M8 PRIVS (doc field or CR M), M6 masked messages
    (CR M fallback in the Cluster A pattern), M12 GITSYNC (CR M), M9 ML, M10 server WALLOPS.
 6. SE-1, SE-3, SE-7, SE-8 need a design pass each (burst ordering, parse re-entrancy, lease semantics,
    shutdown sequencing); SE-9 with the synth rework; M7 after the enforcement question; M11 = Cluster C.
