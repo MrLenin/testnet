@@ -410,7 +410,11 @@ stub-source trace to the next c-auditor run.
   window. **DECIDED 2026-09-20 (user): neither — design B** = ephemeral live letter + store-side catch-up
   from the REDACT context rows via the absence table and the CH tunnel; nothing in the doc (a doc
   collection cannot be pruned when retention is forever). Plan: `crdt-mesh-redact-catchup.md`.
-- **Ephemeral METADATA over CR M** (spec §C3: memory + S2S only, never persisted, so ephemeral by
+- **Ephemeral METADATA DONE `a067023`+`a0b6ffc`** (CR M 'E', P10 MD body verbatim; metadata_apply_relayed factored
+  out of ms_metadata; mints at SET/unset, CLEAR per key, the oper account form and the gateway edge; receiver re-emits
+  to legacy only for a tree-absent origin). GATE `md_gate.py`: unregistered-channel metadata set on leaf5 (overlay-only)
+  now read on hub2/leaf2/primary; set on the primary read on leaf5; set on hub2 read everywhere (all three were misses).
+  Was: **Ephemeral METADATA over CR M** (spec §C3: memory + S2S only, never persisted, so ephemeral by
   definition): letter 'E' carrying the P10 MD body verbatim ("<target> <key> <P|*> :<value>" / unset
   form), applied via the ms_metadata non-permanent path; mint at the origin (m_metadata.c:936/941/1060)
   and at the gateway edge in ms_metadata; tree relay to legacy links only when minted. Closes the last
