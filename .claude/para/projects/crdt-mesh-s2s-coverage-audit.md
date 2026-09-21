@@ -348,7 +348,21 @@ Verified at the cited lines; F3 verified LIVE (SNO from hub2 lands twice on leaf
 3. ~~M1 PN edge mint + SE-2 recv_ts + SE-4 synth-on-delta~~ DONE `deeac37`; ~~QUIT reason + SVSNOOP~~ DONE `474e60a`.
 4. M3 webpush tombstones (+ M3b key ring needs a small doc collection) and M2 REDACT (CR M letter with
    store-side apply) — the two data-integrity items.
-5. ~~M4 FAKE/SETHOST~~ DONE `b6df0ad` (record carries fakehost/sethost + schema size guard on every reader; ms_fake + 5 SETHOST sites mint; cmocka 103/103; bed: the login-time FAKE already converged via the +f umode mint side effect — `fake_gate.py` PASS before and after, SETHOST has no bed driver), M5 SASL mech list (CR M), M8 PRIVS (doc field or CR M), M6 masked messages
+5. **Batch 5 DONE 2026-09-21 04:30 (`ecaa07f`, `bef34dc`, `84cebce`, `acef19b`; fleet on acef19b, ircd.202609210822):**
+   ~~M5~~ SASL mech list: CR M 'L' at the gateway edge + announced at every CRDT link (gate BLOCKED: X3 announces the
+   list only at its own boot link, not on relink, and the primary never re-relayed — verify at the next pair rebuild);
+   ~~M8~~ PRIVS: **on the user record** (`privbits[2]`, snapshot-safe) — a letter raced the user's own record on
+   the overlay-only node; gate `privs_gate.py` via CHECK 27/27 both directions; ~~M6~~ masked PRIVMSG/NOTICE
+   'G'/'g' (gate 1 copy on every node both directions); ~~M10~~ server WALLOPS 'W' (code-read); ~~M12~~ GITSYNC
+   'J' (leaf5 runs it; its REPLY notice to the oper dead-sinks — reply-direction design, below); ~~M9~~ ML announce
+   'B' (code-read). **NEW residue: server→user notices/numerics toward a user on a tree-absent server dead-sink**
+   (GITSYNC replies, `PRIVS <nick>` forwarded queries, remote WHOIS…) = the reply-direction design item.
+   LESSONS: (a) `c ? CMD_X : CMD_Y` expands the two-token macros into a comma expression — the command/token
+   arguments shift (clients saw the P10 token "O"); five sites fixed incl. two pre-existing; (b) ms_privs treats a
+   bare `PRIVS <numeric>` from a server as CLEAR — the unguarded re-inject's forwarded query wiped every oper's
+   privileges ~1 s after oper-up (invariant 2: admit IsMe); (c) the host worktree's makefile has no header deps —
+   after a struct change `rm` the engine .o files or cmocka links a stale record size and reads past buffers.
+   ~~M4 FAKE/SETHOST~~ DONE `b6df0ad` (record carries fakehost/sethost + schema size guard on every reader; ms_fake + 5 SETHOST sites mint; cmocka 103/103; bed: the login-time FAKE already converged via the +f umode mint side effect — `fake_gate.py` PASS before and after, SETHOST has no bed driver), M5 SASL mech list (CR M), M8 PRIVS (doc field or CR M), M6 masked messages
    (CR M fallback in the Cluster A pattern), M12 GITSYNC (CR M), M9 ML, M10 server WALLOPS.
 6. SE-1, SE-3, SE-7, SE-8 need a design pass each (burst ordering, parse re-entrancy, lease semantics,
    shutdown sequencing); SE-9 with the synth rework; M7 after the enforcement question; M11 = Cluster C.
