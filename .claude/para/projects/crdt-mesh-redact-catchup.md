@@ -50,6 +50,40 @@ retention is forever.
   NOTE: leaf5's page needs ~8 s on the bed (federated fan-out) and can carry the partial tag while a store is
   slow — the gate waits 8 s; not a REDACT concern.
 
+## P2 wire + storage decisions (grounded 2026-09-21 00:15)
+- **Index CF**: a new column family `redact_index` (`history_cf_redact`, opened with the others in
+  history_init), key `<time_ms be64><redact_msgid>` (fixed 8-byte prefix keeps the CF time-ordered for a
+  seek from `since`), value `<target>\0<parent_msgid>\0<sender>\0<account>\0<reason>`. Written in the
+  same writebatch as the REDACT context row (history_store_message, the `type == HISTORY_REDACT` branch
+  next to reply_index_put). Deleted with the REDACT row's retention purge (same batch as the row delete).
+- **Query**: `CH Q * D <since_ms> <limit> <reqid> <dest>` — target `*` (not a channel), the responder
+  branches on `D` BEFORE the channel/presence machinery (like TARGETS): seek `redact_index` from since_ms,
+  emit up to limit rows, then `E <reqid> <n>[ T]`.
+- **Reply row**: CH R carries no target, so `D` gets its own reply line
+  `CH D <reqid> <time_ms> <redact_msgid> <target> <parent_msgid> <sender> <account> :<reason>`; the
+  requester's `D` handler appends a HistoryMessage (type REDACT, target set) to req->fed_msgs and the
+  request's completion_cb applies each via redact_apply_remote(src=&me-sourced sender mask, …) —
+  idempotent (history_message_is_redacted gate). A dedicated letter keeps old peers (no D handler)
+  ignoring it cleanly instead of mis-storing.
+- **Request**: a FedRequest with completion_cb/cb_data (the SEARCH pattern), client_yxx = our own server
+  numeric so `dest` routes replies back to us (tunnel-aware via collect_storage_targets + crdt_ch_tunnel_try).
+- **cmocka (pure)**: rdx key encode/decode + ordering, value pack/unpack, D reply line parse.
+
+- **P2+P3 SHIPPED 2026-09-21 `e6bdbf9` (pushed, fleet on it).** New CF `redact_index` (key time-be64 +
+  redact msgid, value target/parent/sender/account/reason; same writebatch as the context row; deleted
+  with it at purge); `CH Q * D <since> <limit> <reqid> <dest>` responder scans it → `CH D` rows + E;
+  requester = FedRequest with completion_cb → redact_apply_row (explicit sender/account, idempotent) →
+  watermark (meta key in the same CF, sorts last); trigger = chathistory_store_reachable (boot first-sight
+  + absence close), 60 s slack, 200/round, truncated rounds continue (≤8). redact_index.c pure, gated by
+  history_cmocka (38/38). Gate `tests/src/ircv3/crdt-mesh-redact.test.ts` (CRDT_BED=1) 2/2: live 12 s;
+  stop nefarious6 → redact on hub2 → start → leaf4 logs "REDACT catch-up from AD: applied … " over the
+  tunnel and its member page shows the row redacted with one context row, 79 s end to end. Boot on every
+  node asks each store once (legacy primary ignores `Q * D` silently → request cut, watermark kept).
+  TRAP (test): a page reader must be a MEMBER — presence filtering hides everything from a stranger.
+- **PORT TO THE FORK (both branches rule):** the catch-up half is chathistory (fork-exclusive) and the tree
+  bed has the same absence hole (SQUIT'd store misses REDACTs). Port `redact_index.c` + CF + `CH Q D` +
+  the store_reachable trigger to ircv3.2-hardening/upgrade; the live half there is the tree (no CR M).
+
 ## Phases (each: cmocka where the logic is pure, bed gate, commit)
 - **P1 live letter** — factor redact_apply_remote; CR M `R` mint (3 origin sites + gateway edge); v3
   relay exclusion for CRDT-aware links; receiver. Gate: `redact_gate.py` — redact on hub2, page on leaf5

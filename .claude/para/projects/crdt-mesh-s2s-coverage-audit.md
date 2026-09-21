@@ -412,7 +412,7 @@ stub-source trace to the next c-auditor run.
   form), applied via the ms_metadata non-permanent path; mint at the origin (m_metadata.c:936/941/1060)
   and at the gateway edge in ms_metadata; tree relay to legacy links only when minted. Closes the last
   user-sourced tree-relayed token (live-confirmed fake-direction drop 2026-07-25).
-- **M2 REDACT P1 SHIPPED `cef9c38`** (live letter; catch-up P2/P3 pending — see `crdt-mesh-redact-catchup.md`).
+- **M2 REDACT DONE `cef9c38`+`e6bdbf9`** (live letter + store-side catch-up, design B; bed suite 2/2 — see `crdt-mesh-redact-catchup.md`; fork port pending).
   Found while gating: **M13 (NEW, FIXED `cef9c38`)** the CR M channel receiver gave locals no @msgid/@time and
   the legacy re-emit no S2S tags → one-msgid-per-event broken on every mesh→legacy channel message.
 - Still queued after these: M4 FAKE/SETHOST host mint, M5 SASL mech list (CR M), M8 PRIVS, M6 masked
