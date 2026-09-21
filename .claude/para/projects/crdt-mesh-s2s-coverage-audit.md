@@ -353,8 +353,9 @@ Verified at the cited lines; F3 verified LIVE (SNO from hub2 lands twice on leaf
    this X3 never emits `SASL * * M` (no emitter in x3/src); the ircd's EOB re-send only forwards a cache that such a
    line would have filled, so `get_sasl_mechanisms()` is NULL on every node.** The differing `sasl=` values are per-node
    LOCAL config (`sasl_local_mechanisms()`: primary SASL_LOCAL_MECHANISMS PLAIN,OAUTHBEARER,SCRAM-SHA-256; hub2
-   default PLAIN,OAUTHBEARER; leaf5 falls through to SASL_DEFAULT_MECHANISMS PLAIN), not a mesh gap. The code is
-   correct for a services package that announces a list and inert here; no gate is possible on this bed;
+   default PLAIN,OAUTHBEARER; leaf5 falls through to SASL_DEFAULT_MECHANISMS PLAIN), not a mesh gap. The emitter lived
+   on the DEAD X3 modernization branch (user, 09-21): the fork's EOB re-send + `* * M` handler are vestiges of it, and
+   so is the mesh carrier. Inert on live X3; candidates for removal together if that branch is never revived;
    ~~M8~~ PRIVS: **on the user record** (`privbits[2]`, snapshot-safe) — a letter raced the user's own record on
    the overlay-only node; gate `privs_gate.py` via CHECK 27/27 both directions; ~~M6~~ masked PRIVMSG/NOTICE
    'G'/'g' (gate 1 copy on every node both directions); ~~M10~~ server WALLOPS 'W' (code-read); ~~M12~~ GITSYNC
