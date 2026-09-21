@@ -446,14 +446,60 @@ stub-source trace to the next c-auditor run.
   remote WHOIS + numeric replies, RENAME/RLO doc op; SE-9 synth cache; M7 after the enforcement question;
   M11 Cluster C; the BS/BX stub-source trace.
 
+### New findings from the batch-6 item-3 gates (2026-09-21 evening) — NOT part of that item
+- **M12b GITSYNC has no legacy leg.** The CR M 'J' receiver (m_crdt.c) applies the action locally and
+  never re-emits real P10 to legacy, so a `GITSYNC * force` originating on an overlay-only node never
+  reaches the legacy subtree. GATE: origin leaf5 -> the five mesh nodes answer, testnet SILENT; origin
+  hub2 (tree-linked) -> all seven answer. Every other `*`-target letter (W/U/O/M/D/E/G/g) carries the
+  "re-emit to legacy when the origin has no tree presence here" rule; 'J' is the one that does not.
+- **M8b privileges are not presented to legacy for a mesh-only oper.** `client_send_privs` is a tree
+  emit from the oper's OWN server; an overlay-only node has no tree link and the gateway does not
+  re-emit PRIVS for a stub-homed oper, so the legacy subtree holds no privilege bits for such an oper.
+  Consequence: fixing M12b alone would earn ERR_NOPRIVILEGES at the legacy end. Legacy-presentation
+  edge, same class as the deferred `gateway_birth_modes` exmode rendering. STATUS: inferred from the
+  M8 design (record-only, no legacy emit) + the M12b gate; verify with `CHECK <leaf5-oper>` on the
+  primary before acting.
+- **PRIVS replies were malformed P10** (pre-existing, both trees): `client_report_privs` hand-rolled
+  the numeric in CLIENT form (server NAME prefix, nicknames) and sent it down a server link, where it
+  arrived only by the receiver's lenient name-prefix parse. FIXED: mesh + fork `01d2d04` (server form
+  toward a non-local destination, exactly as send_reply builds one). This is why the mesh reply carrier
+  could not carry it: the carrier requires a numeric source, as the wire does.
+
 ### Batch 6 — the design passes, agreed order (2026-09-21 17:50, user: "seems reasonable")
 Biggest permanent damage first, then the eager-window cluster, bouncer last. Dependency edges: RLO needs
 the reply carrier (3 before 4); orphan-reap Inc 2 needs the farewell (re-open after 5).
-1. ~~BS/BX stub-source trace~~ c-auditor pass launched 17:45 (read-only; result recorded below when in).
+1. ~~BS/BX stub-source trace~~ DONE 17:54 (c-auditor, 15 handler bodies / 2 559 lines, verified by hand):
+   **no crash path** — the `%C` fix covers both branches and no BS/BX handler derefs `cli_user(sptr)`. Stub
+   sources ARE live on three routes: (A) a CRDT-aware P10 peer relays a BX whose origin is a stub here
+   (`CrdtAcceptBeyondHorizonSource`, parse.c:2071); (B) `bounce_materialize_alias_from_doc` drives
+   `bounce_alias_create(uplink=stub, alias_server=stub)` every tick (bouncer_session.c:9161/9191); (C) the CR X
+   'B' re-inject passes `&me` (m_crdt.c:724; `STAT_ME` fails `IsServer` exactly like a stub). Findings:
+   - **T1 (defect, silent drop)** `defer_bx_for_alias` bouncer_session.c:9793/9795 records `cptr_yxx`/`sptr_yxx`
+     only under exact `IsServer` → a stub or `&me` source leaves the field empty → `drain_pending_bx_for_alias`
+     :9862-9876 discards the entry as "source server gone". Every mesh-tunnelled BX E/M (and every stub-relayed
+     BX U/K/V) that arrives before its BX C is lost, Debug-only. `&me` self-registers (`SetYXXServerName`,
+     s_bsd.c:1811) so `FindNServer(cli_yxx(&me)) == &me`: the fix is the paired gate
+     `IsServer || IsMeshStub || IsMe` at both sites, nothing else.
+   - **T2 (defect, lifecycle)** `crdt_shadow_convert_to_stub` (crdt_shadow.c:2316) runs only
+     `s2s_chunk_cleanup_link`; the SQUIT-keep branch never reaches `exit_one_client`, so
+     `s2s_multiline_cleanup_link` / `s2s_bxm_cleanup_link` / `pending_bx_cleanup_link` /
+     `chathistory_fed_cleanup_link` (s_misc.c:324-327) never run for a converted link. A Case-B anchor is retired
+     still `STAT_MESH_SERVER` (s_misc.c:851-856) so the `IsServer(bcptr)` gate skips the same four at free time →
+     a stale `b->link` in `s2s_bxm_batches[]` (`start_time` :9937 is set and never read: no TTL sweep). Fix: run
+     the four at conversion (with paired gates inside `pending_bx_cleanup_link` :9889) and before the Case-B
+     free; give BX M batches the same 30 s TTL as deferred BX.
+   - REVIEW-1: `IsBurstOrBurstAck(sptr)` at :5086 — burst flags survive `convert_to_stub`; a BS A from a
+     mid-burst-died stub leaves the session HOLDING. Clear both flags in `convert_to_stub` (one line) — fold into T2.
+   - REVIEW-2 = M11 (BX U/K/N/V have no carrier; the K emit macro :7896 and U :7543 skip stub-homed aliases).
+   - REVIEW-3: BX M batches via re-inject all key on `cptr == &me`; separation rests on bid uniqueness (msgids).
+     Acceptable; comment it when T2 touches the file.
+   T1+T2+REVIEW-1 SHIPPED as item 1b `a12b8ac` (18:30, user go 18:14); the BX M TTL half ported to the fork `31f2002`.
 2. ~~SASL-list vestige~~ REMOVED (`c290296` fork, `4924fc6` mesh). M7 FEAT_CRDT_BOUNCER_DOC fallback removal
    still the user's call (not raised again; queued).
-3. **Reply direction** — server→user numerics/notices whose target is homed on a tree-absent node
-   (GITSYNC replies, forwarded PRIVS query, remote WHOIS, RLO). One generic carrier.
+3. ~~**Reply direction**~~ SHIPPED `ba3183d` (19:05): `send_buffer` hook → CR M 'Y' (verbatim server-form line,
+   re-injected at the home via do_numeric / the token's server handler); request half CR X 'L' at both hunts;
+   abort_sasl tunnels; do_numeric admits anchor/&me sources. Design + inventory: `crdt-mesh-reply-direction.md`.
+   Gates pending the fleet rebuild.
 4. **RENAME/RLO doc op** — engine rename op (cmocka first), single-writer at the gateway edge; RLO on 3.
 5. **SE-8 DIE/RESTART farewell** — withdraw primitive; then re-open orphan-reap Inc 2.
 6. **SE-3 SQUIT naming an anchor** — same retire path as 5, parse-safe deferral.
