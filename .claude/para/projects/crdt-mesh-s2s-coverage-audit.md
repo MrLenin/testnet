@@ -392,7 +392,10 @@ stub-source trace to the next c-auditor run.
   403 reap, forget-account iterator and stale sweep now tombstone the doc (`crdt_shadow_webpush_remove`,
   the same call the client-driven paths make). Deploy gate: webpush-attention suite + a PERSISTENCE DESTROY
   on hub2 followed by two verify ticks with no re-added subscription.
-- **M3b VAPID key ring — needs a doc collection.** `WP K <id> <gen> <created> <origin> <manual> :<priv>`
+- **M3b DONE `23dac03`+`d5d5ae7`+`82d6000`** (doc collection `webpush_keys`: id → ring record text; mint + gateway-edge
+  + publish-at-load set, origin tombstones on prune, reconcile adopts via webpush_ring_adopt_from_doc; cmocka 102/102).
+  GATE: before, overlay-only leaf5 advertised its OWN boot key (vapid= differed from the other five); after, all six
+  nodes advertise the same current key and leaf5 logs "current VAPID key now … (key from doc)". Was: `WP K <id> <gen> <created> <origin> <manual> :<priv>`
   carries the PRIVATE key; retirement is a removal. Proposed `CRDT_COLL_WEBPUSH_KEYS` LWW map keyed by key
   id, value = the WP K fields; reconcile → webpush_keyring_add/remove + current-key re-derive +
   send_isupport_update; tombstone on retire; snapshot carries it so a fresh overlay-only node signs with the
