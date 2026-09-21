@@ -80,9 +80,14 @@ retention is forever.
   tunnel and its member page shows the row redacted with one context row, 79 s end to end. Boot on every
   node asks each store once (legacy primary ignores `Q * D` silently → request cut, watermark kept).
   TRAP (test): a page reader must be a MEMBER — presence filtering hides everything from a stranger.
-- **PORT TO THE FORK (both branches rule):** the catch-up half is chathistory (fork-exclusive) and the tree
-  bed has the same absence hole (SQUIT'd store misses REDACTs). Port `redact_index.c` + CF + `CH Q D` +
-  the store_reachable trigger to ircv3.2-hardening/upgrade; the live half there is the tree (no CR M).
+- **FORK PORT SHIPPED 2026-09-21 fork `2b98f1d`** (ircv3.2-hardening = ircv3.2-upgrade on origin AND
+  upstream): redact_index.c/CF/scan/watermark + `CH Q * D` + `CH D` + catch-up request verbatim, minus the
+  tunnel/stub branches; replies are direct `sendcmdto_one(&me, CMD_CHATHISTORY, sptr, …)` (the fork has no
+  ch_reply_out); the trigger is the store's `CH A S` arrival (`absence_close(server_ad_index(sptr))` site).
+  history_cmocka 38/38 there too. Bed: tree pair rebuilt on it; gate `tests/src/ircv3/chathistory-redact-
+  catchup.test.ts` (SQUIT leaf → REDACT on primary → CONNECT → leaf applies via the re-ad trigger) **2/2 PASS**;
+  search-federation 5/5 and chathistory-federation 7/7 unchanged on the port (Q-handler regression).
+- Soak on crdt-mesh `e6bdbf9`: 12/12 clean (00:33-01:37).
 
 ## Phases (each: cmocka where the logic is pure, bed gate, commit)
 - **P1 live letter** — factor redact_apply_remote; CR M `R` mint (3 origin sites + gateway edge); v3
