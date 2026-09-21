@@ -386,3 +386,33 @@ Net effect on the fix order above: add QUIT reason + SVSNOOP to batch 3 (cheap, 
 ephemeral MD over CR M to batch 4 (with REDACT — both are "user-sourced content that dies at the horizon"),
 remote WHOIS + numeric-reply direction and the RENAME doc op to the design-pass list, and the BS/BX
 stub-source trace to the next c-auditor run.
+
+### Batch 4 (data integrity) — M3 shipped, three design choices queued (2026-09-20 21:40)
+- **M3 SHIPPED `b99b015`** (pushed, NOT yet on the fleet — the 1 h soak on `474e60a` was running): the
+  403 reap, forget-account iterator and stale sweep now tombstone the doc (`crdt_shadow_webpush_remove`,
+  the same call the client-driven paths make). Deploy gate: webpush-attention suite + a PERSISTENCE DESTROY
+  on hub2 followed by two verify ticks with no re-added subscription.
+- **M3b VAPID key ring — needs a doc collection.** `WP K <id> <gen> <created> <origin> <manual> :<priv>`
+  carries the PRIVATE key; retirement is a removal. Proposed `CRDT_COLL_WEBPUSH_KEYS` LWW map keyed by key
+  id, value = the WP K fields; reconcile → webpush_keyring_add/remove + current-key re-derive +
+  send_isupport_update; tombstone on retire; snapshot carries it so a fresh overlay-only node signs with the
+  right key at boot. Mint at the ring mutation sites (m_webpush.c:1592 emitter's callers) and at the
+  gateway edge for a legacy-origin WP K. Engine change → cmocka first.
+- **M2 REDACT — state or ephemeral?** The P10 REDACT carries S2S tags (event time + the REDACT row's own
+  msgid; one-time-per-message) and ms_redact deletes the row + stores the REDACT context row. Two carriers:
+  (a) CR M letter 'R' "<target> <msgid> <redact_msgid> <time_ms> :<reason>" applied via the ms_redact
+  logic — simple, but a peer that is DOWN during the flood never redacts (compliance hole); (b) a doc
+  collection `redactions` keyed by msgid (value: target, redact_msgid, time_ms, reason) — idempotent,
+  reconciled on delta AND snapshot, so a returning store redacts on catch-up; pruned after the retention
+  window. **DECIDED 2026-09-20 (user): neither — design B** = ephemeral live letter + store-side catch-up
+  from the REDACT context rows via the absence table and the CH tunnel; nothing in the doc (a doc
+  collection cannot be pruned when retention is forever). Plan: `crdt-mesh-redact-catchup.md`.
+- **Ephemeral METADATA over CR M** (spec §C3: memory + S2S only, never persisted, so ephemeral by
+  definition): letter 'E' carrying the P10 MD body verbatim ("<target> <key> <P|*> :<value>" / unset
+  form), applied via the ms_metadata non-permanent path; mint at the origin (m_metadata.c:936/941/1060)
+  and at the gateway edge in ms_metadata; tree relay to legacy links only when minted. Closes the last
+  user-sourced tree-relayed token (live-confirmed fake-direction drop 2026-07-25).
+- Still queued after these: M4 FAKE/SETHOST host mint, M5 SASL mech list (CR M), M8 PRIVS, M6 masked
+  messages, M12 GITSYNC (CR M), M9 ML announce, M10 server WALLOPS; design passes SE-1/SE-3/SE-7/SE-8,
+  remote WHOIS + numeric replies, RENAME/RLO doc op; SE-9 synth cache; M7 after the enforcement question;
+  M11 Cluster C; the BS/BX stub-source trace.
