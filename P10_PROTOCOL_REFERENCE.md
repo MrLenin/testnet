@@ -2367,7 +2367,15 @@ Client                Nefarious              X3
    |<--903 SASL success---|                   |
 ```
 
-### Mechanism Broadcast (M Subcmd)
+### Mechanism Broadcast (M Subcmd) — NOT IMPLEMENTED
+
+> **Status (2026-09-21):** live X3 has no emitter for this form; it existed only on an
+> abandoned X3 branch. The ircd handler and its end-of-burst re-send were removed from
+> both fork branches (`c290296`) and the mesh (`4924fc6`). The advertised `sasl=` value
+> is per-node configuration (`sasl_local_mechanisms()`, `SASL_LOCAL_MECHANISMS` /
+> `SASL_DEFAULT_MECHANISMS`) plus the iauth mechanism cache. A `SASL * * M` line on the
+> wire is now relayed like any other network-wide `SASL *` form and otherwise ignored.
+> The description below is kept for the record.
 
 **Purpose**: Dynamically advertise available SASL mechanisms.
 
@@ -2387,8 +2395,8 @@ Az SASL * * M :PLAIN,EXTERNAL,OAUTHBEARER
 2. When Keycloak availability changes
 3. When any authentication backend status changes
 
-**Nefarious Handling**:
-- Stores mechanism list in global `SaslMechanisms[]`
+**Nefarious Handling** (historical, removed 2026-09-21):
+- Stored the mechanism list in global `SaslMechanisms[]` (the setter survives for iauth)
 - Used in CAP LS 302 response: `sasl=PLAIN,EXTERNAL,OAUTHBEARER`
 
 ### Data Chunking (C Subcmd)
@@ -2578,7 +2586,7 @@ In a network with mixed old/new servers:
 
 | Subcmd | Format | Purpose |
 |--------|--------|---------|
-| `M` | `[X3] SASL * * M :[mechanisms]` | Mechanism broadcast |
+| `M` | `[X3] SASL * * M :[mechanisms]` | Mechanism broadcast — never emitted by live X3; handler removed 2026-09-21 |
 
 ### WEBPUSH Subcmds
 

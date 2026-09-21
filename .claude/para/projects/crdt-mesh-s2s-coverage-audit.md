@@ -355,7 +355,7 @@ Verified at the cited lines; F3 verified LIVE (SNO from hub2 lands twice on leaf
    LOCAL config (`sasl_local_mechanisms()`: primary SASL_LOCAL_MECHANISMS PLAIN,OAUTHBEARER,SCRAM-SHA-256; hub2
    default PLAIN,OAUTHBEARER; leaf5 falls through to SASL_DEFAULT_MECHANISMS PLAIN), not a mesh gap. The emitter lived
    on the DEAD X3 modernization branch (user, 09-21): the fork's EOB re-send + `* * M` handler are vestiges of it, and
-   so is the mesh carrier. Inert on live X3; candidates for removal together if that branch is never revived;
+   so is the mesh carrier. Inert on live X3; **REMOVED 2026-09-21** (user: X3 will not gain this before it stops doing SASL): fork `c290296` (handler + EOB re-send, both branches/remotes), mesh `4924fc6` (carrier 'L', announce, receiver); the iauth cache setter stays;
    ~~M8~~ PRIVS: **on the user record** (`privbits[2]`, snapshot-safe) — a letter raced the user's own record on
    the overlay-only node; gate `privs_gate.py` via CHECK 27/27 both directions; ~~M6~~ masked PRIVMSG/NOTICE
    'G'/'g' (gate 1 copy on every node both directions); ~~M10~~ server WALLOPS 'W' (code-read); ~~M12~~ GITSYNC
@@ -445,3 +445,21 @@ stub-source trace to the next c-auditor run.
   messages, M12 GITSYNC (CR M), M9 ML announce, M10 server WALLOPS; design passes SE-1/SE-3/SE-7/SE-8,
   remote WHOIS + numeric replies, RENAME/RLO doc op; SE-9 synth cache; M7 after the enforcement question;
   M11 Cluster C; the BS/BX stub-source trace.
+
+### Batch 6 — the design passes, agreed order (2026-09-21 17:50, user: "seems reasonable")
+Biggest permanent damage first, then the eager-window cluster, bouncer last. Dependency edges: RLO needs
+the reply carrier (3 before 4); orphan-reap Inc 2 needs the farewell (re-open after 5).
+1. ~~BS/BX stub-source trace~~ c-auditor pass launched 17:45 (read-only; result recorded below when in).
+2. ~~SASL-list vestige~~ REMOVED (`c290296` fork, `4924fc6` mesh). M7 FEAT_CRDT_BOUNCER_DOC fallback removal
+   still the user's call (not raised again; queued).
+3. **Reply direction** — server→user numerics/notices whose target is homed on a tree-absent node
+   (GITSYNC replies, forwarded PRIVS query, remote WHOIS, RLO). One generic carrier.
+4. **RENAME/RLO doc op** — engine rename op (cmocka first), single-writer at the gateway edge; RLO on 3.
+5. **SE-8 DIE/RESTART farewell** — withdraw primitive; then re-open orphan-reap Inc 2.
+6. **SE-3 SQUIT naming an anchor** — same retire path as 5, parse-safe deferral.
+7. **SE-9 store synth cache** — clear on withdrawal; re-synth every doc-learned store at legacy link.
+8. **SE-1 CR F reconcile suite** — non-bursting branch first.
+9. **SE-7 stand-down eager** — bouncer lease.
+10. **M11 alias soft-state** — Cluster C schema add; last (largest bouncer change).
+Fleet note: 4924fc6/c290296 are pure deletions verified by host builds of both trees; the fleet stays on
+`acef19b` (fork bed on 2b98f1d) until the next functional change rebuilds it.

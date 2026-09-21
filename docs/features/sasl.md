@@ -51,7 +51,7 @@ SASL provides secure authentication during IRC connection establishment, before 
 | `C` | `SA C <user> * <base64>` | Bidirectional | Auth data |
 | `D` | `SA D <user> <result> :<message>` | X3 → Server | Auth result |
 | `L` | `SA L <user> <account>` | X3 → Server | Login notification |
-| `M` | `SA * * M :<mechanisms>` | X3 → All | Mechanism broadcast |
+| `M` | `SA * * M :<mechanisms>` | X3 → All | Mechanism broadcast (never emitted by live X3; ircd handler removed 2026-09-21) |
 
 **Result codes**:
 - `S` - Success
@@ -179,15 +179,17 @@ LMDB Keys:
 - Iterations: 4096 (PBKDF2)
 - Keys: SHA-derived from password/token
 
-## Mechanism Broadcast
+## Mechanism Broadcast (not implemented)
 
-On startup, X3 broadcasts available mechanisms to all servers:
+An abandoned X3 branch broadcast its mechanisms to all servers at startup:
 
 ```
 Az SA * * M :PLAIN,EXTERNAL,SCRAM-SHA-1,SCRAM-SHA-256,SCRAM-SHA-512
 ```
 
-Nefarious uses this to populate the `sasl=` capability value.
+Live X3 never emits this and the ircd handler was removed on 2026-09-21. The `sasl=`
+capability value is per-node configuration (`SASL_LOCAL_MECHANISMS`, falling back to
+`SASL_DEFAULT_MECHANISMS`) plus the iauth mechanism cache.
 
 ## Keycloak Integration
 
