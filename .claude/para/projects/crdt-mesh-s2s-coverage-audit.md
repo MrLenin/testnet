@@ -349,8 +349,12 @@ Verified at the cited lines; F3 verified LIVE (SNO from hub2 lands twice on leaf
 4. M3 webpush tombstones (+ M3b key ring needs a small doc collection) and M2 REDACT (CR M letter with
    store-side apply) — the two data-integrity items.
 5. **Batch 5 DONE 2026-09-21 04:30 (`ecaa07f`, `bef34dc`, `84cebce`, `acef19b`; fleet on acef19b, ircd.202609210822):**
-   ~~M5~~ SASL mech list: CR M 'L' at the gateway edge + announced at every CRDT link (gate BLOCKED: X3 announces the
-   list only at its own boot link, not on relink, and the primary never re-relayed — verify at the next pair rebuild);
+   ~~M5~~ SASL mech list: CR M 'L' at the gateway edge + at every CRDT link — **DORMANT, premise corrected 09-21 14:45:
+   this X3 never emits `SASL * * M` (no emitter in x3/src); the ircd's EOB re-send only forwards a cache that such a
+   line would have filled, so `get_sasl_mechanisms()` is NULL on every node.** The differing `sasl=` values are per-node
+   LOCAL config (`sasl_local_mechanisms()`: primary SASL_LOCAL_MECHANISMS PLAIN,OAUTHBEARER,SCRAM-SHA-256; hub2
+   default PLAIN,OAUTHBEARER; leaf5 falls through to SASL_DEFAULT_MECHANISMS PLAIN), not a mesh gap. The code is
+   correct for a services package that announces a list and inert here; no gate is possible on this bed;
    ~~M8~~ PRIVS: **on the user record** (`privbits[2]`, snapshot-safe) — a letter raced the user's own record on
    the overlay-only node; gate `privs_gate.py` via CHECK 27/27 both directions; ~~M6~~ masked PRIVMSG/NOTICE
    'G'/'g' (gate 1 copy on every node both directions); ~~M10~~ server WALLOPS 'W' (code-read); ~~M12~~ GITSYNC
