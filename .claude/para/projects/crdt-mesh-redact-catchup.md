@@ -32,6 +32,24 @@ retention is forever.
    min of the replies' upper bounds (now, if all answered). Bounded by store count × redactions in window.
    No timer: absence close and boot are the only two events after which a miss is possible.
 
+## Execution log
+- **P1 SHIPPED 2026-09-21 `9c0e221`+`314d278`+`a18d1e7`+`cef9c38` (pushed, fleet on it).** Gate
+  `scratchpad/redact_gate.py <origin> <watch>...`: hub2→leaf5/leaf2/primary, leaf5 (overlay-only)→hub2/
+  leaf2/primary (legacy via the receiver re-emit), primary (legacy)→hub2/leaf5/leaf4 — every watcher one
+  REDACT line, content gone from its page, exactly one REDACT context row. Two defects the gate surfaced on
+  the way (both fixed, both pre-existing):
+  1. `a18d1e7` the mesh mint after arming the one-shot S2S tags consumed them → the tree copy left untagged
+     → legacy stores minted a second redact msgid (two context rows on a federated page). Mint first.
+  2. `cef9c38` **the CR M channel receiver delivered locals with sendrawto_one (no @msgid/@time) and re-emitted
+     to legacy without S2S tags** → tagged clients on mesh nodes could not reply-quote/REDACT mesh-delivered
+     messages, and a legacy store minted its OWN msgid for the gateway copy, so a REDACT naming the origin's
+     id never matched there (one-msgid-per-event violated on every mesh→legacy message). Now delivered via
+     sendcmdto_channel_butone with client event + S2S tags armed + CRDT-aware servers skipped (the server
+     leg IS the gateway copy); mesh-only/server-form sources keep a raw local path that now prepends the
+     tags. Probe `tagprobe.py 6674 6669`: `@time=…;msgid=AI…` on hub2 for a leaf5 speaker (was bare).
+  NOTE: leaf5's page needs ~8 s on the bed (federated fan-out) and can carry the partial tag while a store is
+  slow — the gate waits 8 s; not a REDACT concern.
+
 ## Phases (each: cmocka where the logic is pure, bed gate, commit)
 - **P1 live letter** — factor redact_apply_remote; CR M `R` mint (3 origin sites + gateway edge); v3
   relay exclusion for CRDT-aware links; receiver. Gate: `redact_gate.py` — redact on hub2, page on leaf5
