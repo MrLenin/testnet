@@ -164,6 +164,13 @@ dry-run census measures this cohort.
 
 ### A. Root fix — reliable delete detection
 
+> **Partly superseded by F (2026-09-22).** A's *identity* assumption — that X3 can resolve
+> a principal through the directory — does not hold, because X3 outlives LDAP. Identity
+> moves onto the wire (design F). What remains valid here is delete detection as
+> **convergence hygiene**: it is what makes a deletion propagate rather than merely fail
+> closed at the next auth. The transport findings, durability layering and disposal ruling
+> all still stand.
+
 Replace the proxy with the knowledge. A working Keycloak lifecycle feed lets X3 dispose of
 a handle when its backing account is deleted, which is what the timestamp check was
 approximating.
@@ -487,24 +494,134 @@ the X3 detector, retire gate (c), build delete detection.
 - **`bsr_acc_create` becomes vestigial** but should stay in the record format — removing a
   field means another version migration for no benefit.
 
+### F. The identity must ride the wire — supersedes A's entryUUID assumption
+
+*Added 2026-09-22. Design A assumed X3 could learn identity from the directory. It cannot,
+for the whole window that matters.*
+
+#### Why entryUUID is not the answer
+
+**X3 will outlive LDAP** (user, 2026-09-22). That single fact invalidates the sequencing
+constraint recorded earlier in this document — "X3 must stop being an account authority at
+or before LDAP retirement" — and with it every directory-based control.
+
+After LDAP retirement X3 has **no identity source whatsoever**:
+
+| Source | After LDAP retirement |
+|---|---|
+| `entryUUID` (`4d29d8e`) | gone — an LDAP operational attribute |
+| X3's own LDAP auth path | gone |
+| Keycloak REST | never existed — X3 has no HTTP client on any shipping branch |
+| **The P10 wire** | **the only channel left** |
+
+So carrying identity on the wire is not one option among several. It is the only mechanism
+that spans the window, and everything else is scaffolding with a hard expiry.
+
+#### The design
+
+**The ircd carries the Keycloak user id alongside the account; X3 binds the handle to it
+and refuses on mismatch.**
+
+The ircd is the right source: it performs SASL, so it already holds the identity.
+`kc_user.id` is parsed at `kc_keycloak.c:187` and is in hand on every SASL callback path
+(`sasl_plain_cb`, `sasl_scram_creds_cb`, `sasl_ecdsa_key_cb`, `sasl_external_cb`).
+
+Two wire positions, because X3 reads the account from both:
+
+| Position | Site | Today | Proposed |
+|---|---|---|---|
+| `AC` | `m_account.c:512`, `sasl_auth.c:662-679` | `%C %s %Tu` | trailing id parameter |
+| `+r` in burst | `s_user.c:2771-2779` (`umode_str`) | `account:timestamp` | `account:timestamp:id` |
+
+#### It is backward compatible, by luck of the existing parsers
+
+This is the part that makes it cheap rather than a protocol break.
+
+- **`AC`**: the handler gates on `parc > 4` with no strict arity rejection, so an unmodified
+  server ignores a trailing parameter.
+- **`+r`**: `s_user.c:2596-2599` parses with `strchr(account, ':')` then `atoi(ts)`, and
+  `atoi` stops at the next non-digit. So `account:timestamp:id` parses **correctly on
+  unmodified servers** — account up to the first colon, timestamp terminated by the second.
+  X3's `handle_account` does the same thing with `strtol`, and is equally tolerant.
+
+No protocol version gate, no capability negotiation, no flag day.
+
+#### Encode it like a sessid, not as a raw UUID
+
+A burst NICK line is capped at 512 bytes (see `project_s2s_512_compression_rationale`), and
+a hyphenated UUID adds 37 characters per user — enough to push long nick/host/realname
+combinations over on a large burst.
+
+The fork already has the answer: `hs_sessid` carries a UUIDv7 as 22-char base64
+(`AZ7RzhRLcaSl5PLPNJ9eMw`). Encode the Keycloak user id the same way — 16 raw bytes,
+base64url, no padding. 22 characters instead of 37, and consistent with an encoding the
+codebase already reads.
+
+#### Why this survives what the alternatives do not
+
+| | Wire-carried KC id | entryUUID (`4d29d8e`) | P10 relay | Webhook |
+|---|---|---|---|---|
+| Works today | yes | yes | yes | not yet |
+| Survives LDAP retirement | **yes** | no | yes | yes |
+| Nothing lost if X3 is down | **yes** — re-sent on every burst | yes | **no** — one-shot, gone | no — needs catch-up |
+| Needs HTTP in X3 | no | no | no | yes |
+| Backward compatible | yes | n/a | n/a | n/a |
+
+The "nothing lost if X3 is down" property comes free: `cmd_nick` -> `AddUser()` ->
+`mod_usermode()` -> `call_account_func()` -> `handle_account()` runs for **every** user on
+**every** burst. The check is idempotent and re-applies on relink, so an outage delays it
+rather than skipping it.
+
+#### What it replaces
+
+This retires the timestamp's identity role by **replacing it properly**, which is the
+structural gap this whole document opened with: `AC` had no account-id field, so the
+timestamp was drafted as one. Give the wire a real identity field and the timestamp goes
+back to being a date — permanently, not as an interim.
+
+It also means **`4d29d8e` is not the thing to ship.** Going straight to the wire-carried id
+is one mechanism instead of two, with no expiry date. The seeding problem simplifies to
+"store the Keycloak user id", which the census tool already retrieves from its user
+lookups (`u["id"]`), rather than the `LDAP_ID` attribute.
+
+#### Residue
+
+- **Legacy handles remain trust-on-first-use** until seeded, exactly as with entryUUID.
+  Prod has no stored identity of any kind, so the backlog needs the seed before the control
+  covers it.
+- **Stranded handles** (no Keycloak user at all) cannot be seeded and stay claimable. The
+  census enumerates them; disposal is a one-time operator decision.
+- **Fail-open on absent identity** stays the rule, per the ratified ruling and the
+  `ldap_field_oslevel` precedent. Mismatch fails closed.
+
 ## Sequencing
 
-*Revised 2026-09-22 per design E: six steps down to three.*
+*Revised 2026-09-22 per design F.*
 
-| # | Step | Where | Blocking |
+| # | Step | Where | Status |
 |---|---|---|---|
-| 1 | Retire the detector (design B): backfill, three rejects, detect-and-log | x3 `upstream/master` | none — ships now |
-| 2 | Retire bouncer rebind gate (c) `acc_ts_match` | nefarious | operator confidence in `8cf493c` |
-| 3 | Delete detection (design A): KC `user_id` binding, SPI contract, local-only unregister, catch-up + sweep | SPI + consumer | **transport P0-3 (hard)** |
+| 1 | Retire the LDAP backfill (design B) | x3 `upstream/master` | **done** — `cfe7d8a`, unpushed |
+| 2 | Retire bouncer rebind gate (c) (design E) | nefarious | **done** — `396c423` + `95e61e3`, unpushed |
+| 3 | **Wire-carried Keycloak identity (design F)** | nefarious + x3 | next — no prerequisite |
+| 4 | Seed stored identity for existing handles; stranded-handle report | tooling, no deploy | needs 3 |
+| 5 | Delete detection as convergence hygiene (design A) | SPI + consumer | **transport P0-3 (hard)** |
 
-Design sections are lettered A-E; sequencing steps are numbered. They deliberately do not
-correspond — the root fix (A) is the largest piece and lands last.
+Steps 1 and 2 are complete and independent; they remove no working control (see B and E)
+and do not wait on 3.
 
-Step 1 first because it stops permanent data loss and needs nothing. Steps 1 and 2 are
-independent of each other and of 3.
+Step 3 is the control that replaces the retired timestamp's identity role, and it is the
+only one that spans the whole window — it works today, survives LDAP retirement, and is
+moot only when X3 itself retires.
 
-**Withdrawn from the sequence** (superseded, see E): seeding `account_created_at`, the
-libkc ladder, the realm mapper, and the federation-retirement rung drop.
+Step 4 is what makes step 3 cover the existing population: without it every handle is
+trust-on-first-use, and the backlog stays claimable.
+
+Step 5 stops being a blocker. With identity enforced at point of use, a lost or delayed
+lifecycle event costs convergence, not safety.
+
+**Withdrawn** (superseded, see E): seeding `account_created_at`, the libkc ladder, the realm
+mapper, the federation-retirement rung drop. **Not adopted** (superseded, see F): shipping
+`4d29d8e` as the control, and any directory-based identity binding.
 
 ## Census tool — built, and outliving its original purpose
 
@@ -609,8 +726,36 @@ cross-path wire-TS equality test (design D).*
 
 **Open:**
 - **Does gate (c) retire?** Its own doc asked for "production confidence in A" (`8cf493c`,
-  2026-05-19). Four months have passed. This is an operator judgement — and design E's
-  simplification depends on it, so it is the highest-value open question here.
+  2026-05-19). Design E's simplification depends on it.
+
+  **Frequency measured 2026-09-22** from five months of production `ircd-user.log`
+  (2026-04-25 → 2026-09-22): the rebind path fired **four times total**.
+
+  ```
+  2026-6-4   ghost fc42     -> AbDMT on Aurora.AfterNET.Org
+  2026-7-1   ghost ibutsu   -> BFCrG on luna.AfterNET.Org
+  2026-9-2   ghost ibutsu   -> AbJ4k on Aurora.AfterNET.Org
+  2026-9-2   ghost princess -> AbJ69 on Aurora.AfterNET.Org
+  ```
+
+  So gate (c) fires *at most* four times per five months. Two consequences:
+
+  1. **Waiting for proof is impractical.** The gate-discriminating output is
+     `Debug((DEBUG_INFO, "...authorizing via account-TS match...")`, which lives only in
+     the ephemeral debug stream — `docker logs` covers only since container start. At this
+     event rate, proving "never fires" would take a year.
+  2. **The risk of retiring is rare and loud, not silent.** The failure mode is a refused
+     rebind, which produces the "Overruled by older nick" churn the 2026-05-19 doc was
+     filed about — already documented, with a known diagnosis. That is a defensible
+     deliberate risk.
+
+  **Recommended:** retire it without waiting, and separately make each rebind self-report
+  its gate. `log_write(LS_USER, L_TRACE, "Bouncer rebind: ghost %s rebound to remote
+  primary %s...")` at `bouncer_session.c:6098` already persists for months; the gate
+  variables (`origin_match` / `sessid_match` / `acc_ts_match`) are in a scoped block ~100
+  lines earlier and do not reach it. Hoist an `auth_via` string, set it in the three
+  branches, append it to that line. Five lines, no behaviour change — and it answers the
+  question for every rebind from then on, including any that follow the retirement.
 - **Two constants need values:** the journal retention period and the batch sanity limit N.
 - **Admin event retention is unset today and that is load-bearing.** Bed verified (KC
   26.4.7, no `adminEventsExpiration`, 7-week-old DELETEs still present); prod believed the
