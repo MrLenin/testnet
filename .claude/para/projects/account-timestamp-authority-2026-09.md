@@ -1,7 +1,9 @@
 # The account timestamp: a delete detector that was disabled mid-migration
 
 **Status:** design approved 2026-09-22, not yet implemented
-**Scope:** x3, nefarious libkc + SASL + webhook consumer, Keycloak realm + SPI, one-shot seeding tool
+**Scope:** x3 (`upstream/master`), nefarious bouncer + webhook consumer, Keycloak SPI.
+*Originally also libkc/SASL, the Keycloak realm mapper and a seeding migration — all
+withdrawn by design E.*
 
 ## Thesis
 
@@ -85,6 +87,8 @@ a second writer appeared.
   user-attribute map**, where it exists only because Keycloak's LDAP User Attribute Mapper
   puts it there. That mapper disappears with federation. `user->created_at` then becomes 0
   for everyone and `AC` stops carrying a timestamp (`sasl_auth.c:662` guards on it).
+  **Downgraded by design E:** once gate (c) retires, nothing reads the value, so this
+  becomes a harmless no-op rather than a scheduled failure.
 - `entryUUID` has the same expiry: X3's identity binding (`4d29d8e`) is built on an LDAP
   operational attribute and dies with LDAP.
 
@@ -310,7 +314,7 @@ in a plaintext header over HTTP, with no body HMAC, no timestamp, no nonce, and 
 With unregister as disposition it becomes **mass irreversible account destruction**.
 
 **Therefore the P0-3 fixes (body HMAC, replay protection, realm check, `vhost` honoured)
-are hard prerequisites for step 5, not hygiene.** UUID keying mitigates *replay* — a repeat
+are hard prerequisites for sequencing step 3, not hygiene.** UUID keying mitigates *replay* — a repeat
 DELETE for `U1` is idempotent — but not *forgery*, since an attacker who can mint requests
 can name any UUID they can learn.
 
@@ -355,7 +359,7 @@ directly. Same outcome. The detector is already defeated, so removing it opens n
 is not already open. (An earlier draft of this spec claimed the `entryUUID` gate was a
 prerequisite. It is not.)
 
-### C. The wire timestamp outlives X3
+### C. The wire timestamp outlives X3 — **SUPERSEDED by E**
 
 One consumer survives: the ircd's bouncer rebind gate (c) uses `acc_create` as a stable
 per-principal discriminator (`bouncer_session.c:5979`, documented at `:5953` as *"set by
@@ -392,7 +396,7 @@ write failed closed and took every OpServ grant to 0.
 Epoch seconds rather than generalized time: the value's semantic is `time_t`, which is what
 `acc_create` is and what `AC` carries as `%Tu`. `parse_ldap_time()` stays for rung 2.
 
-### D. New finding — the wire timestamp is inconsistent across auth paths
+### D. The wire timestamp is inconsistent across auth paths — **SUPERSEDED by E**
 
 X3 still stamps on its own auth paths: `cmd_auth` (`:2445`) and `loc_auth` (`:2656`) both
 call `set_user_handle_info(..., 1)`, and `StampUser()` (`hash.c:394`, via `nickserv.c:1116`)
@@ -405,24 +409,109 @@ everything else here, and as far as I can tell previously unnoticed.
 Resolution: one owner for the wire TS. Either X3 stamps the directory-derived value, or it
 stops stamping and the ircd owns it outright. The second is the direction of travel.
 
+### E. Supersession — the timestamp has no consumer
+
+*Added 2026-09-22, prompted by the question "upstream nef doesn't do anything with the
+timestamp, how can it?" Sections C and D are retained above for their reasoning but no
+longer describe work to be done.*
+
+**Upstream nefarious never consumes the value.** It has `acc_create`, and every use is
+parse, store, or propagate:
+
+```
+m_account.c:199,296,347   parse from AC
+m_account.c:364           ? "%C %s %Tu" : "%C %s"   <- presence check, formatting only
+s_auth.c:435,2337         set from SASL / iauth
+s_user.c:1762             parse from NICK burst
+s_user.c:1920-1926        if (acc_create) ... emit in burst
+```
+
+The only conditionals ask *is it set*, never *what is it*. That is correct by design: the
+timestamp's meaning was always X3's, and the ircd is a courier carrying services' value
+between services and other servers.
+
+**The fork has exactly one comparison, network-wide.** Full enumeration:
+
+| Category | Sites |
+|---|---|
+| Parse from wire | `m_account.c` x3, `s_user.c`, `s_auth.c` x2, `sasl_auth.c` |
+| Store / propagate | `m_account.c:512`, `s_user.c:1920-1926` |
+| Copy primary -> alias | `bouncer_session.c:7559, 8055, 8113` |
+| Persist / restore | `bsr_acc_create` x5, incl. record-version migration |
+| **Compare** | **`bouncer_session.c:5979-5980` — bouncer rebind gate (c). That is all.** |
+
+**And that consumer was already scheduled for deletion.**
+`bouncer-burst-rebind-sessid-gap.md` (2026-05-19) status line:
+
+> Both Options landed and committed. B (`219ab03`) as the receiver-side fallback; A
+> (`8cf493c`) as the principled sender-side fix. **Receiver-side `acc_ts_match` stays as
+> defense-in-depth until production confidence in A; demote/remove as a follow-up.**
+
+Gate (c) was always temporary, pending confidence in the sender-side sessid fix that
+shipped four months ago. `bounce_set_n_sessid_hint()` carries the same judgement in code:
+without it the gate *"fell back to acc_create_match — too coarse, can rebind unrelated
+non-bouncer connections that happen to share an account."*
+
+**So this is the same failure mode as the backfill itself: a deliberate interim measure
+whose planned terminus never arrived.** Two of them, stacked on the same value.
+
+#### Consequence
+
+Retire gate (c), and nothing anywhere reads the account timestamp. The ircd becomes what
+upstream already is — a pure courier. The following all become unnecessary:
+
+| Superseded | Why |
+|---|---|
+| Design C — `account_created_at` carrier attribute | no consumer to feed |
+| libkc fallback ladder (rungs 1-4) | nothing to supply |
+| Seeding migration | nothing to seed for |
+| Attribute written at account creation; realm protocol mapper | same |
+| Federation-retirement rung drop | moot |
+| `kc_keycloak.c:276` scheduled failure | harmless — `acc_create` becomes 0 and nobody reads it |
+| Design D — cross-path stamping inconsistency | moot — nothing compares the two values |
+
+The entire Keycloak-attribute workstream disappears. What remains is three pieces: retire
+the X3 detector, retire gate (c), build delete detection.
+
+#### Caveats
+
+- **Gate (c) is a security gate.** Retiring it needs its own verification that option A
+  covers the legacy-peer case where origin *also* mismatches — a legacy peer reintroducing
+  a user whose ghost was created on a different server carries neither `,S` nor a matching
+  origin. Whether four months of production constitutes the "confidence in A" the doc asked
+  for is an operator judgement, not something to assume.
+- **No wire change.** The ircd still parses and propagates the timestamp, as upstream does.
+  X3 keeps stamping whatever it holds. Nothing becomes incompatible.
+- **The census tool keeps its value.** Its seeding purpose evaporates, but its
+  stranded-handle enumeration feeds delete detection (A) and is worth running regardless.
+- **`bsr_acc_create` becomes vestigial** but should stay in the record format — removing a
+  field means another version migration for no benefit.
+
 ## Sequencing
+
+*Revised 2026-09-22 per design E: six steps down to three.*
 
 | # | Step | Where | Blocking |
 |---|---|---|---|
 | 1 | Retire the detector (design B): backfill, three rejects, detect-and-log | x3 `upstream/master` | none — ships now |
-| 2 | Seed `account_created_at` from prod `x3.db` (dry-run census first) | tooling, no deploy | none — inert |
-| 3 | libkc ladder (design C); `kc_user_create_full()` writes the attribute; realm mapper | nefarious + realm | none |
-| 4 | Resolve the stamping inconsistency (design D) | x3 + nefarious | none |
-| 5 | Delete detection (design A): KC `user_id` binding, SPI contract, local-only unregister, catch-up + sweep | SPI + consumer | **transport P0-3 (hard)** |
-| 6 | Federation retirement: rung 2 drops out | — | 2, 3 |
+| 2 | Retire bouncer rebind gate (c) `acc_ts_match` | nefarious | operator confidence in `8cf493c` |
+| 3 | Delete detection (design A): KC `user_id` binding, SPI contract, local-only unregister, catch-up + sweep | SPI + consumer | **transport P0-3 (hard)** |
 
-Design sections are lettered A-D; sequencing steps are numbered. They deliberately do not
+Design sections are lettered A-E; sequencing steps are numbered. They deliberately do not
 correspond — the root fix (A) is the largest piece and lands last.
 
-Step 1 first because it stops permanent data loss and needs nothing. Step 5 is the root fix
-and the largest piece; steps 1-4 do not wait on it.
+Step 1 first because it stops permanent data loss and needs nothing. Steps 1 and 2 are
+independent of each other and of 3.
 
-## Seeding tool (step 2)
+**Withdrawn from the sequence** (superseded, see E): seeding `account_created_at`, the
+libkc ladder, the realm mapper, and the federation-retirement rung drop.
+
+## Census tool — built, and outliving its original purpose
+
+*Seeding is withdrawn (design E). The tool was built before that was known, and its
+enumeration half remains useful: it is how stranded handles get counted ahead of delete
+detection. `x3/tools/x3-census/`, read-only. What follows documents both halves; the
+write path was never built and now should not be.*
 
 Input is a copy of prod `x3.db` (recdb text; in-container `/x3/data/x3.db`). `"register"` is
 `KEY_REGISTER_ON` (`nickserv.c:99`), epoch seconds — the value to seed.
@@ -432,6 +521,40 @@ Input is a copy of prod `x3.db` (recdb text; in-container `/x3/data/x3.db`). `"r
 
 1. **C dumper** linked against `recdb.c` → JSON `{handle, register, ldap_uuid?, opserv_level?}`.
 2. **Python driver** for the Keycloak side.
+
+**TRAP — the dumper must call `tools_init()` first.** `irccasecmp()` folds through a
+`static char irc_tolower[256]` (`tools.c:356`) that `tools_init()` populates. Uninitialised
+it maps every byte to `'\0'`, so every dict key compares equal and **the parsed database
+silently collapses to a single entry**. No error, no warning — just a confident, wrong
+answer. Verified the hard way 2026-09-22: 25 handles came back as 1. Link
+`recdb.c dict-splay.c tools.c`, stub `MAIN_LOG`, `log_module`, `lang_C`,
+`hidden_host_suffix`, `GetChannel`, `language_find_message`, and call `tools_init()` before
+`parse_database()`.
+
+**Seeding must refuse on UUID mismatch.** Where X3 has a stored `ldap_uuid` that disagrees
+with the KC user's `LDAP_ID`, the name was taken by a different principal. Seeding would
+stamp the *old* principal's registration date onto the *new* principal's account. Such rows
+are reported and skipped, never written — they are disposal candidates, not seed candidates.
+
+**The ambiguity prod cannot resolve.** Two cases present identically as "saxdb differs from
+the directory":
+
+| Case | Truth | Correct action |
+|---|---|---|
+| (a) | same principal, directory entry recreated (restore, migration) | seed — preserves the original date |
+| (b) | a different principal took the name | do not seed — dispose |
+
+Only the stored `ldap_uuid` separates them, and **prod has none**. Observed live on the bed
+2026-09-22, where both appeared in one run: `idbibyxyq` (saxdb 02:33:32 vs directory
+02:33:34, UUIDs differ — case b) alongside `testuser` (saxdb 08-06 vs directory 08-30, no
+conflict — case a).
+
+So the tool **must not auto-resolve the differing set**. Seed the unambiguous rows — where
+saxdb already agrees with the directory — and emit every differing row as an explicit
+review list. Run the census on prod before deciding a policy for it: if the set is small,
+review by hand; if large, it needs a ruling. Note that case (b) handles are already
+compromised, so a wrong timestamp on one is marginal next to the harm already done —
+this is a question of not compounding it silently.
 
 **Join on username only** — prod has no `ldap_uuid` values at all. Where one *is* present
 (bed), assert it against the KC user's `LDAP_ID` and hard-fail that row on mismatch.
@@ -449,42 +572,68 @@ the latent-takeover class, enumerated as a side effect.
 
 ## Testing
 
-**CMocka first for the ladder** — self-contained C in libkc: a test per rung, exhaustion,
-both format parsers. Gates the image.
+**Step 1 — retire the X3 detector** (Vitest E2E; X3 has no CMocka, only legacy
+`test-driver.pl`):
+- dormant-account path: saxdb value differs from the directory -> binds successfully **and
+  keeps its value**. Covers both failure modes at once — the silent overwrite and the bind
+  refusal. Create the divergence by backdating saxdb, not by recreating the directory
+  entry, so the test exercises the dormant case rather than name reuse.
+- a freshly registered account, whose saxdb agrees with the directory, logs nothing.
 
-**Vitest E2E:**
-- wire `acc_create` matches the seeded value; stable across re-auth **and across a
-  deliberate `createTimestamp` change on the LDAP entry** — the regression that started this
-- dormant-account path: saxdb value differs from LDAP → binds successfully, keeps its value
-- same account via `cmd_auth` and via SASL → identical wire TS (design D)
-- held-session reconnect: bouncer gate (c) still authorises
-- delete detection: KC-side delete → handle disposed; a subsequent registration of the same
-  name does **not** inherit access
-- **durability**: stop the consumer, delete an account, restart → catch-up disposes it
+**Step 2 — retire gate (c)**:
+- a leaf re-linking during burst, carrying a user whose account matches a held ghost,
+  rebinds via `,S` sessid match with no kill and no broadcast — the case `8cf493c` was
+  written for, now load-bearing rather than belt-and-braces.
+- the negative that gate (c) used to permit: two unrelated non-bouncer connections sharing
+  an account must **not** rebind onto each other's ghost. This is the coarseness the sessid
+  hint comment warns about, and removing (c) should make it impossible rather than merely
+  unlikely.
+- a legacy peer (no `,S`) reintroducing a user whose ghost was created on **another**
+  server: document what happens. This is the case with neither (a) nor (b), and retiring
+  (c) changes its outcome. If the refusal is unacceptable, (c) cannot retire yet.
+
+**Step 3 — delete detection**:
+- KC-side delete -> handle disposed; a subsequent registration of the same name does **not**
+  inherit access
+- **durability**: stop the consumer, delete an account, restart -> catch-up disposes it
 - **delete-then-recreate during downtime**: consumer down, account deleted and re-created,
-  restart → the NEW account survives untouched and only the old binding is disposed
+  restart -> the NEW account survives untouched and only the old binding is disposed
 - cold start with no watermark does not replay history
+- journal: a disposed handle is recoverable within the retention window
+- batch limit: a run exceeding N halts and alerts instead of proceeding
 
-X3 has no CMocka (only legacy `test-driver.pl`), so the X3 half is gated by Vitest E2E.
+*Withdrawn with design C: the CMocka ladder suite, the seeded-value assertions, and the
+cross-path wire-TS equality test (design D).*
 
 ## Residue and open questions
 
+**Open:**
+- **Does gate (c) retire?** Its own doc asked for "production confidence in A" (`8cf493c`,
+  2026-05-19). Four months have passed. This is an operator judgement — and design E's
+  simplification depends on it, so it is the highest-value open question here.
+- **Two constants need values:** the journal retention period and the batch sanity limit N.
 - **Admin event retention is unset today and that is load-bearing.** Bed verified (KC
   26.4.7, no `adminEventsExpiration`, 7-week-old DELETEs still present); prod believed the
-  same. The store therefore grows unbounded, so someone will eventually set an expiration —
-  the sweep exists to survive that.
-- **Two constants need values:** the journal retention period and the batch sanity limit N.
-- **Disposition RULED: unregister** (user, 2026-09-22), with journal-before-unregister and
-  a batch sanity limit both ruled in. Requires a local-only variant that skips
-  `ldap_delete_account()`, and promotes the P0-3 transport fixes to hard prerequisites.
+  same. The store grows unbounded, so someone will eventually set an expiration — the sweep
+  exists to survive that.
 - **Is shipping `4d29d8e` upstream still worth it?** Clean cherry-pick, closes a live prod
   hole now — but it is built on `entryUUID` (dies with LDAP) inside X3 (being retired), and
-  step 5 supersedes it. Interim value against short half-life.
-- **Pre-03-12 dates are unrecoverable** for the cohort that authenticated since. Intended.
+  delete detection supersedes it. Interim value against short half-life.
 - **`d598377` (`X3AccountLevel` schema) is also absent from prod** — separate subject, same
   five-month gap.
-- Rung 3 is wrong for the federated cohort and right for KC-native accounts. Accepted: it is
-  a last-resort rung behind two better ones.
+
+**Ruled:**
+- **Disposition: unregister** (user, 2026-09-22), with journal-before-unregister and a batch
+  sanity limit both ruled in. Requires a local-only variant that skips
+  `ldap_delete_account()`, and promotes the P0-3 transport fixes to hard prerequisites.
+- **Freeze, do not restore.** Pre-03-12 dates are unrecoverable for the cohort that
+  authenticated since. Intended, not an oversight.
+
+**Closed by design E** (kept so the reasoning is not rediscovered):
+- ~~Policy for the ambiguous seeding set~~ — seeding withdrawn; nothing to seed.
+- ~~Rung 3 is wrong for the federated cohort~~ — no ladder.
+- ~~Which value X3 stamps, given it cannot stop stamping~~ (design D) — nothing compares
+  the values, so inconsistency is harmless.
 
 ## Related
 
