@@ -410,3 +410,68 @@ rediscovered and mistaken for live work.
 
 **This plan is unaffected by the restructure.** Step 1 was always independent, needs no
 prerequisite, and stops permanent data loss on its own.
+
+---
+
+## Execution notes — 2026-09-22
+
+**Executed to completion.** x3 `fix/retire-timestamp-detector` @ `5c180de` (off
+`upstream/master` `5d7fadb`); test committed to testnet as `ea195b33`. Not pushed.
+
+Verified on the bed, against a handle backdated to 2024-01-01 authenticating by SASL:
+
+```
+before: wire timestamp 1790091648 matches LDAP, correcting saxdb from 1704067200
+after:  wire timestamp 1790091934 differs from saxdb 1704067200
+        (registration date preserved; binding)
+```
+
+Constraints held: `hi->registered` assignments 6 → 4 (register x2, saxdb loader,
+autocreate); zero `return;` in the divergence block; `ldap_get_user_create_time()` 3 call
+sites → 2.
+
+### What this plan got wrong
+
+Four errors, all in the test, all found by running it. Recorded because the same mistakes
+are available to the next person.
+
+1. **The test authenticated through the wrong path — the serious one.** It used
+   `AuthServ AUTH`, which goes `cmd_auth` → `StampUser()` and makes X3 the *sender* of the
+   timestamp. `handle_account()` is the AC-*receiver* path and never ran. **The test passed
+   against unfixed code**, with `"correcting saxdb"` appearing zero times. It must
+   authenticate by SASL, so the ircd stamps from Keycloak and X3 receives it. This was
+   written into a plan whose own prose describes that exact distinction three sections
+   earlier.
+
+2. **`registerAndActivate()` hangs.** E-mail verification is off on this bed, so REGISTER
+   completes immediately and no activation cookie is ever issued. Use `registerAccount()`.
+
+3. **Shutdown does not flush saxdb.** The plan assumed `docker stop` persists. X3 does
+   handle SIGTERM (`ioset.c` `do_exit` → `saxdb_write_all`), but docker's 10s timeout
+   expires during the squit and the container dies on SIGKILL (exit 137) first. Use
+   **SIGQUIT** (`main.c` `sigaction_writedb`), and wait — the handler only sets a flag that
+   the main loop picks up after `engine->loop()` returns, observed ~20s later. `O3 WRITE`
+   is not an alternative: `cmd_write` skips any db with a `mondo_section`, and this bed
+   keeps every section in one `x3.db`.
+
+4. **`ACCOUNTINFO <name>` resolves a nick, not an account** ("User with nick ... does not
+   exist"). Call it with no argument; `cmd_handleinfo` falls back to the caller's handle.
+   Its date comes from `ctime()` with no timezone, so append the container's UTC before
+   parsing or the host's offset silently shifts the result.
+
+### The suite does not pass on production's base
+
+Pre-existing failures on `upstream/master`, **confirmed by A/B against the unfixed parent
+commit with identical counts** — not caused by this change:
+
+| Suite | Result on this base |
+|---|---|
+| `authserv.test.ts` | 5 failed / 9 passed (all timeouts) |
+| `opserv.test.ts` | 2 failed / 11 passed (GLINE/UNGLINE, force-join) |
+| `chanserv.test.ts` | 12 failed / 2 passed (cascade from channel registration) |
+| `ldap-identity-binding.test.ts` | 1 failed / 1 passed — **expected**: `4d29d8e` is not on this base |
+
+19 failures across three suites. The bed's tests assume the fork branch; production's X3 is
+five months behind it. Anyone testing an upstream-targeted change here needs the A/B
+against the parent commit to tell signal from background, which is cheap: detach to
+`HEAD~1`, rebuild, run, compare counts.
