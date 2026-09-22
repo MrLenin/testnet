@@ -596,3 +596,40 @@ root loads **no config** — no `setupFiles`, so the account pool never initiali
 registers nothing. Every authenticating test then fails with "SASL authentication failed
 (bad credentials)" against an account that never existed. Use
 `cd tests && IRC_HOST=localhost npm test -- src/...`, exactly as CLAUDE.md says.
+
+### Correction and re-verification — 2026-09-22 (later)
+
+**The runs above were not what they claimed.** `nefarious2` ran a binary from the previous
+evening throughout: its container started `2026-09-21 23:14` and never picked up either
+commit. `scripts/dc.sh -l up -d` does not include nefarious2 — `-l` had been an inert flag
+since `a7245017` retired the libkc overlay it used to add (fixed in `88d75803`). So every
+cross-server result above came from a **mixed fleet**: nefarious on the change, nefarious2
+on the old gate, which still had the account-TS arm.
+
+**Re-run with both servers genuinely on `95e61e3`** (nefarious2 recreated via the fixed
+script, `authorized via` confirmed in both binaries):
+
+| Suite | Result |
+|---|---|
+| multi-attach (4) | pass |
+| cross-server-roundtrip | pass |
+| stale-replica | pass |
+| cross-server-rebind | **failed once, then passed alone** — see below |
+| hold-lifecycle (2 of them) | fail — **a test bug, not a code bug** — see below |
+
+**cross-server-rebind:** failed (`expected 'holding' to be 'active'`) in a run during which
+I had mistakenly started a second `npm test` against the same bed. Re-run alone, it passes.
+The logs are decisive regardless: across both servers there were **zero** `bounce_rebind`
+authorizations or refusals during the failing run, so the gate was never consulted.
+Lesson: global setup/teardown are not safe to run twice concurrently against one bed.
+
+**hold-lifecycle's two "pre-existing" failures are a test time-bomb.** Both assert
+`expected 'AaDK…' to match /^AZ[A-Za-z0-9]+/`. Session ids are UUIDv7, whose leading
+characters encode the timestamp; ids minted before roughly late August start `AZ`, later
+ones start `Aa` (compare `AZ7RzhRLcaSl5PLPNJ9eMw` from July with `AaBf1yWMcaS1WsBflCu7IQ`
+from 2 September). The test hard-coded the prefix of the week it was written, which is
+why the A/B against the parent commit was identical. Fix the regex; the code is fine.
+
+**Still open:** no test in the bed reaches `bounce_rebind_ghost_to_remote_primary()`, and
+`nefarious-crdt` carries the same gate (3 × `acc_ts_match`), which this change does not
+touch.

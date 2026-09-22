@@ -475,3 +475,39 @@ commit with identical counts** — not caused by this change:
 five months behind it. Anyone testing an upstream-targeted change here needs the A/B
 against the parent commit to tell signal from background, which is cheap: detach to
 `HEAD~1`, rebuild, run, compare counts.
+
+### RETRACTION — the "19 pre-existing failures" figure was wrong
+
+Measured with a broken invocation. `vitest.config.ts` lives in **`tests/`**, not the repo
+root, so `npx vitest run tests/src/...` from the root loads **no config**: no `setupFiles`,
+so `initializeAccountPool()` never runs, so `getTestAccount()` falls through to
+`createTestAccount()` — which **only generates a name and registers nothing**. Every test
+that authenticates then fails with "SASL authentication failed (bad credentials)" against
+an account that was never created. Timeouts are unconfigured too.
+
+Correct invocation, which is what CLAUDE.md specifies:
+
+```sh
+cd tests && IRC_HOST=localhost npm test -- src/services/authserv.test.ts
+```
+
+Run that way, `authserv.test.ts` is **14/14 green**.
+
+The A/B comparisons remain internally valid — the same wrong invocation on both sides, so
+"not caused by this change" still holds. But the absolute counts are meaningless, and
+whether the suites pass on prod's `upstream/master` base is now **unmeasured**.
+
+**Re-run correctly, 2026-09-22 — the branch IS verified, and the result is better than the
+original claim.** x3 built from `fix/retire-timestamp-detector` (upstream/master base),
+every command issued from `tests/`:
+
+| Suite | Result |
+|---|---|
+| `account-timestamp.test.ts` | **2/2 pass** with the fix; the date assertion **fails without it** — clean red/green |
+| `authserv` + `opserv` + `chanserv` | **40 passed, 0 failed** |
+| `ldap-identity-binding.test.ts` | 2 failed — **expected**, `4d29d8e` is not on this base |
+
+So the earlier "19 pre-existing failures on prod's base" was entirely an artifact of the
+broken invocation. The service suites pass cleanly on production's X3 base. The only real
+failures are the two `ldap-identity-binding` cases, which test a commit that base does not
+contain.
