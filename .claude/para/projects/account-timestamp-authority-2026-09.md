@@ -627,6 +627,15 @@ and X3 is upgraded.
 worked example — gets a new id and is locked out of its own handle permanently. F needs an
 oper command to clear or re-bind a handle's stored id.
 
+**4. Rolling X3 back past F erases every binding** (found 2026-09-22 on the bed). saxdb
+writes back only the keys the running X3 recognises. The bed ran an upstream-based X3
+without `ldap_uuid` support for a few hours, and its first flush silently erased all 19
+stored identity bindings. F's stored Keycloak id is exposed the same way: roll X3 back to
+any build without it, and on the next write every handle reverts to trust-on-first-use,
+which reopens the takeover window network-wide with no error anywhere. Deployment has to
+treat that as a known hazard. Recovery exists: the census's `--map-out` re-derives
+handle -> Keycloak id from the live realm, so the seed can be re-run after a rollback.
+
 **What section H changes for F:** if X3's own AUTH is restricted at retirement, every
 password login arrives through the ircd's Keycloak SASL and always carries an id. The only
 logins without one are then certificate break-glass through X3 (section J), which never

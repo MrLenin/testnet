@@ -301,6 +301,8 @@ async function cleanup(): Promise<void> {
     // Search patterns cover all test account prefixes used in the test suite
     const ACCOUNT_SEARCH_PATTERNS = [
       'test*',       // test[hex] from createTestAccount
+      'tsdrift*',    // account-timestamp.test.ts (backdated registration dates)
+      'idb*',        // ldap-identity-binding.test.ts (delete-and-recreate legs)
       'bisync*',     // bisync, bisyncadd, bisyncclvl, bisyncdel
       'bisown*',     // keycloak owner accounts
       'kcauto*',     // keycloak autocreate tests
