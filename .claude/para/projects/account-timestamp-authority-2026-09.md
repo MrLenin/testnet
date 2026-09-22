@@ -1,6 +1,6 @@
 # The account timestamp: a delete detector that was disabled mid-migration
 
-**Status:** design approved 2026-09-22, not yet implemented
+**Status (2026-09-22, evening):** sequencing steps 1-2 implemented, verified, **unpushed** (x3 `cfe7d8a`; nefarious `396c423` + `95e61e3`). Designs F and G amended after review (below). Sections H-K added: X3 after LDAP, the saxdb hash, break-glass accounts, and a standalone `cmd_auth` bug.
 **Scope:** x3 (`upstream/master`), nefarious bouncer + webhook consumer, Keycloak SPI.
 *Originally also libkc/SASL, the Keycloak realm mapper and a seeding migration — all
 withdrawn by design E.*
@@ -464,7 +464,7 @@ whose planned terminus never arrived.** Two of them, stacked on the same value.
 
 #### Consequence
 
-Retire gate (c), and nothing anywhere reads the account timestamp. The ircd becomes what
+Retire gate (c), and nothing reads the account timestamp **on an LDAP deployment**. (Amended: step 1 deliberately keeps X3's no-LDAP reject, where the timestamp is still a working delete detector — see B. So on deployments without LDAP it has one consumer, by design.) The ircd becomes what
 upstream already is — a pure courier. The following all become unnecessary:
 
 | Superseded | Why |
@@ -594,6 +594,44 @@ lookups (`u["id"]`), rather than the `LDAP_ID` attribute.
 - **Fail-open on absent identity** stays the rule, per the ratified ruling and the
   `ldap_field_oslevel` precedent. Mismatch fails closed.
 
+#### Review corrections to F (2026-09-22)
+
+Three holes, found on review. The design stands; its cost and its preconditions change.
+
+**1. F survives LDAP retirement only if federated users are *unlinked*, not deleted.** This
+is a hard requirement on the retirement procedure, not a detail. Deleting a Keycloak
+federation provider deletes the users it imported; recreating them mints **new** Keycloak
+ids. With mismatch failing closed, that is a network-wide lockout on the day LDAP goes.
+Keycloak's "Unlink users" converts federated users to local ones and preserves their ids.
+Verify on a copy of the realm before relying on it.
+
+**2. It is not cheap.** Servers drop fields they do not recognise when relaying:
+`m_account.c:512` re-emits only `%C %s %Tu`. So "backward compatible" is true only in the
+weak sense that old servers do not break — they silently strip the id. Every server must:
+
+| Change | Site |
+|---|---|
+| store it | new `struct User` field |
+| set it on SASL success | every mechanism callback in `sasl_auth.c` |
+| parse it from `AC` and `+r` | `m_account.c`, `s_user.c:2596` |
+| relay it | `m_account.c:512` |
+| re-emit it in burst | `umode_str()`, `s_user.c:2771` |
+| copy it primary -> alias | `bouncer_session.c:7559, 8055, 8113` |
+| persist it | bouncer records — a new `bsr` version |
+| carry it across the gateway | `nefarious-crdt` |
+
+On a mixed fleet, protection holds only where every hop between the authenticating server
+and X3 is upgraded.
+
+**3. No re-bind path.** A legitimately recreated account — the `ibutsu` LDAP restore is the
+worked example — gets a new id and is locked out of its own handle permanently. F needs an
+oper command to clear or re-bind a handle's stored id.
+
+**What section H changes for F:** if X3's own AUTH is restricted at retirement, every
+password login arrives through the ircd's Keycloak SASL and always carries an id. The only
+logins without one are then certificate break-glass through X3 (section J), which never
+bind from the wire in the first place.
+
 ### G. X3 cannot be told; it must ask — pull, not push
 
 *Added 2026-09-22. Resolves the question design F leaves open: identity binding stops the
@@ -671,29 +709,150 @@ the mechanism.
   refuse; the remedy is operator correction, not a permissive gate. Absent identity still
   fails open, per the ratified rule.
 
+#### Review corrections to G (2026-09-22)
+
+**The ircd does not answer XQUERY.** `ms_xquery()` addressed to the ircd itself logs
+"Received extension query" and returns; it only *routes* queries onward. The existing
+mechanism carries queries *to* services (iauth asking X3 for login-on-connect), not from
+them. So G needs a new ircd-side responder — dispatch on the query, an asynchronous Keycloak
+admin-events call, an `XREPLY` — as well as the X3 side. Roughly double what was claimed.
+
+Unverified, and needed before G is planned:
+- whether the ircd's Keycloak client holds the `view-events` role
+- the granularity of `dateFrom`. If it is day-granular, each poll re-fetches the day and
+  relies on disposal being idempotent (it is, keyed by UUID).
+
+### H. X3 after LDAP retirement
+
+**Direction (user, 2026-09-22 — "likely"): LDAP retirement will restrict X3's auth
+commands.** X3 will have nothing current to check credentials against, so it should stop
+checking them.
+
+**Prerequisite — `PASS` login must move to the ircd first.** Clients that log in with
+`PASS` rather than SASL are verified by X3 today: `m_pass.c:164` routes login-on-connect to
+`FEAT_LOC_DEFAULT_SERVICE`, and `s_auth.c` waits for X3's reply. The ircd has no Keycloak
+path of its own for it; `kc_user_verify_password` is called only from SASL PLAIN
+(`sasl_auth.c:921`). Restricting X3's auth without this strands every non-SASL client. The
+fix is small because the function exists.
+
+**Open — the account-changing commands.** REGISTER, RENAME, UNREGISTER, password change,
+SET EMAIL and OpServ ACCESS all write LDAP too. Registration already has a replacement in
+the ircd's native `/REGISTER`. The one to flag is **oper level**: OpServ ACCESS writes
+`X3AccountLevel` to LDAP, so after retirement oper levels freeze in saxdb unless they move.
+
+### I. What the saxdb password hash actually is
+
+Established 2026-09-22 against code and the bed. An earlier claim in this document — that
+"old passwords would keep working through AuthServ" — was overstated; this is the precise
+version.
+
+- **X3 writes the same hash to LDAP and to saxdb** at registration: `nickserv_register()`
+  calls `cryptpass()` once and passes the result to both `ldap_do_add()` and
+  `register_handle()`. `cmd_auth` also rewrites it on success (`:2562`).
+- **It is unsalted md5 of the real password.** `md5('Stable1!pass')` =
+  `f756d4300df319edd76342c183c63f7e`, the stored `passwd` of four bed handles. A production
+  `x3.db` is therefore secret material — including the copy made for the census.
+- **It is never consulted while `ldap_enable` is on.** `ldap_check_auth()` is a bare bind as
+  `uid=<account>`, and OpenLDAP returns `Invalid credentials (49)` for a DN that does not
+  exist. `cmd_auth` treats that as a wrong password and never falls back; any other LDAP
+  error returns at `:2454`. `loc_auth` guards `checkpass()` with `!ldap_enable`.
+- **Blank means X3 never saw the password.** Autocreate registers with `passwd` NULL; an
+  unredeemed email-activation cookie blanks it (`:1290`). It is never an LDAP failure: a
+  failed `ldap_do_add()` returns before any handle exists (`:1172`).
+- **So legacy non-LDAP accounts already cannot log in on an LDAP-enabled deployment**, and
+  have not since LDAP was enabled: AuthServ gets `Invalid credentials`, and there is no
+  Keycloak account for SASL.
+- **The hash matters only if `ldap_enable` is turned off.** Then `checkpass()` revives every
+  X3-held hash, including passwords since changed in Keycloak. Section J avoids ever doing
+  that.
+
+**Census consequence.** For a handle with no Keycloak user:
+
+| saxdb `passwd` | Meaning | Treatment |
+|---|---|---|
+| blank | created from the directory, since deleted | dispose |
+| hash | break-glass, or deleted — indistinguishable | hold; never dispose blindly |
+
+### J. Break-glass accounts
+
+**Purpose (user):** pure non-LDAP accounts exist only as a way to use X3 when LDAP or
+Keycloak is down. Per the user there should be none besides, perhaps, an admin account —
+whether production has one is unknown here (the user does not run production X3).
+
+**Rulings (user, 2026-09-22):**
+- **Do not create them in Keycloak.** A break-glass account that depends on the thing it
+  exists to survive defeats its purpose.
+- **They should use a certificate.** Certificate fingerprints live in saxdb, so they never
+  involved LDAP. That means break-glass needs **no `ldap_enable` flip and no password**, and
+  the stale-hash exposure in section I never arises.
+
+**Requirements:**
+1. **A new handle flag — working name `LOCAL` — meaning *never bind this handle from the
+   wire*.** The name is still free in Keycloak, and self-registration is on
+   (`registrationAllowed: true` on the bed realm), so a self-registered user of that name
+   would otherwise be bound to it by SASL: today through the "correcting saxdb" branch,
+   under F through adopt-on-first-use. `handle_account` must refuse a `LOCAL` handle, and F
+   must never adopt one. No existing flag fits: `SUSPENDED` also makes `cmd_auth` refuse the
+   handle, and `FROZEN` restricts changes, not logins.
+2. **`NODELETE`** (existing, `0x80`). A break-glass handle will always show "no Keycloak
+   user", so every disposal path must skip it.
+3. **Certificate only, blank password.**
+
+It depends on section K for the AuthServ path.
+
+**The census already surfaces a candidate:** it prints `opserv_level` beside every handle
+with no Keycloak user. One with an oper level is the first thing to look at on production.
+
+### K. A standalone bug: `cmd_auth` refuses certificate users when LDAP is down
+
+`loc_auth` asks LDAP only if a password was supplied (`ldap_enable && (password != NULL)`),
+so a certificate login never touches LDAP. `cmd_auth` asks LDAP unconditionally and returns
+on any LDAP error at `:2454` — **before** its fingerprint check at `:2509`. So through
+`/msg AuthServ AUTH`, a certificate user is locked out during an LDAP outage, although the
+credential never involved LDAP. The same user gets in through X3's SASL handler
+(EXTERNAL `:5876`, PLAIN `:5935`) or `PASS` login.
+
+It is an ordering accident, not a design decision:
+
+| When | Commit | Effect |
+|---|---|---|
+| 2009-07-17 | `393a3e56` jobe1986 | LDAP added to `cmd_auth`; refuse on any LDAP error. No certificate auth existed yet. |
+| 2014-01-26 | `779da1ca` Matthew Beeching | SASL EXTERNAL; wrote `loc_auth`'s `password != NULL` guard. Certificates designed in. |
+| 2014-06-29 | `8e34267c` Matthew Beeching | fingerprint added to `cmd_auth` **after** the 2009 gate, to forgive a weak password |
+
+Fix: check the fingerprint before the LDAP gate and skip the hard failure when it matches,
+as `loc_auth` does. It is a separate subject from everything else here and a clean small
+upstream PR on its own.
+
 ## Sequencing
 
-*Revised 2026-09-22 per designs F and G.*
+*Revised 2026-09-22 (evening) after review; adds sections H-K.*
 
-| # | Step | Where | Status |
+| # | Step | Where | Status / needs |
 |---|---|---|---|
-| 1 | Retire the LDAP backfill (design B) | x3 `upstream/master` | **done** — `cfe7d8a`, unpushed |
-| 2 | Retire bouncer rebind gate (c) (design E) | nefarious | **done** — `396c423` + `95e61e3`, unpushed |
-| 3 | Wire-carried Keycloak identity (design F) | nefarious + x3 | next — no prerequisite |
-| 4 | Seed stored identity; stranded-handle report | tooling, no deploy | needs 3 |
-| 5 | `XQUERY` deletion poll on link + sweep (design G, layers 2-3) | nefarious + x3 | needs 3 |
-| 6 | Live delivery (design G layer 1) | SPI + consumer | **transport P0-3 (hard)** |
+| 1 | Retire the LDAP backfill (B) | x3 | **done** — `cfe7d8a`, unpushed |
+| 2 | Retire bouncer rebind gate (c) (E) | nefarious | **done** — `396c423` + `95e61e3`, unpushed; `nefarious-crdt` not addressed |
+| 3 | Fix `cmd_auth` certificate lockout (K) | x3 | independent — a standalone upstream PR |
+| 4 | `LOCAL` flag; `NODELETE` on break-glass handles (J) | x3 | independent; **must precede 5** |
+| 5 | Wire-carried Keycloak identity (F), plus an oper re-bind command | nefarious + x3 | needs 4 |
+| 6 | Seed stored identity; refreshed census | tooling | needs 5 |
+| 7 | `XQUERY` poll on link + sweep (G, layers 2-3) | nefarious + x3 | needs 5; new ircd-side responder |
+| 8 | Live delivery (G, layer 1) | SPI + consumer | **transport P0-3 (hard)** |
+| 9 | ircd verifies `PASS` login itself (H) | nefarious | independent; **must precede 10** |
+| 10 | Restrict X3's auth commands (H) | x3 | needs 3, 4, 9, and a ruling on the account-changing commands |
+| 11 | Retire LDAP — **unlink** federated users, never delete them | operations | needs 10; verify on a realm copy first |
 
-Steps 1 and 2 are complete, independent, and remove no working control (see B and E).
+**PR gating (user, 2026-09-22):** step 1's upstream PR waits until the new detector — step 5
+— is ready, although step 1 removes no working control (see B). Step 2 is fork-only.
 
-Step 3 is the control: it replaces the retired timestamp's identity role and spans the
-whole window — works today, survives LDAP retirement, moot only when X3 retires.
+**Why 4 precedes 5.** F adopts a handle on first use when it has no stored id. A
+break-glass handle never has one, so without `LOCAL` the first person to self-register its
+name in Keycloak would be adopted onto it — F would make the break-glass takeover
+permanent rather than merely possible.
 
-Step 4 makes step 3 cover the existing population. Without it every handle is
-trust-on-first-use and the backlog stays claimable.
-
-Step 5 is what actually converges a deletion, and it is the durable half. Step 6 only makes
-convergence faster.
+**Why 11 is last and has a hard precondition.** Deleting the federation provider deletes the
+users it imported, and recreating them mints new ids. Under step 5, with mismatch failing
+closed, that locks out the whole network on the day LDAP goes.
 
 **Withdrawn** (see E): seeding `account_created_at`, the libkc ladder, the realm mapper,
 the federation-retirement rung drop. **Not adopted** (see F): shipping `4d29d8e`, and any
@@ -801,9 +960,50 @@ cross-path wire-TS equality test (design D).*
 
 ## Residue and open questions
 
-**Open:**
-- **Does gate (c) retire?** Its own doc asked for "production confidence in A" (`8cf493c`,
-  2026-05-19). Design E's simplification depends on it.
+*Reorganised 2026-09-22 (evening) after review.*
+
+### Open — needs a decision
+
+- **The account-changing commands at LDAP retirement** (H): REGISTER, RENAME, UNREGISTER,
+  password change, SET EMAIL, OpServ ACCESS. Oper level is the one that freezes silently.
+- **Two constants for disposal:** the journal retention period and the batch sanity limit N.
+
+### Open — needs checking
+
+- **Does production have a break-glass account, and is its name free in Keycloak?**
+  Unknown here; for rubin. The census flags candidates: a handle with no Keycloak user and
+  an oper level.
+- **The unlink procedure** (F): confirm on a realm copy that "Unlink users" preserves
+  Keycloak ids before LDAP retirement relies on it.
+- **The ircd's Keycloak client and `view-events`**, and **`dateFrom` granularity** (G).
+- **Admin event retention is unset today and that is load-bearing.** Bed verified (KC
+  26.4.7, no `adminEventsExpiration`, seven-week-old DELETEs still present); production
+  believed the same. The store grows unbounded, so someone will eventually set an
+  expiration — the sweep exists to survive that.
+
+### Open — known gaps in finished work
+
+- **`nefarious-crdt` carries the same rebind gate** (3 x `acc_ts_match`); step 2 does not
+  touch it.
+- **No bed test reaches `bounce_rebind_ghost_to_remote_primary()`.** Every bouncer suite
+  exercises continuity through the alias path. The one scenario step 2 changes — a legacy
+  peer without `,S` reintroducing a user whose ghost lives on another server — could be
+  reproduced with the bed's legacy slot and has not been tried.
+- **Step 1's test cannot tell old code from new on its first assertion** (both bind); only
+  the date assertion discriminates. The removed-rejects half is untested.
+- **`bouncer-hold-lifecycle` has a test time-bomb:** two assertions hard-code a UUIDv7
+  prefix (`/^AZ.../`) that stopped matching when the clock moved on (ids now start `Aa`).
+  Fix the regex.
+- **The census tool needs a refresh before production use:** its headline rows describe the
+  withdrawn `account_created_at` seed; it takes the admin password on the command line; its
+  Python join uses `.lower()` rather than X3's RFC 1459 fold; and it should report the
+  blank-vs-hash split from section I and the Keycloak id for seeding.
+- **`d598377` (`X3AccountLevel` schema) is absent from production** — separate subject,
+  same five-month gap.
+
+### Resolved
+
+- **Gate (c) retired** (step 2, user). The evidence that made it a defensible call:
 
   **Frequency measured 2026-09-22** from five months of production `ircd-user.log`
   (2026-04-25 → 2026-09-22): the rebind path fired **four times total**.
@@ -833,29 +1033,24 @@ cross-path wire-TS equality test (design D).*
   lines earlier and do not reach it. Hoist an `auth_via` string, set it in the three
   branches, append it to that line. Five lines, no behaviour change — and it answers the
   question for every rebind from then on, including any that follow the retirement.
-- **Two constants need values:** the journal retention period and the batch sanity limit N.
-- **Admin event retention is unset today and that is load-bearing.** Bed verified (KC
-  26.4.7, no `adminEventsExpiration`, 7-week-old DELETEs still present); prod believed the
-  same. The store grows unbounded, so someone will eventually set an expiration — the sweep
-  exists to survive that.
-- **Is shipping `4d29d8e` upstream still worth it?** Clean cherry-pick, closes a live prod
-  hole now — but it is built on `entryUUID` (dies with LDAP) inside X3 (being retired), and
-  delete detection supersedes it. Interim value against short half-life.
-- **`d598377` (`X3AccountLevel` schema) is also absent from prod** — separate subject, same
-  five-month gap.
 
-**Ruled:**
-- **Disposition: unregister** (user, 2026-09-22), with journal-before-unregister and a batch
-  sanity limit both ruled in. Requires a local-only variant that skips
-  `ldap_delete_account()`, and promotes the P0-3 transport fixes to hard prerequisites.
-- **Freeze, do not restore.** Pre-03-12 dates are unrecoverable for the cohort that
-  authenticated since. Intended, not an oversight.
+- **`4d29d8e` will not be shipped** — superseded by F, which does not expire with LDAP.
+- **Disposition is unregister** (user), with journal-before-unregister and a batch sanity
+  limit ruled in. Requires a local-only variant that skips `ldap_delete_account()`, and makes
+  the P0-3 transport fixes hard prerequisites for G's live layer.
+- **Mismatch fails closed with no exception** (user): a bad seed that locks out a legitimate
+  owner is indistinguishable at auth time from a hijack. The remedy is operator correction.
+- **Freeze, do not restore** (user). Pre-2026-03-12 dates are unrecoverable for accounts
+  that authenticated since. Intended.
+- **Break-glass accounts use a certificate and are not created in Keycloak** (user) — J.
+- **`scripts/dc.sh -l` fixed** (`88d75803`): it had been inert since 2026-07-27, so
+  nefarious2 was never recreated through it.
 
-**Closed by design E** (kept so the reasoning is not rediscovered):
-- ~~Policy for the ambiguous seeding set~~ — seeding withdrawn; nothing to seed.
+### Closed by design E (kept so the reasoning is not rediscovered)
+
+- ~~Policy for the ambiguous seeding set~~ — seeding withdrawn.
 - ~~Rung 3 is wrong for the federated cohort~~ — no ladder.
-- ~~Which value X3 stamps, given it cannot stop stamping~~ (design D) — nothing compares
-  the values, so inconsistency is harmless.
+- ~~Which value X3 stamps, given it cannot stop stamping~~ (D) — nothing compares them.
 
 ## Related
 
