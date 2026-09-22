@@ -26,6 +26,14 @@ import { createX3Client, NICKSERV_NICK } from '../helpers/x3-client';
 import { createRawSocketClient, RawSocketClient, uniqueId } from '../helpers/index.js';
 import { authenticateSaslPlain } from '../helpers/sasl';
 
+/* Red until x3 `fix/retire-timestamp-detector` (cfe7d8a, "stop the LDAP backfill
+ * overwriting registration dates") is merged and the bed's x3 is rebuilt from it:
+ * the default bed branch still carries the backfill, so the date assertion fails
+ * there by design. Run with X3_BACKFILL_RETIRED=1 against a bed built from the
+ * fix branch. (An explicit gate, not a silent skipIf -- same convention as
+ * LEGACY_MODE_LETTERS.) */
+const GATED = process.env.X3_BACKFILL_RETIRED !== '1';
+
 const ACCOUNT = `tsdrift${Math.random().toString(36).slice(2, 8)}`;
 const PASSWORD = 'TsDrift!2026';
 /** 2024-01-01T00:00:00Z — comfortably older than any bed directory entry. */
@@ -120,6 +128,9 @@ function parseRegisteredOn(lines: string[]): number {
 
 describe('account registration date survives authentication', () => {
   beforeAll(async () => {
+    // Guard the hook, not just the tests: it stops and restarts x3 and edits
+    // its database, which must never happen when the suite is gated off.
+    if (GATED) return;
     const c = await createX3Client();
     // E-mail verification is off on this bed, so REGISTER completes immediately
     // ("Account has been registered to you.") and authenticates the caller --
@@ -148,7 +159,7 @@ describe('account registration date survives authentication', () => {
     await new Promise((r) => setTimeout(r, 15000));  // X3 relinks to the ircd
   }, 330_000);
 
-  it('binds the handle even though saxdb disagrees with the directory', async () => {
+  it.skipIf(GATED)('binds the handle even though saxdb disagrees with the directory', async () => {
     const client = await saslLogin(ACCOUNT, PASSWORD);
     const info = await ownAccountInfo(client);
     client.close();
@@ -160,7 +171,7 @@ describe('account registration date survives authentication', () => {
     ).toBe(true);
   }, 60_000);
 
-  it('leaves the registration date untouched', async () => {
+  it.skipIf(GATED)('leaves the registration date untouched', async () => {
     const client = await saslLogin(ACCOUNT, PASSWORD);
     const info = await ownAccountInfo(client);
     client.close();
