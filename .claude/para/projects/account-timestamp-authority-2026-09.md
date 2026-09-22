@@ -791,9 +791,19 @@ whether production has one is unknown here (the user does not run production X3)
 **Rulings (user, 2026-09-22):**
 - **Do not create them in Keycloak.** A break-glass account that depends on the thing it
   exists to survive defeats its purpose.
-- **They should use a certificate.** Certificate fingerprints live in saxdb, so they never
+- **They should use a certificate.** This is **new** — existing break-glass accounts, if
+  any, do not use one; they would carry a password and show under the census's HOLD row,
+  most likely with an oper level. Certificate fingerprints live in saxdb, so they never
   involved LDAP. That means break-glass needs **no `ldap_enable` flip and no password**, and
   the stale-hash exposure in section I never arises.
+
+**The mechanism already exists and already survives an LDAP outage** (verified on the bed,
+2026-09-22). When the ircd announces a client's certificate (`MARK <nick> SSLCLIFP <fp>`,
+`s_user.c:998`), X3 calls `nickserv_do_autoauth()` (`nickserv.c:2308`), which finds the
+handle by fingerprint, checks hostmask, suspension and max-logins, and binds — with **no
+LDAP call anywhere in the function**. A test connection with a registered certificate was
+logged in on connect while OpenLDAP was stopped. So certificate break-glass needs no new
+authentication code; what is new is issuing certificates to those accounts.
 
 **Requirements:**
 1. **A new handle flag — working name `LOCAL` — meaning *never bind this handle from the
@@ -807,10 +817,12 @@ whether production has one is unknown here (the user does not run production X3)
    user", so every disposal path must skip it.
 3. **Certificate only, blank password.**
 
-It depends on section K for the AuthServ path.
+It does **not** depend on section K: a certificate user is logged in on connect and never reaches `/msg AuthServ AUTH` (see K).
 
-**The census already surfaces a candidate:** it prints `opserv_level` beside every handle
-with no Keycloak user. One with an oper level is the first thing to look at on production.
+**The census surfaces candidates:** it prints `opserv_level` beside every handle with no
+Keycloak user. One with an oper level is the first thing to look at on production. Its
+certificate-fingerprint count is informational only: certificate break-glass does not
+exist yet.
 
 ### K. A standalone bug: `cmd_auth` refuses certificate users when LDAP is down
 
@@ -829,9 +841,16 @@ It is an ordering accident, not a design decision:
 | 2014-01-26 | `779da1ca` Matthew Beeching | SASL EXTERNAL; wrote `loc_auth`'s `password != NULL` guard. Certificates designed in. |
 | 2014-06-29 | `8e34267c` Matthew Beeching | fingerprint added to `cmd_auth` **after** the 2009 gate, to forgive a weak password |
 
-Fix: check the fingerprint before the LDAP gate and skip the hard failure when it matches,
-as `loc_auth` does. It is a separate subject from everything else here and a clean small
-upstream PR on its own.
+Fix: check the fingerprint before the LDAP gate and skip the LDAP bind when it matches, as
+`loc_auth` does.
+
+**PARKED — real, but practically unreachable (found 2026-09-22 while writing its test).**
+A user whose certificate is registered is logged in **on connect** by
+`nickserv_do_autoauth()`, triggered by the ircd's `MARK SSLCLIFP`, before they send
+anything — and that path never touches LDAP. They never reach `cmd_auth`; the test's own
+AUTH got "You are already authed". The bug only bites a certificate registered
+*mid-session* and then used for a manual AUTH during an LDAP outage. Not worth a PR on its
+own; revisit only if it turns up alongside other `cmd_auth` work.
 
 ## Sequencing
 
@@ -841,14 +860,14 @@ upstream PR on its own.
 |---|---|---|---|
 | 1 | Retire the LDAP backfill (B) | x3 | **done** — `cfe7d8a`, unpushed |
 | 2 | Retire bouncer rebind gate (c) (E) | nefarious | **done** — `396c423` + `95e61e3`, unpushed; `nefarious-crdt` not addressed |
-| 3 | Fix `cmd_auth` certificate lockout (K) | x3 | independent — a standalone upstream PR |
+| 3 | ~~Fix `cmd_auth` certificate lockout (K)~~ | x3 | **parked** — practically unreachable; certificate users are logged in on connect |
 | 4 | `LOCAL` flag; `NODELETE` on break-glass handles (J) | x3 | independent; **must precede 5** |
 | 5 | Wire-carried Keycloak identity (F), plus an oper re-bind command | nefarious + x3 | needs 4 |
 | 6 | Seed stored identity; refreshed census | tooling | needs 5 |
 | 7 | `XQUERY` poll on link + sweep (G, layers 2-3) | nefarious + x3 | needs 5; new ircd-side responder |
 | 8 | Live delivery (G, layer 1) | SPI + consumer | **transport P0-3 (hard)** |
 | 9 | ircd verifies `PASS` login itself (H) | nefarious | independent; **must precede 10** |
-| 10 | Restrict X3's auth commands (H) | x3 | needs 3, 4, 9, and a ruling on the account-changing commands |
+| 10 | Restrict X3's auth commands (H) | x3 | needs 4 and 9, and a ruling on the account-changing commands |
 | 11 | Retire LDAP — **unlink** federated users, never delete them | operations | needs 10; verify on a realm copy first |
 
 **PR gating (user, 2026-09-22):** step 1's upstream PR waits until the new detector — step 5
