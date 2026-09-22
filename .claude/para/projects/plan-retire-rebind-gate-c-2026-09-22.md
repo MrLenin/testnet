@@ -543,3 +543,56 @@ grep "Overruled by older nick" ircd-*.log  # the symptom if this was wrong
 If a refusal does appear, the fix is to extend the sessid propagation to whatever case it
 exposes — not to restore the account-TS arm, which would re-introduce a coarse match on a
 value nothing else on the network consumes.
+
+---
+
+## Execution notes — 2026-09-22
+
+**Executed to completion.** nefarious `fix/retire-rebind-acc-ts-gate` off `bed-deploy`
+(`01d2d04`): `396c423` (instrumentation) and `95e61e3` (retirement). Not pushed.
+
+CMocka 7/7, run inside the Docker image build. Red/green observed at each step — the
+flipped assertion failed `0x3 != 0` before the arm was removed.
+
+### The plan named the wrong tests
+
+It specified `bouncer-hold-lifecycle`, `bouncer-stale-replica` and `bouncer-multi-attach`.
+Two far more relevant suites exist and were run instead (as well):
+`bouncer-cross-server-rebind.test.ts` and `bouncer-cross-server-roundtrip.test.ts`. Both
+pass with the arm removed.
+
+| Suite | Result | vs. baseline |
+|---|---|---|
+| hold-lifecycle + stale-replica + multi-attach | 5 passed, 2 failed | **identical** — A/B-confirmed pre-existing on `01d2d04` |
+| cross-server-rebind + cross-server-roundtrip | 2 passed | — |
+
+### The gate is not reached by any test in the bed
+
+Worth stating plainly rather than letting "all suites pass" imply more than it does.
+After running every bouncer suite above, both servers report **zero** mentions of
+`bounce_rebind` — no `authorizing via`, no refusals, nothing. Logging is not the problem:
+the same logs carry 24k `[DEBUG]` lines and plenty of `Bouncer: alias ...` `log_write`
+events. The cross-server suites exercise session continuity through the **alias** path, not
+`bounce_rebind_ghost_to_remote_primary()`.
+
+So the retirement is verified as: the decision logic is pinned by unit tests, the wiring
+compiles, and nothing regresses. It is **not** verified by having watched a real rebind
+succeed without the arm — because the bed never produces one, consistent with roughly four
+rebinds per five months in production.
+
+That is the reason the instrumentation commit went first. The field will answer what the
+bed cannot, through the persistent log:
+
+```sh
+grep "authorized via" ircd-user.log        # which gate now carries rebinds
+grep "Overruled by older nick" ircd-*.log  # the symptom if this was wrong
+```
+
+### Run vitest from `tests/`
+
+`vitest.config.ts` lives in `tests/`. Running `npx vitest run tests/src/...` from the repo
+root loads **no config** — no `setupFiles`, so the account pool never initialises, so
+`getTestAccount()` falls through to `createTestAccount()`, which only generates a name and
+registers nothing. Every authenticating test then fails with "SASL authentication failed
+(bad credentials)" against an account that never existed. Use
+`cd tests && IRC_HOST=localhost npm test -- src/...`, exactly as CLAUDE.md says.
