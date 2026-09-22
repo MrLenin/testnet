@@ -594,34 +594,111 @@ lookups (`u["id"]`), rather than the `LDAP_ID` attribute.
 - **Fail-open on absent identity** stays the rule, per the ratified ruling and the
   `ldap_field_oslevel` precedent. Mismatch fails closed.
 
+### G. X3 cannot be told; it must ask — pull, not push
+
+*Added 2026-09-22. Resolves the question design F leaves open: identity binding stops the
+wrong person binding, but the stranded handle persists forever, still holding the name and
+its access. Deletion has to propagate.*
+
+#### Why every push design leaked
+
+Each attempt failed the same way, and it is structural rather than a detail of any one
+mechanism: **X3 is the party that can be absent, and it has no durable inbox.** A webhook,
+a P10 relay, a CACHEINVAL-style broadcast — all are one-shot. If X3 is down or delinked
+when the event fires, the event is gone, with nothing to reconcile against afterwards.
+
+Inverting the direction fixes it, because the party that can be absent becomes the party
+that drives:
+
+| | Push | Pull |
+|---|---|---|
+| X3 down at event time | **lost**, permanently | irrelevant — nothing was sent |
+| X3 returns | gap never closes | asks, converges |
+| Retry / batching | producer's problem, and it holds no state about X3 | X3's own schedule |
+| Needs HTTP in X3 | webhook yes, relay no | **no** |
+| Survives LDAP retirement | yes | yes |
+
+#### The channel already exists
+
+`XQUERY`/`XREPLY` — `XQ`/`XR`, `include/msg.h:375-381` — is a generic extension-query
+channel built for services asking a server something. The ircd side exists; **X3
+implements it on no branch**, so that is the work. The ircd is the natural Keycloak proxy:
+it already holds libkc and talks to Keycloak for SASL, so X3 never needs an HTTP client.
+
+#### Three layers, none of which has to be complete alone
+
+**Ruling (user, 2026-09-22): get them live, poll on link, sweep as a safety net.**
+
+| Layer | Trigger | Scope | Role |
+|---|---|---|---|
+| 1 — live | deletion arrives at the ircd | one account | latency: converge in seconds |
+| 2 — on link | X3 links or relinks | deletions since X3's watermark | **durability** |
+| 3 — sweep | slow interval | full reconcile | safety net |
+
+Layer 2 is what makes the design correct, and it is bounded by the number of *deletions*,
+not the number of handles. Keycloak answers deltas directly — verified on the bed
+2026-09-22:
+
+```
+GET /admin/realms/<realm>/admin-events
+      ?resourceTypes=USER&operationTypes=DELETE&dateFrom=<watermark>
+  -> narrowed 6 results to 1; every resourcePath carries the subject UUID
+  -> adminEventsEnabled true, no adminEventsExpiration set (retained)
+```
+
+So on link X3 sends its watermark, the ircd asks Keycloak for deletions since then, and
+returns the list. X3 disposes by **identity**, not by name — the UUID is in every
+`resourcePath`, which is also what makes replay and delete-then-recreate safe (see A).
+
+Layer 3 exists because layer 2's correctness depends on a realm setting nobody will think
+to tell us about: the admin-event store grows unbounded today, so an operator will
+eventually set `adminEventsExpiration`, and any outage longer than that window silently
+loses events. The sweep survives that. It can be slow precisely because it is a net, not
+the mechanism.
+
+#### Consequences
+
+- **The webhook is demoted to a latency optimisation.** It becomes layer 1 and nothing
+  more. The P0-3 transport fixes stop being a correctness prerequisite and become a
+  prerequisite for *enabling* layer 1 — which matters, because with `unregister` as
+  disposition a forged event is still mass destruction.
+- **Watermark lives in saxdb**, alongside the handle data it protects.
+- **Cold start must not replay history.** With no stored watermark, record *now* and let
+  the sweep handle the backlog. Replaying the full store would dispose a handle for every
+  account ever deleted, including names long since legitimately re-registered.
+- **Mismatch fails closed, with no exception** (user, 2026-09-22). A bad seed locking out a
+  legitimate owner is indistinguishable at auth time from a hijack in progress, so it must
+  refuse; the remedy is operator correction, not a permissive gate. Absent identity still
+  fails open, per the ratified rule.
+
 ## Sequencing
 
-*Revised 2026-09-22 per design F.*
+*Revised 2026-09-22 per designs F and G.*
 
 | # | Step | Where | Status |
 |---|---|---|---|
 | 1 | Retire the LDAP backfill (design B) | x3 `upstream/master` | **done** — `cfe7d8a`, unpushed |
 | 2 | Retire bouncer rebind gate (c) (design E) | nefarious | **done** — `396c423` + `95e61e3`, unpushed |
-| 3 | **Wire-carried Keycloak identity (design F)** | nefarious + x3 | next — no prerequisite |
-| 4 | Seed stored identity for existing handles; stranded-handle report | tooling, no deploy | needs 3 |
-| 5 | Delete detection as convergence hygiene (design A) | SPI + consumer | **transport P0-3 (hard)** |
+| 3 | Wire-carried Keycloak identity (design F) | nefarious + x3 | next — no prerequisite |
+| 4 | Seed stored identity; stranded-handle report | tooling, no deploy | needs 3 |
+| 5 | `XQUERY` deletion poll on link + sweep (design G, layers 2-3) | nefarious + x3 | needs 3 |
+| 6 | Live delivery (design G layer 1) | SPI + consumer | **transport P0-3 (hard)** |
 
-Steps 1 and 2 are complete and independent; they remove no working control (see B and E)
-and do not wait on 3.
+Steps 1 and 2 are complete, independent, and remove no working control (see B and E).
 
-Step 3 is the control that replaces the retired timestamp's identity role, and it is the
-only one that spans the whole window — it works today, survives LDAP retirement, and is
-moot only when X3 itself retires.
+Step 3 is the control: it replaces the retired timestamp's identity role and spans the
+whole window — works today, survives LDAP retirement, moot only when X3 retires.
 
-Step 4 is what makes step 3 cover the existing population: without it every handle is
-trust-on-first-use, and the backlog stays claimable.
+Step 4 makes step 3 cover the existing population. Without it every handle is
+trust-on-first-use and the backlog stays claimable.
 
-Step 5 stops being a blocker. With identity enforced at point of use, a lost or delayed
-lifecycle event costs convergence, not safety.
+Step 5 is what actually converges a deletion, and it is the durable half. Step 6 only makes
+convergence faster.
 
-**Withdrawn** (superseded, see E): seeding `account_created_at`, the libkc ladder, the realm
-mapper, the federation-retirement rung drop. **Not adopted** (superseded, see F): shipping
-`4d29d8e` as the control, and any directory-based identity binding.
+**Withdrawn** (see E): seeding `account_created_at`, the libkc ladder, the realm mapper,
+the federation-retirement rung drop. **Not adopted** (see F): shipping `4d29d8e`, and any
+directory-based identity binding. **Demoted** (see G): the webhook, from mechanism to
+latency optimisation.
 
 ## Census tool — built, and outliving its original purpose
 
