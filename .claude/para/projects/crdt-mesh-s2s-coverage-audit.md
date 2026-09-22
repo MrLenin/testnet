@@ -499,7 +499,12 @@ the reply carrier (3 before 4); orphan-reap Inc 2 needs the farewell (re-open af
 3. ~~**Reply direction**~~ SHIPPED `ba3183d` (19:05): `send_buffer` hook → CR M 'Y' (verbatim server-form line,
    re-injected at the home via do_numeric / the token's server handler); request half CR X 'L' at both hunts;
    abort_sasl tunnels; do_numeric admits anchor/&me sources. Design + inventory: `crdt-mesh-reply-direction.md`.
-   Gates pending the fleet rebuild.
+   GATED + SOAKED 09-22: hunt_gate both directions (labels included), privsq_gate from hub2 and the
+   legacy primary, gitsync_gate all five mesh nodes, bed_regress 10/10 (44 tests), crdt-mesh-absence
+   2/2 on a quiet bed, cmocka 107/107, 1 h soak clean. Shipped `3a1306f` (mesh) + `01d2d04` (fork).
+   The gating found five defects, three pre-existing -- see the design doc's gate record; the
+   biggest lesson is that the re-inject's `&me` fallback MIRRORS invariant 2, so the carriers move a
+   bounded token set and oper ACTIONS are deliberately not carried.
 4. **RENAME/RLO doc op** — engine rename op (cmocka first), single-writer at the gateway edge; RLO on 3.
 5. **SE-8 DIE/RESTART farewell** — withdraw primitive; then re-open orphan-reap Inc 2.
 6. **SE-3 SQUIT naming an anchor** — same retire path as 5, parse-safe deferral.

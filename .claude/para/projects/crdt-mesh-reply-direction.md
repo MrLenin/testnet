@@ -290,6 +290,19 @@ omit `IsMe` in `m_mode.c:283`, `m_topic.c:130`, `channel.c:2385`, `channel.c:528
   trailing parameter has spaces and no colon would be split differently than on the wire. Look up
   `mptr` first and pass `mptr->parameters` as the cap.
 
+## Gate record (2026-09-21 evening / 2026-09-22 early)
+
+| gate | result |
+|---|---|
+| `hunt_gate.py 6674 6669 6670 6667 6673` (overlay-only origin -> hub2, leaf2, the LEGACY primary, leaf4) | PASS: VERSION/TIME/ADMIN/WHOIS one reply line each, 317 idle owner-exact, labelled VERSION inside its batch |
+| `hunt_gate.py 6667 6674 6673` (legacy origin -> the two mesh-only nodes) | PASS, labels included (needed the presentation-flag fix) |
+| `privsq_gate.py 6674 6669 6667` (forwarded PRIVS query) | PASS from hub2 AND from the legacy primary; was SILENT before |
+| `gitsync_gate.py 6674` (reply notices) | PASS: all five mesh nodes answer; was tree-reachable ones only |
+| `bed_regress.sh` | 10/10 suites, 44 tests |
+| `crdt-mesh-absence` | 2/2 on a quiet bed. NOTE: run straight after bed_regress it fails its FIRST assertion (the page is already partial before the test stops anything) -- the documented split-window pollution, which is why the regress runner puts the presence suites first. Re-run clean to judge it. |
+| cmocka | 107/107 |
+| soak (1 h, 12 ticks x 5 nodes) | CLEAN: 0 valgrind invalid reads/writes, 0 asserts, 0 protocol violations, 0 doc mismatches, all nodes running |
+
 ## Status
 
 - 2026-09-21 18:05: design complete; user agreed 18:14 ("Sounds good").
