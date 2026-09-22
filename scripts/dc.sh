@@ -6,13 +6,20 @@
 # compose build" — root cause is .env.local being skipped).
 #
 # Usage:
-#   scripts/dc.sh up -d nefarious2
-#   scripts/dc.sh --profile linked up -d nefarious2
+#   scripts/dc.sh up -d                      # base topology
+#   scripts/dc.sh -l up -d                   # + nefarious2   (--profile linked)
+#   scripts/dc.sh -l --profile multi up -d   # + nefarious3/4 (linked + multi)
 #   scripts/dc.sh logs nefarious
 #
-# The "linked" wrapper (parallel to dcl) is selected via -l / --linked
-# before the docker compose args:
-#   scripts/dc.sh -l up -d --build
+# -l / --linked adds `--profile linked`, which is the only thing that brings
+# nefarious2 into scope.  Without it, `up -d` never creates or recreates
+# nefarious2 -- a rebuilt nefarious2 image then sits unused while the old
+# container keeps running.
+#
+# History: -l used to mean "add the libkc-dev compose overlay" (mirroring the
+# dcl bashrc function).  a7245017 retired that overlay with libkc and left the
+# flag parsed but inert, so from 2026-07-27 `dc.sh -l up -d` silently did
+# nothing extra -- while CLAUDE.md documented it as adding nefarious2.
 
 set -euo pipefail
 
@@ -55,5 +62,9 @@ for arg in "$@"; do
     break
   fi
 done
+
+if [[ $LINKED -eq 1 ]]; then
+  set -- --profile linked "$@"
+fi
 
 exec docker compose "$@"
