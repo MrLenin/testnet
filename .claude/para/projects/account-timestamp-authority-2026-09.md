@@ -641,6 +641,71 @@ password login arrives through the ircd's Keycloak SASL and always carries an id
 logins without one are then certificate break-glass through X3 (section J), which never
 bind from the wire in the first place.
 
+#### Step 5 scope, from the site surveys (2026-09-22)
+
+Two read-only surveys mapped every site in nefarious and X3. Pre-existing problems they
+found on the way are in memory (`project_step5_survey_findings.md`), not here.
+
+**Three pieces, landing in this order:**
+
+| | Where | Ships as | What |
+|---|---|---|---|
+| 5-pre | x3 | PR | `AC M` / `AC U` handled. Today both pass the *letter* to `handle_account` as an account name: SASL re-auth and webhook deauth never reach X3, and a handle named `M`/`U`/`D`/`A` would be bound. Small, its own subject; 5b builds on it. |
+| 5a | nefarious | direct push (ircv3 only) | the ircd carries the Keycloak id |
+| 5b | x3 | PR | X3 binds on first use and refuses on mismatch; `REBIND` — **the detector the step-1 PR waits for** |
+
+**5a — the ircd carries the id.**
+- **Where the id comes from.** PLAIN — the commonest login — does not have it: the ROPC
+  access token is a JWT whose `sub` is the Keycloak user id, and nothing parses it. Parse
+  it (beside `kc_jwt_extract_created_at`), and store it in the PLAIN positive cache too.
+  **Without this, F is bypassed by the ordinary login.** EXTERNAL has `users[0].id`;
+  OAUTHBEARER `info->sub` on both paths; SCRAM and ECDSA have it in their credential
+  callbacks and must stash it in the SASL session for completion.
+- **No id, fails open** (the ratified rule): X3's SASL relay, IAuth, login-on-connect,
+  `/REGISTER`, WEBIRC. Impersonation (authzid ≠ authcid) — see D3.
+- `sasl_complete_login()` gains the id; `struct User` gains `kc_id`, cleared on `U` and
+  replaced on `R`/`M` (and `acc_create` gets the same treatment — it is never cleared today).
+- Wire: `AC <u> R|M <acct> <ts> <id>` and `+r <acct>:<ts>:<id>`; parse in `ms_account` and
+  `set_user_mode`; `ms_account`'s relay forwards the id (today it keeps only parv[3..4]); `N`
+  is rebuilt from `struct User` at every hop, so storing it is what carries it. The id never
+  equals `RENAME`, which shares the parv[5] slot on the rename branches.
+- Bouncer: copy on the three primary→alias sites. Persistence — see D4.
+- Not in 5a: the `nefarious-crdt` gateway (next catch-up). Legacy hops strip the id; users
+  behind them fail open.
+
+**5b — X3 binds.**
+- `cmd_account` passes the id (for `R` and the fixed `M`); `handle_account` reads
+  `acct:ts:id`.
+- `handle_info.kc_id`, saxdb key `kc_id` (not the dead legacy `"id"`), indexed by id —
+  step 7 disposes by identity. RENAME carries it (same struct); MERGE keeps the target's.
+- Binding: wire id absent → today's behaviour. Stored none → adopt (a `LOCAL` handle is
+  refused before this). Stored ≠ wire → refuse, fail closed — response per D2.
+- `REBIND *<account> <uuid|*>`: a dedicated oper command (olevel 800 default, logged), not an
+  OSET option — `SEARCH SET` calls OSET options in bulk at level 100 with no rank check.
+- ACCOUNTINFO shows the stored id to opers.
+- Rollback hazard (correction 4) stands; recovery is a re-seed from the census `--map-out`.
+
+**The ircd-side gap.** F binds *X3 handles*. The ircd keys its own account state by *name* —
+bouncer sessions, chathistory, metadata, webpush. A name re-registered in Keycloak
+authenticates as that name at the ircd and could revive the old owner's held bouncer session
+before X3 sees anything. Closing that means storing the id with the session and gating
+revival on it: a new bouncer record version, and the cleanup pass (S10 in memory) fixed
+first, or the upgrade may drop held sessions. See D4.
+
+**Tests, red first.** CMocka: the id codec; `sub` extraction; `+r acct:ts:id` parse and emit.
+Bed: first SASL login adopts (ACCOUNTINFO shows the id); a name deleted and re-registered in
+Keycloak is refused at SASL and at AUTH; X3-authenticated logins still work (no id); REBIND
+lets the rightful owner back in; a relink re-sends the ids and bindings hold; the id survives
+a hop (`nefarious2` → hub → X3).
+
+**Rulings (user, 2026-09-22):**
+- **D1 — encoding: compact.** 22-char unpadded base64url of the 16 bytes, via the exported
+  webpush codec, on the wire and in saxdb. `REBIND` takes the canonical UUID and converts; the
+  census `--map-out` must emit the compact form (or X3 converts on seed).
+- **D2 — mismatch: refuse and KILL outside a burst, refuse only in a burst** — the `LOCAL` rule.
+- **D3 — impersonation: send no id.** Those logins fail open, like the other id-less paths.
+- **D4 — the ircd-side gap: its own step, right after 5** (step 5c in the sequencing).
+
 ### G. X3 cannot be told; it must ask — pull, not push
 
 *Added 2026-09-22. Resolves the question design F leaves open: identity binding stops the
@@ -879,7 +944,8 @@ own; revisit only if it turns up alongside other `cmd_auth` work.
 | 2 | Retire bouncer rebind gate (c) (E) | nefarious | **done** — `396c423` + `95e61e3`, unpushed; `nefarious-crdt` not addressed |
 | 3 | ~~Fix `cmd_auth` certificate lockout (K)~~ | x3 | **parked** — practically unreachable; certificate users are logged in on connect |
 | 4 | `LOCAL` flag; `NODELETE` on break-glass handles (J) | x3 | **done** — `77bd045` on `feature/local-handle-flag`, unpushed (PR: user); test testnet `89265752` |
-| 5 | Wire-carried Keycloak identity (F), plus an oper re-bind command | nefarious + x3 | needs 4 |
+| 5 | Wire-carried Keycloak identity (F), plus an oper re-bind command — as 5-pre (x3 `AC M`/`U`), 5a (ircd carries the id), 5b (X3 binds, `REBIND`); see F, "Step 5 scope" | nefarious + x3 | needs 4; scoped + ruled 2026-09-22 |
+| 5c | ircd-side identity: store the id with bouncer sessions and gate revival on it; fix the bouncer DB cleanup pass (S10) first | nefarious | needs 5a; D4 |
 | 6 | Seed stored identity; refreshed census | tooling | needs 5 |
 | 7 | `XQUERY` poll on link + sweep (G, layers 2-3) | nefarious + x3 | needs 5; new ircd-side responder |
 | 8 | Live delivery (G, layer 1) | SPI + consumer | **transport P0-3 (hard)** |
