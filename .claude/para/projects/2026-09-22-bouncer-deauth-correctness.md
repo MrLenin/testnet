@@ -1606,3 +1606,83 @@ Until one is chosen, "kill on delete" means "deauth network-wide, and additional
 **3. Type consistency.** `enum BounceAliasField` / `BX_ALIAS_FIELD_*` used identically in Tasks 1, 2, 6. `bounce_alias_field_id()` and `bounce_alias_field_name()` match their Task 1 declarations. `struct BounceDeauthSubject` field names (`is_user`, `is_account`, `account_matches`, `is_alias`, `is_hold`, `is_local`) are identical in the Task 3 declaration, the Task 3 tests, and the Task 5 caller. `enum BounceDeauthAction` enumerators match across Tasks 3 and 5. `bounce_apply_alias_field(alias, id, value)` and `bounce_account_deauth_apply(acptr)` match their declarations and call sites.
 
 **One thing to verify at execution time, not assumed here:** Task 2 Step 1 adds `#include "bouncer_deauth.h"` to `include/bouncer_session.h`. If that creates an include cycle or a build order problem, forward-declare the enum in `bouncer_session.h` instead and include the header only in the `.c` files. Check the build, do not assume.
+
+## Execution record (2026-09-23)
+
+Executed inline (superpowers:executing-plans) on nefarious `fix/bouncer-deauth-correctness`,
+cut from the unpushed step-5 tip `fe8f65d` (`fix/wire-keycloak-id`), 13 commits
+`9fb2c6e..fe82551`, unpushed. Tests on testnet `main`. Bed: `bed-deploy` merge `f35d01e`,
+both ircds on `ircd.202609231840`. Push commands: `step5-pr-drafts-2026-09-23.md`, after the
+step-5 pushes (the branch fast-forwards on top of them).
+
+### Commits
+
+| Task | Commit | What |
+|---|---|---|
+| 1 | 9fb2c6e | pure BX U field identity (`bouncer_deauth.c`, cmocka) |
+| 2 | 36d0a68 | `check: show a member's account again` (ruling: outside scope, required by the test) |
+| 2 | eca7d18 | `bounce_apply_alias_field`; both apply blocks on it (B-1) |
+| 3 | 67437fb | pure deauth classifier |
+| 4 | a18faf5 | `bounce_account_deauth_apply`: one body for AC U and the webhook (B-3) |
+| 5 | 001d0bd | classifier-driven walk; `WEBHOOK_KILL_ON_DELETE` default off (B-2, B-6) |
+| 6 | 91e521f | legacy-accounts refusal; alias-emit gate (B-4) |
+| 8 | 82c160a | `bounce_null_alias_primary_pointing_at` at every Client free (B-7 side bug) |
+| 9 | ef8e115 | LIVE-DEAUTHED discriminator in the invariant log (B-5) |
+| fix | 3bb490f | remote client: deauthed (CLEAR_ACCOUNT), never killed |
+| fix | 9ba9e58 | emit to the aliases first, for every session; a held ghost leaves with its session |
+| fix | 272ad9d | kill pre-pass: `bounce_kill_session` on an anchoring primary before deauth + exit |
+| fix | fe82551 | `was_account` / `was_ssl` never hold a flag mask in an int |
+
+### Fresh review (Fable) and fix pass
+
+Verdict "No" on the nine-task branch; five findings, all fixed with a test that failed first:
+
+1. Critical: `bounce_account_deauth_apply` destroyed the sessions before `bounce_emit_alias_update`,
+   which finds aliases through the roster -- the clear never reached an alias on either caller.
+   Emit now runs first, for every session of the account. `bouncer-deauth-local-alias`.
+2. Critical: DESTROY_SESSION removed the record and left the held ghost alive with no timer.
+   The body exits the held session's aliases and returns non-zero; the caller exits the ghost
+   after the relay/AC U. Same suite, "tears down a held session and its ghost".
+3. Important: the classifier skipped remote clients, so one listener deauthed only its own server.
+   B-2 forbids exiting a remote socket, not clearing its account: remote primary/ghost ->
+   CLEAR_ACCOUNT (replica cleared, AC U to the home server). `bouncer-deauth-cross-server`, cmocka.
+4. Important: KILL_ON_DELETE was a plain socket exit: hold kept the session, an alias elsewhere
+   got promoted. A kill pass now runs `bounce_kill_session` first. Same suite, "kill on delete".
+5. Important: `int was_account` / `int was_ssl` stored a flag mask past bit 31 (always 0).
+
+### Rulings (each with its cost if wrong; full text in the ledger until it was deleted)
+
+- Branch cut from the step-5 tip, not hardening `4de99fa`: step 5 touched the same deauth
+  sites; the shared body also clears `acc_create` and `kc_id`. Cost: the branch ships after step 5.
+- Commit trailers use this session's model; plan line numbers re-located by grep.
+- Task 1: Makefile wiring with the test so the red run fails on the header, not the rule.
+- Task 2: Task 7's bed test pulled forward as Task 2's red; observation via oper CHECK rows.
+- Task 2: CHECK's account column was broken (flag past bit 31 in an int); fixed on this branch.
+- Task 2: every ircd-only deploy restarts X3 afterwards (it exhausts uplink retries and exits).
+- Task 4: the shared body clears `acc_create`/`kc_id` (step-5 fields).
+- Task 6: between a18faf5 and 91e521f a legacy peer could have received AC U; never deployed.
+- Fix pass: the multi-session emit loop has no bed test (one session per account on the bed;
+  guards the transient multi-primary state). Cost: a sibling session's alias keeps its account.
+- Fix pass: sibling held ghosts are not exited inside the body; each gets its own walk entry
+  or AC U. Cost: in the transient multi-session state a ghost whose AC U never comes stays.
+
+### Deferred minors (reviewer; not fixed)
+
+- Legacy-accounts gate in `bounce_emit_alias_update` sits after the local apply (unreachable).
+- `bounce_null_alias_primary_pointing_at` walks GlobalClientList three times per exit.
+- LIVE-DEAUTHED discriminator also matches a recycled slot with a fresh unauthenticated user.
+- `wh_stats.sessions_killed` counts deauths and ghost destroys alike.
+- The deauth bed tests sleep then CHECK once; bounded polling would be flake-proof.
+
+### Operator notes
+
+- A Keycloak disable/delete event received by ANY fork server now deauths the account on every
+  server (AC U), including held sessions -- their ghosts leave. Requires `EXTENDED_ACCOUNTS`;
+  refused (logged) under legacy accounts unless the kill switch is on.
+- `WEBHOOK_KILL_ON_DELETE` / `_DISABLE` default off; `SET`/`RESET` at runtime (STATS f shows them
+  when non-default). A kill takes the killed primary's whole session down, aliases on other
+  servers included (BX X), then the local sockets. Remote primaries are still only deauthed.
+- The "network-wide forced disconnect" design item above stands for remote primaries.
+- Bed: the account pool is per-process; never two vitest processes at once (it produced the
+  "aliases.length 0" ghosts of 13:59). Deploy: rebuild BOTH ircd images, recreate both, then
+  make sure X3 relinks.

@@ -27,6 +27,27 @@ git push upstream fix/wire-keycloak-id:ircv3.2-upgrade
 If `ircv3.2-upgrade` has diverged from hardening, push the branches to hardening and
 merge hardening into upgrade as usual.
 
+## nefarious: fix/bouncer-deauth-correctness, after fix/wire-keycloak-id
+
+13 commits (9fb2c6e .. fe82551) on top of fix/wire-keycloak-id's fe8f65d: the bouncer
+deauth correctness plan (`2026-09-22-bouncer-deauth-correctness.md`) plus its review
+fix pass. Fork-only paths (bouncer, Keycloak webhook, oper CHECK), so direct pushes to
+both fork branches on both remotes, one command per branch, AFTER the step-5 pushes
+above (the branch fast-forwards on top of them).
+
+```bash
+git push origin   fix/bouncer-deauth-correctness:ircv3.2-hardening
+git push origin   fix/bouncer-deauth-correctness:ircv3.2-upgrade
+git push upstream fix/bouncer-deauth-correctness:ircv3.2-hardening
+git push upstream fix/bouncer-deauth-correctness:ircv3.2-upgrade
+```
+
+Behaviour change worth a line in the announcement: an account disable/delete event
+now deauths every server's sessions from whichever server receives it (AC U), takes
+a held session's ghost with the session, and `WEBHOOK_KILL_ON_DELETE` defaults to
+off (deauth) -- a kill takes the whole session down first, aliases on other servers
+included.
+
 ## x3 PR 1: `fix/ac-account-change` → evilnet/x3 master (2 commits off 5d7fadb)
 
 **Title:** proto-p10: follow the ircd's AC M and AC U, and pass the timestamp and id through

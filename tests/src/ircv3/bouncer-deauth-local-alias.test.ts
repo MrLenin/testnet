@@ -1,13 +1,21 @@
 /**
- * B-1 regression: a LOCAL bouncer alias must lose its account when the
- * account is deauthed.
+ * Account deauth on the server that owns the session.
  *
- * bounce_emit_alias_update()'s local-apply pass handled seven of the nine
- * BX U fields; `account` was not one of them.  The S2S broadcast skips
- * the primary's own server for loop prevention, so an alias sharing a
- * server with its primary was the one case nothing cleared -- it kept
- * FLAG_ACCOUNT and the account string indefinitely.  Remote aliases were
- * always fine, which is why a single-server bed never showed it.
+ * B-1: a LOCAL bouncer alias must lose its account when the account is
+ * deauthed.  bounce_emit_alias_update()'s local-apply pass handled seven
+ * of the nine BX U fields; `account` was not one of them.  The S2S
+ * broadcast skips the primary's own server for loop prevention, so an
+ * alias sharing a server with its primary was the one case nothing
+ * cleared -- it kept FLAG_ACCOUNT and the account string indefinitely.
+ * Remote aliases were always fine, which is why a single-server bed never
+ * showed it.  A second defect hid behind the first: the deauth body
+ * destroyed the sessions before telling the aliases, and the emit walks
+ * the session roster, so it found nothing to tell.
+ *
+ * B-6: a held session's ghost is an IsUser client carrying the account.
+ * Deauthing the account must take the session AND the ghost with it;
+ * destroying the record alone leaves a ghost with no timer and no
+ * session -- it holds the nick forever.
  *
  * Aliases share the primary's nick, WHOIS by nick answers for the primary,
  * and an alias's JOIN is applied to the primary, so neither can see an
@@ -18,56 +26,24 @@
  * reachable with a synthetic payload carrying a root-level `username`,
  * posted to the ircd container with the ircd's own secret.  A disable only
  * deauths (WEBHOOK_KILL_ON_DISABLE is off by default), which is what leaves
- * both connections around to be inspected.
+ * the connections around to be inspected.
  */
 import { describe, it, expect, afterEach } from 'vitest';
-import * as fs from 'node:fs';
-import { run } from '../helpers/bed-control';
 import {
   RawSocketClient,
   uniqueNick,
   getTestAccount,
   releaseTestAccount,
   createSaslBouncerClient,
+  bouncerEnableHold,
   bouncerDisableHold,
 } from '../helpers/index.js';
 import { createOperClient } from '../helpers/x3-client';
+import { postWebhook, accountDisabledEvent, checkMemberAccount, nickPresent } from '../helpers/webhook-post';
 
-function ircdIp(): string {
-  return run('docker', ['inspect', '-f', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}', 'nefarious']).trim();
-}
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function ircdWebhookSecret(): string {
-  const m = /"WEBHOOK_SECRET"\s*=\s*"([^"]+)"/.exec(fs.readFileSync('../data/ircd.conf', 'utf8'));
-  if (!m) throw new Error('WEBHOOK_SECRET not in data/ircd.conf');
-  return m[1];
-}
-
-/** POST a Keycloak-shaped webhook event to the ircd; resolves to the status code. */
-async function postWebhook(body: unknown): Promise<number> {
-  const res = await fetch(`http://${ircdIp()}:9090/keycloak-webhook`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Webhook-Secret': ircdWebhookSecret() },
-    body: JSON.stringify(body),
-  });
-  return res.status;
-}
-
-/**
- * The account CHECK shows for one member of a channel.  `marker` is the
- * status character before the nick: '~' for an alias, '@' for the op.
- * RPL_CHANUSER (287): ": <oplvl> <status><nick> (<user>@<host>)   (<info>) <account>"
- */
-async function checkAccount(op: RawSocketClient, channel: string, marker: string, nick: string): Promise<string> {
-  op.clearRawBuffer();
-  op.send(`CHECK ${channel}`);
-  const escaped = marker.replace(/[~@+%<!]/g, (c) => `\\${c}`);
-  const row = await op.waitForLine(new RegExp(` 287 \\S+ :.*${escaped}${nick} \\(`), 8000);
-  const m = /\)\s+\(.*\) ?(\S*)\s*$/.exec(row);
-  return m ? m[1] : '';
-}
-
-describe('Bouncer deauth clears LOCAL alias accounts', () => {
+describe('Bouncer deauth on the owning server', () => {
   const clients: RawSocketClient[] = [];
   const poolAccounts: string[] = [];
 
@@ -95,31 +71,51 @@ describe('Bouncer deauth clears LOCAL alias accounts', () => {
     primary.client.clearRawBuffer();
     primary.client.send(`JOIN ${channel}`);
     await primary.client.waitForLine(new RegExp(` JOIN :?${channel}\\b`), 8000);
-    await new Promise((r) => setTimeout(r, 1000));            // the alias's mirrored membership
+    await sleep(1000);                                          // the alias's mirrored membership
 
     const op = await createOperClient();
     clients.push(op);
 
     // Precondition: CHECK shows the account on the primary (@) and the alias (~).
-    expect(await checkAccount(op, channel, '@', primary.nick), 'primary logged in').toBe(account);
-    expect(await checkAccount(op, channel, '~', primary.nick), 'alias logged in').toBe(account);
+    expect(await checkMemberAccount(op, channel, '@', primary.nick), 'primary logged in').toBe(account);
+    expect(await checkMemberAccount(op, channel, '~', primary.nick), 'alias logged in').toBe(account);
 
-    // Disable the account via the webhook's USER/UPDATE branch.
-    const status = await postWebhook({
-      id: 'test-deauth-1',
-      time: Date.now(),
-      realmId: 'testnet',
-      resourceType: 'USER',
-      operationType: 'UPDATE',
-      username: account,
-      representation: JSON.stringify({ enabled: false }),
-    });
-    expect(status).toBe(200);
-    await new Promise((r) => setTimeout(r, 1500));
+    expect(await postWebhook(accountDisabledEvent(account))).toBe(200);
+    await sleep(1500);
 
     // Both connections must have lost the account.  Before the fix the
     // alias row still carried it while the primary's was cleared.
-    expect(await checkAccount(op, channel, '@', primary.nick), 'primary lost the account').toBe('');
-    expect(await checkAccount(op, channel, '~', primary.nick), 'the same-server alias lost the account').toBe('');
+    expect(await checkMemberAccount(op, channel, '@', primary.nick), 'primary lost the account').toBe('');
+    expect(await checkMemberAccount(op, channel, '~', primary.nick), 'the same-server alias lost the account').toBe('');
   }, 45_000);
+
+  it('tears down a held session and its ghost', async () => {
+    const { account, password } = await getTestAccount();
+    poolAccounts.push(account);
+    const nick = uniqueNick('dghost');
+
+    // Hold on, then drop the socket: the session goes HOLDING and a ghost
+    // keeps the nick on the network.
+    const primary = await createSaslBouncerClient(account, password, { nick });
+    expect(await bouncerEnableHold(primary.client), 'hold enabled').toBe(true);
+    primary.client.close();
+    await sleep(1500);
+
+    const op = await createOperClient();
+    clients.push(op);
+    expect(await nickPresent(op, nick), 'the ghost holds the nick before the deauth').toBe(true);
+
+    expect(await postWebhook(accountDisabledEvent(account))).toBe(200);
+    await sleep(1500);
+
+    // The account is gone, so there is nothing for the session to revive
+    // into: the ghost leaves with it.  Before the fix only the record was
+    // destroyed and the ghost stayed, with no timer to ever remove it.
+    expect(await nickPresent(op, nick), 'the ghost is gone with its session').toBe(false);
+
+    // Leave the pool account without the hold preference.
+    const again = await createSaslBouncerClient(account, password, { nick: uniqueNick('dgoff') });
+    clients.push(again.client);
+    expect(await bouncerDisableHold(again.client)).toBe(true);
+  }, 60_000);
 });
