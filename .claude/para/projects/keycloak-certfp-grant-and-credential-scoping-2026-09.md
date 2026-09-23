@@ -2,7 +2,7 @@
 
 **Decision (user, 2026-09-23):** the ircd stops holding Keycloak admin credentials for
 its login paths; certificate login goes through a Keycloak extension (the SPI path).
-Not decided: what happens to SCRAM and ECDSA, and how /REGISTER leaves the admin API. Certificate login (SASL EXTERNAL) moves to a purpose-specific grant
+Not decided: when the SCRAM and ECDSA verifier read moves off the admin API, and how /REGISTER leaves it. Certificate login (SASL EXTERNAL) moves to a purpose-specific grant
 type implemented as a Keycloak extension in the SPI jar we already ship
 (`keycloak-webhook-spi`). The everyday login path runs on a client with no
 administrative role at all. This is the post-X3 direction: user certificates are
@@ -125,19 +125,18 @@ attribute stays the source of truth.
   service account from `realm-admin` to `manage-users` (not a composite, but Keycloak's
   evaluator lets it read users) for as long as /REGISTER stays in-band. That is the interim credential; the goal is
   none.
-- **SCRAM-SHA-256 and ECDSA: open decision** (the user has not chosen; "retire" below
-  was only a recommendation). They need the stored verifier before any token exists,
-  so no plain token grant serves them. Two ways:
-  - **Keep them, served by the SPI.** A realm resource endpoint in the same jar, behind
-    the same allow-list as the certfp grant, returns for a username the SCRAM verifier
-    (salt, iterations, stored key, server key) or the ECDSA public key together with
-    the user's id and created timestamp. The ircd completes the exchange as today and
-    `kc_user_get` loses its last admin callers. The SPI already holds the
-    `ScramCredentialProvider` and `ScramPasswordPolicyProvider`, and the registration
-    suite asserts SCRAM works, so this is the consistent SPI-path answer. Interim
-    grant while it does not exist: `view-users`.
-  - **Retire them.** PLAIN over TLS and OAUTHBEARER cover the need; the SPI's SCRAM
-    providers go with them.
+- **SCRAM-SHA-256 and ECDSA.** Keycloak has no SCRAM of its own: the SPI's
+  `ScramPasswordPolicyProvider` derives the verifier on every password change and
+  stores it as the user's `scram_sha256_salt`, `scram_sha256_iterations`,
+  `scram_sha256_stored_key` and `scram_sha256_server_key` attributes (the ECDSA public
+  key is an attribute too). The write side is already the SPI's. What uses the admin
+  API today is only the read: `kc_user_get` fetches the user representation and takes
+  the attributes from it, which is why these two need `view-users`. To take that read
+  off the admin API, the same jar gains a realm resource endpoint, behind the same
+  allow-list as the certfp grant, that returns for a username those attributes together
+  with the user's id and created timestamp; the ircd completes the exchange exactly as
+  it does now and `kc_user_get` loses its last admin callers. Both mechanisms stay;
+  whether the read moves, and when, is open.
 - **/REGISTER:** decide between Keycloak's own registration page (the ircd hands out
   the link; zero credential) and an SPI endpoint "create IRC user" behind its own role
   that enforces our naming and rate rules. Until decided, `manage-users` stays.
@@ -155,8 +154,8 @@ attribute stays the source of truth.
 3. libkc + ircd: the two credentials, `kc_user_verify_certfp`, EXTERNAL rewired,
    health via JWKS. Bed test with the existing `CertClient` helper: a certificate login
    is introduced with `+r account:ts:id` (the wire test's regex) and X3 binds it.
-4. SCRAM and ECDSA: decide; if kept, the SPI lookup endpoint (same allow-list) and
-   `kc_user_get` loses its last admin callers.
+4. SCRAM and ECDSA: the SPI read endpoint (same allow-list), so `kc_user_get` loses
+   its last admin callers; until then they need `view-users`.
 5. Decide /REGISTER; then remove the admin pair from the ircd entirely if the page
    wins.
 
