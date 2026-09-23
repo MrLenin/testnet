@@ -1267,7 +1267,15 @@ Verdict "Yes with fixes". Fixed, each with a test that failed first where one co
   at start (recreate after a change); `docker logs keycloak | grep "Sending admin event"`
   and `docker logs nefarious | grep WEBHOOK` are the delivery oracles.
 
-### Final bed run
+### Final bed run (binary `ircd.202609232212`, bed-deploy `d3b0e8d`)
 
-See the ledger's last lines (this record was written while the last end-to-end run was in
-progress; the result line follows below when it lands).
+- `keycloak-webhook-e2e` 3/3 with real Keycloak events: disable deauths the live session and
+  the cached password is refused; an admin reset refuses the old password at once and
+  accepts the new one; delete deauths the live session and refuses the cached password of a
+  user who had logged out. Each case asserts the account was visible before the action.
+- `bouncer-deauth-cross-server` 3/3, `bouncer-deauth-local-alias` 2/2, `x3-account-change`
+  2/2, `sasl-reauth` 4/4; cmocka `webhook_subject` 9/9 and `bouncer_deauth` 11/11; a
+  `--disable-keycloak` configure and build of the branch tip succeed without the module.
+- Two bed lessons: the leaf needs more than 45 s after a restart before cross-server suites
+  are meaningful, and `BOUNCER SET HOLD` is a per-session override (hold is on by default),
+  so a test that closes primaries and asks WHOIS by nick must turn it off on each primary.
