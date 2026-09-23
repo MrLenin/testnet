@@ -1084,7 +1084,7 @@ Expected: all green.
 
 - [ ] **Step 1: Replace the README's "Event Formats" and "X3 IRC Services Integration" sections**
 
-```markdown
+````markdown
 ## Event Formats
 
 ### Admin Events
@@ -1134,7 +1134,7 @@ The ircd resolves the uuid against the Keycloak id it stores for every logged-in
 client and every positive-cache entry (the ID token's `sub`, compact form), so
 no username is needed on admin events.  A root-level `username` is honoured when
 present (synthetic events, tests).
-```
+````
 
 - [ ] **Step 2: Re-anchor the Java comments**
 
