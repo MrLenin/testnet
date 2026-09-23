@@ -282,6 +282,15 @@ await new Promise(r => setTimeout(r, 500));  // Let modes settle
 await client.registerChannel(channel);
 ```
 
+**5. Security override**: staff commands (`OSET`, `OUNREGISTER`, ...) refuse with "You must have
+security override (helping mode) on" until the oper sends `O3 GOD ON`. Assert setup commands
+**positively** (e.g. the `FLAGS:` reply contains the letter): a check for known refusal wordings
+misses the one you did not know, and every case then runs against the wrong setup.
+
+**6. Restarting X3 loses what it has not saved**: `docker restart/stop x3` ends in SIGKILL before
+saxdb is written, so accounts created by the test vanish. Call `flushX3Saxdb(handle)` from
+`helpers/bed-control.ts` first (SIGQUIT, then waits until the handle is on disk).
+
 ### Access Levels
 
 ```typescript

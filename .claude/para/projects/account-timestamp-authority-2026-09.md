@@ -1,6 +1,6 @@
 # The account timestamp: a delete detector that was disabled mid-migration
 
-**Status (2026-09-22, evening):** sequencing steps 1-2 implemented, verified, **unpushed** (x3 `cfe7d8a`; nefarious `396c423` + `95e61e3`). Designs F and G amended after review (below). Sections H-K added: X3 after LDAP, the saxdb hash, break-glass accounts, and a standalone `cmd_auth` bug.
+**Status (2026-09-22, night):** sequencing steps 1-2 and 4 implemented, verified, **unpushed** (x3 `cfe7d8a`, x3 `77bd045`; nefarious `396c423` + `95e61e3`). Step 3 parked. Next: step 5. Designs F and G amended after review (below). Sections H-K added: X3 after LDAP, the saxdb hash, break-glass accounts, and a standalone `cmd_auth` bug.
 **Scope:** x3 (`upstream/master`), nefarious bouncer + webhook consumer, Keycloak SPI.
 *Originally also libkc/SASL, the Keycloak realm mapper and a seeding migration — all
 withdrawn by design E.*
@@ -819,6 +819,23 @@ authentication code; what is new is issuing certificates to those accounts.
 
 It does **not** depend on section K: a certificate user is logged in on connect and never reaches `/msg AuthServ AUTH` (see K).
 
+**Implemented (step 4, x3 `77bd045` on `feature/local-handle-flag`; test testnet `89265752`):**
+- `HI_FLAG_LOCAL` = `0x1000`, letter `L`. `ADVANCED` held `0x1000` unlettered — never saved, set by
+  `SET ADVANCED` — and moved to `0x2000`; reusing its bit would have let any user set `LOCAL` on
+  themselves. The saxdb loader now skips unknown flag letters (it shifted by -1).
+- `handle_account` refuses before the timestamp block. Outside a burst the claimant is killed
+  ("Account unavailable.") **from the timer queue** — the stamp can arrive mid-introduction
+  (the `N` line's `+r`), which keeps using the `userNode` — and the kill is skipped if X3 has
+  since bound that user to the handle itself (only certificate auto-login can). In a burst it
+  only refuses; **the ircd replays `MARK SSLCLIFP` in the burst**, so auto-login re-binds the
+  owner (verified).
+- `cmd_auth`: a directory bind for a `LOCAL` handle becomes a wrong password (generic reply;
+  failpw hooks and auto-gag still run). `loc_auth`: never counts it; a certificate still does.
+- Known limit: a bouncer session for a `LOCAL` account that the ircd re-announces outside a
+  burst is killed unless auto-login bound it first. Break-glass accounts are not expected to
+  use bouncer sessions.
+- Setting it: `/msg O3 GOD ON`, then `/msg AuthServ OSET *<account> FLAGS +L` (plus `+n`).
+
 **The census surfaces candidates:** it prints `opserv_level` beside every handle with no
 Keycloak user. One with an oper level is the first thing to look at on production. Its
 certificate-fingerprint count is informational only: certificate break-glass does not
@@ -861,7 +878,7 @@ own; revisit only if it turns up alongside other `cmd_auth` work.
 | 1 | Retire the LDAP backfill (B) | x3 | **done** — `cfe7d8a`, unpushed |
 | 2 | Retire bouncer rebind gate (c) (E) | nefarious | **done** — `396c423` + `95e61e3`, unpushed; `nefarious-crdt` not addressed |
 | 3 | ~~Fix `cmd_auth` certificate lockout (K)~~ | x3 | **parked** — practically unreachable; certificate users are logged in on connect |
-| 4 | `LOCAL` flag; `NODELETE` on break-glass handles (J) | x3 | independent; **must precede 5** |
+| 4 | `LOCAL` flag; `NODELETE` on break-glass handles (J) | x3 | **done** — `77bd045` on `feature/local-handle-flag`, unpushed (PR: user); test testnet `89265752` |
 | 5 | Wire-carried Keycloak identity (F), plus an oper re-bind command | nefarious + x3 | needs 4 |
 | 6 | Seed stored identity; refreshed census | tooling | needs 5 |
 | 7 | `XQUERY` poll on link + sweep (G, layers 2-3) | nefarious + x3 | needs 5; new ircd-side responder |

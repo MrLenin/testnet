@@ -60,6 +60,10 @@ PRIVMSG AuthServ :COOKIE <account> <cookie>            # activate a registration
 PRIVMSG ChanServ :REGISTER #channel
 PRIVMSG ChanServ :ADDUSER  #channel *account 200       # account-name prefix
 
+# Staff account changes: security override first, then *account
+PRIVMSG O3 :GOD ON                                     # else "must have security override"
+PRIVMSG AuthServ :OSET *account FLAGS +L               # a bare name is looked up as a nick
+
 # OpServ (requires olevel)
 PRIVMSG O3 :ACCESS                                     # report your olevel
 PRIVMSG O3 :GLINE *!*@host 1h reason                   # network ban
