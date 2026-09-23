@@ -100,16 +100,27 @@ async function boundAccount(c: RawSocketClient): Promise<string> {
   return /Account Information for \x02?([^\x02\s]+)/.exec(line)?.[1] ?? '';
 }
 
-/** Run one AuthServ command as an oper with the security override on; returns the reply lines. */
-async function asOper(command: string): Promise<string> {
+/** Run one service command as an oper with the security override on; returns the reply lines. */
+async function asOper(command: string, service: string = NICKSERV_NICK): Promise<string> {
   const op = await createOperClient();
   try {
     const god = await op.serviceCmd(OPSERV_NICK, 'GOD ON');
     expect(god.join('\n'), 'GOD ON').toMatch(/Security override has been enabled|already have security override enabled/);
-    return (await op.serviceCmd(NICKSERV_NICK, command)).join('\n');
+    return (await op.serviceCmd(service, command)).join('\n');
   } finally {
     op.close();
   }
+}
+
+/**
+ * Bind the command to AuthServ.  X3 keeps a service's command bindings in
+ * its database, and a service that already has some does not pick up a
+ * module's new commands on restart, so an operator binds them once:
+ * /msg O3 BIND AuthServ REBIND *nickserv.rebind.  Idempotent here.
+ */
+async function bindRebind(): Promise<void> {
+  const reply = await asOper(`BIND ${NICKSERV_NICK} REBIND *nickserv.rebind`, OPSERV_NICK);
+  expect(reply, 'REBIND bound to AuthServ').toMatch(/bound|already/i);
 }
 
 describe('REBIND re-binds or clears a handle\'s Keycloak id', () => {
@@ -119,6 +130,7 @@ describe('REBIND re-binds or clears a handle\'s Keycloak id', () => {
     if (GATED) return;
     token = await getKeycloakAdminToken();
     await kcCreate();
+    await bindRebind();
   }, 60_000);
 
   afterAll(async () => {
