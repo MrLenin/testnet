@@ -1,7 +1,17 @@
 # Step 5: PR drafts and push commands (2026-09-23)
 
-Everything below is unpushed. Order: the nefarious pushes carry no PR (ircv3-only);
-the x3 Part A PR is independent; the x3 Part C PR opens only after step 4 merges.
+**Done 2026-09-23 (nefarious + x3 Part A branch).** `fix/authenticate-reauth-dispatch`
+and `fix/wire-keycloak-id` were siblings off 4de99fa (neither contained the other), so the
+per-branch sequence below could not fast-forward past the second push. What was pushed:
+the re-auth branch as listed (4de99fa..c33c50d), then one conventional merge commit
+`75d8101` ("Merge branch 'fix/bouncer-deauth-correctness' into ircv3.2-hardening",
+carrying fix/wire-keycloak-id and the deauth branch on top of it), to both fork branches
+on both remotes. All four tips are 75d8101. x3 `fix/ac-account-change` is on
+MrLenin/x3 (5ee1a88); the PR is yours to open with the body below. The Part C branch
+stays local until step 4 merges.
+
+Order: the nefarious pushes carry no PR (ircv3-only); the x3 Part A PR is independent;
+the x3 Part C PR opens only after step 4 merges.
 
 ## nefarious: direct pushes, no PR
 
