@@ -17,7 +17,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'node:fs';
 import { run, flushX3Saxdb } from '../helpers/bed-control';
 import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
-import { authenticateSaslPlain } from '../helpers/sasl';
+import { authenticateSaslPlain, authenticateSaslOAuthBearer } from '../helpers/sasl';
 import { NICKSERV_NICK } from '../helpers/x3-client';
 import { getKeycloakAdminToken } from '../helpers/keycloak-sync';
 
@@ -93,6 +93,17 @@ async function login(nick: string): Promise<{ c: RawSocketClient; ok: boolean; k
   return { c, ok: r.success, killed };
 }
 
+/** A bearer token for a realm user, minted to the public irc-client. */
+async function kcUserToken(): Promise<string> {
+  const res = await fetch(`${KC}/realms/${REALM}/protocol/openid-connect/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'password', client_id: 'irc-client', username: NAME, password: PASSWORD }),
+  });
+  if (!res.ok) throw new Error(`token for ${NAME}: ${res.status} ${await res.text()}`);
+  return (await res.json()).access_token;
+}
+
 /** X3's view of who a client is: the account name, or '' when X3 has no binding. */
 async function boundAccount(c: RawSocketClient): Promise<string> {
   c.clearRawBuffer();
@@ -146,4 +157,24 @@ describe('a handle binds to its Keycloak user id', () => {
       other.c.close();
     }
   }, 120_000);
+
+  it.skipIf(GATED)('refuses the different user on a post-registration authentication too (AC)', async () => {
+    // Same recreated user, but authenticating after registration: the ircd
+    // announces this with AC (fifth parameter), not with the introduction.
+    const c = await createRawSocketClient();
+    try {
+      await c.capLs();
+      await c.capReq(['sasl']);
+      c.capEnd();
+      c.register(`kid${tag}d`);
+      await c.waitForNumeric('001', 15000);
+
+      const r = await authenticateSaslOAuthBearer(c, await kcUserToken());
+      expect(r.success, `the ircd accepts the token: ${r.error}`).toBe(true);
+      const closed = await c.waitForLine(/ KILL \S+ :|ERROR :Closing Link/, 12000).then(() => true, () => false);
+      expect(closed, 'X3 refuses the announced id and the connection is closed').toBe(true);
+    } finally {
+      c.close();
+    }
+  }, 90_000);
 });

@@ -13,7 +13,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
-import { authenticateSaslPlain, authenticateSaslOAuthBearer } from '../helpers/sasl';
+import { authenticateSaslPlain, authenticateSaslOAuthBearer, sendSaslPayload } from '../helpers/sasl';
 import { getKeycloakAdminToken } from '../helpers/keycloak-sync';
 
 const KC = process.env.KEYCLOAK_URL || 'http://localhost:8080';
@@ -21,8 +21,13 @@ const REALM = 'testnet';
 
 // 'test*' is swept by src/scripts/cleanup-tests.ts.
 const tag = Math.random().toString(36).slice(2, 7);
+// One account per case: a disconnected client leaves a held bouncer session,
+// and the next login as the same account revives it (and takes its nick).
 const FIRST = `testrea${tag}a`;
 const SECOND = `testrea${tag}b`;
+const FAILED = `testrea${tag}f`;
+const LATE = `testrea${tag}n`;
+const PLAINLY = `testrea${tag}p`;
 const PASSWORD = 'Change!2026';
 
 let token = '';
@@ -87,13 +92,11 @@ async function whoisAccount(c: RawSocketClient, nick: string): Promise<string> {
 describe('SASL re-authentication after registration', () => {
   beforeAll(async () => {
     token = await getKeycloakAdminToken();
-    await kcCreateUser(FIRST);
-    await kcCreateUser(SECOND);
+    for (const u of [FIRST, SECOND, FAILED, LATE, PLAINLY]) await kcCreateUser(u);
   }, 60_000);
 
   afterAll(async () => {
-    await kcDeleteUser(FIRST);
-    await kcDeleteUser(SECOND);
+    for (const u of [FIRST, SECOND, FAILED, LATE, PLAINLY]) await kcDeleteUser(u);
   });
 
   it('OAUTHBEARER changes the account of a registered client', async () => {
@@ -112,15 +115,61 @@ describe('SASL re-authentication after registration', () => {
     }
   }, 60_000);
 
+  it('a failed OAUTHBEARER re-authentication does not open the door to PLAIN', async () => {
+    const nick = `rea${tag}f`;
+    const c = await connectAs(FAILED, nick);
+    try {
+      // Drive the failed exchange by hand: OAUTHBEARER answers a bad token
+      // with an error challenge, which the client acknowledges with "+".
+      c.clearRawBuffer();
+      c.send('AUTHENTICATE OAUTHBEARER');
+      await c.waitForLine(/AUTHENTICATE \+/, 10000);
+      await sendSaslPayload(c, Buffer.from('n,,\x01auth=Bearer not.a.valid.token\x01\x01').toString('base64'));
+      const challenge = await c.waitForLine(/AUTHENTICATE [^+]|\s90[0-9] /, 15000);
+      expect(challenge, 'a bad token is not accepted').not.toMatch(/ 90[03] /);
+      if (/AUTHENTICATE /.test(challenge)) {
+        c.send('AUTHENTICATE +');
+        await c.waitForLine(/ 90[2456] /, 10000);
+      }
+
+      c.clearRawBuffer();
+      c.send('AUTHENTICATE PLAIN');
+      const line = await c.waitForLine(/ (907|462) |^AUTHENTICATE /, 10000);
+      expect(line, 'a client that has an account may only re-authenticate with OAUTHBEARER').toMatch(/ 907 /);
+      expect(await whoisAccount(c, nick)).toBe(FAILED);
+    } finally {
+      c.close();
+    }
+  }, 60_000);
+
+  it('a registered client with no account may authenticate with PLAIN', async () => {
+    const nick = `rea${tag}n`;
+    const c = await createRawSocketClient();
+    try {
+      await c.capLs();
+      await c.capReq(['sasl']);
+      c.capEnd();
+      c.register(nick);
+      await c.waitForNumeric('001', 15000);
+      expect(await whoisAccount(c, nick)).toBe('');
+
+      const r = await authenticateSaslPlain(c, LATE, PASSWORD);
+      expect(r.success, `SASL PLAIN after registration: ${r.error}`).toBe(true);
+      expect(await whoisAccount(c, nick)).toBe(LATE);
+    } finally {
+      c.close();
+    }
+  }, 60_000);
+
   it('PLAIN is still refused with ERR_SASLALREADY once SASL has completed', async () => {
     const nick = `rea${tag}p`;
-    const c = await connectAs(FIRST, nick);
+    const c = await connectAs(PLAINLY, nick);
     try {
       c.clearRawBuffer();
       c.send('AUTHENTICATE PLAIN');
-      const line = await c.waitForLine(/ (907|462|AUTHENTICATE) /, 10000);
+      const line = await c.waitForLine(/ (907|462) |^AUTHENTICATE /, 10000);
       expect(line, 'the re-auth guard answers, not the already-registered handler').toMatch(/ 907 /);
-      expect(await whoisAccount(c, nick)).toBe(FIRST);
+      expect(await whoisAccount(c, nick)).toBe(PLAINLY);
     } finally {
       c.close();
     }
