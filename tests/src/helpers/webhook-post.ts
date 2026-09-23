@@ -99,6 +99,7 @@ export async function nickPresent(client: RawSocketClient, nick: string): Promis
  */
 export async function whoisAccount(client: RawSocketClient, nick: string): Promise<string> {
   const lines = (client as unknown as { lines: { raw: string }[] }).lines;
+  client.clearRawBuffer();                  // an earlier reply's unconsumed 318 must not end this wait
   const start = lines.length;
   client.send(`WHOIS ${nick}`);
   await client.waitForLine(new RegExp(` (318|401) \\S+ ${nick} `), 8000);

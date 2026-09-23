@@ -101,6 +101,7 @@ describe('Keycloak admin actions reach the ircd', () => {
     expect(cached, 'second login (cache hit)').not.toBeNull();
     clients.push(cached!);
 
+    expect(await whoisAccount(primary!, `wh${tag}a`), 'logged in before the disable').toBe(USER);
     expect((await kc(`/users/${userId}`, { method: 'PUT', body: JSON.stringify({ enabled: false }) })).status).toBe(204);
 
     try {
@@ -161,6 +162,7 @@ describe('Keycloak admin actions reach the ircd', () => {
     gone!.close();
     await sleep(1000);
 
+    expect(await whoisAccount(stay!, `wh${tag}h`), 'logged in before the delete').toBe(USER);
     expect((await kc(`/users/${userId}`, { method: 'DELETE' })).status).toBe(204);
 
     expect(await loggedOutWithin(stay!, `wh${tag}h`, 8000), 'the live session lost its account').toBe(true);
