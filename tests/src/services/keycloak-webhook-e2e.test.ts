@@ -16,7 +16,7 @@
  * ircd with its secret (plan task 1).
  */
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
-import { RawSocketClient, createRawSocketClient } from '../helpers/index.js';
+import { RawSocketClient, createRawSocketClient, bouncerDisableHold } from '../helpers/index.js';
 import { authenticateSaslPlain } from '../helpers/sasl';
 import { getKeycloakAdminToken } from '../helpers/keycloak-sync';
 import { whoisAccount } from '../helpers/webhook-post';
@@ -50,6 +50,19 @@ async function kcCreateUser(username: string, password: string): Promise<string>
   if (!res.ok && res.status !== 409) throw new Error(`create ${username}: ${res.status} ${await res.text()}`);
   const q = await kc(`/users?username=${encodeURIComponent(username)}&exact=true`);
   return (await q.json())[0].id;
+}
+
+/**
+ * The first login of a case, with hold turned off for ITS session.  Hold is
+ * on by default (BOUNCER_DEFAULT_HOLD) and BOUNCER SET HOLD is a per-session
+ * override: a closed primary would otherwise leave a held ghost that the next
+ * login of the account revives, taking the ghost's nick, and every case here
+ * closes its clients and asks WHOIS by the nick it registered.
+ */
+async function loginPrimary(password: string, nick: string): Promise<RawSocketClient | null> {
+  const c = await tryLogin(password, nick);
+  if (c) expect(await bouncerDisableHold(c), `hold off for ${nick}`).toBe(true);
+  return c;
 }
 
 /** SASL PLAIN as the user; resolves to the registered client, or null when the login was refused. */
@@ -94,7 +107,7 @@ describe('Keycloak admin actions reach the ircd', () => {
   });
 
   it('disable deauths the session and stops the cached password', async () => {
-    const primary = await tryLogin(PASSWORD, `wh${tag}a`);
+    const primary = await loginPrimary(PASSWORD, `wh${tag}a`);
     expect(primary, 'first login').not.toBeNull();
     clients.push(primary!);
     const cached = await tryLogin(PASSWORD, `wh${tag}b`);          // primes the positive cache
@@ -125,7 +138,7 @@ describe('Keycloak admin actions reach the ircd', () => {
   async function loginWithin(password: string, nick: string, ms: number): Promise<RawSocketClient | null> {
     const deadline = Date.now() + ms;
     for (;;) {
-      const c = await tryLogin(password, nick);
+      const c = await loginPrimary(password, nick);
       if (c || Date.now() >= deadline) return c;
       await sleep(5000);
     }
@@ -154,7 +167,7 @@ describe('Keycloak admin actions reach the ircd', () => {
   }, 90_000);
 
   it('delete deauths the session and stops the cached password, even for a user who logged out', async () => {
-    const stay = await tryLogin(NEW_PASSWORD, `wh${tag}h`);
+    const stay = await loginPrimary(NEW_PASSWORD, `wh${tag}h`);
     expect(stay).not.toBeNull();
     clients.push(stay!);
     const gone = await tryLogin(NEW_PASSWORD, `wh${tag}i`);          // primes the cache, then leaves
