@@ -164,3 +164,7 @@ dc restart x3
 # Full restart
 dc down && dc up -d
 ```
+
+## Trap: restarting the ircd containers alone can leave X3 exited
+
+`scripts/dc.sh -l up -d --no-deps nefarious nefarious2` recreates the ircds; X3 retries its uplink a few times, logs "All available uplinks exhausted; giving up." and exits (1). Anything that talks to AuthServ afterwards (the test account pool's REGISTER on startup) waits a timeout per account. After an ircd deploy, `scripts/dc.sh up -d --no-deps x3` and wait for a fresh `W: DH Z x3.services` / EB in `docker logs --since 45s x3` (older lines match too, so limit the window).

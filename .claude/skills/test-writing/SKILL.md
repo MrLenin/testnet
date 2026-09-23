@@ -663,3 +663,7 @@ Then bump the nefarious pointer in testnet via `git add nefarious && git commit`
 1. Run a single test with `-v` (already on by default) — the raw IRC dialog goes to stderr / pytest output.
 2. The harness writes `pytest.xml` in `nefarious/.irctest/`; CI uploads that as an artifact.
 3. Compare against a known-good run via the `nefarious-upstream` submodule (`dc up nefarious-upstream` — unmodified upstream master); if both fail, it's spec ambiguity or upstream behaviour, not us.
+
+## Trap: an alias's own state is only visible through oper CHECK
+
+Bouncer aliases share the primary's nick, WHOIS by nick answers for the primary, and an alias's JOIN is applied to the primary (`m_join.c` rewrites `sptr` to `cli_alias_primary`), so neither WHOIS nor a `+r` channel gate can observe an alias's own account. Oper `CHECK #channel` lists every member with its own account as the last field, aliases marked `~` (RPL_CHANUSER 287: `": <oplvl> <status><nick> (<user>@<host>)   (<info>) <account>"`). See `src/ircv3/bouncer-deauth-local-alias.test.ts`. CHECK's account column was empty on the fork until `check: show a member's account again` (2026-09-23).
