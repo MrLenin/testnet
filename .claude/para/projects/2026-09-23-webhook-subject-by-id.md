@@ -1169,3 +1169,105 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 **4. Review focus.** Each of the five lines names its test: 1 -> Task 2 case C; 2 -> `user-update-partial.json`; 3 -> `user-delete-bad-path.json` and the resource-type test; 4 -> `user-delete-actor-named.json` + Task 5 step 5; 5 -> `user-delete-root-username.json` + Task 6 step 3.
 
 **Things to verify at execution time, not assumed here:** whether `ircd/test/Makefile.in` needs the explicit `.o` rule or the generic one already takes `CPPFLAGS` (the fixture path define must reach the compile either way); whether `enum Feature` is the type name `feature_bool` takes (`include/ircd_features.h`); and whether Keycloak needs a full recreate or a restart to re-read the SPI environment (Task 1 step 2 checks inside the container).
+
+## Execution record (2026-09-23)
+
+Executed inline (superpowers:executing-plans) on nefarious `fix/webhook-subject-by-id`, cut
+from `75d8101` (the pushed tip of both fork branches), 9 commits `70f1a09..7b65b7a`,
+unpushed. Tests on testnet `main`; SPI docs on `docs/ircd-contract` (2 commits off main).
+Bed: `bed-deploy` merge `d3b0e8d`, both ircds on `ircd.202609232212`. Push commands and PR
+text: `step5-pr-drafts-2026-09-23.md`. The user approved the plan and its four proposals as
+written ("looks good").
+
+### Commits
+
+| Task | Where | Commit | What |
+|---|---|---|---|
+| 1 | testnet | 68e4f691 | `.env` (and `.env.local`) point the SPI at `nefarious:9090` with the ircd's secret |
+| 2 | testnet | fe40cd41 | `keycloak-webhook-e2e.test.ts`, red on the old build |
+| 3 | nefarious | 70f1a09 | pure `webhook_subject` decision, fixtures from the realm, cmocka |
+| 4 | nefarious | f22b28d | positive-cache purge by id; `CI <name|*> [<id>]` |
+| 5 | nefarious | ec30e19 | handler on the subject; id-aware walk match; parser drops the actor-name fallback |
+| 6 | nefarious | 9d3d4b9 | a named re-enable purges the caches (negative cache after a refused attempt) |
+| 7 | spi | c195c7a, f8a6e1c | README event formats + consumer contract; Java comments re-anchored |
+| fix | nefarious | 8e7a3df | only `users/<uuid>` is the user; `users/<uuid>/credentials/<id>` purges |
+| fix | nefarious | 137d50d | module and cmocka program gated on the Keycloak build; `configure` regenerated |
+| fix | nefarious | 9f08338 | names from the purged cache reach id-less sessions; warnings |
+| fix | nefarious | 7b65b7a | fixtures carry synthetic identifiers |
+| fix | testnet | d66616c4, 48656404 | WHOIS helper reads its own whole reply; e2e pre-state assertions; hold off for the test user; skill notes |
+
+### Fresh review (Fable) and fix pass
+
+Verdict "Yes with fixes". Fixed, each with a test that failed first where one could exist:
+
+1. Critical: a `USER`/`DELETE` or `UPDATE` on a sub-resource of the user (unlinking a
+   federated identity is `DELETE users/<uuid>/federated-identity/<p>`) was read as the
+   user's own deletion or disable. Only the bare path (or a synthetic path-less event) is
+   the user. cmocka `test_subresource_delete_or_update_is_not_the_user`.
+2. Important: sessions carrying no Keycloak id (authenticated through X3, relayed `AC R`
+   without the id as prod X3 sends it, legacy hops, DB-restored ghosts) are unreachable by
+   a nameless event. Partial cover: the id purge hands back the account names of the
+   positive-cache entries it drops and those are walked too; "nothing names the subject"
+   is a warning naming the id; README and this record say which classes are reached.
+3. Important: `webhook_subject.c` and its cmocka program were unconditional and pull in
+   jansson through `kc/kc_webhook.h`; both now ride configure's `KC_SRC` /
+   `KC_CMOCKA_TESTPROGS`; `./configure --disable-keycloak && make` verified on a detached
+   worktree of `7b65b7a` (module absent, tree and cmocka gate build).
+4. Minor, fixed: `whoisAccount` marks earlier lines consumed before it asks; each e2e case
+   asserts the account is visible before the admin action.
+5. Minor, fixed: `users/<uuid>/credentials/<id>` under `DELETE` or `ACTION` purges the
+   caches (`test_credential_removal_purges`).
+6. Minor, fixed: the four-name cap warns; `.env` comment; fixtures scrubbed.
+
+### Rulings (cost if wrong in the ledger)
+
+- The user's "looks good" on the plan doc took the four proposals as decided (CI id form,
+  `.env.local` edit, SPI docs only, ungated e2e).
+- Task 1's gate is the Keycloak side (sends logged, no delivery failure) plus the
+  functional proof; the ircd's L_INFO webhook lines turned out to reach `docker logs`,
+  its L_DEBUG ones do not.
+- Task 2: a failed case re-enables the user in a `finally`, so cases cannot cascade.
+- Task 3: the first "disable" fixture was a bare console toggle; a full-representation
+  one was added beside it, and the Task 3 commit was amended (it had landed red).
+- Task 6: case B retries its first login for up to 75 s (a refused attempt on a disabled
+  account sits in the negative cache for `SASL_NEGCACHE_TTL`; a bare `{enabled:true}`
+  toggle names the user only by id); a re-enable that names the user purges by name.
+- Fix pass: the durable cover for id-less sessions (persist id to account at every
+  id-carrying login; `kc_id` in the bounce-DB session record) is deferred to step 5c,
+  where the restored-ghost id is already owed.
+- Fix pass: hold is on by default (`BOUNCER_DEFAULT_HOLD`); the e2e test turns it off for
+  its user, since a closed client's ghost is revived by the next login under the ghost's
+  nick.
+
+### Deferred (not fixed here)
+
+- A bare API re-enable leaves a refused password in the negative cache for up to 60 s.
+- Under `WEBHOOK_KILL_ON_*` a name-only match can disconnect an id-less client of a
+  reused name (rename + id-less login + the switch on); no feature doc file carries it.
+- The cross-server id purge has no bed observer; a pre-branch v3 peer relays `CI *`
+  without the id (rollout window).
+- The cmocka suite mirrors the parser's field mapping instead of driving `dispatch_event`.
+- Bouncer observation for a bouncer-analyst pass: a client revived from a held ghost was
+  classified as held (`IsBouncerHold`) two seconds later and its session destroyed on a
+  delete; if a live client can carry that flag, a plain deauth exits it (ledger, green3
+  investigation, `docker logs nefarious` 22:16:12-16Z).
+
+### Operator notes
+
+- A Keycloak delete, disable (`enabled:false` in the update), admin password reset or
+  credential removal reaches the ircd by the user's Keycloak id; nothing in the event
+  names the user and nothing needs to. `CI <name|*> [<id>]` carries the id to every fork
+  server; old receivers ignore it.
+- Sessions authenticated through X3, a legacy hop, or restored from the bouncer DB carry
+  no id and are reached only through a name (the event's, or one the purged cache knew);
+  the log warns with the id when nothing names the subject.
+- `WEBHOOK_KILL_ON_DELETE` / `_DISABLE` stay off; a re-enable purges by name only when
+  the event names the user (console save), not for a bare API toggle.
+- Bed: `.env` and `.env.local` must agree on the SPI URL and secret; Keycloak reads them
+  at start (recreate after a change); `docker logs keycloak | grep "Sending admin event"`
+  and `docker logs nefarious | grep WEBHOOK` are the delivery oracles.
+
+### Final bed run
+
+See the ledger's last lines (this record was written while the last end-to-end run was in
+progress; the result line follows below when it lands).
