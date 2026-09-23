@@ -90,11 +90,22 @@ export async function nickPresent(client: RawSocketClient, nick: string): Promis
   return / 311 /.test(line);
 }
 
-/** The account WHOIS reports for the nick (330), or '' when it has none. */
+/**
+ * The account WHOIS reports for the nick (330), or '' when it has none.
+ * Reads the whole reply: it waits for the end of this WHOIS (318, or 401)
+ * and then looks for the 330 among the lines that arrived after the
+ * request, so a late line from an earlier reply cannot be mistaken for
+ * "no account".
+ */
 export async function whoisAccount(client: RawSocketClient, nick: string): Promise<string> {
-  client.clearRawBuffer();
+  const lines = (client as unknown as { lines: { raw: string }[] }).lines;
+  const start = lines.length;
   client.send(`WHOIS ${nick}`);
-  const line = await client.waitForLine(new RegExp(` (330|318|401) \\S+ ${nick} `), 8000);
-  const m = new RegExp(` 330 \\S+ ${nick} (\\S+) `).exec(line);
-  return m ? m[1] : '';
+  await client.waitForLine(new RegExp(` (318|401) \\S+ ${nick} `), 8000);
+  const acct = new RegExp(` 330 \\S+ ${nick} (\\S+) `);
+  for (let i = start; i < lines.length; i++) {
+    const m = acct.exec(lines[i].raw);
+    if (m) return m[1];
+  }
+  return '';
 }

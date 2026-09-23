@@ -114,9 +114,25 @@ describe('Keycloak admin actions reach the ircd', () => {
     }
   }, 90_000);
 
+  /**
+   * Log in, retrying for up to `ms`.  The refused attempt at the end of the
+   * disable case put (user, password) in the ircd's negative cache
+   * (SASL_NEGCACHE_TTL, 60 s by default), and a bare `{enabled:true}` toggle
+   * names the user only by id, so the ircd cannot purge that entry: the
+   * re-enabled user logs in again once it expires.
+   */
+  async function loginWithin(password: string, nick: string, ms: number): Promise<RawSocketClient | null> {
+    const deadline = Date.now() + ms;
+    for (;;) {
+      const c = await tryLogin(password, nick);
+      if (c || Date.now() >= deadline) return c;
+      await sleep(5000);
+    }
+  }
+
   it('an admin password reset stops the old password at once', async () => {
-    const c1 = await tryLogin(PASSWORD, `wh${tag}d`);
-    expect(c1, 'login after re-enable').not.toBeNull();
+    const c1 = await loginWithin(PASSWORD, `wh${tag}d`, 75_000);
+    expect(c1, 'login after re-enable (once the negative cache entry expires)').not.toBeNull();
     clients.push(c1!);
     const c2 = await tryLogin(PASSWORD, `wh${tag}e`);               // primes the positive cache
     expect(c2).not.toBeNull();

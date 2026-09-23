@@ -31,6 +31,8 @@ Which mechanisms get *advertised* is gated by `FEAT_SASL_LOCAL_MECHANISMS` (defa
 - **Phase 4c** (committed to submodule): CI token for cross-server cache coherence.
 - **Webhook**: a single *inbound* HTTP listener (`sasl_webhook_init(port, secret)` on top of libkc's `kc_webhook` server) receiving Keycloak events (password change / delete / disable / logout). Configured by `FEAT_WEBHOOK_PORT` + `FEAT_WEBHOOK_SECRET` — one port, no URL list, no outbound delivery.
 - **CI token**: `CACHEINVAL` / `CI` — a P10 token, silently ignored by legacy servers. Handled by `ms_cacheinval()` in `sasl_webhook.c`.
+- **CI id form (2026-09-23, plan 2 of the webhook audit)**: `CI <username|*> [<kc_id>]`. The positive cache entries carry the compact Keycloak id since step 5, so a delete or admin reset -- which Keycloak names only by uuid -- purges by id (`sasl_cache_invalidate_id`) here and on every fork server; `*` = no name. Old receivers ignore the second parameter and find nothing under `*`. Sender: `cache_invalidate_subject()` in `sasl_webhook.c`.
+- **Webhook subject by id**: `USER` admin events carry no username (delete, reset-password: only `resourcePath: users/<uuid>`; update: the changed fields, `enabled` among them when it changed). `include/webhook_subject.h` (pure, cmocka over real fixtures under `ircd/test/fixtures/webhook/`) turns an event into (kind, compact id, payload name); the handler deauths under every account name the id resolves to and matches clients by id when both sides carry one. `authDetails` is the acting admin, never the subject (the parser no longer reads its username). Bed e2e: `tests/src/services/keycloak-webhook-e2e.test.ts` (real admin actions on a throwaway user).
 
 ## Transition Architecture
 

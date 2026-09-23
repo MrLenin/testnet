@@ -92,6 +92,13 @@ Check all three:
 - **X3**: Service link status
 - **Keycloak**: HTTP connectivity from X3
 
+### Keycloak webhook delivery (SPI -> ircd :9090)
+
+- The SPI reads `KC_SPI_EVENTS_LISTENER_WEBHOOK_EVENTS_URL` / `_SECRET` at Keycloak start (`.env` + `.env.local`; `.env.local` wins). Since 2026-09-23 both name `http://nefarious:9090/keycloak-webhook` and the ircd's conf secret; `docker exec keycloak sh -c 'echo $KC_SPI_EVENTS_LISTENER_WEBHOOK_EVENTS_URL'` shows what the running container got. A recreate (`scripts/dc.sh up -d --force-recreate --no-deps keycloak`, ~45 s to healthy) is needed after an env change.
+- Keycloak logs every send at INFO (`Sending admin event webhook to N endpoint(s): resourceType=USER, operationType=DELETE, path=users/<uuid>`) and every non-2xx or connection failure at WARN/ERROR (`Webhook to <url> attempt N failed` / `returned error: 4xx`); success itself is DEBUG only. Sends with no failure line = the ircd accepted them.
+- The ircd side is silent on the bed: `handle_user_event` logs through `log_write(LS_SYSTEM, ...)` and `data/ircd.conf` has no Log block routing it, so prove delivery functionally (a real disable/delete deauths the session) or add a Log block first.
+- TRAP: `docker logs --since 2026-09-23T20:56:00` reads the timestamp as LOCAL time (EDT), not UTC; use relative windows (`--since 10m`).
+
 ## Docker Compose Commands
 
 **Always use the `dc` shell function** instead of raw `docker compose`. It sources
