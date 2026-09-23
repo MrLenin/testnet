@@ -414,7 +414,13 @@ else
     -H "Authorization: Bearer $TOKEN" \
     "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients?clientId=x3-services" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
-  # Get service account user and assign realm-admin role for full access
+  # Get service account user and grant the least realm-management role the
+  # ircd's admin calls need (measured 2026-09-23, Keycloak 26.4.7; see
+  # .claude/para/projects/keycloak-certfp-grant-and-credential-scoping-2026-09.md):
+  #   query-users  -- EXTERNAL only (fingerprint search, brief representations)
+  #   view-users   -- SCRAM-SHA-256 / ECDSA (verifiers are user attributes)
+  #   manage-users -- /REGISTER (create, send-verify-email); also covers reads
+  # realm-admin is never required.
   echo "Setting up service account permissions..."
   SERVICE_USER=$(curl -s \
     -H "Authorization: Bearer $TOKEN" \
@@ -427,18 +433,18 @@ else
       "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients?clientId=realm-management" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
     if [ -n "$REALM_MGMT" ]; then
-      # Get realm-admin role (composite role with all permissions)
-      REALM_ADMIN_ROLE=$(curl -s \
+      # manage-users: the row /REGISTER needs; drop to view-users or query-users
+      # once registration leaves the admin API (see the design doc above)
+      SA_ROLE=$(curl -s \
         -H "Authorization: Bearer $TOKEN" \
-        "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$REALM_MGMT/roles/realm-admin")
+        "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$REALM_MGMT/roles/manage-users")
 
-      # Assign realm-admin role to service account
       curl -s -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/users/$SERVICE_USER/role-mappings/clients/$REALM_MGMT" \
         -H "Authorization: Bearer $TOKEN" \
         -H "Content-Type: application/json" \
-        -d "[$REALM_ADMIN_ROLE]"
+        -d "[$SA_ROLE]"
 
-      echo "Service account granted realm-admin role"
+      echo "Service account granted manage-users role"
     fi
   fi
 fi

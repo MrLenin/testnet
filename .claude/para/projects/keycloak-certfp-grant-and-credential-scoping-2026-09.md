@@ -24,12 +24,39 @@ role, including `impersonation`, `manage-realm`, `manage-clients`), granted by
 | PLAIN | `kc_user_verify_password` (password grant) | a client secret, no role; works on a public client |
 | OAUTHBEARER | `kc_jwt_validate_local` (JWKS) / `kc_token_introspect` fallback | none / a client secret, no role |
 | health probe | `kc_token_ensure` at init, on the retry timer, periodically | none needed: JWKS or the discovery document answers the same question |
-| EXTERNAL | `kc_user_search("x509_fingerprints:<fp>", exact)` | `view-users` today |
+| EXTERNAL | `kc_user_search("x509_fingerprints:<fp>", exact)` | `query-users` suffices (measured below); `realm-admin` today |
 | SCRAM-SHA-256, ECDSA | `kc_user_get` for the stored verifier before any token exists | `view-users` today; both off by default, the bed enables SCRAM |
 | /REGISTER | `kc_user_get` (twice), `kc_user_create_full`, `kc_user_send_verify_email` | `manage-users` |
 | unused in the ircd | delete, update, set password, get-by-id, groups | none; dead surface |
 
 The inbound webhook, cache invalidation and web push use no Keycloak credential.
+
+## Minimum privileges today (measured on the bed, Keycloak 26.4.7, 2026-09-23)
+
+A throwaway service-account client was granted one realm-management role at a time and
+exercised every admin call the ircd makes:
+
+| role | search by name (`kc_user_get`) | search by attribute (EXTERNAL) | get by id | create (/REGISTER) | send verify email |
+|---|---|---|---|---|---|
+| none | 403 | 403 | 403 | 403 | 403 |
+| `query-users` | 200, brief representation (no attributes) | 200 | 403 | 403 | 403 |
+| `view-users` (= `query-users` + `query-groups`) | 200 with attributes | 200 | 200 | 403 | 403 |
+| `manage-users` (not a composite; the evaluator lets it read users) | 200 with attributes | 200 | 200 | 201 | authorised (the bed's 500 is missing SMTP) |
+
+So, by what is switched on:
+
+- **EXTERNAL only** (SCRAM/ECDSA off, /REGISTER off): `query-users`. The fingerprint
+  search and the brief representation carry everything EXTERNAL uses (`id`, `username`,
+  `createdTimestamp`).
+- **SCRAM-SHA-256 or ECDSA on:** `view-users`, because the verifiers are user attributes
+  and `query-users` returns brief representations without them.
+- **/REGISTER on:** `manage-users`, which also covers every read. It can still create,
+  delete and reset any user in the realm; it cannot impersonate, manage clients or the
+  realm. That is the interim production grant, and the reason /REGISTER is the next
+  thing to move off the admin API.
+
+Production should grant exactly the row it needs and nothing above it; `realm-admin`
+is never required.
 
 ## The certfp grant
 
@@ -92,8 +119,8 @@ attribute stays the source of truth.
 
 - `scripts/setup-keycloak.sh`: create `irc-login` (confidential, direct access grants
   on, no service account) and put it on the grant's allow-list; narrow `x3-services`'s
-  service account from `realm-admin` to `manage-users` (which contains `view-users`)
-  for as long as /REGISTER stays in-band. That is the interim credential; the goal is
+  service account from `realm-admin` to `manage-users` (not a composite, but Keycloak's
+  evaluator lets it read users) for as long as /REGISTER stays in-band. That is the interim credential; the goal is
   none.
 - **SCRAM-SHA-256 and ECDSA:** retire. They need the stored verifier before any token
   exists, which no non-admin path can supply. PLAIN over TLS and OAUTHBEARER cover the
@@ -107,8 +134,9 @@ attribute stays the source of truth.
 
 ## Steps
 
-1. Bed: narrow the service account in `setup-keycloak.sh` and on the live realm;
-   confirm EXTERNAL, SCRAM and /REGISTER still work with `manage-users` only.
+1. Bed: narrow the service account in `setup-keycloak.sh` and on the live realm to
+   the measured row (`manage-users` while /REGISTER stays in-band); confirm EXTERNAL,
+   SCRAM and /REGISTER still work.
 2. SPI: the certfp grant, with unit tests (the SPI has none today) for: unknown
    fingerprint, two users, disabled user, pending required action, a client not on the
    allow-list, and the happy path returning an ID token with `sub`.
