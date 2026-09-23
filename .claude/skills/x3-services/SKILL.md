@@ -89,3 +89,7 @@ For test code, `tests/src/helpers/x3-client.ts` exports two factories:
 - `createOperClient()` — pre-authenticated as `X3_ADMIN` with olevel 1000, for tests that exercise OpServ.
 
 See the `test-writing` skill for full helper patterns, retries, and tag handling.
+
+## Trap: new module commands are not bound on an existing install
+
+`create_default_binds()` skips a service that already has saved bindings (the modcmd section of x3.db), so a command added in code — e.g. `REBIND` (step 5) — is "an unknown command" after the upgrade until an oper binds it once: `/msg O3 BIND AuthServ REBIND *nickserv.rebind` (`*module.command` form; `bind` needs opserv level 800). Tests that use a new command bind it in their setup (idempotent: "already bound").

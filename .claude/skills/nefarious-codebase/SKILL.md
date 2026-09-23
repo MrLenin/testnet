@@ -74,3 +74,7 @@ Channel, nick and account names are case-insensitive under the casemapping, but 
 - No local build environment — Docker is the only build path. Don't compile `.o` files locally; they contaminate the Docker COPY.
 - Submodule commits go in the submodule dir (`nefarious/`); the parent repo tracks the submodule pointer.
 - Stalls/hangs/"why isn't X firing": reach for an strace/gdb **sidecar** (no rebuild) first — `docker run --pid=container:X --cap-add SYS_PTRACE debian:13`.
+
+## Trap: header includes live in their own `#ifndef INCLUDED_x_h` block
+
+ircu headers wrap every include as `#ifndef INCLUDED_ircd_defs_h / #include "ircd_defs.h" / #endif`. An include added *inside* another header's block is skipped whenever that header was already included, and the symbol is "undeclared" only in some translation units. Add a new include as its own guarded block (`#ifndef INCLUDED_account_id_h ... #endif`).
