@@ -58,6 +58,51 @@ a held session's ghost with the session, and `WEBHOOK_KILL_ON_DELETE` defaults t
 off (deauth) -- a kill takes the whole session down first, aliases on other servers
 included.
 
+## nefarious: fix/webhook-subject-by-id (webhook plan 2), after the pushes above
+
+9 commits (70f1a09 .. 7b65b7a) on top of 75d8101 (the tip both fork branches are at):
+the subject of a USER admin event resolved by Keycloak id, cache purge by id and the
+`CI <name|*> [<id>]` form, the handler rewrite, the review fix pass (sub-resource
+paths are not the user, credential removal purges, the module gated on the Keycloak
+build, names from the purged cache reach id-less sessions, synthetic fixtures).
+Fork-only paths, so direct pushes to both fork branches on both remotes, one command
+per branch; the branch fast-forwards on top of 75d8101.
+
+```bash
+cd /home/ibutsu/testnet/nefarious
+git push origin   fix/webhook-subject-by-id:ircv3.2-hardening
+git push origin   fix/webhook-subject-by-id:ircv3.2-upgrade
+git push upstream fix/webhook-subject-by-id:ircv3.2-hardening
+git push upstream fix/webhook-subject-by-id:ircv3.2-upgrade
+```
+
+Announcement lines: a Keycloak delete, disable, admin password reset or credential
+removal now reaches the ircd by the user's Keycloak id (no username needed); `CI`
+carries the id; sessions authenticated through X3, a legacy hop, or restored from the
+bouncer DB carry no id and are reached only through a name (a warning names the id);
+`--disable-keycloak` builds again include none of it.
+
+## keycloak-webhook-spi: docs/ircd-contract → evilnet/keycloak-webhook-spi main
+
+2 commits (c195c7a, f8a6e1c) off main 6c2c54d, documentation only: the README's event
+formats and a consumer-contract table for the ircd, Java comments re-anchored from X3
+to the ircd. The repository's only remote is evilnet itself, so the branch has to be
+pushed there to open the PR:
+
+```bash
+cd /home/ibutsu/testnet/keycloak-webhook-spi
+git push origin docs/ircd-contract
+```
+
+**Title:** docs: the payload contract is the Nefarious ircd's, not X3's
+
+**Body:** X3 stopped consuming these events; the README and the code comments still
+described what X3's resolver expected. Document what the ircd reads: the subject of a
+USER admin event is the resourcePath uuid (only the bare `users/<uuid>` path is the
+user; a credential removal purges; other sub-resources are nothing), authDetails is the
+acting admin, only credential user events carry a username, and which sessions a
+nameless event reaches. No payload change.
+
 ## x3 PR 1: `fix/ac-account-change` → evilnet/x3 master (2 commits off 5d7fadb)
 
 **Title:** proto-p10: follow the ircd's AC M and AC U, and pass the timestamp and id through
