@@ -14,9 +14,11 @@ token, which this design extends to certificate logins);
 
 ## Today
 
-The ircd's service account on the bed holds `realm-admin` (every realm-management
+The ircd's service account on the bed held `realm-admin` (every realm-management
 role, including `impersonation`, `manage-realm`, `manage-clients`), granted by
-`scripts/setup-keycloak.sh:417-441` "for full access". libkc holds one
+`scripts/setup-keycloak.sh` "for full access", until 2026-09-23: the script now grants
+`manage-users`, the live realm was narrowed to match, and the registration suite
+(14 cases, /REGISTER plus SCRAM) passed under it. libkc holds one
 `client_id`/`client_secret` (`x3-services`) and uses it for everything:
 
 | ircd path | libkc call | credential it needs |
