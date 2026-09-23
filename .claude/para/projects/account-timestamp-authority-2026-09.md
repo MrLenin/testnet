@@ -1174,3 +1174,7 @@ cross-path wire-TS equality test (design D).*
 `x3-merge-sequencing.md` §0 and §2.3, `project_x3_name_reuse_escalation`,
 `project_x3_ldap_identity_binding`, `project_ibutsu_account_lost_x3db_wipe`,
 `project_x3_branch_strategy`, `project_x3_ldap_oslevel_schema`.
+
+### Step 5 review residue for 5c (2026-09-23)
+
+The fresh review of the step-5 branches found that a **restored or revived bouncer session never regains an id**: `bounce_create_ghost` sets none (records do not carry it), no revive or attach path adopts the authenticating connection's id, and `bounce_setup_local_alias` copies primary → alias only, overwriting a live alias's own id. So after an ircd restart, held sessions are announced id-less on every burst and `AC` for the rest of their life, and X3 fails open for exactly the long-lived accounts. The same review found the BX U "account" receiver updates only the name, so an alias keeps the previous account's id and timestamp; a later promotion and relink would burst `newname:oldts:oldid`, which X3 refuses during the burst. Both are ircd-side bouncer identity, ruled into 5c by D4; 5c must fix them explicitly (in memory, no record change: adopt on revive/attach; copy or clear on account change), under the bouncer-architecture invariant check.
