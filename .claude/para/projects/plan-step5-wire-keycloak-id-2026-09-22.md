@@ -40,7 +40,7 @@ Inputs the spec implies but no task's tests exercise, most likely to matter firs
 
 **Why:** `cmd_account` passes the subcommand *letter* to `handle_account` for anything but `C/H/S/R` (`src/proto-p10.c:1710-1711`). An account change (`M`) leaves X3 on the old handle; an account removal (`U`) leaves X3 bound; a handle literally named `M`, `U`, `D` or `A` would be bound. Small, its own subject, and Part C needs `M`.
 
-### Task A1: Failing bed test — X3 follows account change and removal
+### Task 1 (A1): Failing bed test — X3 follows account change and removal
 
 **Files:**
 - Create: `tests/src/services/x3-account-change.test.ts`
@@ -170,7 +170,7 @@ Expected: `rebinds…` fails (`FIRST` still bound); `unbinds…` fails (still `F
 cd /home/ibutsu/testnet && git add tests/src/services/x3-account-change.test.ts && git commit -m "tests: X3 must follow the ircd's AC M and AC U (x3 5-pre)"
 ```
 
-### Task A2: Handle `AC M` and `AC U` in `cmd_account`
+### Task 2 (A2): Handle `AC M` and `AC U` in `cmd_account`
 
 **Files:**
 - Modify: `x3/src/proto-p10.c:1708-1712` (`cmd_account`, the `R` branch and the fall-through)
@@ -244,7 +244,7 @@ EOF
 
 Branch: `git switch -c fix/wire-keycloak-id 4de99fa` in a worktree or the bed checkout (the bed checkout normally sits on `bed-deploy`; use a worktree under the scratchpad and deploy via `bed-deploy` = merge, as for the crash fixes). Tasks B1–B6 each end with a host build (`make -C ircd`) and a commit; B7 builds the images and tests on the bed. The current bed X3 ignores the new field (its `AC` handler reads only the account; its `+r` parser stops at the second colon), so Part B can deploy before Part C.
 
-### Task B1: `account_id` — the compact id codec
+### Task 3 (B1): `account_id` — the compact id codec
 
 **Files:**
 - Create: `include/account_id.h`, `ircd/account_id.c`
@@ -442,7 +442,7 @@ git commit -m "account_id: compact form of a Keycloak user id (22-char base64url
 ```
 (add the Co-Authored-By trailer.)
 
-### Task B2: `kc_jwt_extract_sub` — the user id from the ID token
+### Task 4 (B2): `kc_jwt_extract_sub` — the user id from the ID token
 
 **Files:**
 - Modify: `ircd/kc/kc_jwt.c` (beside `kc_jwt_extract_created_at`, ~line 722), `include/kc/kc_jwt.h:60`
@@ -589,7 +589,7 @@ with the argument lists unchanged. `openid` is the OpenID Connect marker, not a 
 
 - [ ] **Step 5: Commit** — `kc: ask the password grant for an ID token and read its "sub" (the Keycloak user id)`.
 
-### Task B3: Fields — where the id lives on the ircd
+### Task 5 (B3): Fields — where the id lives on the ircd
 
 **Files:**
 - Modify: `include/struct.h:93-94` (`struct User`), `include/client.h:568-569` and `777-779` (SASL staging + accessor), `include/sasl_auth.h:78` (`struct SASLSession`), `ircd/sasl_auth.c:286-293` (`struct poscache_entry`)
@@ -641,7 +641,7 @@ and beside the accessors:
 
 - [ ] **Step 3: Build** `make -C ircd` — expect clean (fields only). **Commit** — `account: store the Keycloak user id with the account (fields only)`.
 
-### Task B4: `sasl_complete_login` carries the id; every mechanism supplies it
+### Task 6 (B4): `sasl_complete_login` carries the id; every mechanism supplies it
 
 **Files:**
 - Modify: `include/sasl_auth.h:116-117`, `ircd/sasl_auth.c` (`sasl_complete_login` 586-704; `poscache_insert` ~297, `poscache_check` ~329; call sites 759, 899, 957, 1149, 1260, 1725, 1899; SCRAM stash ~1446; ECDSA stash ~1774), `ircd/m_sasl.c:251`
@@ -710,7 +710,7 @@ static const char *sasl_id_for(const char *login_as, const char *verified,
 
 - [ ] **Step 4: Build** `make -C ircd` — expect clean; run `./ircd/test/account_id_cmocka` and `kc_jwt_cmocka` again. **Commit** — `sasl: announce the Keycloak user id with the account` with a body noting: PLAIN reads it from the ID token's `sub` (Task B2 makes the password grant ask for `scope=openid`); EXTERNAL, SCRAM and ECDSA take it from the user record those mechanisms already fetch; OAUTHBEARER carries one only when the client's own bearer token has `sub` (a token minted without the `basic` scope has none, so that login carries no id — the userinfo endpoint is the non-admin source if that ever matters, and it is not part of step 5); an impersonated login carries none (D3); a same-name re-authentication sends no `AC` (unchanged early return), so a changed id on an unchanged name reaches other servers only at the next burst.
 
-### Task B5: The wire — `AC` fifth parameter and `+r account:ts:id`
+### Task 7 (B5): The wire — `AC` fifth parameter and `+r account:ts:id`
 
 **Files:**
 - Modify: `ircd/m_account.c:289-326` (`R`/`M` parse + relay), `ircd/s_user.c:2771-2779` (`umode_str`), `ircd/s_user.c:2592-2604` (`set_user_mode`)
@@ -781,7 +781,7 @@ and in the `else` (no colon at all) set `cli_user(acptr)->kc_id[0] = '\0';` — 
 
 - [ ] **Step 4: Build; wire check on the host is not possible — B7 covers it. Commit** — `account: carry the Keycloak user id on AC and in the burst +r`.
 
-### Task B6: Bouncer aliases inherit the primary's id
+### Task 8 (B6): Bouncer aliases inherit the primary's id
 
 **Files:** `ircd/bouncer_session.c:7554-7555`, `8050-8051`, `8108-8109`
 
@@ -793,7 +793,7 @@ A restored ghost (`bounce_create_ghost`, 2976-2979) sets no id — records do no
 
 - [ ] **Step 2: Build. Commit** — `bouncer: aliases carry the primary's Keycloak user id`.
 
-### Task B7: Bed test — the id is on the wire
+### Task 9 (B7): Bed test — the id is on the wire
 
 **Files:**
 - Create: `tests/src/ircv3/account-id-wire.test.ts` (gated `WIRE_KC_ID=1`)
@@ -910,7 +910,7 @@ If the first case finds an introduction with only `account:ts`, check the grant 
 
 **Index note:** step 7 (dispose-by-identity) will index handles by id; step 5 stores the id and reads it per-login only. Do not add the dict here (YAGNI until step 7).
 
-### Task C1: The field, persisted
+### Task 10 (C1): The field, persisted
 
 **Files:** `x3/src/nickserv.h:100-127` (`handle_info`), `x3/src/nickserv.c` — `KEY_*` (~101), `free_handle_info` (560), saxdb write (~4221), saxdb read (~4954)
 
@@ -944,7 +944,7 @@ saxdb read, after the `KEY_INFO` block:
 
 - [ ] **Step 3: Build + a smoke check.** `cd /home/ibutsu/testnet && scripts/dc.sh build x3` — expect clean. This task has no behaviour yet; it is verified by C3's persistence test. **Commit** — `nickserv: store a handle's Keycloak user id in saxdb (field only)`.
 
-### Task C2: `handle_account` — adopt on first use, refuse a mismatch
+### Task 11 (C2): `handle_account` — adopt on first use, refuse a mismatch
 
 **Files:** `x3/src/nickserv.c` — the message table (~232, by `NSMSG_LOCAL_ACCOUNT_KILL`), the step-4 helpers (5580-5634), `handle_account` (5637-5655)
 
@@ -1123,7 +1123,7 @@ nickserv_bind_identity(struct userNode *user, struct handle_info *hi,
 
 - [ ] **Step 6: Build, deploy, run — expect both cases green.** Rebuild x3, deploy, wait for relink, re-run the C2 test. Also re-run step 4's `X3_LOCAL_FLAG=1 ... local-handle-flag.test.ts` — the shared helper change must not regress it. **Commit** — `nickserv: bind a handle to its Keycloak user id; refuse a different one`, body noting: adopt on first use, mismatch refused (killed outside a burst, D2), no id on the wire is left alone (fail open).
 
-### Task C3: `REBIND` — re-bind or clear a handle's id
+### Task 12 (C3): `REBIND` — re-bind or clear a handle's id
 
 **Files:** `x3/src/nickserv.c` (a new `cmd_rebind`, its registration ~6260, messages), `x3/src/nickserv.help` (a `REBIND` entry near `RENAME`)
 
@@ -1232,7 +1232,7 @@ Registration, by `RENAME`:
 
 - [ ] **Step 5: Build, deploy, run — expect green** (all three C cases). **Commit** — `nickserv: REBIND to re-bind or clear a handle's Keycloak id`.
 
-### Task C4: Show the id in ACCOUNTINFO
+### Task 13 (C4): Show the id in ACCOUNTINFO
 
 **Files:** `x3/src/nickserv.c` — `cmd_handleinfo` oper block (after the FLAGS reply, ~1814), message table
 
