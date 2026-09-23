@@ -655,12 +655,17 @@ found on the way are in memory (`project_step5_survey_findings.md`), not here.
 | 5b | x3 | PR | X3 binds on first use and refuses on mismatch; `REBIND` — **the detector the step-1 PR waits for** |
 
 **5a — the ircd carries the id.**
-- **Where the id comes from.** PLAIN — the commonest login — does not have it: the ROPC
-  access token is a JWT whose `sub` is the Keycloak user id, and nothing parses it. Parse
-  it (beside `kc_jwt_extract_created_at`), and store it in the PLAIN positive cache too.
-  **Without this, F is bypassed by the ordinary login.** EXTERNAL has `users[0].id`;
-  OAUTHBEARER `info->sub` on both paths; SCRAM and ECDSA have it in their credential
-  callbacks and must stash it in the SASL session for completion.
+- **Where the id comes from.** PLAIN — the commonest login — does not have it today. Take
+  it from the **ID token** of the password grant: ask for `scope=openid`, keep the `id_token`
+  Keycloak returns in the same reply, and read its `sub` (beside `kc_jwt_extract_created_at`);
+  store it in the PLAIN positive cache too. **Not the access token's `sub`**: on Keycloak
+  25+ that claim comes from the `basic` client scope, which the ircd's admin-capable client
+  may not carry (user, 2026-09-23), while an ID token carries `sub` by definition. The ircd
+  relies on non-admin Keycloak paths whenever feasible; this one costs no extra request.
+  Confirmed on the bed 2026-09-23 (Keycloak 26.4.7). **Without this, F is bypassed by the
+  ordinary login.** EXTERNAL has `users[0].id`; OAUTHBEARER `info->sub` on both paths (the
+  client's own token — none without `sub`, so no id); SCRAM and ECDSA have it in their
+  credential callbacks and must stash it in the SASL session for completion.
 - **No id, fails open** (the ratified rule): X3's SASL relay, IAuth, login-on-connect,
   `/REGISTER`, WEBIRC. Impersonation (authzid ≠ authcid) — see D3.
 - `sasl_complete_login()` gains the id; `struct User` gains `kc_id`, cleared on `U` and

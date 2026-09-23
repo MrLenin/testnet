@@ -28,7 +28,7 @@
 ## Review Focus
 
 Inputs the spec implies but no task's tests exercise, most likely to matter first; each gets a test in its owning task:
-1. **Access tokens without `sub`.** Keycloak 25+ puts `sub` in the `basic` client scope; a client without it yields no id → fails open silently. Task B2 tests the extractor on a payload without `sub` (returns 0, empty out); Task B7 asserts the bed's token carries one.
+1. **A grant reply without an ID token.** The id comes from the ID token's `sub`; an *access* token's `sub` depends on the `basic` client scope (Keycloak 25+), which the ircd's admin-capable client may not carry, so the plan never reads it. If the password grant reply has no `id_token`, the login proceeds with no id (fails open, silently). Task B2 tests the extractor on a payload without `sub` (returns 0, empty out); Task B7 asserts the bed's introduction carries an id, which fails if the grant stopped asking for `scope=openid`.
 2. **Ids of the wrong shape on the wire** (a relaying hop truncating, a hand-typed value). Task B1 tests `account_id_valid` on 21/23-char and bad-alphabet inputs; Task C2 drops an invalid third field and binds as if absent.
 3. **`RENAME` sharing the `AC R` fifth slot** (`parv[5] == "RENAME"` on the rename branches). Task B5's parser accepts a fifth parameter only when `account_id_valid()` — the literal never validates.
 4. **A same-name re-authentication** (name unchanged, id changed): `sasl_complete_login` step 7 and `ms_account` both return early on an unchanged name, so no `AC` travels. Recorded as a known limit in Task B4's commit message; the burst re-sends the current id on relink.
@@ -442,13 +442,16 @@ git commit -m "account_id: compact form of a Keycloak user id (22-char base64url
 ```
 (add the Co-Authored-By trailer.)
 
-### Task B2: `kc_jwt_extract_sub` — the user id from an access token
+### Task B2: `kc_jwt_extract_sub` — the user id from the ID token
 
 **Files:**
 - Modify: `ircd/kc/kc_jwt.c` (beside `kc_jwt_extract_created_at`, ~line 722), `include/kc/kc_jwt.h:60`
+- Modify: `ircd/kc/kc_keycloak.c` (`parse_access_token` 135-176, `kc_user_verify_password` 1354-1359, `kc_access_token_free` 1581-1598), `include/kc/kc_keycloak.h:43-57`
 - Modify: `ircd/test/kc_jwt_cmocka.c` (it `#include`s `../kc/kc_jwt.c`; add two cases)
 
-**Interfaces (produced):** `int kc_jwt_extract_sub(const char *token, char *out, size_t out_size);` — 1 and the `sub` claim copied on success; 0 (and `out[0] = '\0'`) when the token is malformed or has no `sub`.
+**Why the ID token, not the access token:** the ircd's Keycloak client is an admin-capable one (it manages accounts and receives Keycloak events), and an access token's `sub` claim comes from the `basic` client scope, which such a client may not carry. An ID token carries `sub` by definition (OpenID Connect Core, section 2), independent of client scopes: on the bed the `basic` scope's `sub` mapper targets only the access token and introspection. Asking the password grant for `scope=openid` makes Keycloak return the ID token in the same reply, so this costs no extra request and no admin call, which is the preference for the ircd whenever feasible. Confirmed on the bed 2026-09-23 (Keycloak 26.4.7): the grant as `x3-services` with `scope=openid` returns `id_token` whose `sub` equals the access token's.
+
+**Interfaces (produced):** `int kc_jwt_extract_sub(const char *token, char *out, size_t out_size);` — 1 and the `sub` claim copied on success; 0 (and `out[0] = '\0'`) when the token is malformed or has no `sub`. `struct kc_access_token` gains `char *id_token; size_t id_token_size;` (NULL when the reply carried none).
 
 - [ ] **Step 1: Write the failing tests** (append to `kc_jwt_cmocka.c` before `main`, register in `main`):
 
@@ -484,7 +487,7 @@ static void test_extract_sub_absent_or_malformed(void **state) {
     char out[64] = "x";
     char *tok = jwt_with_payload("{\"exp\":9999999999}");
     (void)state;
-    assert_int_equal(kc_jwt_extract_sub(tok, out, sizeof(out)), 0);   /* no sub: Keycloak without the basic scope */
+    assert_int_equal(kc_jwt_extract_sub(tok, out, sizeof(out)), 0);   /* no sub: not an ID token */
     assert_string_equal(out, "");
     free(tok);
     strcpy(out, "x");
@@ -548,16 +551,43 @@ kc_jwt_extract_sub(const char *token, char *out, size_t out_size)
 Header: after the `created_at` declaration:
 ```c
 /**
- * Extract the "sub" claim -- the Keycloak user id -- from a JWT without
- * validation (Keycloak already verified the credentials).
+ * Extract the "sub" claim -- the Keycloak user id -- from a JWT (the ID
+ * token of a password grant) without validation: Keycloak minted it in
+ * reply to the credentials we just sent.
  * @return 1 and the claim in out, or 0 with out empty when absent/malformed.
  */
 int kc_jwt_extract_sub(const char *token, char *out, size_t out_size);
 ```
 
-- [ ] **Step 4: Run — expect all kc_jwt cases to pass**, then `make check-kc-boundary` (the file gained no ircd includes).
+- [ ] **Step 3b: Ask for the ID token and keep it** (`kc_keycloak.c`, `kc_keycloak.h`). No unit harness links `kc_keycloak.c` (it needs libcurl), so this change is covered by Task B7's bed test, which fails if the introduction carries no id.
 
-- [ ] **Step 5: Commit** — `kc_jwt: extract the "sub" claim (the Keycloak user id)`.
+`include/kc/kc_keycloak.h`, in `struct kc_access_token` after `scope_size`:
+```c
+    char *id_token;               /* OpenID Connect ID token; NULL when the grant did not ask for one */
+    size_t id_token_size;
+```
+`parse_access_token`, after the `scope` block:
+```c
+    tok->id_token = json_get_string(json, "id_token");
+    if (tok->id_token)
+        tok->id_token_size = strlen(tok->id_token);
+```
+`kc_access_token_free`, after the `refresh_token` block (an ID token names the user; zero it like the others):
+```c
+    if (token->id_token) {
+        memset(token->id_token, 0, token->id_token_size);
+        free(token->id_token);
+    }
+```
+`kc_user_verify_password`: both `snprintf` format strings become
+```c
+        "grant_type=password&scope=openid&client_id=%s&client_secret=%s&username=%s&password=%s",
+```
+with the argument lists unchanged. `openid` is the OpenID Connect marker, not a removable client scope, so no client configuration can leave it out.
+
+- [ ] **Step 4: Run — expect all kc_jwt cases to pass**, then `make -C ircd` (recompiles `kc_keycloak.c`) and `make check-kc-boundary` (the kc files gained no ircd includes).
+
+- [ ] **Step 5: Commit** — `kc: ask the password grant for an ID token and read its "sub" (the Keycloak user id)`.
 
 ### Task B3: Fields — where the id lives on the ircd
 
@@ -668,17 +698,17 @@ static const char *sasl_id_for(const char *login_as, const char *verified,
 
 | Site | Change |
 |---|---|
-| `sasl_plain_cb` (759) | before the insert: `char kcid[ACCOUNT_ID_LEN + 1] = ""; char sub[64]; if (token && token->access_token && kc_jwt_extract_sub(token->access_token, sub, sizeof(sub))) account_id_from_uuid(sub, kcid);` then `poscache_insert(session->authcid, session->authcid, session->cred_hash, token ? token->created_at : 0, kcid);` and `sasl_complete_login(acptr, login_as, ..., sasl_id_for(login_as, session->authcid, kcid));` |
+| `sasl_plain_cb` (759) | before the insert: `char kcid[ACCOUNT_ID_LEN + 1] = ""; char sub[64]; if (token && token->id_token && kc_jwt_extract_sub(token->id_token, sub, sizeof(sub))) account_id_from_uuid(sub, kcid);` then `poscache_insert(session->authcid, session->authcid, session->cred_hash, token ? token->created_at : 0, kcid);` and `sasl_complete_login(acptr, login_as, ..., sasl_id_for(login_as, session->authcid, kcid));` |
 | cache hit (899) | `char cached_kcid[ACCOUNT_ID_LEN + 1] = "";` passed to `poscache_check(...)`, then `sasl_complete_login(sptr, login_as, cached_created_at, sasl_id_for(login_as, cached_account, cached_kcid));` |
 | `sasl_external_cb` (957) | `char kcid[ACCOUNT_ID_LEN + 1] = ""; if (users[0].id) account_id_from_uuid(users[0].id, kcid);` → pass `kcid[0] ? kcid : NULL` (no authzid on this path) |
-| OAUTHBEARER introspection (1149) and local JWT (1260) | `char kcid[ACCOUNT_ID_LEN + 1] = ""; if (info->sub) account_id_from_uuid(info->sub, kcid);` → `sasl_id_for(login_as, info->username, kcid)` — compute before `kc_jwt_token_info_free(info)` |
+| OAUTHBEARER introspection (1149) and local JWT (1260) | `char kcid[ACCOUNT_ID_LEN + 1] = ""; if (info->sub) account_id_from_uuid(info->sub, kcid);` → `sasl_id_for(login_as, info->username, kcid)` — compute before `kc_jwt_token_info_free(info)`; `info->sub` is whatever the client's own token carries, and a missing one means no id (Step 4 note) |
 | SCRAM creds callback (1446) | after `session->acc_created_at = user->created_at;`: `session->kc_id[0] = '\0'; if (user->id) account_id_from_uuid(user->id, session->kc_id);` |
 | `sasl_scram_complete` (1725) | `sasl_id_for(login_as, session->authcid, session->kc_id)` |
 | ECDSA key callback (1774) | same stash as SCRAM |
 | `sasl_ecdsa_client_response` (1899) | same as SCRAM completion |
 | `m_sasl.c:251` (relay through X3) | `sasl_complete_login(acptr, cli_saslaccount(acptr), cli_saslacccreate(acptr), NULL);` — the wire from X3 carries no id |
 
-- [ ] **Step 4: Build** `make -C ircd` — expect clean; run `./ircd/test/account_id_cmocka` and `kc_jwt_cmocka` again. **Commit** — `sasl: announce the Keycloak user id with the account` with a body noting: PLAIN reads it from the access token's `sub`; an impersonated login carries none (D3); a same-name re-authentication sends no `AC` (unchanged early return), so a changed id on an unchanged name reaches other servers only at the next burst.
+- [ ] **Step 4: Build** `make -C ircd` — expect clean; run `./ircd/test/account_id_cmocka` and `kc_jwt_cmocka` again. **Commit** — `sasl: announce the Keycloak user id with the account` with a body noting: PLAIN reads it from the ID token's `sub` (Task B2 makes the password grant ask for `scope=openid`); EXTERNAL, SCRAM and ECDSA take it from the user record those mechanisms already fetch; OAUTHBEARER carries one only when the client's own bearer token has `sub` (a token minted without the `basic` scope has none, so that login carries no id — the userinfo endpoint is the non-admin source if that ever matters, and it is not part of step 5); an impersonated login carries none (D3); a same-name re-authentication sends no `AC` (unchanged early return), so a changed id on an unchanged name reaches other servers only at the next burst.
 
 ### Task B5: The wire — `AC` fifth parameter and `+r account:ts:id`
 
@@ -866,7 +896,7 @@ describe('Keycloak user id on the wire', () => {
   }, 60_000);
 });
 ```
-If the first case finds an introduction with only `account:ts`, decode the bed's access token (`sub` may be missing without the `basic` client scope — Review Focus 1) before suspecting the code.
+If the first case finds an introduction with only `account:ts`, check the grant first: the request must carry `scope=openid` and the reply must include `id_token` (Review Focus 1) before suspecting the codec or the wire.
 
 - [ ] **Step 3: Run** `WIRE_KC_ID=1 IRC_HOST=localhost npm test -- src/ircv3/account-id-wire.test.ts` — expect 2 passed; also re-run `src/keycloak/keycloak.test.ts` (expect the known 23/2) and `src/ircv3/bouncer-holding-state.test.ts`.
 
@@ -1234,12 +1264,12 @@ In `cmd_handleinfo`, in the oper-gated region (after the FLAGS block, before OPS
 
 ## Self-review
 
-**Spec coverage (design F "Step 5 scope"):** 5-pre `AC M`/`AC U` → Part A. 5a: id source incl. PLAIN `sub` → B2, B4; fail-open paths → B4 (helper + `sasl_id_for`); `struct User.kc_id`, cleared on U/M → B3; wire `AC` + `+r` + relay → B5; bouncer alias copy → B6; not-in-5a crdt gateway → noted in B intro. 5b: `handle_info.kc_id` + saxdb (not the dead `"id"`) → C1; adopt/refuse (LOCAL rule) → C2; `REBIND` not an OSET option → C3; ACCOUNTINFO → C4. Rulings: D1 compact → B1; D2 refuse+kill/burst → C2; D3 impersonation carries none → B4 `sasl_id_for`; D4 ircd-side gap is 5c → out of scope, stated.
+**Spec coverage (design F "Step 5 scope"):** 5-pre `AC M`/`AC U` → Part A. 5a: id source (PLAIN: the ID token's `sub`; EXTERNAL/SCRAM/ECDSA: the user record they already fetch; OAUTHBEARER: the client's own token, none without `sub`) → B2, B4; fail-open paths → B4 (helper + `sasl_id_for`); `struct User.kc_id`, cleared on U/M → B3; wire `AC` + `+r` + relay → B5; bouncer alias copy → B6; not-in-5a crdt gateway → noted in B intro. 5b: `handle_info.kc_id` + saxdb (not the dead `"id"`) → C1; adopt/refuse (LOCAL rule) → C2; `REBIND` not an OSET option → C3; ACCOUNTINFO → C4. Rulings: D1 compact → B1; D2 refuse+kill/burst → C2; D3 impersonation carries none → B4 `sasl_id_for`; D4 ircd-side gap is 5c → out of scope, stated.
 
 **Placeholders:** none — every step has the code or the exact command.
 
 **Type consistency:** `account_id_from_uuid`/`account_id_valid`/`ACCOUNT_ID_LEN` (B1) used verbatim in B3/B4/B5; `kc_jwt_extract_sub(token, out, size)` (B2) used in B4; `sasl_complete_login(..., kc_id)` (B4) matches all nine call sites incl. `m_sasl.c`; `cli_saslkcid`/`cli_user(x)->kc_id`/`session->kc_id`/`poscache_entry.kc_id` consistent B3↔B4; X3 `hi->kc_id`, `KEY_KC_ID`, `nickserv_bind_identity`, `struct local_claim.reason`, `NSMSG_IDENTITY_KILL`/`NSMSG_REBIND_*`/`NSMSG_HANDLEINFO_KC_ID` consistent C1–C4.
 
-**Review Focus:** (1) no `sub` → B2 test + B7 note; (2) bad-shape id → B1 `account_id_valid` cases + C2 22-char guard; (3) `RENAME` slot → B5 `account_id_valid` gate ("RENAME" never validates); (4) same-name re-auth → B4 commit note; (5) id-less restored ghost → B6 note + B5's two-field fallback. All five owned.
+**Review Focus:** (1) no `id_token`/`sub` → B2 test + B7 note; (2) bad-shape id → B1 `account_id_valid` cases + C2 22-char guard; (3) `RENAME` slot → B5 `account_id_valid` gate ("RENAME" never validates); (4) same-name re-auth → B4 commit note; (5) id-less restored ghost → B6 note + B5's two-field fallback. All five owned.
 
 **Known limits (carried, not fixed here):** a changed id on an unchanged name travels only at the next burst (5a); legacy/crdt hops strip the id → those users fail open (5a); ircd keeps its own account-keyed state by name → step 5c (D4).
