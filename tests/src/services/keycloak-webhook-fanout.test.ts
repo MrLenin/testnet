@@ -144,11 +144,21 @@ describe('Webhook fan-out: every server receives, one relay per event', () => {
     await sleep(2000);
     const p1 = await webhookCounts(primary);
     const l1 = await webhookCounts(leaf);
+    // Each server applies the event exactly once, whichever copy arrives first.
+    // Which copies get dropped depends on the race: if the leaf's own delivery
+    // lands before the primary's relay, the leaf applies it and relays, and both
+    // servers drop one copy; if the relay lands first, the leaf applies the relay,
+    // drops its own delivery and has nothing to relay back.  So per server the
+    // dropped count grows by 0 or 1, and by at least 1 somewhere.
+    let droppedTotal = 0;
     for (const [name, before, after] of [['primary', p0, p1], ['leaf', l0, l1]] as const) {
       expect(applied(after) - applied(before), `${name}: applied exactly once`).toBe(1);
-      expect(dropped(after) - dropped(before), `${name}: the other copy was dropped`).toBe(1);
       expect(after.userEvents - before.userEvents, `${name}: the handler ran once`).toBe(1);
+      const d = dropped(after) - dropped(before);
+      expect(d, `${name}: dropped at most one copy`).toBeLessThanOrEqual(1);
+      droppedTotal += d;
     }
+    expect(droppedTotal, 'the second copy was dropped somewhere').toBeGreaterThanOrEqual(1);
     await sleep(10000);
     const p2 = await webhookCounts(primary);
     const l2 = await webhookCounts(leaf);
@@ -209,6 +219,83 @@ describe('Webhook fan-out: every server receives, one relay per event', () => {
     expect(l1.relay, 'the leaf applied the relay').toBe(l0.relay + 1);
     expect(l1.deauths, 'the leaf deauthed its own session').toBe(l0.deauths + 1);
   }, 90_000);
+
+  const LEAF_NAME = 'leaf.fractalrealities.net';
+
+  /** Whether the primary's LINKS lists the leaf (the bed may link many other servers). */
+  async function leafLinked(op: RawSocketClient): Promise<boolean> {
+    const lines = (op as unknown as { lines: { raw: string }[] }).lines;
+    op.clearRawBuffer();
+    const start = lines.length;
+    op.send('LINKS');
+    await op.waitForLine(/ 365 /, 8000);
+    return lines.slice(start).some((l) => / 364 /.test(l.raw) && l.raw.includes(` ${LEAF_NAME} `));
+  }
+
+  async function leafLinkWithin(op: RawSocketClient, want: boolean, ms: number): Promise<boolean> {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      if ((await leafLinked(op)) === want) return true;
+      await sleep(2000);
+    }
+    return false;
+  }
+
+  /** Split the leaf away, run `during`, relink; the link always comes back. */
+  async function acrossASplit(primary: RawSocketClient, during: () => Promise<void>): Promise<void> {
+    primary.send(`SQUIT ${LEAF_NAME} :webhook catch-up test`);
+    try {
+      expect(await leafLinkWithin(primary, false, 20000), 'the leaf split away').toBe(true);
+      await sleep(3000);   // the leaf's dead-link detection lags the primary's SQUIT
+      await during();
+    } finally {
+      primary.send(`CONNECT ${LEAF_NAME}`);
+    }
+    expect(await leafLinkWithin(primary, true, 60000), 'the link came back').toBe(true);
+  }
+
+  // D5: a server that missed an event while split learns it at relink.
+  it('an event applied during a split reaches the leaf after relink', async () => {
+    if (!leafReachable) { console.warn('Skipping: leaf not reachable'); return; }
+    const { primary, leaf: leafOp } = await opers();
+    const { client, nick, account } = await loggedIn('fnsplit', 'leaf');
+    const l0 = await webhookCounts(leafOp);
+    const p0 = await webhookCounts(primary);
+    await acrossASplit(primary, async () => {
+      expect(await postWebhook(accountDisabledEvent(account), 'nefarious'), 'posted to the primary alone').toBe(200);
+      await sleep(1500);
+      expect(await whoisAccount(client, nick), 'the split leaf still shows the account').toBe(account);
+    });
+    expect(await loggedOutWithin(client, nick, 30000), 'the leaf session lost its account after relink').toBe(true);
+    const l1 = await webhookCounts(leafOp);
+    const p1 = await webhookCounts(primary);
+    expect(l1.catchup, 'the leaf applied it from the catch-up').toBe(l0.catchup + 1);
+    expect(p1.catchupSent, 'the primary sent a catch-up').toBeGreaterThan(p0.catchupSent);
+  }, 180_000);
+
+  // Bouncer pass H5: a disable that a later enable superseded is not replayed as a disable.
+  it('a disable superseded by an enable during the split does not deauth after relink', async () => {
+    if (!leafReachable) { console.warn('Skipping: leaf not reachable'); return; }
+    const { primary, leaf: leafOp } = await opers();
+    const { client, nick, account } = await loggedIn('fnsup', 'leaf');
+    const l0 = await webhookCounts(leafOp);
+    await acrossASplit(primary, async () => {
+      expect(await postWebhook(accountDisabledEvent(account), 'nefarious')).toBe(200);
+      await sleep(500);
+      const enable = { ...accountDisabledEvent(account), id: `test-enable-${Date.now()}`, representation: JSON.stringify({ enabled: true }) };
+      expect(await postWebhook(enable, 'nefarious')).toBe(200);
+      await sleep(1000);
+    });
+    const deadline = Date.now() + 30000;
+    let l1 = await webhookCounts(leafOp);
+    while (l1.catchupReceived < l0.catchupReceived + 2 && Date.now() < deadline) {
+      await sleep(2000);
+      l1 = await webhookCounts(leafOp);
+    }
+    expect(l1.catchupReceived, 'both lines reached the leaf').toBeGreaterThanOrEqual(l0.catchupReceived + 2);
+    await sleep(2000);
+    expect(await whoisAccount(client, nick), 'the re-enabled account is untouched').toBe(account);
+  }, 180_000);
 
   // Review focus 1: an id the log cannot hold is applied without dedupe and never stored.
   it('a delivery whose event id cannot travel the wire is applied but not logged', async () => {
