@@ -204,6 +204,8 @@ run the ircd with `Webhook { legacysecret = yes; }` for the window). JUnit: `mvn
 
 ## x3 PR 1: `fix/ac-account-change` → evilnet/x3 master (2 commits off 5d7fadb)
 
+**OPENED 2026-09-24: https://github.com/evilnet/x3/pull/62** (from MrLenin:fix/ac-account-change, 5742fc8 + 5ee1a88, against master 5d7fadb). Prod ordering: it lands with or before the ircd chain.
+
 **Title:** proto-p10: follow the ircd's AC M and AC U, and pass the timestamp and id through
 
 **Body:**
