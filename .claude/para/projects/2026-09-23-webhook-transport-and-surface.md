@@ -715,3 +715,35 @@ Each "no deauth" case posts, waits 1.5 s, and asserts `whoisAccount(client, nick
 **4. Review focus.** 1 -> `test_stale_timestamp_is_refused` + bed "stale"; 2 -> `test_replay_is_refused` + bed "replay"; 3 -> bed "wrong realm"; 4 -> `test_bad_username_is_dropped`; 5 -> Task 6 Step 4 by hand (a harness edit of `data/ircd.conf` is not safe to automate).
 
 **To verify at execution time:** the grammar's boolean production name for `legacysecret` and whether `REALM` is already a token; whether `KC_BOUNDARY_FILES` in `ircd/Makefile.in` lists kc files explicitly (then `kc/kc_webhook_sig.c` must be added); whether the maven builder image can run `mvn test` offline (Step 2 of Task 1 tries `-o` first); `HMAC_CTX_new` availability under the tree's OpenSSL (1.1+; the tree already uses `PKCS5_PBKDF2_HMAC`).
+
+---
+
+## Execution record (2026-09-23)
+
+Executed inline (`superpowers:executing-plans`), then one fresh-context review (Agent, model fable) over the three ranges and ONE fix pass. Nothing pushed; push commands and PR text in `step5-pr-drafts-2026-09-23.md`.
+
+**Commits.**
+- nefarious `fix/webhook-transport` on 7b65b7a (plan 2's tip): cde1b99 kc signature module + cmocka; 82378b3 listener enforces signature/window/replay/realm at HTTP time, full `Webhook {}` threading, secret-only rehash, `SNO_UNAUTH` notice; 0ada9cd username gate; 2e921c6 `STATS webhook`; ead82a8 eight feature-less STATS entries oper-only (review 2); e48d764 review fix pass (1, 3, 4, 5). bed-deploy merge b6a8ee7.
+- keycloak-webhook-spi `feature/signed-events` on f8a6e1c (`docs/ircd-contract`, superseded): ad0a2dd signs every delivery, `realmName`, JUnit vector; 7b5db8a warns when the realm cannot be named (review 4).
+- testnet main: 420cc1ee setup script asserts admin events; d94c96a2 helper signs + transport suite; 821c1eb0 Webhook block docs; f226c497 secret renamed `ircd-webhook-secret`, x3.conf's dead block gone; 8d197e58 review tests + doc corrections; then the records commit.
+
+**Proof on the bed** (images from b6a8ee7): transport 8/8 (unsigned, stale, other secret, other realm, replay, STATS count, non-oper 481, realmName-less counted), e2e 3/3 (real disable / admin reset / delete, signed and realm-named, the no-realm count untouched), bouncer-deauth local-alias 2/2 and cross-server 3/3, x3-account-change 2/2 (needs `X3_AC_CHANGE=1`), sasl-reauth 4/4; cmocka `kc_webhook_sig` 6/6, `webhook_subject` 10/10; JUnit 2/2; a full `--disable-keycloak` build links. By hand: a secret-only `REHASH` kept the listener and every counter (new secret 200, old 401, revert 200); a busy-port `REHASH` produced the oper notice and `STATS webhook` "NOT RUNNING", the revert brought the listener back (signed post 200).
+
+**Review findings.** Critical 1 (stub build broken by `RPL_STATSDEBUG` without `numeric.h`) fixed. Critical 2 (a non-oper's `STATS webhook` -- and `webpush`, `authtoken`, `chathistory`, `metadata`, `dnsbl`, `gitsync`, `chathistoryads` -- aborted the server through `feature_bool(FEAT_LAST_F)`'s type assert; asserts are on in the image) fixed for all eight entries: a prod crash vector until deployed. Important 3 (replay ring: an id re-signed after its window was appended behind its stale slot, so a replay of the new sighting passed; and the ring lived by receipt time, so a skewed SPI clock shortened the refusal window) fixed: the ring lives by the signature's `t`, refresh in place. Important 4 (decision 4's "accepted and counted" for a missing `realmName` was not implemented and the deviation was not ledgered) fixed: `events_no_realm`, the "Without realmName" STATS line, SPI warning. Important 5 (a failed re-init left `STATS` reporting stale counters as a live listener and a later rehash with the old values was a no-op) fixed: initialized flag cleared, oper notice, NOT RUNNING, active state forgotten so the next rehash retries. Important 6 (`64k` does not parse) and 7 (`SNO_UNAUTH` is not in the default oper mask) fixed in the docs; 7's default-mask half and 8 (an SPI retry of an applied event whose 200 was lost is refused as a replay three times; the reviewer's refinement: same id + newer `t` + valid signature = 200 duplicate) are the user's decisions in the register. Minors 9-20 deferred to the register.
+
+**Rulings** (each with what it costs if wrong; the ledger had the full lines):
+1. The six open proposals were taken as decided by "rest looks good" -- cost: each is a contained change.
+2. The nefarious branch is cut from plan 2's unpushed tip; the SPI branch from `docs/ircd-contract` so one PR carries docs + signing (the docs branch is not opened on its own; whether to split is now a register decision) -- cost: a rebase if plan 2 changes.
+3. kc code includes its own headers in angle form only -- cost: none.
+4. Replay and realm checks moved from dispatch time to HTTP time so the SPI gets 401/403 -- cost: one extra `json_loadb` per accepted request.
+5. `process_request` returns the HTTP status and a message -- cost: none.
+6. `send_reply`/`SND_EXPLICIT` come from `ircd_reply.h` in the common block -- cost: none.
+7. The docs commit landed before the rename commit (two commits, not the plan's one) -- cost: none.
+8. Finding 2's fix covers the seven older entries with the same flags; its RED could not be run against the shared bed -- cost: none (an abort became 481).
+9. Finding 5 verified by hand, no automated test (the plan's own ruling on conf edits) -- cost: a regression of the dead-listener report goes unnoticed until an operator hits it.
+10. Finding 7: doc fix now, the default-mask change is the user's -- cost: a default oper hears no refusal notices until the mask is set.
+11. Finding 8 recorded for the user, nothing changed -- cost: a lost 200 makes the SPI retry into three "replay" refusals with notices.
+12. Finding 17's wrong `legacysecret` sentence corrected within 7's doc edit; the rest deferred -- cost: none.
+13. The reviewer's declined-to-judge list stands as set aside (TLS, `atoi` Content-Length, connection-hold DoS, unauthenticated GET/HEAD 200, `authDetails.username` log name, legacy timing shape, X3 attribution, SCRAM material, `doc/example.conf` gap, a stale test comment, IPv4-only listener, the bed's feature-form confs), each now a register row where it was not one -- cost: as each row says.
+
+**Traps learned.** The listener's 9090 is not published on the host (post to the container IP); never `sed -i` a `data/ircd*.conf` (per-file bind mounts); `x3-account-change` is gated on `X3_AC_CHANGE=1`; a non-oper STATS request aborts any image older than ead82a8; the SPI submodule checkout is detached at the branch tip because the bed's builder mounts it; the ircd's skill mirrors under `nefarious/.claude/skills` have drifted from the testnet copies (register).

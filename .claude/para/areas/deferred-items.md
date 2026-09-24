@@ -11,21 +11,46 @@ Legend: **owner** = the plan or pass expected to close it. Prod has no legacy (n
 
 | Item | Source | Owner |
 |---|---|---|
-| Webhook transport: the `Webhook {}` config's vhost/path/limits are discarded by `sasl_webhook_init`; listener binds 0.0.0.0; plaintext HTTP; static secret header; no body signature, timestamp or nonce (a replayed `USER/DELETE` is now a live deauth primitive); no realm check | P0-3 | plan 3 |
-| No operator-visible surface: `STATS` entry for the libkc transport and business counters; loud notice on secret rejection | P0-4 | plan 3 |
-| The secret is still named `x3-webhook-secret` in all seven ircd confs and `data/x3.conf`; the dead `keycloak_webhook_*` block in `data/x3.conf` | P0-3, cutover 6 | plan 3 |
+| ~~Webhook transport: the `Webhook {}` config's vhost/path/limits are discarded by `sasl_webhook_init`; listener binds 0.0.0.0; plaintext HTTP; static secret header; no body signature, timestamp or nonce (a replayed `USER/DELETE` is now a live deauth primitive); no realm check~~ closed by plan 3 (nefarious `fix/webhook-transport` cde1b99..2e921c6, SPI `feature/signed-events` ad0a2dd): the block is threaded in full, HMAC signature + 300 s window + replay ring + realm check. TLS on the listener stays open (row below) | P0-3 | ~~plan 3~~ |
+| ~~No operator-visible surface: `STATS` entry for the libkc transport and business counters; loud notice on secret rejection~~ closed by plan 3: `STATS webhook`, `SNO_UNAUTH` notice once per cause per minute | P0-4 | ~~plan 3~~ |
+| ~~The secret is still named `x3-webhook-secret` in all seven ircd confs and `data/x3.conf`; the dead `keycloak_webhook_*` block in `data/x3.conf`~~ closed f226c497 (bed) | P0-3, cutover 6 | ~~plan 3~~ |
 | SPI ships SCRAM verifier material in every credential event; the ircd parses `event.scram` and never reads it: drop it or consume it deliberately under TLS | P1-3 | decision, then plan |
 | SPI resource model: `HttpClient` per provider instance, delivery on the ForkJoinPool common pool with blocking sleeps, no cap on in-flight deliveries, no reconciliation after four failed attempts (a missed delete is permanent divergence) | P1-4 | SPI plan |
 | SCRAM attribute lifecycle: attributes written from a password-policy `validate()` side effect; policy-bypassing password changes leave them stale; keep `SCRAM-SHA-256` out of prod's `SASL_LOCAL_MECHANISMS` until owned | P1-5 | decision |
-| SPI has no `src/test`; CMocka does not drive `dispatch_event` (plan 2 mirrors its field mapping) | P1-2 | plan 3 or SPI plan |
-| Untrusted `event->username` goes onto the P10 wire and into the cache lookups unvalidated (length, charset) | P2 | plan 3 |
+| SPI's only test is plan 3's signing vector (`WebhookSignatureTest`); the event formatters are untested and CMocka still mirrors `dispatch_event`'s field mapping instead of driving it | P1-2 | SPI plan / later |
+| ~~Untrusted `event->username` goes onto the P10 wire and into the cache lookups unvalidated (length, charset)~~ closed by plan 3 0ada9cd (`username_usable`: at most 32 bytes, no space, colon, control or DEL; a bad name is dropped, the id still resolves) | P2 | ~~plan 3~~ |
 | `CI` cannot cross a legacy hop (`sendcmdto_serv_butone_v3` on emit and relay). Bed-only: prod has no legacy peers (user, 2026-09-23) | P2 | none unless prod gains a legacy peer |
-| Dead branches: credential-event `DELETE` arm needs a representation Keycloak never sends; `handle_session_event` wants `DELETE` while the SPI maps `LOGOUT` to `ACTION`; `WATCHED_RESOURCE_TYPES` omits `CREDENTIAL` and watches `REALM_ROLE_MAPPING` undocumented | P2 | plan 3 hygiene |
-| `kc_webhook.c` HTTP edge cases: a read that exactly fills the buffer is a 400; `Content-Length` via `atoi` accepts negatives; `events_received` counted before authentication | P2 | plan 3 |
+| Dead branches: credential-event `DELETE` arm needs a representation Keycloak never sends; `handle_session_event` wants `DELETE` while the SPI maps `LOGOUT` to `ACTION`; `WATCHED_RESOURCE_TYPES` omits `CREDENTIAL` and watches `REALM_ROLE_MAPPING` undocumented (plan 3 did not touch them) | P2 | later (hygiene) |
+| `kc_webhook.c` HTTP edge cases: a read that exactly fills the buffer is a 400; `Content-Length` via `atoi` accepts negatives (~~`events_received` counted before authentication~~ fixed by plan 3: counted after the signature and realm checks) | P2 | later |
 | `ScramCredentialProvider.java` is dead but named as the lockstep counterpart in `kc_cred_derive.c/.h`; `pom.xml` targets 26.0.0 while the bed runs 26.4.7 | P2 | SPI plan |
-| `scripts/setup-keycloak.sh` short-circuits on "webhook-events already enabled" and skips the admin-events writes | P2 | plan 3 |
-| Rehash churn: any `wh_changed()` field rebinds the listener and resets the stats; `kc_webhook_set_secret()` is never called | P2 | plan 3 |
+| ~~`scripts/setup-keycloak.sh` short-circuits on "webhook-events already enabled" and skips the admin-events writes~~ closed 420cc1ee | P2 | ~~plan 3~~ |
+| ~~Rehash churn: any `wh_changed()` field rebinds the listener and resets the stats; `kc_webhook_set_secret()` is never called~~ closed by plan 3 82378b3: a secret-only change goes through `kc_webhook_set_secret` and keeps the listener and every counter; a change to any other item re-inits, which keeps the handler's counters and zeroes libkc's listener counters | P2 | ~~plan 3~~ |
 | Prod cutover 7-9: keep SCRAM off; keep `send-all-events=false` on any realm whose URL list includes an ircd; verify the realm's listener and admin-event settings | cutover | prod cutover |
+| Plan 3 rollout on prod: the signing SPI goes in before the ircd (or `Webhook { legacysecret = yes; }` covers the window, then comes out); the Keycloak block's `realm` and the SPI's realm name must agree | plan 3 decision 2 | prod cutover |
+| TLS on the webhook listener: not built (plan 3 decision 3); the posture is a private `vhost` plus the signature. Requirement if the link is ever shared: TLS in libkc's listener or an authenticated tunnel in front of it | plan 3 decision 3 | decision, then plan |
+| A payload without `realmName` (a pre-signing SPI) is accepted and counted (plan 3 decision 4); refusing it too is the alternative once the signing SPI is deployed everywhere | plan 3 decision 4 | later, after the SPI ships |
+| The bed's seven ircd confs still set `WEBHOOK_PORT`/`WEBHOOK_SECRET` as features (a CONFIG warning on every rehash says migrate to a `Webhook {}` block); the new items ride on defaults there | plan 3 | bed chore |
+| The nefarious tree's `.claude/skills` mirrors (sasl-keycloak, bouncer-architecture, nefarious-codebase) have drifted from the testnet copies (last synced at 7bc4751; 38/32/68 lines differ on 2026-09-23); CLAUDE.md says to mirror every edit. Sync them in a chore commit, not inside a feature branch | found during plan 3 | hygiene |
+
+## From the webhook plan 3 review (2026-09-23; fix pass closed findings 1-6, these remain)
+
+| Item | Owner |
+|---|---|
+| **Decision:** `SNO_UNAUTH` (32) is not in `SNO_OPERDEFAULT`, so a default oper hears no refusal notice until the mask is set (the doc says how); add it to the default mask, or leave it opt-in? (review finding 7) | user decision |
+| **Decision:** an SPI retry of an event the ircd applied but whose 200 was lost is refused "replay" three times with `SNO_UNAUTH` notices and the SPI logs a failure; the reviewer's refinement: same id + newer `t` + valid signature = 200 "duplicate" (counted, not acted), byte-identical = 401 replay; the bed replay case (same `t`) stays valid (finding 8) | user decision |
+| **Decision:** the SPI branch `feature/signed-events` carries two subjects (the docs re-anchoring c195c7a/f8a6e1c and the signing ad0a2dd/7b5db8a); split into two PRs per the one-subject rule, or ship as one? (finding 20) | user decision |
+| The replay ring is reset on every listener re-init (a captured request becomes replayable after a port/vhost/limit rehash); drop the reset from init, reset in shutdown (9) | later |
+| Foreign-realm events occupy ring slots before the realm check, so a second foreign delivery reads "replay" not "realm"; check the realm first; document that `webhook-events` belongs on the ircd's realm only (each foreign event costs the SPI four attempts) (10) | later |
+| A fixed 256-slot ring cycles under bulk admin operations (a few hundred users in five minutes evict every earlier id); expire by time or warn on evicting a young entry (11) | later |
+| A signed payload without `id` is replay-exempt (`x3-account-change.test.ts` posts one); keying the ring on the `v1` digest removes the JSON dependency (12) | later |
+| A rehash that changes only the Keycloak block's `realm` never reaches the listener: `wh_changed()` ignores the effective realm (13) | later |
+| `sasl_conf_keycloak_realm()` has no callers (14); X3 attribution still in `kc_webhook.h:8-9` / `kc_webhook.c:5`; stale "KILL_ON_DELETE defaults on" comment in `x3-account-change.test.ts:18` | hygiene |
+| In the deploy window a wrong plain secret without a signature is reported as "missing" (15) | later |
+| `kc_log_warning` per refused request is unbounded; only the notice is rate-limited (an attacker on the link grows the log; memory `bed-disk-full`) (16) | later |
+| Docs: no clock-sync note (skew beyond `signaturewindow` refuses everything as "stale"); `kc_webhook.h:122` still says "NULL = no auth"; `doc/example.conf` documents neither the Keycloak nor the Webhook block (pre-existing) (17) | docs |
+| Untested: `legacysecret = yes`; the three grammar items (`signaturewindow`, `legacysecret`, `realm`) are parsed by no bed conf (the bed uses the feature form) (18) | tests |
+| `scripts/setup-keycloak.sh` PUTs `eventsListeners`/`enabledEventTypes` wholesale on every run, clobbering hand additions; read-merge-write (19) | bed |
+| Listener: GET/HEAD/wrong-path requests are answered 200 without authentication (a probe surface); IPv4-only listener and peer string (pre-existing, declined by the reviewer) | later |
 
 ## From webhook plan 2 (`2026-09-23-webhook-subject-by-id.md`, execution record)
 
@@ -34,8 +59,8 @@ Legend: **owner** = the plan or pass expected to close it. Prod has no legacy (n
 | Durable cover for id-less sessions: persist Keycloak id to account at every id-carrying login; store `kc_id` in the bounce-DB session record so restored ghosts carry it (today: X3-authenticated, relayed-without-id and restored sessions are reached only through a name; the log warns with the id. The legacy-hop case is bed-only: prod has no legacy peers) | 5c |
 | A bare API re-enable (`{"enabled":true}`, no name) leaves a refused password in the negative cache for up to `SASL_NEGCACHE_TTL` (60 s); remembering the names resolved at DISABLE would let the bare ENABLE purge them | later |
 | Under `WEBHOOK_KILL_ON_*` a name-only match can disconnect an id-less client of a reused name (rename + id-less login + the switch on); no feature documentation file carries the note | doc |
-| The cross-server id purge (`CI * <id>`) has no bed observer; a pre-branch v3 peer relays `CI *` without the id (rollout window only; prod deploys the chain in lockstep) | plan 3 tests |
-| The cmocka suite mirrors the parser's field mapping instead of driving `dispatch_event` | plan 3 |
+| The cross-server id purge (`CI * <id>`) has no bed observer; a pre-branch v3 peer relays `CI *` without the id (rollout window only; prod deploys the chain in lockstep). Plan 3 did not add the observer | later (tests) |
+| The cmocka suite mirrors the parser's field mapping instead of driving `dispatch_event` (untouched by plan 3) | later |
 | Bouncer observation, UNVERIFIED: a client revived from a held ghost still read `IsBouncerHold` two seconds later and a deauth exited it (memory `project_bouncer_revived_ghost_hold_flag.md`) | bouncer-analyst pass |
 
 ## From bouncer deauth plan 1 (`2026-09-22-bouncer-deauth-correctness.md`, execution record)
@@ -45,7 +70,7 @@ Legend: **owner** = the plan or pass expected to close it. Prod has no legacy (n
 | Legacy-accounts gate in `bounce_emit_alias_update` sits after the local alias apply (unreachable today) | later |
 | `bounce_null_alias_primary_pointing_at` walks GlobalClientList three times per exit, remote exits included (O(n^2) on a netsplit) | later |
 | The LIVE-DEAUTHED discriminator also matches a recycled slot holding a fresh unauthenticated user; `cli_session_id` vs `hs_sessid` would discriminate | later |
-| `wh_stats.sessions_killed` counts deauths and ghost destroys alike | plan 3 (STATS) |
+| `wh_stats.sessions_killed` counts deauths and ghost destroys alike; plan 3's `STATS webhook` prints it as one "deauths or kills" figure | later |
 | The deauth bed tests sleep a fixed time then CHECK once; bounded polling would be flake-proof | later |
 | The multi-session emit loop in `bounce_account_deauth_apply` has no bed test (one session per account in the profile model); sibling held ghosts are not exited inside the body (each gets its own walk entry or AC U) | bouncer-analyst pass |
 | Network-wide forced disconnect for remote primaries (kill = deauth everywhere + local sockets + the killed primary's aliases everywhere); B-8 duplicate `AC U` wallops | design decision |
@@ -62,7 +87,7 @@ Legend: **owner** = the plan or pass expected to close it. Prod has no legacy (n
 | X3 Part A's legacy fall-through still binds unknown single-letter subcommands | X3, later |
 | LOC reply `A` keeps a stale `acc_create` when `parc <= 4` | later |
 | `keycloak-id-binding.test.ts` asserts only "disconnected", not the kill reason; REBIND must be BOUND on existing deployments (`/msg O3 BIND AuthServ REBIND *nickserv.rebind`) | tests / operator note |
-| The fail-open when the grant reply lacks `id_token` logs at DEBUG only | plan 3 (STATS/notice) |
+| The fail-open when the grant reply lacks `id_token` logs at DEBUG only (plan 3's notice covers webhook refusals only) | later |
 | D3 needs a trusted-authzid bed config; the OAUTHBEARER test helper's error-challenge branch is unreachable | tests |
 | Positive cache carried identity for `SASL_POSCACHE_TTL` after a delete | ~~closed by plan 2 (purge by id)~~ |
 

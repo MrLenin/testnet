@@ -82,26 +82,78 @@ carries the id; sessions authenticated through X3, a legacy hop, or restored fro
 bouncer DB carry no id and are reached only through a name (a warning names the id);
 `--disable-keycloak` builds again include none of it.
 
-## keycloak-webhook-spi: docs/ircd-contract → evilnet/keycloak-webhook-spi main
+## nefarious: fix/webhook-transport (webhook plan 3), after fix/webhook-subject-by-id
 
-2 commits (c195c7a, f8a6e1c) off main 6c2c54d, documentation only: the README's event
-formats and a consumer-contract table for the ircd, Java comments re-anchored from X3
-to the ircd. The repository's only remote is evilnet itself, so the branch has to be
-pushed there to open the PR:
+6 commits (cde1b99 .. e48d764) on top of 7b65b7a (plan 2's tip): the four task commits
+plus the review fix pass (ead82a8: eight feature-less STATS entries were a non-oper
+server abort through feature_bool's assert, now oper-only 481 -- this one touches
+webpush/authtoken/chathistory/metadata/dnsbl/gitsync too; e48d764: stub build, replay
+ring by signature time, realmName-less payloads counted, a failed listener start is
+loud): libkc verifies the SPI's signature (HMAC-SHA256 over
+`<t>.<body>`, 300 s window, a ring of recent event ids refuses replays), the listener
+refuses unsigned/stale/replayed (401) and other-realm (403) deliveries at HTTP time and
+counts each cause, the whole `Webhook {}` block reaches the listener (`vhost`, `path`,
+limits) plus `signaturewindow`, `legacysecret` (default no) and `realm` (default: the
+Keycloak block's), a secret-only REHASH keeps the listener and its counters,
+`STATS webhook` and a per-cause `SNO_UNAUTH` notice, and a payload username is used
+only if it can travel the wire. Fork-only paths, so direct pushes to both fork branches
+on both remotes, one command per branch; the branch fast-forwards on top of
+`fix/webhook-subject-by-id`.
+
+```bash
+cd /home/ibutsu/testnet/nefarious
+git push origin   fix/webhook-transport:ircv3.2-hardening
+git push origin   fix/webhook-transport:ircv3.2-upgrade
+git push upstream fix/webhook-transport:ircv3.2-hardening
+git push upstream fix/webhook-transport:ircv3.2-upgrade
+```
+
+Rollout on prod (SPI first): the ircd refuses every unsigned delivery once deployed,
+so the signing SPI (`feature/signed-events`) goes into Keycloak before the ircd, or the
+ircd's `Webhook {}` block carries `legacysecret = yes;` for the minutes between (then
+drop it). The realm check keys on the Keycloak block's `realm`; the SPI sends the
+realm's name, so the two must agree (`Webhook { realm = "..."; }` overrides). The bed's
+confs still use the deprecated `WEBHOOK_PORT`/`WEBHOOK_SECRET` features (a CONFIG
+warning says so); prod should move to a `Webhook {}` block with `vhost` on the private
+interface. `STATS webhook` shows the counters; refusals reach opers on the
+"unauthorized connections" snomask once per cause per minute.
+
+## keycloak-webhook-spi: feature/signed-events → evilnet/keycloak-webhook-spi main
+
+Supersedes `docs/ircd-contract` (plan 3 was cut from it so ONE PR carries the docs and
+the signing; do not open `docs/ircd-contract` on its own -- unless the one-subject rule
+says to split them, an open decision in the deferred register). 4 commits (c195c7a,
+f8a6e1c, ad0a2dd, 7b5db8a) off main 6c2c54d: the README's event formats and consumer-contract table for
+the ircd, Java comments re-anchored from X3 to the ircd, then the signing: every
+delivery carries `X-Webhook-Signature: t=<unix>,v1=<hex HMAC-SHA256(secret, "<t>." + body)>`
+beside the unchanged `X-Webhook-Secret`, every payload carries `realmName`, a JUnit
+vector test (`WebhookSignatureTest`). The repository's only remote is evilnet itself, so
+the branch has to be pushed there to open the PR:
 
 ```bash
 cd /home/ibutsu/testnet/keycloak-webhook-spi
-git push origin docs/ircd-contract
+git push origin feature/signed-events
 ```
 
-**Title:** docs: the payload contract is the Nefarious ircd's, not X3's
+**Title:** spi: sign every delivery and name the realm; the payload contract is the ircd's
 
 **Body:** X3 stopped consuming these events; the README and the code comments still
 described what X3's resolver expected. Document what the ircd reads: the subject of a
 USER admin event is the resourcePath uuid (only the bare `users/<uuid>` path is the
 user; a credential removal purges; other sub-resources are nothing), authDetails is the
 acting admin, only credential user events carry a username, and which sessions a
-nameless event reaches. No payload change.
+nameless event reaches.
+
+Then sign: a consumer that only checked the static `X-Webhook-Secret` header could be
+fed a captured delivery again (a replayed USER delete is a deauth), a stale one, or one
+from another realm. Each delivery now carries `X-Webhook-Signature: t=<unix seconds>,v1=<hex>`
+where the digest is HMAC-SHA256 over `<t>.<body>` with the shared secret, and every
+payload names its realm (`realmName`). The plain secret header is still sent, so an
+older consumer keeps working; the Nefarious ircd (fork branch `fix/webhook-transport`)
+requires the signature, refuses a timestamp outside its window and a repeated event id,
+and refuses another realm's events. Deploy this SPI before that ircd (or run the ircd
+with `Webhook { legacysecret = yes; }` for the window). JUnit: `mvn test`
+(`WebhookSignatureTest`, a fixed vector and a wrong-secret vector).
 
 ## x3 PR 1: `fix/ac-account-change` → evilnet/x3 master (2 commits off 5d7fadb)
 
