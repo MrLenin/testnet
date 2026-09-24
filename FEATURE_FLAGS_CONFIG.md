@@ -429,10 +429,12 @@ Webhook {
 
 **The signature.** The SPI sends `X-Webhook-Signature: t=<unix seconds>,v1=<hex>` where the
 digest is HMAC-SHA256 over `<t>.<body>` with the shared secret, and `realmName` in every
-payload.  The ircd refuses (401) a missing, malformed, stale or wrong signature, refuses
-(401) a second delivery of an event id within the window (a replay), and refuses (403) a
-payload whose `realmName` is not its own.  A secret-only change under `REHASH` keeps the
-listener and its counters.
+payload.  The ircd refuses (401) a missing, malformed, stale or wrong signature; refuses
+(403) a payload whose `realmName` is not its own; refuses (401) a copy of an accepted event
+played back (same event id, a signature no newer than the last accepted one); and answers
+200 to the SPI's own re-signed retry of an accepted event (same id, newer timestamp)
+without acting on it again, counting it as a duplicate.  A secret-only change under
+`REHASH` keeps the listener and its counters.
 
 **What the events do.** `USER` delete, disable (`enabled:false` in the update), admin
 password reset and credential removal act on the user resolved by the Keycloak id in
@@ -443,7 +445,8 @@ escalate a deauth to disconnecting local sockets.
 **Seeing it.** `STATS webhook` (opers only) lists the listener's connections, authenticated /
 processed / invalid / dropped events, every refusal by cause with the last one's age, the
 plain-secret transition count, the count of payloads that named no realm (a pre-signing
-SPI), and the handler's counters; a listener whose last start failed (busy port, bad
+SPI), the duplicates (the SPI's re-signed retries, answered 200 and not acted on), and the
+handler's counters; a listener whose last start failed (busy port, bad
 `vhost`) is reported as NOT RUNNING and a rehash retries it.  Every refusal also reaches
 opers who carry the "unauthorized connections" server notice mask (`SNO_UNAUTH`, 32; it is
 not in the default oper mask, so add it with `/MODE <nick> +s +32` or in the oper's

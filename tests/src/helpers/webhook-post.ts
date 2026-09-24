@@ -104,6 +104,26 @@ export async function nickPresent(client: RawSocketClient, nick: string): Promis
   return / 311 /.test(line);
 }
 
+/** One number off `STATS webhook` (oper): the first capture group of `pattern` on its matching line. */
+export async function statsWebhookNumber(op: RawSocketClient, pattern: RegExp): Promise<number> {
+  op.clearRawBuffer();
+  op.send('STATS webhook');
+  const line = await op.waitForLine(pattern, 8000);
+  return parseInt(pattern.exec(line)![1], 10);
+}
+
+/**
+ * Payloads the listener accepted although they named no realm (a pre-signing SPI).  A real
+ * Keycloak event leaves it unchanged; a synthetic one without `realmName` raises it by one.
+ */
+export const withoutRealmCount = (op: RawSocketClient) => statsWebhookNumber(op, /Without realmName: (\d+)/);
+
+/** Re-signed retries of accepted events: answered 200, not acted on again. */
+export const duplicateCount = (op: RawSocketClient) => statsWebhookNumber(op, /Duplicates: (\d+)/);
+
+/** User events the handler acted on. */
+export const handlerUserEvents = (op: RawSocketClient) => statsWebhookNumber(op, /Handler: (\d+) user events/);
+
 /**
  * The account WHOIS reports for the nick (330), or '' when it has none.
  * Reads the whole reply: it waits for the end of this WHOIS (318, or 401)
@@ -111,18 +131,6 @@ export async function nickPresent(client: RawSocketClient, nick: string): Promis
  * request, so a late line from an earlier reply cannot be mistaken for
  * "no account".
  */
-/**
- * The "Without realmName" count that `STATS webhook` reports to an oper: payloads the
- * listener accepted although they named no realm (a pre-signing SPI).  A real Keycloak
- * event leaves it unchanged; a synthetic one without `realmName` raises it by one.
- */
-export async function withoutRealmCount(op: RawSocketClient): Promise<number> {
-  op.clearRawBuffer();
-  op.send('STATS webhook');
-  const line = await op.waitForLine(/Without realmName: \d+/, 8000);
-  return parseInt(/Without realmName: (\d+)/.exec(line)![1], 10);
-}
-
 export async function whoisAccount(client: RawSocketClient, nick: string): Promise<string> {
   const lines = (client as unknown as { lines: { raw: string }[] }).lines;
   client.clearRawBuffer();                  // an earlier reply's unconsumed 318 must not end this wait

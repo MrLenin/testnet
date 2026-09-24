@@ -6,9 +6,9 @@
  * The helper posts what the SPI posts: the plain secret header plus
  * X-Webhook-Signature (t=<unix>,v1=<hex HMAC-SHA256(secret, "<t>." + body)>)
  * and a realmName.  Each case bends one thing and asserts the status and
- * that the logged-in account is untouched; the replay case is the one that
- * acts, so it comes last.  Before the fix the listener checked only the
- * plain secret header, so every bent delivery was accepted.
+ * that the logged-in account is untouched; the replay and retry cases are the
+ * ones that act, each on its own pool account.  Before the fix the listener
+ * checked only the plain secret header, so every bent delivery was accepted.
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import {
@@ -20,7 +20,9 @@ import {
   bouncerDisableHold,
 } from '../helpers/index.js';
 import { createOperClient } from '../helpers/x3-client';
-import { postWebhook, accountDisabledEvent, whoisAccount, withoutRealmCount } from '../helpers/webhook-post';
+import {
+  postWebhook, accountDisabledEvent, whoisAccount, withoutRealmCount, duplicateCount, handlerUserEvents,
+} from '../helpers/webhook-post';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -122,5 +124,25 @@ describe('Webhook transport: signature, freshness, replay, realm', () => {
     delete bare.realmName;
     expect(await postWebhook(bare, 'nefarious')).toBe(200);
     expect(await withoutRealmCount(op), 'one more counted').toBe(before + 1);
+  }, 45_000);
+
+  // Decision (2026-09-24): the SPI's own retry of an accepted event, signed again with a
+  // newer timestamp, is a duplicate: answered 200 so the retries stop, not acted on again.
+  // A copy with the same timestamp stays a replay (the case above).
+  it('answers a re-signed retry of an accepted event with 200 and does not act twice', async () => {
+    const op = await createOperClient();
+    clients.push(op);
+    const { client, nick, account } = await loggedIn('wtdup');
+    const event = { ...accountDisabledEvent(account), id: `retry-${Date.now()}` };
+    const t = Math.floor(Date.now() / 1000);
+    expect(await postWebhook(event, 'nefarious', { t }), 'the original').toBe(200);
+    await sleep(1500);
+    expect(await whoisAccount(client, nick), 'the original acted').toBe('');
+    const handled = await handlerUserEvents(op);
+    const dups = await duplicateCount(op);
+    expect(await postWebhook(event, 'nefarious', { t: t + 2 }), 'the SPI signed it again').toBe(200);
+    await sleep(1000);
+    expect(await duplicateCount(op), 'counted as a duplicate').toBe(dups + 1);
+    expect(await handlerUserEvents(op), 'not handled twice').toBe(handled);
   }, 45_000);
 });
