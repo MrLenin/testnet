@@ -393,6 +393,62 @@ Built-in DNS-based blocklist checking without external scripts.
 - `presence` - Returns current effective presence ("present", "away:message", or "away-star")
 - `last_present` - Returns Unix timestamp of when account was last present
 
+### Webhook block (Nefarious, Keycloak event listener)
+
+The ircd runs a small HTTP listener (libkc's `kc_webhook`) for the Keycloak webhook SPI.
+Every delivery must be signed by the SPI with the shared secret; unsigned, stale,
+replayed and other-realm deliveries are refused and counted.
+
+```
+Webhook {
+  port = 9090;                    # 0 = disabled
+  secret = "ircd-webhook-secret"; # shared with the SPI; required (no secret = every request refused)
+  vhost = "10.0.0.5";             # bind address; empty = all interfaces.  Bind to the private interface on prod.
+  path = "/keycloak-webhook";     # empty = /keycloak-webhook, /webhook or /
+  maxconnections = 16;
+  maxrequestsize = 64k;
+  queuemax = 1000;
+  batchsize = 10;
+  signaturewindow = 300;          # seconds either side of the signature's timestamp; 0 = 300
+  legacysecret = no;              # yes accepts the plain X-Webhook-Secret header alone: only for the
+                                  # minutes between deploying a signing SPI and this ircd
+  realm = "afternet";             # refuse payloads whose realmName differs; default = the Keycloak block's realm
+};
+```
+
+| Item | Default | Meaning |
+|------|---------|---------|
+| `port` | 0 | Listener port (0 = disabled) |
+| `secret` | "" | Shared secret; the signature is HMAC-SHA256 over `<t>.<body>` with it |
+| `vhost` | "" | Bind address (all interfaces when empty) |
+| `path` | "" | Accepted URL path |
+| `maxconnections` / `maxrequestsize` / `queuemax` / `batchsize` | 16 / 64k / 1000 / 10 | Listener limits |
+| `signaturewindow` | 300 | Seconds a signature's timestamp may differ from now |
+| `legacysecret` | no | Accept the plain secret header without a signature (deploy window only) |
+| `realm` | Keycloak block's realm | Refuse other realms' events |
+
+**The signature.** The SPI sends `X-Webhook-Signature: t=<unix seconds>,v1=<hex>` where the
+digest is HMAC-SHA256 over `<t>.<body>` with the shared secret, and `realmName` in every
+payload.  The ircd refuses (401) a missing, malformed, stale or wrong signature, refuses
+(401) a second delivery of an event id within the window (a replay), and refuses (403) a
+payload whose `realmName` is not its own.  A secret-only change under `REHASH` keeps the
+listener and its counters.
+
+**What the events do.** `USER` delete, disable (`enabled:false` in the update), admin
+password reset and credential removal act on the user resolved by the Keycloak id in
+`resourcePath`; see `keycloak-webhook-audit-2026-09.md` and the SPI README for the
+contract.  `WEBHOOK_KILL_ON_DELETE` / `WEBHOOK_KILL_ON_DISABLE` (features, default off)
+escalate a deauth to disconnecting local sockets.
+
+**Seeing it.** `STATS webhook` (oper) lists the listener's connections, authenticated /
+processed / invalid / dropped events, every refusal by cause with the last one's age, the
+plain-secret transition count, and the handler's counters.  Every refusal also reaches
+opers on the `SNO_UNAUTH` server notice mask, at most once per cause per minute with the
+running count.
+
+**Posture.** No TLS on the listener: run it on a private link (bind `vhost` to the private
+interface, keep the port off the public side) and rely on the signature.
+
 ### Example Configuration
 
 ```
@@ -782,24 +838,9 @@ Bidirectional sync uses hierarchical paths:
 
 ### Keycloak Webhook
 
-Real-time cache invalidation when users change passwords or attributes in Keycloak.
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `keycloak_webhook_port` | 0 | HTTP listener port (0 = disabled) |
-| `keycloak_webhook_secret` | "" | Shared secret for request authentication |
-| `keycloak_webhook_bind` | "" | Bind address (empty = all interfaces) |
-
-**Webhook Architecture**:
-- Keycloak sends POST requests when user attributes change
-- X3 validates the shared secret header
-- Cache entries are invalidated immediately
-- Eliminates polling delay for password/attribute changes
-
-**Keycloak Event Listener Configuration**:
-Configure a webhook event listener in Keycloak to POST to `http://x3-host:port/webhook`:
-- Event types: UPDATE_PASSWORD, UPDATE_PROFILE, UPDATE_EMAIL
-- Include shared secret in `X-Webhook-Secret` header
+X3 no longer consumes Keycloak events; the `keycloak_webhook_*` options are gone from
+`x3.conf`.  The consumer is the Nefarious ircd's `Webhook {}` block, documented under
+[Nefarious IRCd Features](#webhook-block-nefarious-keycloak-event-listener).
 
 ### Certificate Auto-Registration
 
