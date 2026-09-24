@@ -60,6 +60,8 @@ included.
 
 ## nefarious: fix/webhook-subject-by-id (webhook plan 2), after the pushes above
 
+**PUSHED 2026-09-24** as part of the fix/webhook-transport push (32e3664 contains it).
+
 9 commits (70f1a09 .. 7b65b7a) on top of 75d8101 (the tip both fork branches are at):
 the subject of a USER admin event resolved by Keycloak id, cache purge by id and the
 `CI <name|*> [<id>]` form, the handler rewrite, the review fix pass (sub-resource
@@ -83,6 +85,8 @@ bouncer DB carry no id and are reached only through a name (a warning names the 
 `--disable-keycloak` builds again include none of it.
 
 ## nefarious: fix/webhook-transport (webhook plan 3), after fix/webhook-subject-by-id
+
+**PUSHED 2026-09-24:** the four fork branches (origin and upstream, ircv3.2-hardening and ircv3.2-upgrade) fast-forwarded 75d8101 -> 32e3664, which carries plan 2's nine commits and plan 3's seven. The section below is the record of what went.
 
 7 commits (cde1b99 .. 32e3664) on top of 7b65b7a (plan 2's tip): the four task commits,
 the review fix pass (ead82a8: eight feature-less STATS entries were a non-oper server
@@ -121,6 +125,8 @@ interface. `STATS webhook` shows the counters; refusals reach opers on the
 "unauthorized connections" snomask once per cause per minute.
 
 ## keycloak-webhook-spi: two PRs, both off main 6c2c54d (decision 2026-09-24: one subject each)
+
+**PUSHED DIRECTLY 2026-09-24 (user: "spi can be directly pushed"):** main 6c2c54d -> f8a6e1c (the docs commits) -> a340a9d (the signing commits rebased on top: 94535e2, a340a9d). No PRs. The sections below are the record.
 
 Neither branch is based on the other (the user's rule: never stack). Both touch
 `README.md` and the Java file, so whichever merges second needs a rebase onto the new
