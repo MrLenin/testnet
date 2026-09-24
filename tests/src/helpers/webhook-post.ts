@@ -8,6 +8,7 @@
  * or "deleted" for the ircd's purposes and still log in afterwards.
  */
 import * as fs from 'node:fs';
+import { createHmac } from 'node:crypto';
 import { run } from './bed-control';
 import type { RawSocketClient } from './index.js';
 
@@ -30,14 +31,25 @@ function webhookEndpoint(target: WebhookTarget): { port: string; secret: string 
   return { port, secret };
 }
 
-/** POST a Keycloak-shaped webhook event to an ircd; resolves to the HTTP status. */
-export async function postWebhook(body: unknown, target: WebhookTarget = 'nefarious'): Promise<number> {
+/** The SPI's signature header: HMAC-SHA256 over "<t>.<body>" with the shared secret. */
+export function signWebhook(secret: string, t: number, body: string): string {
+  return `t=${t},v1=${createHmac('sha256', secret).update(`${t}.${body}`).digest('hex')}`;
+}
+
+/**
+ * POST a Keycloak-shaped webhook event to an ircd, signed the way the SPI
+ * signs it; resolves to the HTTP status.  `opts` bends the signature for the
+ * transport tests: another timestamp, another secret, or no signature at all.
+ * The plain secret header is sent as well, as the SPI still does.
+ */
+export async function postWebhook(body: unknown, target: WebhookTarget = 'nefarious',
+                                  opts: { t?: number; secret?: string; unsigned?: boolean } = {}): Promise<number> {
   const { port, secret } = webhookEndpoint(target);
-  const res = await fetch(`http://${containerIp(target)}:${port}/keycloak-webhook`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Webhook-Secret': secret },
-    body: JSON.stringify(body),
-  });
+  const payload = JSON.stringify(body);
+  const t = opts.t ?? Math.floor(Date.now() / 1000);
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', 'X-Webhook-Secret': secret };
+  if (!opts.unsigned) headers['X-Webhook-Signature'] = signWebhook(opts.secret ?? secret, t, payload);
+  const res = await fetch(`http://${containerIp(target)}:${port}/keycloak-webhook`, { method: 'POST', headers, body: payload });
   return res.status;
 }
 
@@ -47,6 +59,7 @@ export function accountDisabledEvent(account: string): Record<string, unknown> {
     id: `test-disable-${Date.now()}`,
     time: Date.now(),
     realmId: 'testnet',
+    realmName: 'testnet',
     resourceType: 'USER',
     operationType: 'UPDATE',
     username: account,
@@ -60,6 +73,7 @@ export function accountDeletedEvent(account: string): Record<string, unknown> {
     id: `test-delete-${Date.now()}`,
     time: Date.now(),
     realmId: 'testnet',
+    realmName: 'testnet',
     resourceType: 'USER',
     operationType: 'DELETE',
     username: account,

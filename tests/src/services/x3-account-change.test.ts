@@ -23,12 +23,11 @@
  * GATED behind X3_AC_CHANGE=1: needs x3 from fix/ac-account-change.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import * as fs from 'node:fs';
-import { run } from '../helpers/bed-control';
 import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
 import { authenticateSaslPlain, authenticateSaslOAuthBearer } from '../helpers/sasl';
 import { NICKSERV_NICK } from '../helpers/x3-client';
 import { getKeycloakAdminToken } from '../helpers/keycloak-sync';
+import { postWebhook } from '../helpers/webhook-post';
 
 const GATED = process.env.X3_AC_CHANGE !== '1';
 const KC = process.env.KEYCLOAK_URL || 'http://localhost:8080';
@@ -102,15 +101,7 @@ async function connectAs(account: string, nick: string): Promise<RawSocketClient
   return c;
 }
 
-function ircdIp(): string {
-  return run('docker', ['inspect', '-f', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}', 'nefarious']).trim();
-}
 
-function ircdWebhookSecret(): string {
-  const m = /"WEBHOOK_SECRET"\s*=\s*"([^"]+)"/.exec(fs.readFileSync('../data/ircd.conf', 'utf8'));
-  if (!m) throw new Error('WEBHOOK_SECRET not in data/ircd.conf');
-  return m[1];
-}
 
 describe('X3 follows the ircd account changes', () => {
   let thirdId = '';
@@ -151,18 +142,13 @@ describe('X3 follows the ircd account changes', () => {
     try {
       expect(await x3Account(c)).toBe(THIRD);
 
-      // The admin event the Keycloak SPI sends when the account is disabled, with the ircd's secret.
-      const body = JSON.stringify({
+      // The admin event the Keycloak SPI sends when the account is disabled, signed like the SPI signs.
+      const status = await postWebhook({
         resourceType: 'USER', operationType: 'UPDATE', resourcePath: `users/${thirdId}`,
         representation: JSON.stringify({ enabled: false }),
-        username: THIRD, realmId: REALM, time: Date.now(),
+        username: THIRD, realmId: REALM, realmName: REALM, time: Date.now(),
       });
-      const res = await fetch(`http://${ircdIp()}:9090/keycloak-webhook`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Webhook-Secret': ircdWebhookSecret() },
-        body,
-      });
-      expect(res.status, 'ircd webhook accepted the event').toBeLessThan(300);
+      expect(status, 'ircd webhook accepted the event').toBeLessThan(300);
 
       await c.waitForLine(/Account disabled/, 15000);   // the ircd deauthed us and sent AC U
       expect(await x3Account(c)).toBe('');              // X3 unbound
