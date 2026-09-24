@@ -16,6 +16,8 @@ Legend: **owner** = the plan or pass expected to close it. Prod has no legacy (n
 | ~~The secret is still named `x3-webhook-secret` in all seven ircd confs and `data/x3.conf`; the dead `keycloak_webhook_*` block in `data/x3.conf`~~ closed f226c497 (bed) | P0-3, cutover 6 | ~~plan 3~~ |
 | SPI ships SCRAM verifier material in every credential event; the ircd parses `event.scram` and never reads it: drop it or consume it deliberately under TLS | P1-3 | decision, then plan |
 | SPI resource model: `HttpClient` per provider instance, delivery on the ForkJoinPool common pool with blocking sleeps, no cap on in-flight deliveries, no reconciliation after four failed attempts (a missed delete is permanent divergence) | P1-4 | SPI plan |
+| **Direction (user, 2026-09-24): every ircd should receive every event directly from the SPI; the network fan-out (`CI`, `AC U`) then only covers misses, and a server that is split but not down still gets its own delivery.** Needs: the SPI URL list naming every server; a network-wide dedupe key (the Keycloak event id) on the relayed messages so N direct receivers do not multiply the broadcasts; a decision on local-only action per receiver versus today's network-wide walk. Planned: `2026-09-24-webhook-every-server.md` (executing 2026-09-24) | direction | plan 4 |
+| The applied-events log of plan 4 is a first version (user, 2026-09-24: "will probably need some more work later, but it's a fair start"): an in-memory ring of 1024 entries with a 24 h window, no persistence across restarts (a restarted server relies on the catch-up from its peers), no per-kind retention, linear scans | plan 4 | later |
 | SCRAM attribute lifecycle: attributes written from a password-policy `validate()` side effect; policy-bypassing password changes leave them stale; keep `SCRAM-SHA-256` out of prod's `SASL_LOCAL_MECHANISMS` until owned | P1-5 | decision |
 | SPI's only test is plan 3's signing vector (`WebhookSignatureTest`); the event formatters are untested and CMocka still mirrors `dispatch_event`'s field mapping instead of driving it | P1-2 | SPI plan / later |
 | ~~Untrusted `event->username` goes onto the P10 wire and into the cache lookups unvalidated (length, charset)~~ closed by plan 3 0ada9cd (`username_usable`: at most 32 bytes, no space, colon, control or DEL; a bad name is dropped, the id still resolves) | P2 | ~~plan 3~~ |
@@ -51,6 +53,21 @@ Legend: **owner** = the plan or pass expected to close it. Prod has no legacy (n
 | Untested: `legacysecret = yes`; the three grammar items (`signaturewindow`, `legacysecret`, `realm`) are parsed by no bed conf (the bed uses the feature form) (18) | tests |
 | `scripts/setup-keycloak.sh` PUTs `eventsListeners`/`enabledEventTypes` wholesale on every run, clobbering hand additions; read-merge-write (19) | bed |
 | Listener: GET/HEAD/wrong-path requests are answered 200 without authentication (a probe surface); IPv4-only listener and peer string (pre-existing, declined by the reviewer) | later |
+
+## From webhook plan 4 (`2026-09-24-webhook-every-server.md`, executed 2026-09-24; residue and the review's minors)
+
+| Item | Owner |
+|---|---|
+| Mixed rollout (decision 1, no switch): a held ghost on a pre-plan-4 server is stranded forever (its session destroyed by a new server's `AC U`, its hold timer gone, its `ms_cacheinval` never walks); a pre-plan-4 server in the middle of a chain forwards the two-parameter `CI` and strips the id and kind for everything behind it. Lockstep deploy avoids both | prod cutover |
+| Whether an AuthServ (X3) login on the bed leaves the client without a Keycloak id is unverified (`CHECK` shows no id); the fan-out suite's name-only case is a regression guard either way, the name-list plumbing is cmocka-covered | bed |
+| Under `WEBHOOK_KILL_ON_*`, a remote alias of a killed primary whose session record a sibling's `AC U` already destroyed is left to its home server (the fallback exits local aliases only); its home skips it in its own KILL pass because the account is already cleared, so it keeps an open socket with no account (pre-plan-4 residue, consistent network-wide) | later |
+| The receiver applies a caught-up disable without checking its own log for a later enable of the subject: a split where the disable reached one side and the enable the other deauths the re-enabled user once at relink (review minor 5) | later |
+| `names_add` truncates a name longer than `ACCOUNTLEN` (15) to a prefix that can be another account, and the relay and the log now carry it; `username_usable` admits 32 bytes (review minor 6; pre-existing) | later |
+| The catch-up's line cap comes from `WEBHOOK_EVENTLOG_SIZE` rather than the ring's count, so lowering the feature at runtime would drop the newest entries; the log is sized at first use (review minor 7) | later |
+| `relay_deauth` with no names logs nothing, unlike the direct path's operator cue (review minor 8) | later |
+| Docs: a caught-up entry gets a fresh applied time here and lives another window in this server's catch-ups (harmless, dedupe); the name-only compaction caveat (a name-only disable and an id-carrying enable of the same user do not compact) is not in the feature doc (review minor 10) | docs |
+| `relay_event`'s old-form fallback sends a comma-joined list as one name when the event id is junk; an old receiver purges the literal string (review minor 11) | later |
+| The applied-events log is in memory only: a restarted server relies on its peers' catch-up; the SPI's retries remain the only cover for an event no server received (D7) | later / P1-4 |
 
 ## From webhook plan 2 (`2026-09-23-webhook-subject-by-id.md`, execution record)
 

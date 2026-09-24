@@ -124,6 +124,35 @@ warning says so); prod should move to a `Webhook {}` block with `vhost` on the p
 interface. `STATS webhook` shows the counters; refusals reach opers on the
 "unauthorized connections" snomask once per cause per minute.
 
+## nefarious: feature/webhook-every-server (webhook plan 4), after fix/webhook-transport
+
+7 commits (68e3b6f .. 028de05) on top of 32e3664 (the tip every fork branch is at since
+the 2026-09-24 push): the applied-events log; the relay parser and kind letters; the
+deauth classifier's `remote_ok` (a remote client is its home server's job); one relay per
+event (`CI <names|*> <kc_id|*> <event_id> <kind>`) deduped by the event id, the receiver
+applying to what it owns; the catch-up at end of burst with enable-supersedes-disable
+compaction; a bare enable relayed; the review fix pass (the catch-up carries the resolved
+names, compaction keeps insertion order, the KILL fallback stays local). Fork-only paths:
+direct pushes to both fork branches on both remotes, one command per branch; the branch
+fast-forwards on top of 32e3664.
+
+```bash
+cd /home/ibutsu/testnet/nefarious
+git push origin   feature/webhook-every-server:ircv3.2-hardening
+git push origin   feature/webhook-every-server:ircv3.2-upgrade
+git push upstream feature/webhook-every-server:ircv3.2-hardening
+git push upstream feature/webhook-every-server:ircv3.2-upgrade
+```
+
+Rollout on prod: the SPI's URL list names EVERY ircd (`KC_SPI_EVENTS_LISTENER_WEBHOOK_EVENTS_URL`
+is comma-separated; a Keycloak restart reads it); the whole ircd chain deploys together (a
+server without this code purges on a relay but deauths nobody, and a new server's `AC U`
+can strand a held ghost it owns); `WEBHOOK_KILL_ON_DELETE` / `_DISABLE` must be set the
+same on every server. New features `WEBHOOK_EVENTLOG_SIZE` (1024) and
+`WEBHOOK_EVENTLOG_WINDOW` (86400 s); `STATS webhook` gains the applied / already-applied /
+relays / catch-up lines. SPI: one README commit (063e616, local, unpushed: "list every
+ircd") for a direct push to main when convenient.
+
 ## keycloak-webhook-spi: two PRs, both off main 6c2c54d (decision 2026-09-24: one subject each)
 
 **PUSHED DIRECTLY 2026-09-24 (user: "spi can be directly pushed"):** main 6c2c54d -> f8a6e1c (the docs commits) -> a340a9d (the signing commits rebased on top: 94535e2, a340a9d). No PRs. The sections below are the record.
