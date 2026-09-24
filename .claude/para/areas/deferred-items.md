@@ -54,6 +54,13 @@ Legend: **owner** = the plan or pass expected to close it. Prod has no legacy (n
 | `scripts/setup-keycloak.sh` PUTs `eventsListeners`/`enabledEventTypes` wholesale on every run, clobbering hand additions; read-merge-write (19) | bed |
 | Listener: GET/HEAD/wrong-path requests are answered 200 without authentication (a probe surface); IPv4-only listener and peer string (pre-existing, declined by the reviewer) | later |
 
+## X3 side (account-timestamp steps 4 and 5)
+
+| Item | Owner |
+|---|---|
+| **Held (user, 2026-09-24): the LOCAL break-glass flag (x3 step 4, `feature/local-handle-flag` 77bd045) is not sent upstream for now.** Rubin does not care about non-LDAP accounts (he did not say X3 ignores them), so it is a maintenance-appetite question, parked. x3 PR 2 (`feature/keycloak-id-binding`, six commits on 77bd045) waits with it or is reworked to stand alone; x3 PR 1 (`fix/ac-account-change`) is independent and ready | user |
+| x3 PR 1 must land on prod with or before the ircd chain: prod X3 (upstream master 5d7fadb) looks up a handle named "U" on `AC <user> U` and keeps the user bound after a webhook deauth | prod cutover |
+
 ## From webhook plan 4 (`2026-09-24-webhook-every-server.md`, executed 2026-09-24; residue and the review's minors)
 
 | Item | Owner |

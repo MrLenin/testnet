@@ -237,6 +237,11 @@ deauth (`AC U`) leaves the user unbound.
 Open after step 4 (`nickserv: LOCAL flag`) merges, then rebase onto master. Do not
 stack it on step 4's PR.
 
+**HELD 2026-09-24 (user): the LOCAL idea is on hold for now, so step 4 is not opened and
+this PR waits with it.** Its refusal rule (refuse during a burst, refuse and disconnect
+otherwise) is step 4's; to open it alone it would have to be reworked to stand without
+that commit. PR 1 (`fix/ac-account-change`) is unaffected and stays ready.
+
 **Title:** nickserv: bind a handle to its Keycloak user id; refuse a different one
 
 **Body:**
