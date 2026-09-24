@@ -4,7 +4,7 @@ One line per item that a plan, a review or an audit set aside on purpose. Each n
 the full text lives and what closes it. Add to this file whenever something is deferred;
 strike a line (do not delete it) when the item ships, with the commit. Started 2026-09-23.
 
-Legend: **owner** = the plan or pass expected to close it. "5c" = account-timestamp step 5c
+Legend: **owner** = the plan or pass expected to close it. Prod has no legacy (non-fork) peers; the only ones are on the test bed (user, 2026-09-23), so "legacy hop" rows are bed-only concerns. "5c" = account-timestamp step 5c
 (`account-timestamp-authority-2026-09.md`). "plan 3" = webhook audit plan 3 (P0-3/P0-4).
 
 ## From the webhook audit (`keycloak-webhook-audit-2026-09.md`), not yet planned
@@ -19,7 +19,7 @@ Legend: **owner** = the plan or pass expected to close it. "5c" = account-timest
 | SCRAM attribute lifecycle: attributes written from a password-policy `validate()` side effect; policy-bypassing password changes leave them stale; keep `SCRAM-SHA-256` out of prod's `SASL_LOCAL_MECHANISMS` until owned | P1-5 | decision |
 | SPI has no `src/test`; CMocka does not drive `dispatch_event` (plan 2 mirrors its field mapping) | P1-2 | plan 3 or SPI plan |
 | Untrusted `event->username` goes onto the P10 wire and into the cache lookups unvalidated (length, charset) | P2 | plan 3 |
-| `CI` cannot cross a legacy hop (`sendcmdto_serv_butone_v3` on emit and relay) | P2 | with the next legacy-hop pass |
+| `CI` cannot cross a legacy hop (`sendcmdto_serv_butone_v3` on emit and relay). Bed-only: prod has no legacy peers (user, 2026-09-23) | P2 | none unless prod gains a legacy peer |
 | Dead branches: credential-event `DELETE` arm needs a representation Keycloak never sends; `handle_session_event` wants `DELETE` while the SPI maps `LOGOUT` to `ACTION`; `WATCHED_RESOURCE_TYPES` omits `CREDENTIAL` and watches `REALM_ROLE_MAPPING` undocumented | P2 | plan 3 hygiene |
 | `kc_webhook.c` HTTP edge cases: a read that exactly fills the buffer is a 400; `Content-Length` via `atoi` accepts negatives; `events_received` counted before authentication | P2 | plan 3 |
 | `ScramCredentialProvider.java` is dead but named as the lockstep counterpart in `kc_cred_derive.c/.h`; `pom.xml` targets 26.0.0 while the bed runs 26.4.7 | P2 | SPI plan |
@@ -31,10 +31,10 @@ Legend: **owner** = the plan or pass expected to close it. "5c" = account-timest
 
 | Item | Owner |
 |---|---|
-| Durable cover for id-less sessions: persist Keycloak id to account at every id-carrying login; store `kc_id` in the bounce-DB session record so restored ghosts carry it (today: X3-authenticated, relayed-without-id, legacy-hop and restored sessions are reached only through a name; the log warns with the id) | 5c |
+| Durable cover for id-less sessions: persist Keycloak id to account at every id-carrying login; store `kc_id` in the bounce-DB session record so restored ghosts carry it (today: X3-authenticated, relayed-without-id and restored sessions are reached only through a name; the log warns with the id. The legacy-hop case is bed-only: prod has no legacy peers) | 5c |
 | A bare API re-enable (`{"enabled":true}`, no name) leaves a refused password in the negative cache for up to `SASL_NEGCACHE_TTL` (60 s); remembering the names resolved at DISABLE would let the bare ENABLE purge them | later |
 | Under `WEBHOOK_KILL_ON_*` a name-only match can disconnect an id-less client of a reused name (rename + id-less login + the switch on); no feature documentation file carries the note | doc |
-| The cross-server id purge (`CI * <id>`) has no bed observer; a pre-branch v3 peer relays `CI *` without the id (rollout window) | plan 3 tests |
+| The cross-server id purge (`CI * <id>`) has no bed observer; a pre-branch v3 peer relays `CI *` without the id (rollout window only; prod deploys the chain in lockstep) | plan 3 tests |
 | The cmocka suite mirrors the parser's field mapping instead of driving `dispatch_event` | plan 3 |
 | Bouncer observation, UNVERIFIED: a client revived from a held ghost still read `IsBouncerHold` two seconds later and a deauth exited it (memory `project_bouncer_revived_ghost_hold_flag.md`) | bouncer-analyst pass |
 
