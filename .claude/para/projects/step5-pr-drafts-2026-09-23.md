@@ -126,6 +126,8 @@ interface. `STATS webhook` shows the counters; refusals reach opers on the
 
 ## nefarious: feature/webhook-every-server (webhook plan 4), after fix/webhook-transport
 
+**PUSHED 2026-09-24:** the four fork branches (origin and upstream, ircv3.2-hardening and ircv3.2-upgrade) fast-forwarded 32e3664 -> 028de05. The SPI README commit 063e616 went straight to evilnet main (a340a9d -> 063e616). The section below is the record.
+
 7 commits (68e3b6f .. 028de05) on top of 32e3664 (the tip every fork branch is at since
 the 2026-09-24 push): the applied-events log; the relay parser and kind letters; the
 deauth classifier's `remote_ok` (a remote client is its home server's job); one relay per
