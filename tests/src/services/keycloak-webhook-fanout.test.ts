@@ -255,7 +255,11 @@ describe('Webhook fan-out: every server receives, one relay per event', () => {
     expect(await loggedOutWithin(client, nick, 30000), 'the leaf session lost its account after relink').toBe(true);
     const l1 = await webhookCounts(leafOp);
     const p1 = await webhookCounts(primary);
-    expect(l1.catchup, 'the leaf applied it from the catch-up').toBe(l0.catchup + 1);
+    // At least the split-time event: the catch-up also carries anything else the
+    // leaf happened to miss within the window (a real event whose delivery to
+    // the leaf failed), so the count is a floor, and the account loss above is
+    // the observable that pins the split-time event itself.
+    expect(l1.catchup, 'the leaf applied it from the catch-up').toBeGreaterThanOrEqual(l0.catchup + 1);
     expect(p1.catchupSent, 'the primary sent a catch-up').toBeGreaterThan(p0.catchupSent);
   }, 180_000);
 

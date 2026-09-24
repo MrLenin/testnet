@@ -425,7 +425,7 @@ All tokens below have server-to-server handlers (ms_* functions in parse.c).
 | `MDQ` | METADATAQUERY | Both | Metadata query to services **(stub only — handler registered, no emitter or X3-side receiver)** |
 | `WP` | WEBPUSH | Both | Web push notifications |
 | `ML` | MULTILINE | Both | S2S multiline batch propagation |
-| `CI` | CACHEINVAL | Nef↔Nef | SASL auth-cache invalidation (Keycloak webhook fan-out; legacy peers silently ignore) |
+| `CI` | CACHEINVAL | Nef↔Nef | Keycloak webhook event relay: auth-cache purge, and since plan 4 the deduped one-relay-per-event with the event id and kind, plus the link-time catch-up (legacy peers silently ignore) |
 
 #### Bouncer
 
@@ -1911,25 +1911,35 @@ ABAAB ML -ABAAB1735308001 BBAAC :
 #### P10 Format
 
 ```
-[SERVER] CI <username>
+[SERVER] CI <username>                                   (purge by name)
+[SERVER] CI <username|*> <kc_id>                         (purge by name and Keycloak id; plan 2)
+[SERVER] CI <names|*> <kc_id|*> <event_id> <kind>        (one relay per event; plan 4)
+[SERVER] CI <names|*> <kc_id|*> <event_id> <kind> B      (a catch-up line at end of burst; plan 4)
 ```
 
 | Field | Type | Description |
 |---|---|---|
-| username | String | The account whose cached auth entries should be invalidated on the receiver |
+| names | String | The account names the sender resolved for the subject, comma-joined (the payload's, the names its id purge dropped, the account of every client carrying the id), or `*` |
+| kc_id | String | The subject's compact Keycloak id (22 chars, `account_id_valid`), or `*` |
+| event_id | String | The Keycloak event id (1-39 chars of `[A-Za-z0-9._:-]`), the network-wide dedupe key |
+| kind | Char | `D` delete, `X` disable, `R` admin reset, `C` credential removed, `E` enable, `P` purge only |
+| B | Marker | Present on a catch-up line only; it travels one link and is stripped when forwarded |
 
 #### Processing
 
 Receiver (`ms_cacheinval` in `ircd/sasl_webhook.c`):
-1. Validates that the message has a username param.
-2. Calls `sasl_cache_invalidate_user(username)` — drops the user from both the negative-cache (failures) and positive-cache (successful auths).
-3. Logs the invalidation.
+1. One or two parameters: the older forms. Purges by name (unless `*`) and by id (when valid), forwards unchanged, no dedupe.
+2. Five or six parameters: `webhook_relay_parse` refuses an event id or kind that may not travel the wire, an empty name slot, or a marker other than `B`; a refused line purges what it names and is not forwarded (a warning once a minute).
+3. Otherwise the event id is recorded in the applied-events log (`webhook_eventlog.c`); an id already there is dropped and counted, not forwarded.
+4. A new id: every name in the slot is purged; the id purge runs and its dropped names are added; the account of every client carrying the id is added (resolution is global, replicas included); for `D` and `X` the local deauth walk runs over those names (the classifier skips clients this server does not own); then the plain five-parameter form is forwarded to every IRCv3-aware server (`sendcmdto_serv_butone_v3`).
+5. A catch-up line (`B`) is applied like a relay and counted separately.
 
-The receive handler is registered for SERVER messages only — direct propagation, no reply.
+The receive handler is registered for SERVER messages only.
 
 #### When it's emitted
 
-- **Webhook arrival**: when Nefarious's libkc webhook handler receives a Keycloak `LOGOUT_ERROR`, `RESET_PASSWORD_ERROR`, `DELETE_ACCOUNT`, or admin-side `USER_DELETE` / `USER_DISABLED` event, it invalidates locally *and* emits `CI` to every peer so the rest of the network drops their cached entries.
+- **Webhook arrival**: every ircd receives every Keycloak event directly (the SPI's URL list names them all). The receiver resolves the subject's names, purges its own caches, sends ONE five-parameter `CI` to every IRCv3-aware server, and deauths only the sessions it owns. Without a usable event id (a synthetic event without one) the older forms go instead.
+- **End of burst**: `sasl_webhook_link_catchup` (called from `ms_end_of_burst` beside the strict-presence sync) sends a newly linked IRCv3-aware peer the applied-events log of the last `WEBHOOK_EVENTLOG_WINDOW` as catch-up lines, oldest first, at most `WEBHOOK_EVENTLOG_SIZE`; a disable superseded by a later enable of the same subject goes as `P`.
 - See `sasl_webhook.c:nef_webhook_handle_event` for the dispatch table; CACHEINVAL coverage matches the SASL auth-cache shape (currently username-keyed; account-rename events do not need CI since the auth path is keyed on the credential).
 
 #### Legacy interop

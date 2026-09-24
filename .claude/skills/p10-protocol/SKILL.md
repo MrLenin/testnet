@@ -206,6 +206,20 @@ AB AC ABAAB R accountname 1703345678
 
 **Important**: Always check `feature_bool(FEAT_EXTENDED_ACCOUNTS)` to determine which format to use.
 
+## CACHEINVAL (CI) Command
+
+Fork-only (`sendcmdto_serv_butone_v3`: IRCv3-aware peers only; X3 and legacy peers never see it). Handled by `ms_cacheinval` in `ircd/sasl_webhook.c`.
+
+```
+CI <username>                                   purge by name
+CI <username|*> <kc_id>                         purge by name and compact Keycloak id (plan 2)
+CI <names|*> <kc_id|*> <event_id> <kind>        one relay per Keycloak event (plan 4, 2026-09-24)
+CI <names|*> <kc_id|*> <event_id> <kind> B      a catch-up line at end of burst (plan 4)
+```
+
+- `names`: the account names the sender resolved, comma-joined (payload name, names its id purge dropped, the account of every client carrying the id), so a peer owning an id-less session can match by name. `kind`: `D` delete, `X` disable, `R` reset, `C` credential removed, `E` enable, `P` purge only. `event_id`: 1-39 chars of `[A-Za-z0-9._:-]`, the network-wide dedupe key (`webhook_eventlog.c`, 1024 entries).
+- Receiver: parse (`webhook_relay_parse`; junk purges what it names and goes no further), dedupe by the id (already applied: drop, do not forward), purge every name and the id, resolve more names globally, deauth the sessions THIS server owns for `D`/`X`, forward the plain form. Every server receives every event directly from the SPI too, so the relay covers misses; the `B` line is the catch-up a server sends a newly linked peer (`sasl_webhook_link_catchup`, `m_endburst.c`), stripped on forward.
+
 ## FAKEHOST (FA) Command
 
 ### Format

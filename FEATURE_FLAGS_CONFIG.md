@@ -453,6 +453,37 @@ not in the default oper mask, so add it with `/MODE <nick> +s +32` or in the ope
 `snomask`), at most once per cause per minute with the running count.  A failed listener
 start is announced on the general oper notice mask.
 
+**Every server receives (plan 4, 2026-09-24).** The SPI's URL list names every ircd
+(`KC_SPI_EVENTS_LISTENER_WEBHOOK_EVENTS_URL` is comma-separated; the bed lists the primary on
+9090 and the leaf on 9091), and each ircd verifies and applies its own delivery: it purges
+its own caches and deauths only the sessions it owns (a remote client is its home server's
+job, which receives the same event).  It sends one relay per event to every IRCv3-aware
+server, `CI <names|*> <kc_id|*> <event_id> <kind>`, whose name slot carries every account
+name it resolved (the payload's, the names the id purge dropped from its cache, the
+account of every client carrying the Keycloak id), so a peer that owns an id-less session
+(authenticated through X3, restored from the bouncer database) can still match it by name.
+Kinds: `D` delete, `X` disable, `R` admin reset, `C` credential removed, `E` enable, `P`
+purge only.  Every server keeps an applied-events log keyed by the Keycloak event id
+(`WEBHOOK_EVENTLOG_SIZE`, 1024 entries; sized at first use, a change takes effect at
+restart): a direct delivery or a relay whose id is already there is dropped and counted, so
+several direct receivers do not multiply the broadcasts and relays cannot loop.  At the end
+of a peer's burst a server sends that peer the log entries of the last
+`WEBHOOK_EVENTLOG_WINDOW` (86400 s) as catch-up lines (the same `CI` with a trailing `B`,
+oldest first, bounded by the log size); the peer applies what it lacks, forwards it, drops
+what it has, so a server that was split or down converges at relink.  A disable superseded
+by a later enable of the same subject is caught up as a purge only.  `STATS webhook`
+adds `Applied: N direct, N via relay, N via catch-up; already applied: N direct, N relay`
+and `Relays: N sent, N forwarded; catch-up N sent, N received; log N entries, oldest N s`.
+
+Two rules follow.  `WEBHOOK_KILL_ON_DELETE` / `WEBHOOK_KILL_ON_DISABLE` must be set the same
+on every server: each server now kills its own sockets, so a session's fate depends on
+the switch where its primary lives.  Deploy the whole ircd chain together: a server
+without this code still purges on a relay but deauths nobody, and a held ghost it owns can
+be stranded by a new server's `AC U`.  Not covered: an event no server received within the
+SPI's retries is lost, and a relink after a split longer than the window gets no catch-up
+for the older events (the positive-cache TTL bounds the password exposure; a live session
+of a deleted account on that server is the residue).
+
 **Posture.** No TLS on the listener: run it on a private link (bind `vhost` to the private
 interface, keep the port off the public side) and rely on the signature.
 
