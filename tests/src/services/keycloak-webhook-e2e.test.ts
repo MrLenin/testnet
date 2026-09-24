@@ -19,8 +19,8 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import { RawSocketClient, createRawSocketClient, bouncerDisableHold } from '../helpers/index.js';
 import { authenticateSaslPlain } from '../helpers/sasl';
 import { getKeycloakAdminToken } from '../helpers/keycloak-sync';
-import { whoisAccount, withoutRealmCount } from '../helpers/webhook-post';
-import { createOperClient } from '../helpers/x3-client';
+import { whoisAccount, withoutRealmCount, webhookCounts, createLeafOperClient, leafAddress } from '../helpers/webhook-post';
+import { createOperClient, X3Client } from '../helpers/x3-client';
 
 const KC = process.env.KEYCLOAK_URL || 'http://localhost:8080';
 const REALM = 'testnet';
@@ -119,11 +119,24 @@ describe('Keycloak admin actions reach the ircd', () => {
     const op = await createOperClient();                          // the SPI must name the realm (review finding 4)
     clients.push(op);
     const noRealmBefore = await withoutRealmCount(op);
+    // Plan 4: the SPI posts to every ircd; the leaf sees the real event directly.
+    let leafOp: X3Client | null = null;
+    let leafDirectBefore = 0;
+    try {
+      const { host, port } = leafAddress();
+      leafOp = await createLeafOperClient(host, port);
+      clients.push(leafOp);
+      leafDirectBefore = (await webhookCounts(leafOp)).direct;
+    } catch (e) { console.warn(`leaf not reachable, its direct-delivery count is not checked: ${(e as Error).message}`); leafOp = null; }
     expect((await kc(`/users/${userId}`, { method: 'PUT', body: JSON.stringify({ enabled: false }) })).status).toBe(204);
 
     try {
       expect(await loggedOutWithin(primary!, `wh${tag}a`, 8000), 'the session lost its account').toBe(true);
       expect(await withoutRealmCount(op), 'the real event named its realm').toBe(noRealmBefore);
+      if (leafOp) {
+        await sleep(1500);
+        expect((await webhookCounts(leafOp)).direct, 'the leaf received the real event directly').toBe(leafDirectBefore + 1);
+      }
       const again = await tryLogin(PASSWORD, `wh${tag}c`);
       if (again) clients.push(again);
       expect(again, 'the cached password no longer logs in').toBeNull();

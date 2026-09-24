@@ -20,28 +20,15 @@ import {
   createSaslBouncerClient,
   bouncerDisableHold,
 } from '../helpers/index.js';
-import { createOperClient, X3Client, IRC_OPER } from '../helpers/x3-client';
+import { createOperClient, X3Client } from '../helpers/x3-client';
 import {
   postWebhook, accountDisabledEvent, accountEventById, whoisAccount, webhookCounts, WebhookCounts,
+  createLeafOperClient, leafAddress,
 } from '../helpers/webhook-post';
 import { getKeycloakAdminToken } from '../helpers/keycloak-sync';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const KC = process.env.KEYCLOAK_URL || 'http://localhost:8080';
-
-/** An oper on the leaf (createOperClient only knows the primary). */
-async function createLeafOperClient(host: string, port: number): Promise<X3Client> {
-  const c = new X3Client();
-  await c.connect(host, port);
-  await c.capLs();
-  c.capEnd();
-  c.register(uniqueNick('lop'));
-  await c.waitForLine(/ 001 /, 15000);
-  await sleep(1000);
-  c.send(`OPER ${IRC_OPER.name} ${IRC_OPER.password}`);
-  await c.waitForLine(/ 381 /, 5000);
-  return c;
-}
 
 /** Poll WHOIS until the nick shows no account, or give up. */
 async function loggedOutWithin(c: RawSocketClient, nick: string, ms: number): Promise<boolean> {
@@ -64,8 +51,7 @@ describe('Webhook fan-out: every server receives, one relay per event', () => {
   let leafReachable = false;
 
   beforeAll(async () => {
-    leafHost = process.env.IRC_HOST2 ?? (process.env.IRC_HOST === 'localhost' ? 'localhost' : 'nefarious2');
-    leafPort = parseInt(process.env.IRC_PORT2 ?? (leafHost === 'localhost' ? '6668' : '6667'), 10);
+    ({ host: leafHost, port: leafPort } = leafAddress());
     leafReachable = await new Promise<boolean>((resolve) => {
       const sock = createConnection({ host: leafHost, port: leafPort });
       const cleanup = (ok: boolean) => { sock.removeAllListeners(); sock.destroy(); resolve(ok); };

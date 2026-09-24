@@ -11,6 +11,8 @@ import * as fs from 'node:fs';
 import { createHmac } from 'node:crypto';
 import { run } from './bed-control';
 import type { RawSocketClient } from './index.js';
+import { uniqueNick } from './index.js';
+import { X3Client, IRC_OPER } from './x3-client';
 
 export type WebhookTarget = 'nefarious' | 'nefarious2';
 
@@ -121,6 +123,27 @@ export async function nickPresent(client: RawSocketClient, nick: string): Promis
   client.send(`WHOIS ${nick}`);
   const line = await client.waitForLine(new RegExp(` (311|401) \\S+ ${nick} `), 8000);
   return / 311 /.test(line);
+}
+
+/** An oper on the leaf (createOperClient only knows the primary). */
+export async function createLeafOperClient(host: string, port: number): Promise<X3Client> {
+  const c = new X3Client();
+  await c.connect(host, port);
+  await c.capLs();
+  c.capEnd();
+  c.register(uniqueNick('lop'));
+  await c.waitForLine(/ 001 /, 15000);
+  await new Promise((r) => setTimeout(r, 1000));
+  c.send(`OPER ${IRC_OPER.name} ${IRC_OPER.password}`);
+  await c.waitForLine(/ 381 /, 5000);
+  return c;
+}
+
+/** The leaf's host and port as the suites see them (IRC_HOST2 / IRC_PORT2, else the linked bed's defaults). */
+export function leafAddress(): { host: string; port: number } {
+  const host = process.env.IRC_HOST2 ?? (process.env.IRC_HOST === 'localhost' ? 'localhost' : 'nefarious2');
+  const port = parseInt(process.env.IRC_PORT2 ?? (host === 'localhost' ? '6668' : '6667'), 10);
+  return { host, port };
 }
 
 /** One number off `STATS webhook` (oper): the first capture group of `pattern` on its matching line. */
