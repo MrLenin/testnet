@@ -475,6 +475,12 @@ by a later enable of the same subject is caught up as a purge only.  `STATS webh
 adds `Applied: N direct, N via relay, N via catch-up; already applied: N direct, N relay`
 and `Relays: N sent, N forwarded; catch-up N sent, N received; log N entries, oldest N s`.
 
+A session that carries a Keycloak id is matched by that id, so an event for another uuid (a
+user re-created under the same name, anyone else) leaves it alone; a session that carries no
+id (authenticated through X3, restored from the bouncer database) is matched by name and is
+deauthed when a relay or a catch-up names its account, including for a user re-created under
+that name.
+
 Two rules follow.  `WEBHOOK_KILL_ON_DELETE` / `WEBHOOK_KILL_ON_DISABLE` must be set the same
 on every server: each server now kills its own sockets, so a session's fate depends on
 the switch where its primary lives.  Deploy the whole ircd chain together: a server

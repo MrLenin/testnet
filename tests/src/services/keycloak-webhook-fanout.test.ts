@@ -287,6 +287,29 @@ describe('Webhook fan-out: every server receives, one relay per event', () => {
     expect(await whoisAccount(client, nick), 'the re-enabled account is untouched').toBe(account);
   }, 180_000);
 
+  // Review focus 2: a session carrying a Keycloak id is matched by that id, so
+  // an event for another uuid (a re-created user, someone else) leaves it alone
+  // even though nothing else names a subject (the "nothing names the subject"
+  // branch).  A name-only session is matched by name and would be touched; the
+  // feature doc says so.
+  it('an event for another Keycloak id leaves an id-carrying session alone', async () => {
+    if (!leafReachable) { console.warn('Skipping: leaf not reachable'); return; }
+    const { client, nick, account } = await loggedIn('fnother', 'primary');
+    const { primary, leaf } = await opers();
+    const p0 = await webhookCounts(primary);
+    const l0 = await webhookCounts(leaf);
+    const otherUuid = '0b4a2f0e-1d4c-4c4a-9a1e-00000000dead';
+    expect(await postWebhook(accountEventById('delete', otherUuid), 'nefarious')).toBe(200);
+    await sleep(2500);
+    expect(await whoisAccount(client, nick), 'the session keeps its account').toBe(account);
+    const p1 = await webhookCounts(primary);
+    const l1 = await webhookCounts(leaf);
+    expect(p1.direct, 'the primary applied the event (to nobody)').toBe(p0.direct + 1);
+    expect(p1.deauths, 'the primary deauthed nobody').toBe(p0.deauths);
+    expect(l1.relay + l1.alreadyRelay, 'the leaf received the relay').toBe(l0.relay + l0.alreadyRelay + 1);
+    expect(l1.deauths, 'the leaf deauthed nobody').toBe(l0.deauths);
+  }, 60_000);
+
   // Review focus 1: an id the log cannot hold is applied without dedupe and never stored.
   it('a delivery whose event id cannot travel the wire is applied but not logged', async () => {
     if (!leafReachable) { console.warn('Skipping: leaf not reachable'); return; }
