@@ -67,6 +67,25 @@ export function accountDisabledEvent(account: string): Record<string, unknown> {
   };
 }
 
+/**
+ * A real-shaped USER admin event: the subject named only by its Keycloak uuid
+ * in resourcePath, no username (what Keycloak actually sends for a delete, and
+ * for a disable through the API).  The ircd resolves the subject by id.
+ */
+export function accountEventById(kind: 'delete' | 'disable', uuid: string): Record<string, unknown> {
+  const base: Record<string, unknown> = {
+    id: `test-byid-${kind}-${Date.now()}`,
+    time: Date.now(),
+    realmId: 'testnet',
+    realmName: 'testnet',
+    resourceType: 'USER',
+    resourcePath: `users/${uuid}`,
+  };
+  return kind === 'delete'
+    ? { ...base, operationType: 'DELETE' }
+    : { ...base, operationType: 'UPDATE', representation: JSON.stringify({ enabled: false }) };
+}
+
 /** The USER/DELETE event the SPI sends when an account is removed. */
 export function accountDeletedEvent(account: string): Record<string, unknown> {
   return {
@@ -123,6 +142,51 @@ export const duplicateCount = (op: RawSocketClient) => statsWebhookNumber(op, /D
 
 /** User events the handler acted on. */
 export const handlerUserEvents = (op: RawSocketClient) => statsWebhookNumber(op, /Handler: (\d+) user events/);
+
+/** Every counter one `STATS webhook` reports, read in a single request. */
+export interface WebhookCounts {
+  direct: number;          // events applied from a direct delivery
+  relay: number;           // applied from a peer's relay
+  catchup: number;         // applied from a peer's catch-up at link time
+  alreadyDirect: number;   // direct deliveries dropped: already applied
+  alreadyRelay: number;    // relays dropped: already applied
+  relaysSent: number;
+  relaysForwarded: number;
+  catchupSent: number;
+  catchupReceived: number;
+  logEntries: number;
+  userEvents: number;      // Handler: N user events
+  deauths: number;         // Handler: ... N deauths or kills
+}
+
+export async function webhookCounts(op: RawSocketClient): Promise<WebhookCounts> {
+  const lines = (op as unknown as { lines: { raw: string }[] }).lines;
+  op.clearRawBuffer();
+  const start = lines.length;
+  op.send('STATS webhook');
+  await op.waitForLine(/ 219 /, 8000);
+  const text = lines.slice(start).map((l) => l.raw).join('\n');
+  const num = (re: RegExp): number => {
+    const m = re.exec(text);
+    // NaN would satisfy toBe(NaN) (Object.is), so a missing line must fail loudly.
+    if (!m) throw new Error(`STATS webhook has no line matching ${re}`);
+    return parseInt(m[1], 10);
+  };
+  return {
+    direct: num(/Applied: (\d+) direct/),
+    relay: num(/Applied: \d+ direct, (\d+) via relay/),
+    catchup: num(/Applied: \d+ direct, \d+ via relay, (\d+) via catch-up/),
+    alreadyDirect: num(/already applied: (\d+) direct/),
+    alreadyRelay: num(/already applied: \d+ direct, (\d+) relay/),
+    relaysSent: num(/Relays: (\d+) sent/),
+    relaysForwarded: num(/Relays: \d+ sent, (\d+) forwarded/),
+    catchupSent: num(/catch-up (\d+) sent/),
+    catchupReceived: num(/catch-up \d+ sent, (\d+) received/),
+    logEntries: num(/log (\d+) entries/),
+    userEvents: num(/Handler: (\d+) user events/),
+    deauths: num(/(\d+) deauths or kills/),
+  };
+}
 
 /**
  * The account WHOIS reports for the nick (330), or '' when it has none.
