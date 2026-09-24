@@ -111,6 +111,18 @@ export async function nickPresent(client: RawSocketClient, nick: string): Promis
  * request, so a late line from an earlier reply cannot be mistaken for
  * "no account".
  */
+/**
+ * The "Without realmName" count that `STATS webhook` reports to an oper: payloads the
+ * listener accepted although they named no realm (a pre-signing SPI).  A real Keycloak
+ * event leaves it unchanged; a synthetic one without `realmName` raises it by one.
+ */
+export async function withoutRealmCount(op: RawSocketClient): Promise<number> {
+  op.clearRawBuffer();
+  op.send('STATS webhook');
+  const line = await op.waitForLine(/Without realmName: \d+/, 8000);
+  return parseInt(/Without realmName: (\d+)/.exec(line)![1], 10);
+}
+
 export async function whoisAccount(client: RawSocketClient, nick: string): Promise<string> {
   const lines = (client as unknown as { lines: { raw: string }[] }).lines;
   client.clearRawBuffer();                  // an earlier reply's unconsumed 318 must not end this wait

@@ -20,7 +20,7 @@ import {
   bouncerDisableHold,
 } from '../helpers/index.js';
 import { createOperClient } from '../helpers/x3-client';
-import { postWebhook, accountDisabledEvent, whoisAccount } from '../helpers/webhook-post';
+import { postWebhook, accountDisabledEvent, whoisAccount, withoutRealmCount } from '../helpers/webhook-post';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -102,5 +102,25 @@ describe('Webhook transport: signature, freshness, replay, realm', () => {
     const before = await refusedSignatures(op);
     expect(await postWebhook(accountDisabledEvent('nobody'), 'nefarious', { unsigned: true })).toBe(401);
     expect(await refusedSignatures(op), 'one more refusal counted').toBe(before + 1);
+  }, 45_000);
+
+  // Review finding 2: the entry's flags used to send a non-oper through
+  // feature_bool(FEAT_LAST_F), whose type assert aborted the server.
+  it("refuses a non-oper's STATS webhook with 481", async () => {
+    const { client } = await loggedIn('wtnop');
+    client.clearRawBuffer();
+    client.send('STATS webhook');
+    await client.waitForLine(/ 481 /, 8000);
+  }, 45_000);
+
+  // Review finding 4 (decision 4): a payload without realmName is accepted and counted.
+  it('accepts a payload without realmName and counts it', async () => {
+    const op = await createOperClient();
+    clients.push(op);
+    const before = await withoutRealmCount(op);
+    const bare: Record<string, unknown> = { ...accountDisabledEvent('nobody') };
+    delete bare.realmName;
+    expect(await postWebhook(bare, 'nefarious')).toBe(200);
+    expect(await withoutRealmCount(op), 'one more counted').toBe(before + 1);
   }, 45_000);
 });

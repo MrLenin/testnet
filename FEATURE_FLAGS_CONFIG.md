@@ -406,12 +406,12 @@ Webhook {
   vhost = "10.0.0.5";             # bind address; empty = all interfaces.  Bind to the private interface on prod.
   path = "/keycloak-webhook";     # empty = /keycloak-webhook, /webhook or /
   maxconnections = 16;
-  maxrequestsize = 64k;
+  maxrequestsize = 64 kb;         # sizes take a unit: b, kb, mb
   queuemax = 1000;
   batchsize = 10;
   signaturewindow = 300;          # seconds either side of the signature's timestamp; 0 = 300
   legacysecret = no;              # yes accepts the plain X-Webhook-Secret header alone: only for the
-                                  # minutes between deploying a signing SPI and this ircd
+                                  # minutes this ircd runs against an SPI that does not sign yet
   realm = "afternet";             # refuse payloads whose realmName differs; default = the Keycloak block's realm
 };
 ```
@@ -422,7 +422,7 @@ Webhook {
 | `secret` | "" | Shared secret; the signature is HMAC-SHA256 over `<t>.<body>` with it |
 | `vhost` | "" | Bind address (all interfaces when empty) |
 | `path` | "" | Accepted URL path |
-| `maxconnections` / `maxrequestsize` / `queuemax` / `batchsize` | 16 / 64k / 1000 / 10 | Listener limits |
+| `maxconnections` / `maxrequestsize` / `queuemax` / `batchsize` | 16 / 64 kb / 1000 / 10 | Listener limits |
 | `signaturewindow` | 300 | Seconds a signature's timestamp may differ from now |
 | `legacysecret` | no | Accept the plain secret header without a signature (deploy window only) |
 | `realm` | Keycloak block's realm | Refuse other realms' events |
@@ -440,11 +440,15 @@ password reset and credential removal act on the user resolved by the Keycloak i
 contract.  `WEBHOOK_KILL_ON_DELETE` / `WEBHOOK_KILL_ON_DISABLE` (features, default off)
 escalate a deauth to disconnecting local sockets.
 
-**Seeing it.** `STATS webhook` (oper) lists the listener's connections, authenticated /
+**Seeing it.** `STATS webhook` (opers only) lists the listener's connections, authenticated /
 processed / invalid / dropped events, every refusal by cause with the last one's age, the
-plain-secret transition count, and the handler's counters.  Every refusal also reaches
-opers on the `SNO_UNAUTH` server notice mask, at most once per cause per minute with the
-running count.
+plain-secret transition count, the count of payloads that named no realm (a pre-signing
+SPI), and the handler's counters; a listener whose last start failed (busy port, bad
+`vhost`) is reported as NOT RUNNING and a rehash retries it.  Every refusal also reaches
+opers who carry the "unauthorized connections" server notice mask (`SNO_UNAUTH`, 32; it is
+not in the default oper mask, so add it with `/MODE <nick> +s +32` or in the oper's
+`snomask`), at most once per cause per minute with the running count.  A failed listener
+start is announced on the general oper notice mask.
 
 **Posture.** No TLS on the listener: run it on a private link (bind `vhost` to the private
 interface, keep the port off the public side) and rely on the signature.
