@@ -62,6 +62,12 @@ Legend: **owner** = the plan or pass expected to close it. Prod has no legacy (n
 | **Rubin (relayed by the user 2026-09-24) is in favour of culling saxdb accounts that are not in LDAP.** That is the upstream-endorsed shape of the fix for the name-reuse escalation (a Keycloak delete strands the X3 handle, a re-registration inherits its privileges) and it runs against the held LOCAL flag. Not planned; a design needs a report/dry-run mode, an x3.db backup before any deletion, exemptions (services' accounts, opers) and the user's sign-off on the criteria | user decision, then plan |
 | x3 PR 1 must land on prod with or before the ircd chain: prod X3 (upstream master 5d7fadb) looks up a handle named "U" on `AC <user> U` and keeps the user bound after a webhook deauth | prod cutover |
 
+## Credential scoping (`keycloak-certfp-grant-and-credential-scoping-2026-09.md`)
+
+| Item | Owner |
+|---|---|
+| **Deferred (user, 2026-09-24): the certfp grant in the SPI and libkc's two-credential split can wait; certificate login needs other things before it is usable.** Only step 1 is done (the bed's service account narrowed to `manage-users`); the ircd keeps an admin-capable credential for EXTERNAL (`kc_user_search`), SCRAM/ECDSA (`kc_user_get`, parked) and `/REGISTER`. Not a go-live condition | user decision (made) | later |
+
 ## From webhook plan 4 (`2026-09-24-webhook-every-server.md`, executed 2026-09-24; residue and the review's minors)
 
 | Item | Owner |
