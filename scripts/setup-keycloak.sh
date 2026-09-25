@@ -449,7 +449,9 @@ else
   fi
 fi
 
-# Ensure service account has realm-admin even if client existed
+# Ensure the service account holds manage-users (and nothing wider) even if the
+# client existed: the block above runs only when the client is created.  This
+# used to re-grant realm-admin on every run, undoing the 2026-09-23 narrowing.
 echo ""
 echo "Verifying X3 service account permissions..."
 X3_CLIENT=$(curl -s \
@@ -466,16 +468,24 @@ if [ -n "$X3_CLIENT" ]; then
     "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients?clientId=realm-management" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
   if [ -n "$SERVICE_USER" ] && [ -n "$REALM_MGMT" ]; then
+    SA_ROLE=$(curl -s \
+      -H "Authorization: Bearer $TOKEN" \
+      "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$REALM_MGMT/roles/manage-users")
     REALM_ADMIN_ROLE=$(curl -s \
       -H "Authorization: Bearer $TOKEN" \
       "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$REALM_MGMT/roles/realm-admin")
 
+    # Grant manage-users (idempotent) and take realm-admin away if a previous run left it.
     curl -s -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/users/$SERVICE_USER/role-mappings/clients/$REALM_MGMT" \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "[$SA_ROLE]" 2>/dev/null || true
+    curl -s -X DELETE "$KEYCLOAK_URL/admin/realms/$REALM_NAME/users/$SERVICE_USER/role-mappings/clients/$REALM_MGMT" \
       -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: application/json" \
       -d "[$REALM_ADMIN_ROLE]" 2>/dev/null || true
 
-    echo "Service account permissions verified"
+    echo "Service account permissions verified (manage-users only)"
   fi
 fi
 
