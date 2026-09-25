@@ -52,6 +52,7 @@ Legend: **owner** = the plan or pass expected to close it. Prod has no legacy (n
 | Docs: no clock-sync note (skew beyond `signaturewindow` refuses everything as "stale"); `kc_webhook.h:122` still says "NULL = no auth"; `doc/example.conf` documents neither the Keycloak nor the Webhook block (pre-existing) (17) | docs |
 | Untested: `legacysecret = yes`; the three grammar items (`signaturewindow`, `legacysecret`, `realm`) are parsed by no bed conf (the bed uses the feature form) (18) | tests |
 | `scripts/setup-keycloak.sh` PUTs `eventsListeners`/`enabledEventTypes` wholesale on every run, clobbering hand additions; read-merge-write (19) | bed |
+| ~~`scripts/setup-keycloak.sh` "Verifying X3 service account permissions" block POSTs `realm-admin` to the `x3-services` service account on every run~~ fixed 2026-09-24 (the block grants `manage-users` and DELETEs `realm-admin`; uncommitted on testnet main) | bed |
 | Listener: GET/HEAD/wrong-path requests are answered 200 without authentication (a probe surface); IPv4-only listener and peer string (pre-existing, declined by the reviewer) | later |
 
 ## X3 side (account-timestamp steps 4 and 5)
@@ -121,6 +122,41 @@ Legend: **owner** = the plan or pass expected to close it. Prod has no legacy (n
 | The fail-open when the grant reply lacks `id_token` logs at DEBUG only (plan 3's notice covers webhook refusals only) | later |
 | D3 needs a trusted-authzid bed config; the OAUTHBEARER test helper's error-challenge branch is unreachable | tests |
 | Positive cache carried identity for `SASL_POSCACHE_TTL` after a delete | ~~closed by plan 2 (purge by id)~~ |
+
+## SASL OAUTHBEARER (found 2026-09-24 while answering how bearer tokens are validated and revoked; memory `oauthbearer-token-model`)
+
+| Item | Owner |
+|---|---|
+| ~~libkc's introspection URL is wrong~~ fixed 2026-09-24: nefarious `fix/oauthbearer-introspection` 829a587 (cmocka `test_introspect_endpoint` red→green), on the bed, unpushed | user: push |
+| ~~`sasl_handle_oauthbearer` falls through to introspection on `KC_FORBIDDEN`~~ fixed 2026-09-24: 56ac1c4, a local rejection answers ERR_SASLFAIL at once (covered by keycloak.test.ts "rejects expired/invalid OAuth2 token"; no new red test: the difference is a Keycloak round trip that no client-visible surface shows) | user: push |
+| Revocation: an accepted bearer token is valid until `exp` (bed realm `accessTokenLifespan` 604800 s); no `jti`/`sid`/not-before check locally. Keycloak sign-out, the revoke endpoint and not-before are visible only to introspection. Proposed, open: introspect on every OAUTHBEARER login, or shorten the realm lifespan; both are policy calls | user decision |
+| The SPI forwards no LOGOUT / USER_SESSION admin events, so a Keycloak "sign out all sessions" disconnects nobody from IRC; only delete, disable, password reset / credential update, credential removed and purge do. Whether an IRC session should follow the SSO session is undecided | user decision |
+
+## From Rubin's positions (IRC 2026-09-24, pasted by the user; memory `rubin-positions-2026-09-24`) — none decided yet
+
+| Item | Owner |
+|---|---|
+| Whether the Keycloak push goes to prod at all. Rubin: not at that cost, no auto-kill on delete/disable, existing sessions staying logged in is fine; if ever, one target (`irc.afternet.org`) that passes it on — plan 4's relay + catch-up with one URL in the SPI list, supported by config today. Plan 5 (TLS on the listener) is a go-live condition only if the push ships. 15:29 the user said "make things work as rubin wants": I read that as plan 5 parked and no push on prod for now (my reading, not stated by the user; the docs now say one hub suffices — SPI 40c692c local, FEATURE_FLAGS, service-debugging). 14:48: hubs-only targeting (ibutsu) is the same relay mechanism with fewer URLs, Rubin "yeah i suppose ... extra bonus thing, not something we really need right now". 14:49: deauth on disable is unwanted in prod ("i'd rather some banned idiot keep being able to auth so i can see its him"); nobody is ever deleted or disabled there, so the account-level deauth never fires | user decision |
+| Keycloak events to a bot that runs oper-defined actions (Rubin: "relay the push through a bot that does things we say, eg addalert gline"; "revisit it as a botus feature after all this is up and going"). The SPI posts to any URL, so this is a separate consumer, not an ircd change. Not planned | later (Rubin) |
+| kc_id mismatch policy. Rubin: adopt if empty, on a different id delete+recreate the x3 data ("it resets them"). Step 5 / the held x3 PR 2: refuse + KILL + oper REBIND. Decide before PR 2 is reworked; x3 #62 and the pushed nefarious side fit both | user decision (with Rubin) |
+| Native `/REGISTER` in prod. Rubin prefers Keycloak's own page (captcha, verification, proof of work); a URL-handoff spec does not exist, `FAIL REGISTER` text can carry a URL. Off in prod = no `manage-users` need and no registration-flow bypass. Bed keeps it? | user decision |
+| Bouncer deauth plan 2: prod does not need account-level auto-kill without the push; priority | user decision |
+| Rubin's optional alternative to the push: the ircd re-checks a logged-in session with Keycloak "once a day or something". Not built | later |
+| Caches: Rubin wants at most ~5 min without re-checking Keycloak. Already the default (`SASL_POSCACHE_TTL` 300 s, `SASL_NEGCACHE_TTL` 60 s, no bed override); nothing to strip. Closed by fact, kept for the record | — |
+| **rub[1]n report (2026-09-24) — FIXED on the bed 18:56, unpushed:** the message prefix was `Rubin`; only the tab was `Rub[1]n`, because `replay.c` named a PM conversation's other party after the account's first live client on the global list, and a same-account alt on a legacy server connected last won. nefarious `fix/pm-conversation-nick` (e1554fc + 1a0f3a4): every PM row stores both parties' session ids beside the sender's account (server-internal tags, stripped on playback); the name is the same session under its current nick, else a session on that account holding the historical nick, else the historical nick as written; never a same-account connection outside the session (user rulings 18:08-18:17). Test `chathistory-targets-account-alt.test.ts` (legacy slot + AuthServ AUTH; red on the old build, red on rows-only for the rename case, green on the final build); TARGETS suites and wire green. Push is the user's call. Residue: the latent sessid-hint hazard (memory `bouncer-legacy-alt-demote`) could stamp a legacy alt with the session's id | user: push |
+
+## From the identity rework (`2026-09-24-x3-keycloak-identity.md`, on the bed 2026-09-24)
+
+| Item | Owner |
+|---|---|
+| A reset remembers only the latest replaced id (`kc_id_prev`): sessions from an incarnation two recreates back would reset the account again on their next announcement. Rare (Rubin: names are never reused, nobody is deleted); a small list would close it | later |
+| `created_at` is still fetched from Keycloak, cached in the positive SASL cache and kept in the SASL session (`acc_created_at`), and now unused on the wire; dead data to strip in a cleanup | later |
+| `kc_id` for a handle created by AuthServ REGISTER on the fork path: adopted on the first SASL login after; a name registered through X3 and never used through SASL stays unbound (fail open, as designed) | note |
+| The x3 `bed-x3` branch (step 4 LOCAL + old cherry-picks) is no longer what the bed runs (`bed-x3-identity`); its saxdb LOCAL flags are dropped on the next flush | bed |
+| **Bouncer gap (found 2026-09-24 by the identity review):** an alias never follows its primary's account CHANGE. `bounce_emit_alias_update()` looks the session up by the primary's account name after the name was already rewritten (sasl_auth.c step 7, m_account.c AC M), so it finds nothing and emits nothing; the alias keeps the previous account and id (consistent with itself, so no wrong reset today). nefarious `fix/alias-account-identity-follows` (fc2511a) makes an alias's account update carry the primary's timestamp and id, but that update never runs for a change; the branch is on the bed (bed-deploy a58a1b1), dormant, NOT to be pushed alone. Whether aliases should follow an account change at all is a design question (profile model) | bouncer / user decision |
+| Multi-user carry in `nickserv_reset_handle` (several X3-visible users on one handle: legacy-side users, or primaries on different servers) is fixed by code (review finding 1) but untested on the bed: X3 sees only primaries and legacy users, and a second connection of a logged-in account is an alias it never sees. A legacy-slot test (nefarious-upstream + AuthServ AUTH) would cover it | tests |
+| Bouncer rebind gate clause (c) `acc_ts_match` (`bouncer_session.c` ~6004) can no longer fire for SASL-authenticated ghosts now that local logins carry no timestamp; it degrades to the origin/sessid fallback the code itself calls "too coarse" (reviewer, 2026-09-24) | bouncer |
+| The SASL relay `L` reply without a timestamp (`parc <= 5`) and the iauth account path (`s_auth.c` ~3090) leave a previous session's timestamp in the field (pre-existing; reviewer 2026-09-24) | later |
 
 ## Elsewhere (tracked in memory `MEMORY.md`, not repeated here)
 

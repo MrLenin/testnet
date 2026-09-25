@@ -197,7 +197,9 @@ AB AC ABAAB accountname 1703345678
 Example:
 ```
 AB AC ABAAB R accountname 1703345678
+AB AC ABAAB R accountname 0 ZP-D7eraToi4r24EgSYing   (fork: SASL login, no ircd timestamp, Keycloak id 5th)
 ```
+`[TIMESTAMP]` is X3's registration date, stamped by X3 when it authenticates a user itself and refused by X3 when a later announcement's stamp differs (its delete detector). The fork sends `0` on local Keycloak logins (2026-09-24); the Keycloak id (22-char base64url) follows as the fifth field and is the identity X3 binds to.
 
 ### When to Send AC
 - After successful SASL for a **registered** user (already introduced via `N`)

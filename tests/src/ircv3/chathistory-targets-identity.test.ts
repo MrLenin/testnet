@@ -19,9 +19,11 @@ import {
  * stored as PM history for every account.
  *
  * Now: service traffic is not stored at all; TARGETS names a PM row after
- * the other party (their live nick, else the nick their newest row
- * carries) and lists nothing it cannot name; the server's own
- * `+evilnet.github.io/sid=` marker never reaches a client.
+ * the other party as the conversation's rows have them (the nick their
+ * newest row carries, else the nick the caller addressed; never whoever
+ * is online under their account -- an account's connections are not
+ * interchangeable, 2026-09-24) and lists nothing it cannot name; the
+ * server's own `+evilnet.github.io/sid=` marker never reaches a client.
  */
 
 const SID_LIKE = /^[A-Za-z0-9+/_-]{22}$/;

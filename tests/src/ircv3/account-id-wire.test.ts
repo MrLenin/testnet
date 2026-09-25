@@ -3,6 +3,9 @@
  *
  * After a SASL PLAIN login the ircd introduces the user to its peers with
  * +r account:ts:id, where id is the user's Keycloak id in its compact form
+ * and ts is 0: the timestamp field is X3's registration date, stamped by X3
+ * when it authenticates a user itself, and the ircd has none of its own to
+ * put there (Keycloak's creation time is not that date; user, 2026-09-24)
  * (16 UUID bytes as 22 base64url characters).  The linked server parses the
  * third field (a debug line shows what it took).  A later re-authentication
  * to another account announces AC ... M account ts id, and a second
@@ -119,7 +122,7 @@ describe('Keycloak user id on the wire', () => {
     const c = await connectAs(A, nick);
     try {
       await settle();
-      const intro = new RegExp(` N ${nick} \\d+ \\d+ \\S+ \\S+ \\+\\S*r\\S* ${A}:\\d+:(${ID})`);
+      const intro = new RegExp(` N ${nick} \\d+ \\d+ \\S+ \\S+ \\+\\S*r\\S* ${A}:0:(${ID})`);
       const sent = intro.exec(logs('nefarious'));
       expect(sent, 'the origin server sent the introduction with a third field').not.toBeNull();
       expect(sent![1]).toBe(compact(idA));
@@ -140,7 +143,7 @@ describe('Keycloak user id on the wire', () => {
       expect(r.success, `SASL OAUTHBEARER as ${B}: ${r.error}`).toBe(true);
       await settle();
 
-      const ac = new RegExp(` AC \\S+ M ${B} \\d+ (${ID})`);
+      const ac = new RegExp(` AC \\S+ M ${B} 0 (${ID})`);
       const sent = ac.exec(logs('nefarious'));
       expect(sent, 'the origin server sent AC M with an id').not.toBeNull();
       expect(sent![1]).toBe(compact(idB));
@@ -157,7 +160,7 @@ describe('Keycloak user id on the wire', () => {
     try {
       alias = await connectAs(A, `wid${tag}q`);
       await settle();
-      const bx = new RegExp(` BX C \\S+ \\S+ ${A} \\S+ \\+\\S*r\\S* ${A}:\\d+:(${ID})`);
+      const bx = new RegExp(` BX C \\S+ \\S+ ${A} \\S+ \\+\\S*r\\S* ${A}:0:(${ID})`);
       const sent = bx.exec(logs('nefarious'));
       expect(sent, 'the alias introduction carries a third field').not.toBeNull();
       expect(sent![1]).toBe(compact(idA));

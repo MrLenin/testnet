@@ -1615,6 +1615,16 @@ The AC token operates in two modes:
 
 Extended mode is used by all current deployments.
 
+**The timestamp field.** `[TIMESTAMP]` (and the `:ts` in the burst's `+r account:ts[:id]`)
+is X3's registration date for the account: X3 stamps a user with it when it authenticates
+them itself (AuthServ AUTH, the SASL relay), and X3's `handle_account` refuses a later
+announcement whose stamp differs from the date it holds — its delete detector, kept while
+legacy servers authenticate through X3 (user, 2026-09-24). The fork sends `0` there on
+every local Keycloak (SASL) login — Keycloak's creation time is the directory's date, not
+X3's — so those logins are never checked against it; the Keycloak id travels in its own
+field after it (`AC R|M <account> 0 <id>`, `+r account:0:id`), and is the identity X3
+binds the handle to.
+
 #### P10 Formats (Extended Mode)
 
 **Auth Check — Basic (C)** (Nefarious → X3):

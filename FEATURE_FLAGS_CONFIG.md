@@ -453,9 +453,12 @@ not in the default oper mask, so add it with `/MODE <nick> +s +32` or in the ope
 `snomask`), at most once per cause per minute with the running count.  A failed listener
 start is announced on the general oper notice mask.
 
-**Every server receives (plan 4, 2026-09-24).** The SPI's URL list names every ircd
+**Every server receives (plan 4, 2026-09-24).** The SPI's URL list may name every ircd
 (`KC_SPI_EVENTS_LISTENER_WEBHOOK_EVENTS_URL` is comma-separated; the bed lists the primary on
-9090 and the leaf on 9091), and each ircd verifies and applies its own delivery: it purges
+9090 and the leaf on 9091) — the most reliable shape, not a requirement: one reachable hub
+suffices, since a receiver relays every event to everything linked to it and catches a
+peer up on relink (Rubin, 2026-09-24: hit the hubs, or one target that passes it on).
+Each ircd verifies and applies its own delivery: it purges
 its own caches and deauths only the sessions it owns (a remote client is its home server's
 job, which receives the same event).  It sends one relay per event to every IRCv3-aware
 server, `CI <names|*> <kc_id|*> <event_id> <kind>`, whose name slot carries every account

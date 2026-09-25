@@ -146,7 +146,7 @@ git push upstream feature/webhook-every-server:ircv3.2-hardening
 git push upstream feature/webhook-every-server:ircv3.2-upgrade
 ```
 
-Rollout on prod: the SPI's URL list names EVERY ircd (`KC_SPI_EVENTS_LISTENER_WEBHOOK_EVENTS_URL`
+Rollout on prod (if the push ships at all — Rubin 2026-09-24 does not want it now): the SPI's URL list names at least one hub (every ircd is the most reliable shape, not a requirement) (`KC_SPI_EVENTS_LISTENER_WEBHOOK_EVENTS_URL`
 is comma-separated; a Keycloak restart reads it); the whole ircd chain deploys together (a
 server without this code purges on a relay but deauths nobody, and a new server's `AC U`
 can strand a held ghost it owns); `WEBHOOK_KILL_ON_DELETE` / `_DISABLE` must be set the
@@ -234,48 +234,102 @@ deauth (`AC U`) leaves the user unbound.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
-## x3 PR 2: `feature/keycloak-id-binding` → evilnet/x3 master (6 commits off step 4's 77bd045)
+## x3 PR 2: `feature/keycloak-identity` → evilnet/x3 master (5 commits off 5d7fadb) — REWORKED 2026-09-24
 
-Open after step 4 (`nickserv: LOCAL flag`) merges, then rebase onto master. Do not
-stack it on step 4's PR.
+Replaces the held `feature/keycloak-id-binding` (which needed step 4's LOCAL machinery).
+Stands alone on master; not stacked on #62 (`fix/ac-account-change`), which only makes the
+AC path carry the id to it. Bed: `bed-x3-identity` = master + #62 + this. Worktree
+`scratchpad/x3-identity`. Commits: `14931a0` timestamp check as before a52968b, `b156d6f`
+kc_id field + saxdb, `7ac40e9` ACCOUNTINFO line, `03ade7f` REBIND, `bedb654` bind + reset
++ remembered previous id. **Opening it is the user's call.** Deploy order on prod: the
+nefarious change below first or together (with it, SASL logins carry no timestamp, so the
+restored check never sees a directory date).
 
-**HELD 2026-09-24 (user): the LOCAL idea is on hold for now, so step 4 is not opened and
-this PR waits with it.** Its refusal rule (refuse during a burst, refuse and disconnect
-otherwise) is step 4's; to open it alone it would have to be reworked to stand without
-that commit. PR 1 (`fix/ac-account-change`) is unaffected and stays ready.
-
-**Title:** nickserv: bind a handle to its Keycloak user id; refuse a different one
+**Title:** nickserv: identity by Keycloak id; the timestamp check as it was before the directory reconciliation
 
 **Body:**
 
-The ircd now announces each account with the user's Keycloak id: `AC R|M <account>
-<ts> <id>` and, in the burst, `+r account:ts:id` (the id is the 16 UUID bytes as 22
-unpadded base64url characters). X3 uses it as the identity behind a name:
+Two things about how X3 decides that an announced account is the handle it knows.
 
-- `handle_info.kc_id`, persisted in saxdb as `kc_id` (the legacy key `id` is dead and
-  stays unused), freed with the handle.
-- `handle_account` parses the id. A handle with none adopts it once the login goes
-  through (after the timestamp and suspension checks, and also for a handle the LDAP
-  autocreate made on that login). The same id is accepted. A different id is a
-  different Keycloak user with this name, typically the name deleted and recreated in
-  Keycloak, and is refused with the LOCAL rule: refused only during a burst, since the
-  announcement may replay a legitimate login; refused and disconnected otherwise,
-  because X3 cannot take back an account the ircd already set. No id on the wire
-  leaves the handle alone, so older servers and services relays behave as before.
+The timestamp check goes back to what it was before a52968b. That commit turned it into
+a reconciliation against the directory: when the wire agreed with LDAP it overwrote X3's
+own registration date, when LDAP could not be read it adopted any plausible wire value,
+and it refused only in between. In the one case the check exists for -- a directory entry
+destroyed and recreated underneath X3 -- it adopted the new timestamp and bound anyway,
+and it destroyed the registration date of every account whose directory entry had ever
+been recreated. Legacy servers still authenticate through X3, which stamps them with its
+own date, so the check stays: a wire timestamp that differs from X3's date refuses the
+bind, the date is never rewritten, no directory lookup is in the path. The ircd side
+(nefarious) stops stamping Keycloak's creation time on SASL logins, so on that path the
+wire carries no timestamp and X3 checks only what it stamped itself.
+
+The Keycloak user id is the identity behind a name. The ircd announces it with the account
+(`AC R|M <account> <ts> <id>`, burst `+r account:ts:id`; 22 unpadded base64url characters
+of the UUID):
+
+- `handle_info.kc_id`, saxdb `kc_id`. A handle with none adopts the announced id once the
+  login goes through (after the timestamp and suspension checks; also for a handle the LDAP
+  autocreate made on that login). No id on the wire leaves the handle alone.
+- A different id under a bound name is a recreated Keycloak account, and the handle starts
+  over: the modules' unregister hooks run (channel access, memos, ...), the registered
+  nicks and everything on the record go, the directory is left alone (the entry belongs to
+  the new user), a fresh handle of the same name is created with X3's own date and bound to
+  the new id, the users logged in to the old handle are carried over without being
+  re-stamped, and opers are told. Nobody is disconnected, in or out of a burst.
+- The reset remembers the id it replaced (saxdb `kc_id_prev`). Sessions from before the
+  recreate keep announcing the old id -- a burst replays them with it, a bouncer alias
+  attach copies it, the ircd's login cache answers with it for a few minutes -- and such an
+  announcement is bound to the fresh record instead of taken for yet another recreate.
+  Nobody can newly obtain the old id.
 - `REBIND <*account> <keycloak-uuid|*>` (oper level 800, through `get_victim_oper`'s
-  outranking; deliberately not an OSET option, which SEARCH SET could apply without
-  that check) sets the id from the admin console or clears it so the next login
-  adopts one. For an account whose Keycloak user was legitimately recreated.
-- ACCOUNTINFO shows the id in the oper-gated part of the reply.
+  outranking; deliberately not an OSET option) sets the stored id by hand or clears it so
+  the next login adopts one; it forgets the remembered id. ACCOUNTINFO shows both to opers.
 
-**Operator note:** a service that already has saved command bindings does not pick up
-a module's new commands on restart; bind the new one once:
+**Operator note:** a service that already has saved command bindings does not pick up a
+module's new commands on restart; bind the new one once:
 `/msg O3 BIND AuthServ REBIND *nickserv.rebind`.
 
-Tested on the Afternet testnet (Vitest, gated `KC_ID_BIND=1`): adopt on first login
-and across logins; refusal and disconnect of a recreated user, on connect and on a
-post-registration authentication; refusal without disconnect during a burst, across a
-hop and a relink; REBIND to a UUID and to `*`; ACCOUNTINFO. The step-4 LOCAL suite
-still passes.
+Tested on the Afternet testnet (Vitest): a recreated user is let in, bound to the new id,
+with its channel access gone and X3's fresh date; an older session rides along; a login the
+ircd answers from its cache with the old id binds without another reset; the same in a
+burst across a hop and a relink; REBIND; ACCOUNTINFO; an AuthServ-made stamp replayed after
+saxdb was changed is refused and the date is never rewritten; a SASL login carries no
+timestamp and binds.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+## nefarious: `fix/no-ircd-account-timestamp` (f607b31 off 028de05) — direct push, no PR (2026-09-24)
+
+One hunk in `sasl_auth.c`: a SASL login stamps `acc_create = 0` instead of Keycloak's
+creation time (the id keeps its own field; the burst emits `account:0:id`). ircv3/fork-only
+→ direct push to both fork branches on both remotes, one command per branch, when the user
+says push:
+
+```
+git -C nefarious push origin fix/no-ircd-account-timestamp:ircv3.2-hardening
+git -C nefarious push origin fix/no-ircd-account-timestamp:ircv3.2-upgrade
+git -C nefarious push upstream fix/no-ircd-account-timestamp:ircv3.2-hardening
+git -C nefarious push upstream fix/no-ircd-account-timestamp:ircv3.2-upgrade
+```
+(`ircv3.2-upgrade` may need the branch merged rather than fast-forwarded; check first.)
+
+## nefarious: `fix/pm-conversation-nick` (e1554fc + 1a0f3a4 off 028de05) — direct push, no PR (2026-09-24)
+
+`ircd/replay.c`, `ircd_relay.c`, `m_chathistory.c`: a PM conversation is named after the nick it
+was held with (newest row they sent, else the nick the caller addressed) while that nick is still
+theirs; every PM row now stores both parties' session ids (server-internal tags, stripped on
+playback), and only the SAME SESSION under its current nick may stand in for a stored nick — never
+a same-account connection outside it; TARGETS reads the rows first. Prod symptom
+(2026-09-24): a conversation held with `Rubin` listed as `Rub[1]n`, his same-account alt on a
+legacy server. Test: `tests/src/ircv3/chathistory-targets-account-alt.test.ts` (red on the old
+bed, green after). chathistory/fork-only → direct push to both fork branches on both remotes
+when the user says push:
+
+```
+git -C nefarious push origin fix/pm-conversation-nick:ircv3.2-hardening
+git -C nefarious push origin fix/pm-conversation-nick:ircv3.2-upgrade
+git -C nefarious push upstream fix/pm-conversation-nick:ircv3.2-hardening
+git -C nefarious push upstream fix/pm-conversation-nick:ircv3.2-upgrade
+```
+(also `fix/oauthbearer-introspection` 829a587+56ac1c4, same shape; `fix/no-ircd-account-timestamp`
+08ce54b above; the three are independent of each other and of the merge order.)

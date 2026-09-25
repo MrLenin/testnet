@@ -1,38 +1,42 @@
 /**
- * The account registration date must survive authentication.
+ * The account timestamp check works the way it originally did: X3's own
+ * registration date is canonical and is never overwritten, and a wire
+ * timestamp that differs from it refuses the bind.
  *
- * X3 used to treat a wire/saxdb timestamp difference as a signal that the
- * directory account had been recreated, and "reconciled" by overwriting its own
- * record with the directory's value. That destroyed the registration date of
- * every account whose directory entry had ever been recreated -- and refused the
- * handle bind outright when the wire and the directory disagreed.
+ * The LDAP bridge (a52968b) "reconciled" a difference by overwriting X3's
+ * record with the directory's value, which destroyed the registration date of
+ * every account whose directory entry had ever been recreated and defeated the
+ * check in the one case it existed for. Legacy servers still authenticate
+ * through X3 over LDAP, so the check stays and goes back to its original form
+ * (user, 2026-09-24); the Keycloak id is the identity signal on the fork path.
  *
- * MUST authenticate via SASL. The reconciliation lives in handle_account(),
- * which is the AC-*receiver* path: it runs only when the ircd completes SASL
- * itself against Keycloak and then announces the account to X3. Authenticating
- * with `AuthServ AUTH` instead goes through cmd_auth -> StampUser(), which makes
- * X3 the *sender* -- handle_account never runs and the test passes against
- * unfixed code.
+ * Two paths meet in handle_account(), the AC-*receiver* path:
  *
- * The divergence is created the way production acquired it: saxdb holds an older
- * date than the directory does. saxdb is edited directly rather than recreating
- * the directory entry, because that is the dormant-account case -- same
- * principal, stale local record -- and not name reuse.
+ * - A stamp X3 made itself.  `AuthServ AUTH` stamps the user with the
+ *   account's registration date (cmd_auth -> set_user_handle_info(stamp=1)
+ *   -> AC R account ts), and the ircd carries that stamp into every later
+ *   burst.  When saxdb's date is then changed underneath it -- here by
+ *   editing the database while X3 is stopped, the way a restore or a
+ *   migration would -- the replayed stamp no longer matches and X3 refuses
+ *   the bind.  That is the delete detector doing its job.
+ * - A SASL login.  The ircd completes SASL against Keycloak and announces
+ *   the account with no timestamp of its own (0), so X3 checks nothing and
+ *   binds; the registration date stays what saxdb says.
+ *
+ * The bridge did neither: it bound the stale stamp and overwrote the date.
  */
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execSync } from 'node:child_process';
 import * as fs from 'node:fs';
-import { createX3Client, NICKSERV_NICK } from '../helpers/x3-client';
+import { createX3Client, createOperClient, NICKSERV_NICK, OPSERV_NICK, X3Client } from '../helpers/x3-client';
 import { createRawSocketClient, RawSocketClient, uniqueId } from '../helpers/index.js';
 import { authenticateSaslPlain } from '../helpers/sasl';
 
-/* Red until x3 `fix/retire-timestamp-detector` (cfe7d8a, "stop the LDAP backfill
- * overwriting registration dates") is merged and the bed's x3 is rebuilt from it:
- * the default bed branch still carries the backfill, so the date assertion fails
- * there by design. Run with X3_BACKFILL_RETIRED=1 against a bed built from the
- * fix branch. (An explicit gate, not a silent skipIf -- same convention as
- * LEGACY_MODE_LETTERS.) */
-const GATED = process.env.X3_BACKFILL_RETIRED !== '1';
+/* Red until x3 `feature/keycloak-identity` is on the bed: the default bed branch
+ * still carries the LDAP backfill, which binds and overwrites. Run with
+ * X3_TS_ORIGINAL=1 against a bed built from that branch. (An explicit gate, not
+ * a silent skipIf -- same convention as LEGACY_MODE_LETTERS.) */
+const GATED = process.env.X3_TS_ORIGINAL !== '1';
 
 const ACCOUNT = `tsdrift${Math.random().toString(36).slice(2, 8)}`;
 const PASSWORD = 'TsDrift!2026';
@@ -126,7 +130,31 @@ function parseRegisteredOn(lines: string[]): number {
   return Math.floor(t / 1000);
 }
 
+/** Run one AuthServ command as an oper with the security override on; returns the reply lines. */
+async function asOper(command: string): Promise<string[]> {
+  const op = await createOperClient();
+  try {
+    const god = await op.serviceCmd(OPSERV_NICK, 'GOD ON');
+    expect(god.join('\n'), 'GOD ON').toMatch(/Security override has been enabled|already have security override enabled/);
+    return await op.serviceCmd(NICKSERV_NICK, command);   // awaited: the finally below closes the socket
+  } finally {
+    op.close();
+  }
+}
+
+/** X3's log since `since`, both streams. */
+function x3Logs(since: string): string {
+  return sh(`docker logs --since ${since} x3 2>&1`);
+}
+
 describe('account registration date survives authentication', () => {
+  /** Authenticated through AuthServ before the date was changed: carries X3's old stamp. */
+  let stamped: X3Client | undefined;
+
+  afterAll(() => {
+    stamped?.close();
+  });
+
   beforeAll(async () => {
     // Guard the hook, not just the tests: it stops and restarts x3 and edits
     // its database, which must never happen when the suite is gated off.
@@ -154,28 +182,43 @@ describe('account registration date survives authentication', () => {
     }
     expect(ready, `${ACCOUNT} never became usable for SASL`).toBe(true);
 
+    // X3 stamps this one itself, with the date it knows now; the ircd keeps
+    // the stamp and replays it to X3 in every burst from here on.
+    stamped = await createX3Client();
+    const authed = await stamped.auth(ACCOUNT, PASSWORD);
+    expect(authed.success, `AUTH failed: ${JSON.stringify(authed)}`).toBe(true);
+    expect((await ownAccountInfo(stamped)).some((l) => l.includes('Account Information')), 'bound after AUTH').toBe(true);
+
     await flushSaxdb(ACCOUNT);                       // account must be on disk
-    backdateRegister(ACCOUNT, OLD_REGISTER);
+    backdateRegister(ACCOUNT, OLD_REGISTER);         // X3 restarts: the burst replays the stamp
     await new Promise((r) => setTimeout(r, 15000));  // X3 relinks to the ircd
   }, 330_000);
 
-  it.skipIf(GATED)('binds the handle even though saxdb disagrees with the directory', async () => {
+  it.skipIf(GATED)('refuses a stamp that no longer matches saxdb, and never rewrites the date to it', async () => {
+    // The replayed stamp is the old date; saxdb now says 2024.  The check as
+    // it originally was refuses: the user stays +r on the ircd but unbound in
+    // X3, so AuthServ reports no account rather than the handle's details.
+    const info = await ownAccountInfo(stamped!);
+    expect(
+      info.some((l) => l.includes('Account Information')),
+      `the stale stamp was bound: ${JSON.stringify(info)}`,
+    ).toBe(false);
+    expect(x3Logs('180s'), 'X3 logged the mismatch').toMatch(
+      new RegExp(`using account ${ACCOUNT} but timestamp does not match: wire=\\d+ saxdb=${OLD_REGISTER}`),
+    );
+    // Nothing "corrected" saxdb from the stamp or from the directory.
+    expect(parseRegisteredOn((await asOper(`ACCOUNTINFO *${ACCOUNT}`)))).toBe(OLD_REGISTER);
+  }, 60_000);
+
+  it.skipIf(GATED)('binds a SASL login, which carries no timestamp, and leaves the date untouched', async () => {
     const client = await saslLogin(ACCOUNT, PASSWORD);
     const info = await ownAccountInfo(client);
     client.close();
-    // A refused bind leaves the user +r on the ircd but unbound in X3, so
-    // AuthServ reports no account rather than the handle's details.
     expect(
       info.some((l) => l.includes('Account Information')),
       `handle bind was refused: ${JSON.stringify(info)}`,
     ).toBe(true);
-  }, 60_000);
-
-  it.skipIf(GATED)('leaves the registration date untouched', async () => {
-    const client = await saslLogin(ACCOUNT, PASSWORD);
-    const info = await ownAccountInfo(client);
-    client.close();
-    // The bug overwrote this with the directory's createTimestamp (2026-xx).
+    // The bridge overwrote this with the directory's createTimestamp (2026-xx).
     expect(parseRegisteredOn(info)).toBe(OLD_REGISTER);
   }, 60_000);
 });

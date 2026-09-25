@@ -1,22 +1,39 @@
 /**
- * REBIND: an oper sets or clears the Keycloak user id a handle is bound to
- * (design F, 5b).  The case it exists for: a name legitimately deleted and
- * recreated in Keycloak has a new id, so its logins are refused until an
- * oper re-binds the handle -- to the new id from the admin console, or to
- * nothing, so the next login adopts one.
+ * X3 binds each handle to the Keycloak user id the ircd announces.  When an
+ * announcement carries a different id, the account was recreated in Keycloak
+ * (Rubin, 2026-09-24: "if field in x3 is empty, populate it. if its there but
+ * different, delete+recreate data in x3.db ... so the first time they show up
+ * on irc with a new uuid (recreated account) it resets them"): the handle
+ * starts over -- bound to the new id, with the old data (channel access,
+ * registration date, ...) gone -- the login goes through, nobody is
+ * disconnected, and the sessions that were logged in ride along onto the
+ * fresh handle.  The id a reset (or a REBIND) replaced is remembered, so
+ * sessions that still announce it (bursts, alias attaches, the ircd's login
+ * cache) bind instead of resetting the account again.
  *
- * After the recreate, the test delivers the Keycloak delete event to the
- * ircd's webhook listener (with the ircd's own secret), as the SPI would,
- * so the ircd's positive SASL cache does not answer with the previous id.
+ * What this bed lets a test see, and how the cases are built around it:
+ * - X3 sees bouncer PRIMARIES and legacy users only; an alias introduction
+ *   (BX C) is a no-op for services.  A second connection of a logged-in
+ *   account is an alias, invisible to X3 and answered through its primary.
+ *   So the "different id" is driven by the primary's own re-authentication
+ *   (OAUTHBEARER; AC M carries the id), after the stored id was changed by
+ *   hand with REBIND -- no Keycloak deletion involved.  A re-authentication
+ *   to the SAME account name announces nothing (known limit), so the primary
+ *   goes to a second account and back.
+ * - A closed client leaves a held bouncer ghost, and the next login of the
+ *   account revives it or attaches instead of announcing the account, so
+ *   ghosts are reaped (oper KILL) before a case that needs a plain login.
+ * - This bed's Keycloak SPI posts account events to the ircd, which deauths
+ *   every session of a deleted account before the recreated user can log in;
+ *   the recreate case therefore starts with nothing connected.
  *
  * GATED behind KC_ID_BIND=1: needs nefarious from fix/wire-keycloak-id and
- * x3 from feature/keycloak-id-binding.
+ * x3 from feature/keycloak-identity.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import * as fs from 'node:fs';
-import { run } from '../helpers/bed-control';
+import { spawnSync } from 'node:child_process';
 import { createRawSocketClient, RawSocketClient } from '../helpers/index.js';
-import { authenticateSaslPlain } from '../helpers/sasl';
+import { authenticateSaslPlain, authenticateSaslOAuthBearer } from '../helpers/sasl';
 import { createOperClient, NICKSERV_NICK, OPSERV_NICK } from '../helpers/x3-client';
 import { getKeycloakAdminToken } from '../helpers/keycloak-sync';
 
@@ -27,7 +44,13 @@ const REALM = 'testnet';
 // 'test*' is swept by src/scripts/cleanup-tests.ts.
 const tag = Math.random().toString(36).slice(2, 7);
 const NAME = `testreb${tag}`;
+const SECOND = `testreb${tag}s`;                                 // a detour account for the re-authentication
+const CHAN = `#testreb${tag}`;
 const PASSWORD = 'Rebind!2026';
+const PASSWORD_AFTER = 'Rebind!2026-again';
+/** Ids no Keycloak user has; what an oper would type from the admin console. */
+const BOGUS = '6ba7b810-9dad-11d1-80b4-00c04fd430c8';
+const BOGUS2 = '6ba7b811-9dad-11d1-80b4-00c04fd430c8';
 
 let token = '';
 
@@ -38,53 +61,45 @@ async function kc(p: string, init: RequestInit = {}): Promise<Response> {
   });
 }
 
-async function kcCreate(): Promise<string> {
+async function kcCreate(password: string, username: string = NAME): Promise<string> {
   const res = await kc('/users', {
     method: 'POST',
     body: JSON.stringify({
-      username: NAME, enabled: true, emailVerified: true, email: `${NAME}@example.com`,
-      credentials: [{ type: 'password', value: PASSWORD, temporary: false }],
+      username, enabled: true, emailVerified: true, email: `${username}@example.com`,
+      credentials: [{ type: 'password', value: password, temporary: false }],
     }),
   });
   if (!res.ok && res.status !== 409) throw new Error(`create: ${res.status} ${await res.text()}`);
-  return (await (await kc(`/users?username=${NAME}&exact=true`)).json())[0].id;
+  return (await (await kc(`/users?username=${username}&exact=true`)).json())[0].id;
 }
 
-async function kcDelete(): Promise<string> {
-  const id = (await (await kc(`/users?username=${NAME}&exact=true`)).json())[0]?.id;
+async function kcDelete(username: string = NAME): Promise<string> {
+  const id = (await (await kc(`/users?username=${username}&exact=true`)).json())[0]?.id;
   if (id) await kc(`/users/${id}`, { method: 'DELETE' });
   return id ?? '';
 }
 
-function ircdIp(): string {
-  return run('docker', ['inspect', '-f', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}', 'nefarious']).trim();
-}
-
-function ircdWebhookSecret(): string {
-  const m = /"WEBHOOK_SECRET"\s*=\s*"([^"]+)"/.exec(fs.readFileSync('../data/ircd.conf', 'utf8'));
-  if (!m) throw new Error('WEBHOOK_SECRET not in data/ircd.conf');
-  return m[1];
-}
-
-/** The admin event the Keycloak SPI sends when a user is deleted; the ircd clears its caches for the name. */
-async function tellIrcdUserDeleted(userId: string): Promise<void> {
-  const body = JSON.stringify({
-    resourceType: 'USER', operationType: 'DELETE', resourcePath: `users/${userId}`,
-    username: NAME, realmId: REALM, time: Date.now(),
-  });
-  const res = await fetch(`http://${ircdIp()}:9090/keycloak-webhook`, {
+/** An access token from the realm's public IRC client (its sub is the user's id). */
+async function kcUserToken(password: string, username: string = NAME): Promise<string> {
+  const res = await fetch(`${KC}/realms/${REALM}/protocol/openid-connect/token`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Webhook-Secret': ircdWebhookSecret() },
-    body,
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'password', client_id: 'irc-client', username, password }),
   });
-  expect(res.status, 'ircd webhook accepted the delete event').toBeLessThan(300);
+  if (!res.ok) throw new Error(`token for ${username}: ${res.status} ${await res.text()}`);
+  return (await res.json()).access_token as string;
 }
 
-async function login(nick: string): Promise<{ c: RawSocketClient; ok: boolean; closed: boolean }> {
+/** The 22-character form of a Keycloak UUID, as the ircd announces it and X3 stores and prints it. */
+function compactId(uuid: string): string {
+  return Buffer.from(uuid.replace(/-/g, ''), 'hex').toString('base64url');
+}
+
+async function login(nick: string, password: string): Promise<{ c: RawSocketClient; ok: boolean; closed: boolean }> {
   const c = await createRawSocketClient();
   await c.capLs();
   await c.capReq(['sasl']);
-  const r = await authenticateSaslPlain(c, NAME, PASSWORD);
+  const r = await authenticateSaslPlain(c, NAME, password);
   c.capEnd();
   c.register(nick);
   const closed = await c.waitForLine(/ KILL \S+ :|ERROR :Closing Link/, 12000).then(() => true, () => false);
@@ -100,7 +115,7 @@ async function boundAccount(c: RawSocketClient): Promise<string> {
   return /Account Information for \x02?([^\x02\s]+)/.exec(line)?.[1] ?? '';
 }
 
-/** Run one service command as an oper with the security override on; returns the reply lines. */
+/** Run one service command as an oper with the security override on; returns the reply lines joined. */
 async function asOper(command: string, service: string = NICKSERV_NICK): Promise<string> {
   const op = await createOperClient();
   try {
@@ -110,6 +125,35 @@ async function asOper(command: string, service: string = NICKSERV_NICK): Promise
   } finally {
     op.close();
   }
+}
+
+/** KILL a held ghost so the account's next login announces itself instead of reviving it. */
+async function reap(nick: string): Promise<void> {
+  const op = await createOperClient();
+  try {
+    op.send(`KILL ${nick} :test cleanup`);
+    await new Promise((r) => setTimeout(r, 1500));
+  } finally {
+    op.close();
+  }
+}
+
+/** "Registered on: Mon Jan  1 00:00:00 2024" -> epoch seconds (ctime(), container in UTC). */
+function registeredOn(info: string): number {
+  const line = info.split('\n').find((l) => l.includes('Registered on:'));
+  expect(line, `no "Registered on:" in:\n${info}`).toBeDefined();
+  const t = Date.parse(`${line!.split('Registered on:')[1].trim()} UTC`);
+  expect(Number.isNaN(t), `unparseable date in "${line}"`).toBe(false);
+  return Math.floor(t / 1000);
+}
+
+function x3Logs(since: string): string {
+  const r = spawnSync('docker', ['logs', '--since', since, 'x3'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  return (r.stdout ?? '') + (r.stderr ?? '');
+}
+
+function resetLine(newId: string, oldId: string): RegExp {
+  return new RegExp(`account ${NAME} with a different Keycloak id \\(${compactId(newId)}, was ${compactId(oldId)}\\): account data reset`);
 }
 
 /**
@@ -123,58 +167,146 @@ async function bindRebind(): Promise<void> {
   expect(reply, 'REBIND bound to AuthServ').toMatch(/bound|already/i);
 }
 
-describe('REBIND re-binds or clears a handle\'s Keycloak id', () => {
-  let newId = '';
+describe('a different Keycloak id resets the account', () => {
+  let idBefore = '';
+  let idAfter = '';
 
   beforeAll(async () => {
     if (GATED) return;
     token = await getKeycloakAdminToken();
-    await kcCreate();
+    idBefore = await kcCreate(PASSWORD);
+    await kcCreate(PASSWORD, SECOND);
     await bindRebind();
   }, 60_000);
 
   afterAll(async () => {
     if (GATED) return;
     await kcDelete();
+    await kcDelete(SECOND);
   });
 
-  it.skipIf(GATED)('a recreated Keycloak user is let back in by REBIND to the new id, and by clearing', async () => {
-    const first = await login(`reb${tag}a`);
+  it.skipIf(GATED)('a bound session that re-authenticates with a different id resets the account and rides along', async () => {
+    const older = await login(`reb${tag}a`, PASSWORD);            // the primary, the one X3 sees
+    const older2 = await login(`reb${tag}z`, PASSWORD);           // an alias of it: answered through the primary
+    const op = await createOperClient();
     try {
-      expect(first.ok && !first.closed, 'first login bound').toBe(true);
-      expect(await boundAccount(first.c)).toBe(NAME);
-    } finally {
-      first.c.close();
-    }
+      expect(older.ok && !older.closed, 'first login bound').toBe(true);
+      expect(await boundAccount(older.c)).toBe(NAME);
+      expect(await boundAccount(older2.c)).toBe(NAME);
+      const before = await asOper(`ACCOUNTINFO *${NAME}`);
+      expect(before, 'adopted the id on first use').toMatch(new RegExp(`Keycloak ID:\\s*${compactId(idBefore)}`));
+      const dateBefore = registeredOn(before);
 
+      // Something to lose: access on a registered channel.
+      expect((await op.serviceCmd(OPSERV_NICK, 'GOD ON')).join('\n')).toMatch(/enabled/);
+      op.send(`JOIN ${CHAN}`);
+      await new Promise((r) => setTimeout(r, 1000));
+      const reg = await op.registerChannel(CHAN);
+      expect(reg.success, `REGISTER ${CHAN}: ${reg.lines.join(' | ')}`).toBe(true);
+      const add = await op.addUser(CHAN, NAME, 200);
+      expect(add.success, `ADDUSER: ${add.lines.join(' | ')}`).toBe(true);
+      // USERS listing: the single-account ACCESS reply is worded differently and not parsed.
+      const hasAccess = async () =>
+        (await op.getAccess(CHAN)).some((a) => a.account.toLowerCase() === NAME.toLowerCase());
+      expect(await hasAccess(), 'access granted').toBe(true);
+
+      // A different id on the record, without touching Keycloak: clear, then
+      // set one no user has (nothing remembered, since nothing was stored).
+      expect(await asOper(`REBIND *${NAME} *`)).toMatch(/binding cleared/i);
+      expect(await asOper(`REBIND *${NAME} ${BOGUS}`)).toMatch(/Keycloak id set/i);
+
+      // The primary re-authenticates: away to a second account and back, since
+      // a re-authentication to the same name announces nothing.  The way back
+      // is AC M with its real id, which differs from the stored one -> reset.
+      const away = await authenticateSaslOAuthBearer(older.c, await kcUserToken(PASSWORD, SECOND));
+      expect(away.success, `re-authentication to ${SECOND}: ${away.error}`).toBe(true);
+      await new Promise((res) => setTimeout(res, 2000));
+      const back = await authenticateSaslOAuthBearer(older.c, await kcUserToken(PASSWORD));
+      expect(back.success, `re-authentication back to ${NAME}: ${back.error}`).toBe(true);
+      await new Promise((res) => setTimeout(res, 3000));
+
+      expect(x3Logs('120s'), 'X3 reset the account').toMatch(resetLine(idBefore, BOGUS));
+      expect(older.closed, 'nobody was disconnected').toBe(false);
+      expect(await boundAccount(older.c), 'the primary is on the fresh handle').toBe(NAME);
+      expect(await boundAccount(older2.c), 'its alias too').toBe(NAME);
+
+      const after = await asOper(`ACCOUNTINFO *${NAME}`);
+      expect(after, 'bound to the announced id').toMatch(new RegExp(`Keycloak ID:\\s*${compactId(idBefore)}`));
+      expect(after, 'and remembers the one it replaced').toMatch(new RegExp(`Previous Keycloak ID:\\s*${compactId(BOGUS)}`));
+      expect(registeredOn(after), 'X3\'s own fresh date').toBeGreaterThanOrEqual(dateBefore);
+      expect(await hasAccess(), 'channel access did not survive the reset').toBe(false);
+    } finally {
+      older.c.close();
+      older2.c.close();
+      await reap(`reb${tag}a`);
+      await reap(`reb${tag}z`);
+      try {
+        const un = await op.unregisterChannel(CHAN);
+        const code = /UNREGISTER \S+ (\S+)/.exec(un.lines.join('\n'))?.[1];
+        if (code) await op.unregisterChannel(CHAN, code);
+      } catch { /* best effort */ }
+      op.close();
+    }
+  }, 240_000);
+
+  it.skipIf(GATED)('an announcement carrying the id a change replaced binds without another reset', async () => {
+    // REBIND to another id keeps the replaced one (the sessions still carrying
+    // it are this name's).  A login announcing the real id then binds.
+    expect(await asOper(`REBIND *${NAME} ${BOGUS2}`)).toMatch(/Keycloak id set/i);
+    const set = await asOper(`ACCOUNTINFO *${NAME}`);
+    expect(set).toMatch(new RegExp(`Keycloak ID:\\s*${compactId(BOGUS2)}`));
+    expect(set, 'REBIND remembers the id it replaced').toMatch(new RegExp(`Previous Keycloak ID:\\s*${compactId(idBefore)}`));
+
+    const marker = Math.floor(Date.now() / 1000);
+    const c = await login(`reb${tag}b`, PASSWORD);              // a plain login: the ghosts were reaped
+    try {
+      expect(c.ok && !c.closed, 'login accepted').toBe(true);
+      expect(await boundAccount(c.c), 'bound to the fresh handle').toBe(NAME);
+    } finally {
+      c.c.close();
+      await reap(`reb${tag}b`);
+    }
+    const info = await asOper(`ACCOUNTINFO *${NAME}`);
+    expect(info, 'the stored id is untouched').toMatch(new RegExp(`Keycloak ID:\\s*${compactId(BOGUS2)}`));
+    expect(x3Logs(`${Math.max(1, Math.floor(Date.now() / 1000) - marker + 5)}s`), 'no second reset')
+      .not.toMatch(new RegExp(`account ${NAME} with a different Keycloak id .*: account data reset`));
+  }, 120_000);
+
+  it.skipIf(GATED)('a recreated Keycloak user is let in and bound to its new id', async () => {
     const oldId = await kcDelete();
-    await tellIrcdUserDeleted(oldId);
-    newId = await kcCreate();                          // the same name, a new user id
+    idAfter = await kcCreate(PASSWORD_AFTER);
+    expect(idAfter, 'a recreated user has a new id').not.toBe(oldId);
 
-    const refused = await login(`reb${tag}b`);
-    refused.c.close();
-    expect(refused.closed, 'the new-id login is refused until an oper re-binds').toBe(true);
-
-    // Re-bind to the new id, as an oper would with the UUID from the admin console.
-    expect(await asOper(`REBIND *${NAME} ${newId}`)).toMatch(/Keycloak id set for account/i);
-    const back = await login(`reb${tag}c`);
+    const fresh = await login(`reb${tag}c`, PASSWORD_AFTER);
     try {
-      expect(back.closed, 'after REBIND to the new id the login is accepted').toBe(false);
-      expect(await boundAccount(back.c)).toBe(NAME);
+      expect(fresh.ok, 'SASL accepted the recreated user').toBe(true);
+      expect(fresh.closed, 'not disconnected').toBe(false);
+      expect(await boundAccount(fresh.c), 'X3 bound the login').toBe(NAME);
     } finally {
-      back.c.close();
+      fresh.c.close();
+      await reap(`reb${tag}c`);
     }
+    expect(x3Logs('120s'), 'X3 reset the account').toMatch(resetLine(idAfter, BOGUS2));
+    const info = await asOper(`ACCOUNTINFO *${NAME}`);
+    expect(info, 'the handle carries the new id').toMatch(new RegExp(`Keycloak ID:\\s*${compactId(idAfter)}`));
+    expect(info, 'and remembers the one it replaced').toMatch(new RegExp(`Previous Keycloak ID:\\s*${compactId(BOGUS2)}`));
+  }, 180_000);
 
-    // Clearing works too: the next login adopts whatever id it carries.
+  it.skipIf(GATED)('REBIND to * clears both ids, and the next login adopts its own', async () => {
     expect(await asOper(`REBIND *${NAME} *`)).toMatch(/binding cleared/i);
-    const adopted = await login(`reb${tag}d`);
+    expect(await asOper(`ACCOUNTINFO *${NAME}`), 'clearing forgets both').not.toMatch(/Keycloak ID:/);
+
+    const adopted = await login(`reb${tag}d`, PASSWORD_AFTER);
     try {
-      expect(adopted.closed, 'after clearing, the login is accepted and adopts').toBe(false);
+      expect(adopted.closed, 'with nothing stored the login is accepted').toBe(false);
       expect(await boundAccount(adopted.c)).toBe(NAME);
     } finally {
       adopted.c.close();
+      await reap(`reb${tag}d`);
     }
-  }, 180_000);
+    expect(await asOper(`ACCOUNTINFO *${NAME}`), 'the login adopted its own id')
+      .toMatch(new RegExp(`Keycloak ID:\\s*${compactId(idAfter)}`));
+  }, 120_000);
 
   it.skipIf(GATED)('refuses a value that is not a Keycloak UUID', async () => {
     expect(await asOper(`REBIND *${NAME} not-an-id`)).toMatch(/Keycloak ID/i);

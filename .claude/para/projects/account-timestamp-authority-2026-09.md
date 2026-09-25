@@ -1,5 +1,7 @@
 # The account timestamp: a delete detector that was disabled mid-migration
 
+**Status (2026-09-24, evening):** step 5's X3 side rebuilt after the user's rulings of the day (plan `2026-09-24-x3-keycloak-identity.md`): the timestamp check is restored to what it was before a52968b ("can't retire it yet" -- legacy servers still authenticate through X3 over LDAP; "fix it to work like it did" = before the PR that overwrote the dates), and the fork ircd stamps no timestamp of its own on SASL logins, so the SASL path never mismatches and the dormant tail needs no seeding. Design F's D2 is superseded by Rubin's rule: a different id resets the handle's data and remembers the replaced id (no KILL, no REBIND needed to recover). x3 `feature/keycloak-identity` + nefarious `fix/no-ircd-account-timestamp`, on the bed, unpushed. Step 4 (LOCAL) stays held.
+
 **Status (2026-09-22, night):** sequencing steps 1-2 and 4 implemented, verified, **unpushed** (x3 `cfe7d8a`, x3 `77bd045`; nefarious `396c423` + `95e61e3`). Step 3 parked. Next: step 5. Designs F and G amended after review (below). Sections H-K added: X3 after LDAP, the saxdb hash, break-glass accounts, and a standalone `cmd_auth` bug.
 **Scope:** x3 (`upstream/master`), nefarious bouncer + webhook consumer, Keycloak SPI.
 *Originally also libkc/SASL, the Keycloak realm mapper and a seeding migration — all
@@ -708,6 +710,7 @@ a hop (`nefarious2` → hub → X3).
   webpush codec, on the wire and in saxdb. `REBIND` takes the canonical UUID and converts; the
   census `--map-out` must emit the compact form (or X3 converts on seed).
 - **D2 — mismatch: refuse and KILL outside a burst, refuse only in a burst** — the `LOCAL` rule.
+  **Superseded 2026-09-24 (user: "make things work as rubin wants"): a different id under a bound name RESETS the handle -- the modules' unregister hooks, a fresh handle of the same name with X3's own date, the logged-in users carried over, nobody disconnected, in and out of a burst -- and the reset remembers the replaced id so the old sessions' announcements (bursts, alias attaches, the ircd's login cache) bind instead of resetting again. REBIND stays as an operator tool. The timestamp check is not retired (design B) but restored to its pre-a52968b form; the ircd sends no timestamp on SASL logins.**
 - **D3 — impersonation: send no id.** Those logins fail open, like the other id-less paths.
 - **D4 — the ircd-side gap: its own step, right after 5** (step 5c in the sequencing).
 
