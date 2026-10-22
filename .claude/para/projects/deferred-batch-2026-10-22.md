@@ -65,6 +65,11 @@ locally and on the leaf.
 - C1: revive with a Keycloak id that DIFFERS from the held ghost's -> REFUSE the revive; the stale
   ghost is ENDED (quiet exit with a stated reason) and the login registers a fresh session. A ghost
   with NO id adopts the reviving login's id (otherwise every pre-v12 session fails to revive).
+- C1 (user, 2026-10-22 11:50): the adopt rule "has to do that, otherwise it breaks the transition" --
+  pre-v12 records and every session begun by an X3 login carry no id.  Webhooks "aren't happening for
+  now", so nothing ends a held session when its Keycloak account is deleted: a name re-registered while
+  the old session is held revives into it (residual risk, same class as the x3 name-reuse item; Rubin:
+  names are never reused).  Security review flagged it 10-22; kept by decision.
 Analyst findings driving the rest (2026-10-21): B2 real and a crash (alias keeps OPER_HANDLER after
 -o; KILL asserts); B4 most likely a test-run misread (harden the ACTIVE-branch revive only); B3 real
 (BX U ta=); B5 premise out of date (clause (c) retired in 95e61e3) -- my default, not a user decision:
