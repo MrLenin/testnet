@@ -1,7 +1,9 @@
 /**
  * ACCOUNTINFO shows an account's bound Keycloak user id to an oper
  * (design F, 5b): the value REBIND sets or clears, in the compact form the
- * ircd announces (22 base64url characters).
+ * ircd announces (22 base64url characters).  Only to an oper: the account's
+ * owner passes the same gate as staff and saw it too until 2026-10-22
+ * (deferred-items C10; the plan said opers).
  *
  * GATED behind KC_ID_BIND=1: needs nefarious from fix/wire-keycloak-id and
  * x3 from feature/keycloak-id-binding.
@@ -91,5 +93,28 @@ describe('ACCOUNTINFO shows the bound Keycloak id', () => {
     const info = await asOper(`ACCOUNTINFO *${NAME}`);
     expect(info, 'the account is known').toMatch(new RegExp(`Account Information for \\x02?${NAME}`));
     expect(info, 'oper ACCOUNTINFO shows a Keycloak id').toMatch(/Keycloak ID:\s*[A-Za-z0-9_-]{22}/);
+  }, 60_000);
+
+  it.skipIf(GATED)('the account\'s owner does not see it (the oper case above bound it)', async () => {
+    const c = await createRawSocketClient();
+    try {
+      await c.capLs();
+      await c.capReq(['sasl']);
+      const r = await authenticateSaslPlain(c, NAME, PASSWORD);
+      expect(r.success, `SASL PLAIN as ${NAME}: ${r.error}`).toBe(true);
+      c.capEnd();
+      c.register(`inf${tag}o`);
+      await c.waitForNumeric('001', 15000);
+      await new Promise(res => setTimeout(res, 1500));
+      const mark = c.allParsedLines.length;
+      c.send(`PRIVMSG ${NICKSERV_NICK} :ACCOUNTINFO`);
+      await c.waitForParsedLine(m => /Account Information for/.test(m.params[1] ?? ''), 8000);
+      await new Promise(res => setTimeout(res, 2000));
+      const info = c.allParsedLines.slice(mark).map(m => m.params[1] ?? '').join('\n');
+      expect(info, 'setup: the owner gets the account information').toMatch(/Account Information for/);
+      expect(info, 'the owner is not shown the Keycloak id').not.toMatch(/Keycloak ID:/);
+    } finally {
+      c.close();
+    }
   }, 60_000);
 });

@@ -52,7 +52,7 @@ describe('Bouncer hold lifecycle', () => {
     // Before HOLD off: session exists, BouncerPrimary present.
     const before = await runCheck(oper, nick, 10_000);
     expect(before.primary).toBeDefined();
-    expect(before.primary?.sessid).toMatch(/^AZ[A-Za-z0-9]+/);
+    expect(before.primary?.sessid).toMatch(/^[A-Za-z0-9+\/]{22}$/);  // UUIDv7, 22 chars of standard base64 (its first chars are the mint time)
 
     // Disable hold → session destroyed.
     expect(await bouncerDisableHold(client)).toBe(true);
@@ -98,7 +98,7 @@ describe('Bouncer hold lifecycle', () => {
       await new Promise(r => setTimeout(r, 300));
 
       const state = await runCheck(oper, nick, 10_000);
-      expect(state.primary?.sessid).toMatch(/^AZ[A-Za-z0-9]+/);
+      expect(state.primary?.sessid).toMatch(/^[A-Za-z0-9+\/]{22}$/);  // UUIDv7, 22 chars of standard base64 (its first chars are the mint time)
       sessids.push(state.primary!.sessid);
 
       expect(await bouncerDisableHold(client)).toBe(true);

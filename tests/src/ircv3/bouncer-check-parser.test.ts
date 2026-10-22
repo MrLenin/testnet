@@ -82,7 +82,7 @@ describe('/CHECK -b parser', () => {
     // Sessid should be non-empty and stable (matches one of the other
     // Session ID:: lines from the same /CHECK output, which the parser
     // captures in rawLines for debug).
-    expect(state.primary?.sessid).toMatch(/^AZ[A-Za-z0-9]+/);
+    expect(state.primary?.sessid).toMatch(/^[A-Za-z0-9+\/]{22}$/);  // UUIDv7, 22 chars of standard base64 (its first chars are the mint time)
   });
 
   it('keeps the same session sessid across disconnect + revive', async () => {
@@ -110,7 +110,7 @@ describe('/CHECK -b parser', () => {
     expect(await bouncerEnableHold(first.client)).toBe(true);
 
     const before = await runCheck(oper, nick, 10_000);
-    expect(before.primary?.sessid).toMatch(/^AZ[A-Za-z0-9]+/);
+    expect(before.primary?.sessid).toMatch(/^[A-Za-z0-9+\/]{22}$/);  // UUIDv7, 22 chars of standard base64 (its first chars are the mint time)
     const sessidBefore = before.primary!.sessid;
 
     // Close first client cleanly — session should transition to HOLDING.
