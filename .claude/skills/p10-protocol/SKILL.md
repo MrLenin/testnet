@@ -109,10 +109,10 @@ SASL <target> <source>!<fd>.<cookie> <subcmd> <data> [ext]
 |------|-----------|---------|-------------|------------|
 | `S` | Nef→X3 | Start (mechanism name) | Outbound only | `handle_sasl_input()` |
 | `H` | Nef→X3 | Host info (`user@host:ip`) | Outbound only | `handle_sasl_input()` |
-| `C` | Both | Continue (base64 auth data) | `m_sasl.c:237` | `handle_sasl_input()` |
-| `D` | Both | Done (`S`=success, `F`=fail, `A`=abort) | `m_sasl.c:245` | `handle_sasl_input()` |
-| `L` | X3→Nef | Login (account name, timestamp) | `m_sasl.c:240` | Outbound only |
-| `M` | X3→Nef | Mechanisms list (for 908 numeric) | `m_sasl.c:267` | Outbound only |
+| `C` | Both | Continue (base64 auth data) | `m_sasl.c:240` | `handle_sasl_input()` |
+| `D` | Both | Done (`S`=success, `F`=fail, `A`=abort) | `m_sasl.c:248` | `handle_sasl_input()` |
+| `L` | X3→Nef | Login (account name, timestamp) | `m_sasl.c:243` | Outbound only |
+| `M` | X3→Nef | Mechanisms list (for 908 numeric) | `m_sasl.c:273` | Outbound only |
 
 **Important**: X3 may send `I` (Impersonation) but Nefarious does NOT handle it - silently ignored.
 
@@ -287,7 +287,7 @@ ABAAB SR :This is my new realname
 
 ### Direction
 - **Client→Server**: User sends `SETNAME :newname` command
-- **Server→Server**: Propagated via P10 `SE` token
+- **Server→Server**: Propagated via P10 `SR` token (`m_setname.c`, IRCv3-aware peers only via `sendcmdto_serv_butone_v3`)
 - **Server→Client**: Sent to channel members with `setname` capability
 
 ### Client Protocol (IRCv3)
