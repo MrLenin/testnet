@@ -103,3 +103,17 @@ off the pushed 028de05; worktree `scratchpad/nef-nots`), merged into `bed-deploy
   Reviewer's notes kept as residue: the bouncer rebind gate's clause (c) `acc_ts_match` can no longer fire for SASL-authenticated ghosts (degrades to origin/sessid); `L` without a timestamp and the iauth account path leave a previous session value in place (pre-existing).
 - Rulings: none against the spec; `nickserv_reset_handle` cannot fail any more (no NULL branch).
 - **Final state 2026-09-24 18:56:** bed-deploy 5e281a4 = 028de05 + `fix/no-ircd-account-timestamp` 08ce54b + `fix/oauthbearer-introspection` (829a587, 56ac1c4) + `fix/alias-account-identity-follows` fc2511a (dormant) + `fix/pm-conversation-nick` (e1554fc, 1a0f3a4); x3 bed-x3-identity = master + #62 + `feature/keycloak-identity` (6 commits, tip 9e13f54). Green on these images: wire 3/3, keycloak-id-rebind 5/5, burst 1/1, accountinfo 1/1, account-timestamp 2/2, x3-account-change 2/2, sasl-reauth 4/4, oauth invalid-token 1/1, chathistory-targets-account-alt 1/1, targets-identity 2/2, targets-presence 1/1, targets-crowding 1/1 (identity suites rerun on the final ircd images 19:25: wire 3/3, rebind 5/5, burst 1/1, accountinfo 1/1, timestamp 2/2, account-change 2/2, sasl-reauth 4/4, invalid-token 1/1 — all green). Nothing pushed; testnet main uncommitted (tests, docs, register, plan, setup script).
+
+## 2026-10-20 — the reset becomes a config option (user: "1 and 2", then 19:19-19:20)
+
+Decided: default = adopt the id when none is stored; on a real mismatch REFUSE the bind
+(like the timestamp check: return, nobody killed), log it and tell opers
+(`NSMSG_IDENTITY_MISMATCH`), keep the stored id and the data. The switch
+`keycloak_id_reset` (nickserv conf; docker `X3_KC_ID_RESET`, default 0) means "do not
+refuse, remove the old": the bedb654 reset, still logging and telling opers. My first cut
+(786c8aa) bound anyway on a mismatch; the user corrected it ("a real mismatch should refuse
+on X3's part") → 3abfa4b. Tests `keycloak-id-rebind` and `keycloak-id-burst` parametrised
+on `KC_ID_RESET=1` (the bed's volume conf is frozen and has no key, so the bed runs the
+default; the reset path needs the key appended to the running conf + REHASH, or a fresh
+volume). Red confirmed 19:15 on the old image (2 of 5 rebind cases). Not pushed: the PR
+update is the user's call.

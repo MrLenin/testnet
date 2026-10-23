@@ -240,7 +240,7 @@ Replaces the held `feature/keycloak-id-binding` (which needed step 4's LOCAL mac
 Stands alone on master; not stacked on #62 (`fix/ac-account-change`), which only makes the
 AC path carry the id to it. Bed: `bed-x3-identity` = master + #62 + this. Worktree
 `scratchpad/x3-identity`. Commits: `14931a0` timestamp check as before a52968b, `b156d6f`
-kc_id field + saxdb, `7ac40e9` ACCOUNTINFO line, `03ade7f` REBIND, `bedb654` bind + reset
+kc_id field + saxdb, `7ac40e9` ACCOUNTINFO line, `03ade7f` REBIND, `bedb654` bind + reset (2026-10-20: + the `keycloak_id_reset` gate commit, reset off by default — user "1 and 2")
 + remembered previous id. **Opening it is the user's call.** Deploy order on prod: the
 nefarious change below first or together (with it, SASL logins carry no timestamp, so the
 restored check never sees a directory date).
@@ -268,31 +268,45 @@ The Keycloak user id is the identity behind a name. The ircd announces it with t
 of the UUID):
 
 - `handle_info.kc_id`, saxdb `kc_id`. A handle with none adopts the announced id once the
-  login goes through (after the timestamp and suspension checks; also for a handle the LDAP
-  autocreate made on that login). No id on the wire leaves the handle alone.
-- A different id under a bound name is a recreated Keycloak account, and the handle starts
-  over: the modules' unregister hooks run (channel access, memos, ...), the registered
-  nicks and everything on the record go, the directory is left alone (the entry belongs to
-  the new user), a fresh handle of the same name is created with X3's own date and bound to
-  the new id, the users logged in to the old handle are carried over without being
-  re-stamped, and opers are told. Nobody is disconnected, in or out of a burst.
+  login goes through: after the suspension check, and after the timestamp check for the
+  logins that carry a stamp -- an AuthServ-made one replayed on the wire; a SASL login via
+  Keycloak carries none, Keycloak has no notion of X3's registration date, so nothing is
+  checked against it. Also for a handle the LDAP autocreate made on that login. No id on
+  the wire leaves the handle alone.
+- A different id under a bound name means the Keycloak user was recreated. By default X3
+  refuses the bind: it logs it, tells opers (`NSMSG_IDENTITY_MISMATCH`), keeps the stored id
+  and the account's data, and the user is nobody to X3 until an oper REBINDs the account.
+  Nobody is disconnected, in or out of a burst.
+- With `keycloak_id_reset` on (nickserv config, docker `X3_KC_ID_RESET`, off by default)
+  the handle starts over instead: the modules' unregister hooks run (channel access,
+  memos, ...), the registered nicks and everything on the record go, the directory is left
+  alone (the entry belongs to the new user), a fresh handle of the same name is created
+  with X3's own date and bound to the new id, and opers are told. The sessions logged in
+  to the old handle are detached, not carried over: they authenticated as the user the old
+  id named, and the fresh record belongs to someone else. They stay logged in at the ircd
+  and are nobody to X3 until they authenticate again.
 - The reset remembers the id it replaced (saxdb `kc_id_prev`). Sessions from before the
   recreate keep announcing the old id -- a burst replays them with it, a bouncer alias
   attach copies it, the ircd's login cache answers with it for a few minutes -- and such an
-  announcement is bound to the fresh record instead of taken for yet another recreate.
-  Nobody can newly obtain the old id.
+  announcement is refused and reported (`NSMSG_IDENTITY_STALE`): it is the previous
+  owner's, so it is never bound, and it is not taken for yet another recreate either.
 - `REBIND <*account> <keycloak-uuid|*>` (oper level 800, through `get_victim_oper`'s
   outranking; deliberately not an OSET option) sets the stored id by hand or clears it so
-  the next login adopts one; it forgets the remembered id. ACCOUNTINFO shows both to opers.
+  the next login adopts one; it forgets the remembered id. Setting a different id detaches
+  the sessions logged in under the old one (they authenticated as the previous id) and
+  says how many. ACCOUNTINFO shows both to opers.
 
 **Operator note:** a service that already has saved command bindings does not pick up a
 module's new commands on restart; bind the new one once:
 `/msg O3 BIND AuthServ REBIND *nickserv.rebind`.
 
-Tested on the Afternet testnet (Vitest): a recreated user is let in, bound to the new id,
-with its channel access gone and X3's fresh date; an older session rides along; a login the
-ircd answers from its cache with the old id binds without another reset; the same in a
-burst across a hop and a relink; REBIND; ACCOUNTINFO; an AuthServ-made stamp replayed after
+Tested on the Afternet testnet (Vitest), default off: a recreated user is let in by the
+ircd and refused by X3, the mismatch is reported, the stored id and the channel access stay; an older session rides
+along; the same in a burst across a hop and a relink. With the reset on (`KC_ID_RESET=1`
+runs): bound to the new id, channel access gone, X3's fresh date, a session of the previous
+owner that was logged in through AuthServ on a legacy server is detached by the reset, a
+login announcing the replaced id is refused without another reset. REBIND to a new id
+detaches the logged-in sessions; ACCOUNTINFO; an AuthServ-made stamp replayed after
 saxdb was changed is refused and the date is never rewritten; a SASL login carries no
 timestamp and binds.
 
@@ -333,3 +347,15 @@ git -C nefarious push upstream fix/pm-conversation-nick:ircv3.2-upgrade
 ```
 (also `fix/oauthbearer-introspection` 829a587+56ac1c4, same shape; `fix/no-ircd-account-timestamp`
 08ce54b above; the three are independent of each other and of the merge order.)
+
+## PUSHED 2026-09-24 20:5x (user: "push, make the PR")
+
+- nefarious: one linear chain on 028de05 — 8f42012 (no ircd account timestamp), a0c9440 + 0d43253
+  (introspection endpoint, local rejection not introspected), d0bb623 + 8453087 (PM conversation
+  named by its rows / same session) — pushed to `ircv3.2-hardening` and `ircv3.2-upgrade` on
+  origin and upstream; all four at **8453087**. NOT pushed: `fix/alias-account-identity-follows`
+  (dormant) and the bed branch's older unpushed bouncer rebind-gate change.
+- x3: `feature/keycloak-identity` (9e13f54) pushed to MrLenin/x3; **PR 2 = evilnet/x3#63**
+  (base master, not stacked on #62).
+- keycloak-webhook-spi: 40c692c (one hub suffices) on evilnet main.
+- testnet main: bed3ccf5 (tests + docs) + 5ebe222 (setup-keycloak.sh manage-users) pushed.

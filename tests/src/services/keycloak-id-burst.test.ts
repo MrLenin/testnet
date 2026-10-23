@@ -23,6 +23,7 @@ import { NICKSERV_NICK } from '../helpers/x3-client';
 import { getKeycloakAdminToken } from '../helpers/keycloak-sync';
 
 const GATED = process.env.KC_ID_BIND !== '1';
+const RESET = process.env.KC_ID_RESET === '1';
 const KC = process.env.KEYCLOAK_URL || 'http://localhost:8080';
 const REALM = 'testnet';
 
@@ -107,7 +108,7 @@ describe('a different Keycloak id during a burst', () => {
     await kcDelete();
   });
 
-  it.skipIf(GATED)('resets the account without a disconnect, and the id crosses the hop and the relink', async () => {
+  it.skipIf(GATED)('is handled without a disconnect, and the id crosses the hop and the relink', async () => {
     // Bind the handle to the current user's id, and get it on disk.
     const owner = await createRawSocketClient();
     try {
@@ -131,13 +132,17 @@ describe('a different Keycloak id during a burst', () => {
       await startX3AndWaitForLink();
       await new Promise((res) => setTimeout(res, 5000));
 
-      expect(x3Logs('180s'), 'X3 reset the account when the burst carried a different id')
-        .toMatch(new RegExp(`account ${NAME} with a different Keycloak id during a burst \\(.*\\): account data reset`));
+      if (RESET)
+        expect(x3Logs('180s'), 'X3 reset the account when the burst carried a different id')
+          .toMatch(new RegExp(`account ${NAME} with a different Keycloak id during a burst \\(.*\\): account data reset`));
+      else
+        expect(x3Logs('180s'), 'X3 refused the bind from the burst and reported it')
+          .toMatch(new RegExp(`account ${NAME} with a different Keycloak id during a burst \\(.*\\): bind refused`));
 
       c.clearRawBuffer();
       c.send('PING :still-here');
       await c.waitForLine(/PONG/, 8000);                       // not disconnected
-      expect(await boundAccount(c), 'X3 bound the user to the fresh handle').toBe(NAME);
+      expect(await boundAccount(c), RESET ? 'X3 bound the user to the fresh handle' : 'X3 refused the bind').toBe(RESET ? NAME : '');
     } finally {
       c.close();
     }
