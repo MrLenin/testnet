@@ -279,7 +279,14 @@ describe('IRCv3 Multiline Cooldown', () => {
     ).toBeUndefined();
 
     // Close the second batch normally — that one SHOULD now produce cooldown.
-    sender.send(`@batch=second PRIVMSG ${recipientNick} :replacement payload`);
+    // Big enough to matter: the cooldown is (2 s + bytes/128) * 50 %, on a
+    // one-second clock, and the third batch opens 300 ms after the close.
+    // A short payload gave 1 s, which the clock rounds away whenever a
+    // second boundary falls in those 300 ms (observed 2 of 3 runs).  Two
+    // 300-byte lines give (2 + 600/128) * 50 % = 3 s, so the gate holds.
+    const replacement = 'p'.repeat(300);
+    sender.send(`@batch=second PRIVMSG ${recipientNick} :${replacement}`);
+    sender.send(`@batch=second PRIVMSG ${recipientNick} :${replacement}`);
     sender.send(`BATCH -second`);
     await new Promise(r => setTimeout(r, 300));
 
