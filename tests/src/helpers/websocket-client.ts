@@ -284,6 +284,30 @@ export class WebSocketTestClient {
   }
 
   /**
+   * Stop reading from the socket (the TCP side keeps the connection, the
+   * peer's writes back up into the kernel buffers, as a sleeping phone
+   * does).  Writes still work.
+   */
+  pauseReads(): void {
+    this.socket?.pause();
+  }
+
+  /** Resume reading; buffered data is delivered to the frame parser. */
+  resumeReads(): void {
+    this.socket?.resume();
+  }
+
+  /** Answer every IRC PING seen in the parsed frames since the last clear. */
+  answerPings(): number {
+    let n = 0;
+    for (const f of this.frames) {
+      const m = /(?:^|\n)PING :?([^\r\n]+)/.exec(f.payload.toString());
+      if (m) { this.send(`PONG :${m[1]}`); n++; }
+    }
+    return n;
+  }
+
+  /**
    * Send a text frame.
    */
   send(data: string): void {
