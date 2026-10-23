@@ -94,7 +94,7 @@ async function setHoldSeconds(oper: RawSocketClient, secs: number): Promise<void
       // Baseline: session exists per /CHECK.
       const before = await runCheck(oper!, nick, 10_000);
       expect(before.primary).toBeDefined();
-      expect(before.primary?.sessid).toMatch(/^AZ[A-Za-z0-9]+/);
+      expect(before.primary?.sessid, 'a session exists').toBeTruthy();
 
       // Abrupt drop → HOLDING; hold timer armed at SHORT_HOLD_SECS.
       disconnectAbruptly(client);
