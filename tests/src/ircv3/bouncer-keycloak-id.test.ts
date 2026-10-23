@@ -153,7 +153,14 @@ describe('Bouncer session Keycloak id', () => {
     expect(back.nick, 'setup: the SASL login revived the held session').toBe(nick);
     await sleep(1000);
 
-    expect(await checkId(op, nick), 'the revived session carries the login\'s Keycloak id').not.toBeNull();
+    const adopted = await checkId(op, nick);
+    expect(adopted, 'the revived session carries the login\'s Keycloak id').not.toBeNull();
+    // The other servers are told (BX U kcid=): their attach gate and merges
+    // read the session's id, and an id adopted after the introduction used
+    // to reach them only at the next relink.
+    const leafOp = track(await operClient(SECONDARY_SERVER.host, SECONDARY_SERVER.port));
+    await sleep(500);
+    expect(await checkId(leafOp, nick), 'the leaf learns the adopted id').toBe(adopted);
 
     await bouncerDisableHold(back.client);
     back.client.send('QUIT');

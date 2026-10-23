@@ -70,6 +70,18 @@ locally and on the leaf.
   now", so nothing ends a held session when its Keycloak account is deleted: a name re-registered while
   the old session is held revives into it (residual risk, same class as the x3 name-reuse item; Rubin:
   names are never reused).  Security review flagged it 10-22; kept by decision.
+- Keycloak-id attach gate (user, 2026-10-23, after the push security review found the revive refusal
+  bypassable through bounce_auto_resume): "new id should not attach to old session, just like an old
+  session should not get tied to a new id".  A login whose id differs from a session still in use is
+  REFUSED (registering beside it collides); the previous user's unused leftover held here ends.
+  Sessions of different ids are NEVER MERGED after a netsplit (user, 2026-10-23, "Don't merge"): the
+  same-nick D.2 merge falls back to classic collision.  Fix: fork `fix/kc-id-attach-gate`
+  (session-level hs_kc_id + BX U kcid=).
+- Same night, after the analyst's second pass (user, 2026-10-23): a leftover session is ENDED only by a
+  login Keycloak itself confirmed (grant, user lookup, introspection), never by a cached login or a
+  locally checked token a deleted user still holds; any other conflicting login is refused.  The split
+  nick collision (older wins, the younger session is lost) is accepted.  Rollout: every fork server
+  together (an older fork peer merges without the id check).
 Analyst findings driving the rest (2026-10-21): B2 real and a crash (alias keeps OPER_HANDLER after
 -o; KILL asserts); B4 most likely a test-run misread (harden the ACTIVE-branch revive only); B3 real
 (BX U ta=); B5 premise out of date (clause (c) retired in 95e61e3) -- my default, not a user decision:
