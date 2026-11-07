@@ -26,6 +26,9 @@ import {
  * PINGs are answered at once, then one per 2 s.  Unthrottled, all 25 are.
  */
 const RUN = process.env.RUN_RESTART_TESTS === '1';
+/* Pending: evilnet/nefarious2 #158 is still being reworked.  Run with
+ * NEF_PR_158=1 against its branch once its features are settled. */
+const GATED_158 = process.env.NEF_PR_158 !== '1';
 const LAG_PORT = 6675;
 const BURST = 25;
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -158,5 +161,65 @@ async function pongsInThreeSeconds(c: RawSocketClient): Promise<number> {
     await sleep(1000);
     expect(await pongsInThreeSeconds(revived.client),
       'a restored-then-revived session must be fake-lagged').toBeLessThan(21);
+  }, 300_000);
+});
+
+(RUN && !GATED_158 ? describe : describe.skip)('#158 fake-lag pool: a restored ghost', () => {
+  const clients: RawSocketClient[] = [];
+  const pool: string[] = [];
+  let oper: RawSocketClient | undefined;
+
+  afterEach(async () => {
+    try {
+      oper = await ircOper();
+      oper.send('SET FAKELAG_POOL 0');
+      oper.send('SET FAKELAG_BORROW 0');
+      await sleep(300);
+      oper.send('QUIT');
+      oper.close();
+    } catch { /* */ }
+    for (const c of clients) { try { await bouncerDisableHold(c); } catch { /* */ } try { c.close(); } catch { /* */ } }
+    clients.length = 0;
+    for (const a of pool) releaseTestAccount(a);
+    pool.length = 0;
+  });
+
+  it('a session restored after a restart is still charged with the features on', async () => {
+    const acc = await getTestAccount(); if (acc.fromPool) pool.push(acc.account);
+    const first = await createSaslBouncerClient(acc.account, acc.password,
+      { nick: uniqueNick('fpr'), host: PRIMARY_SERVER.host, port: LAG_PORT });
+    expect(await bouncerEnableHold(first.client)).toBe(true);
+    await sleep(8000);
+    disconnectAbruptly(first.client);
+    await sleep(500);
+
+    const linksBefore = await (async () => {
+      const o = await ircOper();
+      try { return await linkedServers(o); } finally { o.send('QUIT'); o.close(); }
+    })();
+    execSync('docker restart nefarious', { encoding: 'utf8' });
+    await waitForNefariousReady();
+    await sleep(35_000);
+    await restoreLinks(linksBefore);
+
+    /* SET after the restart: the conf's values are what a restart keeps. */
+    oper = await ircOper();
+    oper.send('SET FAKELAG_POOL 600');
+    oper.send('SET FAKELAG_BORROW 60');
+    await sleep(500);
+    oper.send('QUIT');
+    oper.close();
+
+    const revived = await createSaslBouncerClient(acc.account, acc.password,
+      { nick: uniqueNick('fpr2'), host: PRIMARY_SERVER.host, port: LAG_PORT });
+    clients.push(revived.client);
+    expect(revived.nick.toLowerCase(), 'revived the restored ghost').toBe(first.nick.toLowerCase());
+    await sleep(1000);
+    const start = revived.client.allLines.length;
+    const tag = Math.random().toString(36).slice(2, 7);
+    for (let i = 0; i < 120; i++) revived.client.send(`PING :${tag}-${i}`);
+    await sleep(3000);
+    const pongs = revived.client.allLines.slice(start).filter(l => / PONG /.test(l) && l.includes(tag)).length;
+    expect(pongs, 'a pool draw is bounded, not an exemption').toBeLessThan(120);
   }, 300_000);
 });

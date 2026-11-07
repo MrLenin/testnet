@@ -6,7 +6,11 @@ import {
   createRawSocketClient,
   PRIMARY_SERVER,
   SECONDARY_SERVER,
+  getTestAccount,
+  releaseTestAccount,
+  createSaslBouncerClient,
 } from '../helpers/index.js';
+import { getP10Logs } from '../helpers/p10-protocol.js';
 
 /**
  * Federated SEARCH (soju.im/search over the CHATHISTORY federation path,
@@ -25,11 +29,18 @@ import {
 
 const CAPS = ['soju.im/search', 'batch', 'server-time', 'message-tags', 'draft/chathistory'];
 const SECONDARY_NAME = 'leaf.fractalrealities.net';
+/* Red until each evilnet/nefarious2 PR is merged and the bed's nefarious slots
+ * are rebuilt: run with NEF_PR_<n>=1 then.  (An explicit gate, not a silent
+ * skipIf.) */
+const GATED_149 = process.env.NEF_PR_149 !== '1';
+const GATED_152 = process.env.NEF_PR_152 !== '1';
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 function searchRows(client: RawSocketClient, start: number): string[] | undefined {
   const lines = client.allLines.slice(start);
-  const open = lines.find(l => / BATCH \+\S+ search\b/.test(l));
+  /* `search` until evilnet/nefarious2 #152 lands, then `soju.im/search`
+   * (drop the optional prefix then). */
+  const open = lines.find(l => / BATCH \+\S+ (soju\.im\/)?search\b/.test(l));
   if (!open) return undefined;
   const id = / BATCH \+(\S+) /.exec(open)![1];
   return lines.filter(l => l.includes(`batch=${id}`) && / (PRIVMSG|NOTICE) /.test(l));
@@ -135,4 +146,89 @@ describe('SEARCH federation (linked bed)', () => {
       await sleep(4000);
     }
   }, 40000);
+});
+
+describe('#149 SEARCH federation: redacted rows', () => {
+  const clients: RawSocketClient[] = [];
+  const pool: string[] = [];
+  const chan = `#frd${Math.random().toString(36).slice(2, 7)}`;
+
+  afterAll(async () => {
+    for (const c of clients) { try { c.send('QUIT'); c.close(); } catch { /* */ } }
+    for (const p of pool) releaseTestAccount(p);
+  });
+
+  it.skipIf(GATED_149)('a row redacted on the leaf does not come back to a search from the primary', async () => {
+    const acc = await getTestAccount();
+    if (acc.fromPool) pool.push(acc.account);
+    const { client: leaf } = await createSaslBouncerClient(acc.account, acc.password, {
+      nick: uniqueNick('frl'),
+      host: SECONDARY_SERVER.host,
+      port: SECONDARY_SERVER.port,
+      extraCaps: [...CAPS, 'echo-message', 'draft/message-redaction'],
+    });
+    clients.push(leaf);
+    leaf.send(`JOIN ${chan}`);
+    await sleep(800);
+
+    const say = async (text: string): Promise<string> => {
+      const start = leaf.allLines.length;
+      leaf.send(`PRIVMSG ${chan} :${text}`);
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        await sleep(100);
+        const id = /(?:^@|;)msgid=([^; ]+)/.exec(
+          leaf.allLines.slice(start).find(l => / PRIVMSG /.test(l) && l.includes(text)) ?? '')?.[1];
+        if (id) return id;
+      }
+      throw new Error(`no echo with a msgid for "${text}"`);
+    };
+
+    /* Two rows only the leaf holds, then one both servers hold. */
+    const leafOnly = await say('rdf leaf gone');
+    await say('rdf leaf kept');
+    await sleep(800);
+    const reader = await client(PRIMARY_SERVER, uniqueNick('frp'));
+    clients.push(reader);
+    reader.send(`JOIN ${chan}`);
+    await sleep(800);
+    const shared = await say('rdf shared gone');
+    await sleep(1000);
+
+    leaf.send(`REDACT ${chan} ${leafOnly}`);
+    leaf.send(`REDACT ${chan} ${shared}`);
+    await sleep(1500);
+    expect(await search(reader, `in=${chan} text=rdf`)).toEqual(['rdf leaf kept']);
+  }, 60000);
+});
+
+describe('#152 SEARCH federation: line breaks stay off the wire', () => {
+  const clients: RawSocketClient[] = [];
+  const chan = `#fcr${Math.random().toString(36).slice(2, 7)}`;
+
+  afterAll(async () => {
+    for (const c of clients) { try { c.send('QUIT'); c.close(); } catch { /* */ } }
+  });
+
+  it.skipIf(GATED_152)('text=a\\nb is refused with FAIL, and nothing goes out over CH Q', async () => {
+    const c = await client(PRIMARY_SERVER, uniqueNick('fcr'));
+    clients.push(c);
+    c.send(`JOIN ${chan}`);
+    await sleep(800);
+    /* A member on the leaf makes it a storage peer a search would ask. */
+    const leaf = await client(SECONDARY_SERVER, uniqueNick('fcl'));
+    clients.push(leaf);
+    leaf.send(`JOIN ${chan}`);
+    await sleep(1200);
+
+    const start = c.allLines.length;
+    c.send(`SEARCH in=${chan};text=a\\nb`);
+    await sleep(1500);
+    const lines = c.allLines.slice(start);
+    expect(lines.some(l => / FAIL SEARCH INVALID_PARAMS /.test(l)), lines.join('\n')).toBe(true);
+    expect(lines.some(l => / BATCH /.test(l)), lines.join('\n')).toBe(false);
+    /* The bed's debug log shows what was sent to a server. */
+    const fanOut = await getP10Logs('nefarious', new RegExp(`CH Q .*${chan.slice(1)}.*text=`), '30s');
+    expect(fanOut, fanOut.join('\n')).toEqual([]);
+  }, 30000);
 });

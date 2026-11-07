@@ -8,6 +8,7 @@ import {
   createSaslBouncerClient,
   createRawSocketClient,
 } from '../helpers/index.js';
+import { createTlsClient, tlsEnableHold, type TlsClient } from '../helpers/tls-sasl-client.js';
 
 /**
  * soju.im/search (https://codeberg.org/emersion/soju/src/branch/master/doc/ext/search.md):
@@ -25,6 +26,13 @@ import {
  */
 
 const CAPS = ['soju.im/search', 'batch', 'server-time', 'message-tags', 'draft/chathistory'];
+/* Red until each evilnet/nefarious2 PR is merged and the bed's nefarious slot
+ * is rebuilt: run with NEF_PR_<n>=1 then.  (An explicit gate, not a silent
+ * skipIf.) */
+const GATED_149 = process.env.NEF_PR_149 !== '1';
+const GATED_150 = process.env.NEF_PR_150 !== '1';
+const GATED_151 = process.env.NEF_PR_151 !== '1';
+const GATED_152 = process.env.NEF_PR_152 !== '1';
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 interface Batch {
@@ -35,7 +43,9 @@ interface Batch {
 /** The first `search` batch opened after `start` in the client's log, with its rows. */
 function searchBatch(client: { allLines: string[] }, start: number): Batch | undefined {
   const lines = client.allLines.slice(start);
-  const open = lines.find(l => / BATCH \+\S+ search\b/.test(l));
+  /* `search` until evilnet/nefarious2 #152 lands, then `soju.im/search`
+   * (drop the optional prefix then). */
+  const open = lines.find(l => / BATCH \+\S+ (soju\.im\/)?search\b/.test(l));
   if (!open) return undefined;
   const id = / BATCH \+(\S+) /.exec(open)![1];
   const rows = lines.filter(l => l.includes(`batch=${id}`) && / (PRIVMSG|NOTICE) /.test(l));
@@ -205,4 +215,226 @@ describe('SEARCH (soju.im/search)', () => {
       expect(batch!.rows.map(textOf), 'only what was said while present').toEqual(['alpha after joining']);
     }, 60000);
   });
+});
+
+const REDACT_CAPS = [...CAPS, 'echo-message', 'draft/message-redaction'];
+
+/** Say a line and read its msgid from the echo. */
+async function say(c: RawSocketClient, chan: string, text: string): Promise<string> {
+  const start = c.allLines.length;
+  c.send(`PRIVMSG ${chan} :${text}`);
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    await sleep(100);
+    const echo = c.allLines.slice(start).find(l => / PRIVMSG /.test(l) && l.includes(text));
+    const id = echo && /(?:^@|;)msgid=([^; ]+)/.exec(echo)?.[1];
+    if (id) return id;
+  }
+  throw new Error(`no echo with a msgid for "${text}"`);
+}
+
+/** Send a SEARCH and return its batch once it closes. */
+async function runSearch(c: RawSocketClient, args: string): Promise<Batch> {
+  const start = c.allLines.length;
+  c.send(`SEARCH ${args}`);
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    await sleep(150);
+    if (c.allLines.slice(start).some(l => / BATCH -/.test(l))) break;
+  }
+  const batch = searchBatch(c, start);
+  expect(batch, `no search batch for ${args}:\n${c.allLines.slice(start).join('\n')}`).toBeTruthy();
+  return batch!;
+}
+
+const uniq = () => Math.random().toString(36).slice(2, 8);
+
+describe('#149 SEARCH: redacted rows', () => {
+  const clients: RawSocketClient[] = [];
+  const pool: string[] = [];
+  const channel = `#srd${uniq()}`;
+  let a: RawSocketClient;
+  let b: RawSocketClient;
+
+  beforeAll(async () => {
+    if (GATED_149) return;
+    for (const tag of ['rda', 'rdb']) {
+      const acc = await getTestAccount();
+      if (acc.fromPool) pool.push(acc.account);
+      const r = await createSaslBouncerClient(acc.account, acc.password, { nick: uniqueNick(tag), extraCaps: REDACT_CAPS });
+      clients.push(r.client);
+      r.client.send(`JOIN ${channel}`);
+    }
+    [a, b] = clients;
+    await sleep(800);
+  }, 60000);
+
+  afterAll(async () => {
+    for (const c of clients) { try { c.send('QUIT'); c.close(); } catch { /* */ } }
+    for (const p of pool) releaseTestAccount(p);
+  });
+
+  it.skipIf(GATED_149)('a redacted line is hidden with in= and without it', async () => {
+    const word = `hide${uniq()}`;
+    const id = await say(a, channel, `${word} gone`);
+    await say(a, channel, `${word} kept`);
+    a.send(`REDACT ${channel} ${id}`);
+    await sleep(1000);
+    expect((await runSearch(a, `in=${channel} text=${word}`)).rows.map(textOf)).toEqual([`${word} kept`]);
+    expect((await runSearch(a, `text=${word}`)).rows.map(textOf)).toEqual([`${word} kept`]);
+  }, 30000);
+
+  it.skipIf(GATED_149)('five matches with the newest two redacted and limit=2 returns 2', async () => {
+    const word = `five${uniq()}`;
+    const ids: string[] = [];
+    for (const n of ['one', 'two', 'three', 'four', 'five']) {
+      ids.push(await say(a, channel, `${word} ${n}`));
+      await sleep(100);
+    }
+    a.send(`REDACT ${channel} ${ids[3]}`);
+    a.send(`REDACT ${channel} ${ids[4]}`);
+    await sleep(1000);
+    expect((await runSearch(a, `in=${channel} text=${word} limit=2`)).rows.map(textOf))
+      .toEqual([`${word} two`, `${word} three`]);
+  }, 30000);
+
+  it.skipIf(GATED_149)('a line with a reply or a reaction stays findable', async () => {
+    const word = `kids${uniq()}`;
+    const replied = await say(a, channel, `${word} replied to`);
+    const reacted = await say(a, channel, `${word} reacted to`);
+    b.send(`@+draft/reply=${replied} PRIVMSG ${channel} :a reply`);
+    b.send(`@+draft/reply=${reacted};+draft/react=ok TAGMSG ${channel}`);
+    await sleep(1000);
+    expect((await runSearch(a, `in=${channel} text=${word}`)).rows.map(textOf))
+      .toEqual([`${word} replied to`, `${word} reacted to`]);
+  }, 30000);
+});
+
+describe('#150 SEARCH: a plaintext alias with no in=', () => {
+  let primary: TlsClient | undefined;
+  let device: RawSocketClient | undefined;
+  let account = '';
+  let fromPool = false;
+
+  afterAll(async () => {
+    try { primary?.send('BOUNCER SET HOLD off'); await sleep(300); } catch { /* */ }
+    for (const c of [device, primary]) { try { c?.send('QUIT'); c?.close(); } catch { /* */ } }
+    if (fromPool) releaseTestAccount(account);
+  });
+
+  it.skipIf(GATED_150)("finds the primary's channels except the +Z one", async () => {
+    const word = `alias${uniq()}`;
+    const open = `#sao${uniq()}`;
+    const secure = `#saz${uniq()}`;
+    const acc = await getTestAccount();
+    account = acc.account;
+    fromPool = acc.fromPool;
+    primary = await createTlsClient(uniqueNick('sap'), { account: acc.account, password: acc.password, caps: CAPS });
+    await tlsEnableHold(primary);
+    primary.send(`JOIN ${open}`);
+    primary.send(`JOIN ${secure}`);
+    await sleep(800);
+    const modeAt = primary.lines.length;
+    primary.send(`MODE ${secure} +Z`);
+    await primary.waitFor(/ MODE \S+ \+Z/, modeAt, 5000);
+    primary.send(`PRIVMSG ${open} :${word} open`);
+    primary.send(`PRIVMSG ${secure} :${word} secure`);
+    await sleep(1200);
+
+    /* Control: the +Z row is there to find, for the TLS primary. */
+    const from = primary.lines.length;
+    primary.send(`SEARCH text=${word}`);
+    await primary.waitFor(/ BATCH -/, from, 5000);
+    const primaryRows = primary.lines.slice(from).filter(l => / PRIVMSG /.test(l)).map(textOf).sort();
+    expect(primaryRows).toEqual([`${word} open`, `${word} secure`]);
+
+    const r = await createSaslBouncerClient(acc.account, acc.password, { nick: uniqueNick('sad'), extraCaps: CAPS });
+    device = r.client;
+    await sleep(1000);
+    expect((await runSearch(device, `text=${word}`)).rows.map(textOf)).toEqual([`${word} open`]);
+  }, 60000);
+});
+
+describe('#151 SEARCH: case folds in UTF-8', () => {
+  const clients: RawSocketClient[] = [];
+  const pool: string[] = [];
+  const channel = `#scf${uniq()}`;
+
+  afterAll(async () => {
+    for (const c of clients) { try { c.send('QUIT'); c.close(); } catch { /* */ } }
+    for (const p of pool) releaseTestAccount(p);
+  });
+
+  it.skipIf(GATED_151)('Cyrillic and Latin-1 match in either case, and an ASCII needle reads past high bytes', async () => {
+    const acc = await getTestAccount();
+    if (acc.fromPool) pool.push(acc.account);
+    const { client: a } = await createSaslBouncerClient(acc.account, acc.password, { nick: uniqueNick('scf'), extraCaps: REDACT_CAPS });
+    clients.push(a);
+    a.send(`JOIN ${channel}`);
+    await sleep(800);
+    await say(a, channel, 'ПРИВЕТ Мир');
+    await say(a, channel, 'CAFÉ crème');
+    await say(a, channel, 'Привет xylo');
+    await sleep(800);
+    expect((await runSearch(a, `in=${channel} text=привет`)).rows.map(textOf)).toEqual(['ПРИВЕТ Мир', 'Привет xylo']);
+    expect((await runSearch(a, `in=${channel} text=café`)).rows.map(textOf)).toEqual(['CAFÉ crème']);
+    expect((await runSearch(a, `in=${channel} text=CRÈME`)).rows.map(textOf)).toEqual(['CAFÉ crème']);
+    expect((await runSearch(a, `in=${channel} text=XYLO`)).rows.map(textOf)).toEqual(['Привет xylo']);
+  }, 30000);
+});
+
+describe('#152 SEARCH: the soju form and its batch', () => {
+  const clients: RawSocketClient[] = [];
+  const pool: string[] = [];
+  const channel = `#ssj${uniq()}`;
+  let a: RawSocketClient;
+
+  beforeAll(async () => {
+    if (GATED_152) return;
+    const acc = await getTestAccount();
+    if (acc.fromPool) pool.push(acc.account);
+    ({ client: a } = await createSaslBouncerClient(acc.account, acc.password,
+      { nick: uniqueNick('ssj'), extraCaps: [...REDACT_CAPS, 'labeled-response'] }));
+    clients.push(a);
+    a.send(`JOIN ${channel}`);
+    await sleep(800);
+    await say(a, channel, 'alpha one');
+    await say(a, channel, 'beta;two');
+    await sleep(800);
+  }, 60000);
+
+  afterAll(async () => {
+    for (const c of clients) { try { c.send('QUIT'); c.close(); } catch { /* */ } }
+    for (const p of pool) releaseTestAccount(p);
+  });
+
+  it.skipIf(GATED_152)('reads one parameter with \\s and \\: escapes', async () => {
+    expect((await runSearch(a, `in=${channel};text=alpha\\sone`)).rows.map(textOf)).toEqual(['alpha one']);
+    expect((await runSearch(a, `in=${channel};text=beta\\:two`)).rows.map(textOf)).toEqual(['beta;two']);
+  }, 30000);
+
+  it.skipIf(GATED_152)('text=a;text= searches with no text filter: the last value wins, empty too', async () => {
+    const rows = (await runSearch(a, `in=${channel};text=nothingsaidthis;text=`)).rows.map(textOf);
+    expect(rows).toEqual(['alpha one', 'beta;two']);
+  }, 30000);
+
+  it.skipIf(GATED_152)('a labeled SEARCH gets one labeled soju.im/search batch and no ACK', async () => {
+    const start = a.allLines.length;
+    a.send(`@label=srch1 SEARCH in=${channel};text=alpha`);
+    await sleep(2000);
+    const lines = a.allLines.slice(start);
+    const labeled = lines.filter(l => /(^@|;)label=srch1\b/.test(l));
+    expect(labeled, lines.join('\n')).toHaveLength(1);
+    expect(labeled[0]).toMatch(/ BATCH \+\S+ soju\.im\/search\b/);
+    expect(lines.some(l => / ACK\b/.test(l)), lines.join('\n')).toBe(false);
+  }, 30000);
+
+  it.skipIf(GATED_152)('an unlabeled SEARCH has no @label=', async () => {
+    const start = a.allLines.length;
+    a.send(`SEARCH in=${channel};text=alpha`);
+    await sleep(2000);
+    const lines = a.allLines.slice(start);
+    expect(lines.some(l => / BATCH /.test(l)), lines.join('\n')).toBe(true);
+    expect(lines.some(l => /(^@|;)label=/.test(l)), lines.join('\n')).toBe(false);
+  }, 30000);
 });
