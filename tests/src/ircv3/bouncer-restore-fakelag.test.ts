@@ -188,9 +188,11 @@ async function pongsInThreeSeconds(c: RawSocketClient): Promise<number> {
     const acc = await getTestAccount(); if (acc.fromPool) pool.push(acc.account);
     const first = await createSaslBouncerClient(acc.account, acc.password,
       { nick: uniqueNick('fpr'), host: PRIMARY_SERVER.host, port: LAG_PORT });
+    clients.push(first.client);
     expect(await bouncerEnableHold(first.client)).toBe(true);
     await sleep(8000);
     disconnectAbruptly(first.client);
+    clients.splice(clients.indexOf(first.client), 1);
     await sleep(500);
 
     const linksBefore = await (async () => {
@@ -198,9 +200,14 @@ async function pongsInThreeSeconds(c: RawSocketClient): Promise<number> {
       try { return await linkedServers(o); } finally { o.send('QUIT'); o.close(); }
     })();
     execSync('docker restart nefarious', { encoding: 'utf8' });
-    await waitForNefariousReady();
-    await sleep(35_000);
-    await restoreLinks(linksBefore);
+    /* Relink even if the restart doesn't come back clean: later suites need
+     * the leaf and services. */
+    try {
+      await waitForNefariousReady();
+      await sleep(35_000);
+    } finally {
+      await restoreLinks(linksBefore);
+    }
 
     /* SET after the restart: the conf's values are what a restart keeps. */
     oper = await ircOper();

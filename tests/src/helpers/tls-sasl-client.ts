@@ -43,7 +43,14 @@ export async function createTlsClient(nick: string, options: {
     }
   });
   sock.on('error', () => { /* a closing test socket */ });
-  await new Promise<void>((res, rej) => { sock.once('secureConnect', () => res()); sock.once('error', rej); });
+  const close = () => { try { sock.destroy(); } catch { /* */ } };
+  try {
+    await new Promise<void>((res, rej) => {
+      const timer = setTimeout(() => rej(new Error(`TLS handshake to ${host}:${port} timed out`)), 10_000);
+      sock.once('secureConnect', () => { clearTimeout(timer); res(); });
+      sock.once('error', e => { clearTimeout(timer); rej(e); });
+    });
+  } catch (e) { close(); throw e; }
 
   const waitFor = async (re: RegExp, from = 0, ms = 10_000) => {
     const end = Date.now() + ms;
@@ -55,26 +62,31 @@ export async function createTlsClient(nick: string, options: {
     throw new Error(`timed out waiting for ${re}; since ${from}: ${JSON.stringify(lines.slice(from))}`);
   };
 
-  const req = [...(account ? ['sasl'] : []), ...caps];
-  if (req.length) send(`CAP REQ :${req.join(' ')}`);
-  send(`NICK ${nick}`);
-  send(`USER ${nick} 0 * :tls client`);
-  if (req.length) await waitFor(/ CAP .* ACK /);
-  if (account) {
-    send('AUTHENTICATE PLAIN');
-    await waitFor(/^AUTHENTICATE/);
-    send('AUTHENTICATE ' + Buffer.from(`${account}\0${account}\0${password}`).toString('base64'));
-    await waitFor(/ 903 /);
-  }
-  if (req.length) send('CAP END');
-  const welcome = await waitFor(/ 001 /, 0, 15_000);
-  await sleep(1000);
+  /* Registration can fail (CAP NAK, SASL refused, no 001): the caller never
+   * gets a client to close then, so close the socket here. */
+  let welcome: string;
+  try {
+    const req = [...(account ? ['sasl'] : []), ...caps];
+    if (req.length) send(`CAP REQ :${req.join(' ')}`);
+    send(`NICK ${nick}`);
+    send(`USER ${nick} 0 * :tls client`);
+    if (req.length) await waitFor(/ CAP .* ACK /);
+    if (account) {
+      send('AUTHENTICATE PLAIN');
+      await waitFor(/^AUTHENTICATE/);
+      send('AUTHENTICATE ' + Buffer.from(`${account}\0${account}\0${password}`).toString('base64'));
+      await waitFor(/ 903 /);
+    }
+    if (req.length) send('CAP END');
+    welcome = await waitFor(/ 001 /, 0, 15_000);
+    await sleep(1000);
+  } catch (e) { close(); throw e; }
   return {
     nick: welcome.split(' ')[2] ?? nick,
     lines,
     send,
     waitFor,
-    close: () => { try { sock.destroy(); } catch { /* */ } },
+    close,
   };
 }
 
@@ -83,4 +95,12 @@ export async function tlsEnableHold(c: TlsClient): Promise<void> {
   const start = c.lines.length;
   c.send('BOUNCER SET HOLD on');
   await c.waitFor(/SETTINGS_UPDATED|SESSION_CREATED| NOTE /, start, 5000);
+}
+
+/** BOUNCER SET HOLD off, waited for, so closing next doesn't drop it and
+ * leave a held session on a pooled account. */
+export async function tlsDisableHold(c: TlsClient): Promise<void> {
+  const start = c.lines.length;
+  c.send('BOUNCER SET HOLD off');
+  await c.waitFor(/SETTINGS_UPDATED| NOTE /, start, 5000);
 }

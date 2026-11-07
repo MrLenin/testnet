@@ -8,7 +8,7 @@ import {
   createSaslBouncerClient,
   createRawSocketClient,
 } from '../helpers/index.js';
-import { createTlsClient, tlsEnableHold, type TlsClient } from '../helpers/tls-sasl-client.js';
+import { createTlsClient, tlsEnableHold, tlsDisableHold, type TlsClient } from '../helpers/tls-sasl-client.js';
 
 /**
  * soju.im/search (https://codeberg.org/emersion/soju/src/branch/master/doc/ext/search.md):
@@ -233,18 +233,27 @@ async function say(c: RawSocketClient, chan: string, text: string): Promise<stri
   throw new Error(`no echo with a msgid for "${text}"`);
 }
 
+/** The lines from `start` up to the close of the first search batch opened
+ * after it, once that batch has closed; throws if it doesn't close in time. */
+async function searchLines(c: RawSocketClient, start: number, what: string, ms = 5000): Promise<string[]> {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    await sleep(150);
+    const lines = c.allLines.slice(start);
+    const open = lines.find(l => / BATCH \+\S+ (soju\.im\/)?search\b/.test(l));
+    const id = open && / BATCH \+(\S+) /.exec(open)?.[1];
+    const end = id ? lines.findIndex(l => / BATCH -(\S+)/.exec(l)?.[1] === id) : -1;
+    if (end >= 0) return lines.slice(0, end + 1);
+  }
+  throw new Error(`no closed search batch for ${what}:\n${c.allLines.slice(start).join('\n')}`);
+}
+
 /** Send a SEARCH and return its batch once it closes. */
 async function runSearch(c: RawSocketClient, args: string): Promise<Batch> {
   const start = c.allLines.length;
   c.send(`SEARCH ${args}`);
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    await sleep(150);
-    if (c.allLines.slice(start).some(l => / BATCH -/.test(l))) break;
-  }
-  const batch = searchBatch(c, start);
-  expect(batch, `no search batch for ${args}:\n${c.allLines.slice(start).join('\n')}`).toBeTruthy();
-  return batch!;
+  await searchLines(c, start, args);
+  return searchBatch(c, start)!;
 }
 
 const uniq = () => Math.random().toString(36).slice(2, 8);
@@ -302,9 +311,19 @@ describe('#149 SEARCH: redacted rows', () => {
     const word = `kids${uniq()}`;
     const replied = await say(a, channel, `${word} replied to`);
     const reacted = await say(a, channel, `${word} reacted to`);
+    const at = a.allLines.length;
     b.send(`@+draft/reply=${replied} PRIVMSG ${channel} :a reply`);
     b.send(`@+draft/reply=${reacted};+draft/react=ok TAGMSG ${channel}`);
-    await sleep(1000);
+    /* Both must reach the channel with their parent's msgid, or the parents
+     * are just plain lines and this proves nothing. */
+    const deadline = Date.now() + 5000;
+    const got = () => a.allLines.slice(at);
+    const hasReply = () => got().some(l => l.includes(`+draft/reply=${replied}`) && / PRIVMSG /.test(l));
+    const hasReact = () => got().some(l => l.includes(`+draft/reply=${reacted}`) && / TAGMSG /.test(l));
+    while (Date.now() < deadline && !(hasReply() && hasReact())) await sleep(100);
+    expect(hasReply(), `the reply reached the channel:\n${got().join('\n')}`).toBe(true);
+    expect(hasReact(), `the reaction reached the channel:\n${got().join('\n')}`).toBe(true);
+    await sleep(500);
     expect((await runSearch(a, `in=${channel} text=${word}`)).rows.map(textOf))
       .toEqual([`${word} replied to`, `${word} reacted to`]);
   }, 30000);
@@ -317,7 +336,7 @@ describe('#150 SEARCH: a plaintext alias with no in=', () => {
   let fromPool = false;
 
   afterAll(async () => {
-    try { primary?.send('BOUNCER SET HOLD off'); await sleep(300); } catch { /* */ }
+    try { if (primary) await tlsDisableHold(primary); } catch { /* */ }
     for (const c of [device, primary]) { try { c?.send('QUIT'); c?.close(); } catch { /* */ } }
     if (fromPool) releaseTestAccount(account);
   });
@@ -421,8 +440,9 @@ describe('#152 SEARCH: the soju form and its batch', () => {
   it.skipIf(GATED_152)('a labeled SEARCH gets one labeled soju.im/search batch and no ACK', async () => {
     const start = a.allLines.length;
     a.send(`@label=srch1 SEARCH in=${channel};text=alpha`);
-    await sleep(2000);
-    const lines = a.allLines.slice(start);
+    const lines = await searchLines(a, start, 'labeled');
+    await sleep(500);   // room for a stray ACK after the batch
+    lines.push(...a.allLines.slice(start + lines.length));
     const labeled = lines.filter(l => /(^@|;)label=srch1\b/.test(l));
     expect(labeled, lines.join('\n')).toHaveLength(1);
     expect(labeled[0]).toMatch(/ BATCH \+\S+ soju\.im\/search\b/);
@@ -432,9 +452,7 @@ describe('#152 SEARCH: the soju form and its batch', () => {
   it.skipIf(GATED_152)('an unlabeled SEARCH has no @label=', async () => {
     const start = a.allLines.length;
     a.send(`SEARCH in=${channel};text=alpha`);
-    await sleep(2000);
-    const lines = a.allLines.slice(start);
-    expect(lines.some(l => / BATCH /.test(l)), lines.join('\n')).toBe(true);
+    const lines = await searchLines(a, start, 'unlabeled');
     expect(lines.some(l => /(^@|;)label=/.test(l)), lines.join('\n')).toBe(false);
   }, 30000);
 });

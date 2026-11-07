@@ -3,7 +3,7 @@ import {
   RawSocketClient, uniqueNick, getTestAccount, releaseTestAccount,
   createSaslBouncerClient, SECONDARY_SERVER,
 } from '../helpers/index.js';
-import { createTlsClient, tlsEnableHold, type TlsClient } from '../helpers/tls-sasl-client.js';
+import { createTlsClient, tlsEnableHold, tlsDisableHold, type TlsClient } from '../helpers/tls-sasl-client.js';
 
 /**
  * +Z and a plaintext bouncer device (evilnet/nefarious2 #159, #162).  The bed
@@ -18,11 +18,14 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 describe('#162 CHMODE_Z_STRICT counts a plaintext bouncer alias', () => {
   const tlsClients: TlsClient[] = [];
+  const held: TlsClient[] = [];
   const rawClients: RawSocketClient[] = [];
   const pool: string[] = [];
 
   afterEach(async () => {
-    for (const c of tlsClients) { try { c.send('BOUNCER SET HOLD off'); c.close(); } catch { /* */ } }
+    for (const c of held) { try { await tlsDisableHold(c); } catch { /* */ } }
+    held.length = 0;
+    for (const c of tlsClients) c.close();
     tlsClients.length = 0;
     for (const c of rawClients) { try { c.close(); } catch { /* */ } }
     rawClients.length = 0;
@@ -41,6 +44,7 @@ describe('#162 CHMODE_Z_STRICT counts a plaintext bouncer alias', () => {
     if (acc.fromPool) pool.push(acc.account);
     const primary = await createTlsClient(uniqueNick('zpr'), { account: acc.account, password: acc.password });
     tlsClients.push(primary);
+    held.push(primary);
     await tlsEnableHold(primary);
     primary.send(`JOIN ${chan}`);
     await sleep(500);

@@ -134,10 +134,12 @@ describe('#158 fake-lag pool', () => {
   }, 180_000);
 
   it.skipIf(GATED)('an anonymous client gets nothing', async () => {
-    /* 6675 requires SASL, so an anonymous client is on the unlagged 6667, or
-     * on a conf that lags it: this pins that no pool draw happens for it, by
-     * what's left for a logged-in client straight after. */
-    await fillPool(600, 60);
+    /* 6675 requires SASL, so an anonymous client is on 6667.  The pool is
+     * capped at one borrow, so a draw of any size leaves the logged-in client
+     * short.  LIMIT: 6667 is unlagged on this bed, so the anonymous client
+     * may never reach the draw path at all; a real check needs a lagged
+     * class without require_sasl in the bed's ircd.conf. */
+    await fillPool(60, 60);
     const anon = await createRawSocketClient(PRIMARY_SERVER.host, PRIMARY_SERVER.port);
     clients.push(anon);
     await anon.capLs();

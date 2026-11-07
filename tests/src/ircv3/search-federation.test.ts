@@ -227,8 +227,15 @@ describe('#152 SEARCH federation: line breaks stay off the wire', () => {
     const lines = c.allLines.slice(start);
     expect(lines.some(l => / FAIL SEARCH INVALID_PARAMS /.test(l)), lines.join('\n')).toBe(true);
     expect(lines.some(l => / BATCH /.test(l)), lines.join('\n')).toBe(false);
-    /* The bed's debug log shows what was sent to a server. */
-    const fanOut = await getP10Logs('nefarious', new RegExp(`CH Q .*${chan.slice(1)}.*text=`), '30s');
-    expect(fanOut, fanOut.join('\n')).toEqual([]);
+    /* The bed's debug log shows what was sent to a server.  getP10Logs gives
+     * [] when the log can't be read, so a valid search must show up there
+     * first, or "no CH Q" proves nothing. */
+    const fanOut = new RegExp(`CH Q .*${chan.slice(1)}.*text=`);
+    const before = await getP10Logs('nefarious', fanOut, '30s');
+    expect(before, before.join('\n')).toEqual([]);
+    await search(c, `in=${chan} text=control`);
+    await sleep(500);
+    const control = await getP10Logs('nefarious', fanOut, '30s');
+    expect(control.length, 'a valid search fans out a CH Q the log can see').toBeGreaterThan(0);
   }, 30000);
 });
