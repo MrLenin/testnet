@@ -394,11 +394,15 @@ describe('#151 SEARCH: case folds in UTF-8', () => {
     await say(a, channel, 'ПРИВЕТ Мир');
     await say(a, channel, 'CAFÉ crème');
     await say(a, channel, 'Привет xylo');
+    await say(a, channel, '😀 smile');
     await sleep(800);
     expect((await runSearch(a, `in=${channel} text=привет`)).rows.map(textOf)).toEqual(['ПРИВЕТ Мир', 'Привет xylo']);
     expect((await runSearch(a, `in=${channel} text=café`)).rows.map(textOf)).toEqual(['CAFÉ crème']);
     expect((await runSearch(a, `in=${channel} text=CRÈME`)).rows.map(textOf)).toEqual(['CAFÉ crème']);
     expect((await runSearch(a, `in=${channel} text=XYLO`)).rows.map(textOf)).toEqual(['Привет xylo']);
+    // П is D0 9F and the emoji is F0 9F 98 80: the old byte-wise Latin-1
+    // fold mapped D0 to F0, so П found the emoji row through a shared byte.
+    expect((await runSearch(a, `in=${channel} text=П`)).rows.map(textOf)).toEqual(['ПРИВЕТ Мир', 'Привет xylo']);
   }, 30000);
 });
 
