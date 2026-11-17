@@ -18,8 +18,10 @@ import {
  *             abuse) are no longer exploitable.
  *
  * Pin the cap behavior at the level the plan promises:
- *   - Tag region: 4095 bytes (client direction) hard-kill on overrun.
- *   - Msg region: FULL_MSG_SIZE (4096) hard-kill on overrun.
+ *   - Tag region: 4095 bytes (client direction); a line over it gets 417
+ *     ERR_INPUTTOOLONG and the client stays (message-tags MUST).
+ *   - Msg region: 512 bytes; a line over it gets 417 the same way.
+ *   - A single line past 64 KiB is a flood: Excess Flood: line too long.
  *   - Sustained flood: get_recvq() raw, no per-CAP boost arithmetic.
  *   - Multiline cap continues to live in m_batch.c as MULTILINE_MAX_BYTES FAIL.
  *   - Non-CAP @-line: silently rejected by parse.c.
@@ -68,7 +70,7 @@ describe('per-class recvQ flood enforcement', () => {
     poolAccounts.length = 0;
   });
 
-  it('kills mid-line on >4095 tag bytes from CAP-active client', async () => {
+  it('answers 417 to >4095 tag bytes and keeps the client', async () => {
     const client = track(
       await createRawSocketClient(PRIMARY_SERVER.host, PRIMARY_SERVER.port),
     );
@@ -78,18 +80,31 @@ describe('per-class recvQ flood enforcement', () => {
     client.register(uniqueNick('flood'));
     await client.waitForNumeric('001');
 
-    // '@' + 4097 'x' = 4098 bytes of tag region.  No terminator —
-    // we expect the kill to fire mid-line.
-    const huge = '@' + 'x'.repeat(4097);
-    client.send(huge); // RawSocketClient appends \r\n; we want NO terminator
-    // RawSocketClient send() may add \r\n; we instead want to push raw
-    // bytes.  Probe how send() handles this by also explicitly closing
-    // with no terminator: even if \r\n was added, the 4098 bytes of
-    // tag region were already over cap before the terminator.
+    // '@' + 4097 'x' = 4098 bytes of tag region: over the cap.
+    client.send('@' + 'x'.repeat(4097) + ' PING :cut');
+    await client.waitForNumeric('417', 3000);
 
+    // Still connected, and the cut line never ran.
+    client.send('PING :after');
+    const pong = await client.waitForCommand('PONG', 3000);
+    expect(pong.params[1]).toBe('after');
+    expect(client.allLines.some(l => / PONG .*:cut$/.test(l))).toBe(false);
+  });
+
+  it('drops the client for a single line past 64 KiB', async () => {
+    const client = track(
+      await createRawSocketClient(PRIMARY_SERVER.host, PRIMARY_SERVER.port),
+    );
+    await client.capLs();
+    await client.capReq(['message-tags']);
+    client.capEnd();
+    client.register(uniqueNick('flood'));
+    await client.waitForNumeric('001');
+
+    client.send('PING :' + 'z'.repeat(70000));
     const closed = await waitForClose(client, 5000);
-    expect(closed, `expected server-side kill on >4095 byte tag region.\nLines: ${client.allLines.join('\n')}`).toBe(true);
-    expect(client.allLines.some(l => /tag region/.test(l))).toBe(true);
+    expect(closed, `expected Excess Flood on a 70000-byte line.\nLines: ${client.allLines.join('\n')}`).toBe(true);
+    expect(client.allLines.some(l => /line too long/.test(l))).toBe(true);
   });
 
   it('accepts exactly 4095 tag bytes from CAP-active client', async () => {
@@ -217,12 +232,12 @@ describe('per-class recvQ flood enforcement', () => {
     }
   });
 
-  it('body region capped at 512 for client direction too (IRCv3 spec compliance)', async () => {
+  it('body region capped at 512 for client direction too, answered with 417', async () => {
     // IRCv3 message-tags spec keeps the body at "the standard 510 byte
     // tag-less message limit" — only tags grow.  Nefarious's own
     // outbound P10 chunks at BUFSIZE per line, so the inbound classifier
     // applies the same cap.  Anything above 512 bytes in the message
-    // region (post-tag, pre-CRLF) trips RECV_CLASSIFY_MSG_OVERRUN.
+    // region (post-tag, pre-CRLF) is cut (recv_clip) and gets 417.
     const client = track(
       await createRawSocketClient(PRIMARY_SERVER.host, PRIMARY_SERVER.port),
     );
@@ -238,12 +253,13 @@ describe('per-class recvQ flood enforcement', () => {
     const pong = await client.waitForCommand('PONG', 3000);
     expect(pong.params[1]).toBe(ok);
 
-    // 600-byte body — exceeds cap.  Must kill the connection with the
-    // classifier's named reason.
+    // 600-byte body — exceeds cap.  417, the line does not run, and the
+    // client stays.
     const oversized = 'b'.repeat(600);
     client.send(`PING :${oversized}`);
-    const closed = await waitForClose(client, 5000);
-    expect(closed, `expected server-side kill on >512 byte msg region`).toBe(true);
-    expect(client.allLines.some(l => /message region/.test(l))).toBe(true);
+    await client.waitForNumeric('417', 3000);
+    client.send('PING :after');
+    const after = await client.waitForCommand('PONG', 3000);
+    expect(after.params[1]).toBe('after');
   });
 });

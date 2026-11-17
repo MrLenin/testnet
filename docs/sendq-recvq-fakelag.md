@@ -13,18 +13,24 @@ loop (`ircd/s_bsd.c:1537`). Two checks guard it.
 
 ### Per-line caps (before the append)
 
-The byte classifier (`include/recv_classify.h`, called from `read_packet`)
-walks the inbound stream and tracks the size of the `@tag` region and the
-message region of each line. Caps depend on the direction:
+The byte classifier (`include/recv_classify.h`, called from `read_packet`
+and `ws_deliver`) walks the inbound stream and tracks the size of the
+`@tag` region and the message region of each line. Caps depend on the
+direction:
 
 | Direction | Tag region | Message region |
 |---|---|---|
-| Client | 4095 | `FULL_MSG_SIZE` = 8191 + 512 = 8703 |
+| Client | 4095 | 512 |
 | Server / handshake | 8191 | 512 (legacy P10 body) |
 
-Overrun exits the connection with `Excess Flood: tag region too large` or
-`Excess Flood: message region too large` (clients) /
-`Excess Flood: S2S body exceeds 512` (servers).
+Clients (`recv_clip()`): bytes past one over a region's cap are dropped as
+they arrive, and `parse_client()` answers the cut line with 417
+`ERR_INPUTTOOLONG` (no label; charged fake lag; an open multiline batch
+fails). The client stays. Only a single line past 64 KiB exits with
+`Excess Flood: line too long`.
+
+Servers (`recv_classify()`): overrun exits the link with `Excess Flood: tag
+region too large` / `Excess Flood: S2S body exceeds 512`.
 
 ### Queue-depth cap
 
