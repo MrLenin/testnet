@@ -1,4 +1,4 @@
-# `evilnet/channel-relocate` — consent-based channel renaming
+# `evilnet.github.io/channel-relocate` — consent-based channel renaming
 
 Status: **draft** (vendored extension, `evilnet/` namespace)
 
@@ -72,7 +72,7 @@ implement both capabilities. [`message-tags`][mt] is recommended.
 
 ### Capability
 
-    evilnet/channel-relocate
+    evilnet.github.io/channel-relocate
 
 No value. Advertised and negotiated per [`capability-negotiation`][cap].
 Negotiating it means: *"my client will present relocation notices to the
@@ -83,7 +83,7 @@ user as an actionable prompt, and will not assume it has been moved."*
 ### `RELOCATE` message
 
 Sent by the server to a channel member who is **not** being moved and who has
-negotiated `evilnet/channel-relocate`:
+negotiated `evilnet.github.io/channel-relocate`:
 
     :<source> RELOCATE <old-channel> <new-channel> [:<reason>]
 
@@ -172,14 +172,14 @@ At rename time each member of the old channel falls into exactly one class:
 | Class | Moved? | Notification |
 |---|---|---|
 | The issuer of the rename | yes | per rename caps (`RENAME` or `PART`+`JOIN`) |
-| Members with `evilnet/channel-relocate` | no | `RELOCATE` |
+| Members with `evilnet.github.io/channel-relocate` | no | `RELOCATE` |
 | All other members | no | server `NOTICE` to the old channel |
 
 The issuer is the only member moved by the server: issuing the rename is
-consent. Every other member stays; those with `evilnet/channel-relocate`
+consent. Every other member stays; those with `evilnet.github.io/channel-relocate`
 receive a `RELOCATE` prompt and the rest a fallback `NOTICE`, and any of them
 follows by their own `JOIN <new-channel>` (see *Follow preference*). A member
-holding `draft/channel-rename` but not `evilnet/channel-relocate` is an
+holding `draft/channel-rename` but not `evilnet.github.io/channel-relocate` is an
 ordinary stayer (a `NOTICE`); the rename capability only governs how a *move*
 is presented, and non-issuers do not move server-side.
 
@@ -240,7 +240,7 @@ channel itself cannot be renamed.
 
 Channel `#oldname` is renamed to `#newname` by `alice` (reason
 `moving!`). Members: `alice` (issuer, has `draft/channel-rename`), `bob` (has
-`draft/channel-rename` only), `carol` (has `evilnet/channel-relocate`), `dan`
+`draft/channel-rename` only), `carol` (has `evilnet.github.io/channel-relocate`), `dan`
 (no relevant caps).
 
 Alice (the issuer — the only member moved server-side — has the rename cap):

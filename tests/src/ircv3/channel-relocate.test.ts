@@ -8,7 +8,7 @@ import {
 } from '../helpers/index.js';
 
 /**
- * evilnet/channel-relocate E2E — consent-based channel renaming.
+ * evilnet.github.io/channel-relocate E2E — consent-based channel renaming.
  *
  * Spec: docs/specs/channel-relocate.md (vendored, evilnet/ namespace).
  * Server side: nefarious/ircd/m_rename.c (relocate_execute, tombstone
@@ -69,7 +69,9 @@ const LEGACY_BLOCKERS = [
   'leaf5.fractalrealities.net',
 ];
 
-const RELOCATE_CAP = 'evilnet/channel-relocate';
+// The DNS-prefixed name since nefarious2 #289. Builds before it offer only
+// the old 'evilnet/channel-relocate': run those with RELOCATE_CAP set to it.
+const RELOCATE_CAP = process.env.RELOCATE_CAP ?? 'evilnet.github.io/channel-relocate';
 const RENAME_CAP = 'draft/channel-rename';
 
 async function settle(ms: number): Promise<void> {
@@ -167,7 +169,7 @@ function sawPartFrom(client: X3Client, channel: string, nick: string): boolean {
   );
 }
 
-describe('evilnet/channel-relocate (consent-based channel renaming)', () => {
+describe('evilnet.github.io/channel-relocate (consent-based channel renaming)', () => {
   const clients: X3Client[] = [];
   const track = (c: X3Client): X3Client => {
     clients.push(c);
@@ -352,7 +354,7 @@ describe('evilnet/channel-relocate (consent-based channel renaming)', () => {
     // fallback NOTICE, never a RENAME (which would falsely assert a move).
     const bobNick = `rlbob${sfx}`;
     const bob = track(await connectClient(bobNick, [RENAME_CAP]));
-    // Class 3 ("carol"): evilnet/channel-relocate — must NOT be moved, gets RELOCATE.
+    // Class 3 ("carol"): evilnet.github.io/channel-relocate — must NOT be moved, gets RELOCATE.
     const relocNick = `rlrel${sfx}`;
     const relocClient = track(await connectClient(relocNick, [RELOCATE_CAP]));
     // Class 4 ("dan"): no relevant caps at all — NOTICE fallback, must NOT be
