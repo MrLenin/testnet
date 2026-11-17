@@ -28,7 +28,7 @@ git submodule update --init --recursive
 Configuration files are stored in `data/` and mounted directly into containers:
 
 - `data/local.conf` - Nefarious IRCd configuration (mounted to container)
-- `data/x3.conf` - X3 services configuration (mounted to container)
+- X3's configuration is generated in the image from `x3/docker/x3.conf-dist` and the `X3_*` variables in `.env.local` (see `docker-compose.yml`)
 - `.env` - Environment variables (mostly unused; configs are hardcoded in the above files)
 - `.env.local` - Local overrides (not committed to repo)
 
