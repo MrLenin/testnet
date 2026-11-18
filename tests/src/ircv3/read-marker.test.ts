@@ -324,9 +324,9 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
       );
       expect(response.command).toBe('MARKREAD');
       // The marker can be in ISO or Unix-fraction form depending on
-      // server config; just verify it's not the empty "*" sentinel.
-      expect(response.raw, 'GET should return previously-set value, not the empty marker')
-        .not.toMatch(/timestamp=\*/);
+      // server config; just verify it's not the bare "*" (no marker).
+      expect(response.params[1], 'GET should return previously-set value, not the empty marker')
+        .not.toBe('*');
 
       client.send('QUIT');
     });
@@ -367,9 +367,10 @@ describe('IRCv3 Read Marker (draft/read-marker)', () => {
         msg => msg.command === 'MARKREAD' && msg.raw.includes(channel),
         3000
       );
-      expect(response.raw,
+      // No marker known: the spec's literal "*", not "timestamp=*".
+      expect(response.params[1],
         'A fresh ephemeral session must not see another session\'s markers'
-      ).toMatch(/timestamp=\*/);
+      ).toBe('*');
 
       second.send('QUIT');
     });
