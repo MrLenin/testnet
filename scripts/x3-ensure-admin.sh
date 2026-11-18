@@ -19,7 +19,6 @@ OPER_PASS="${OPER_PASS:-shmoo}"
 X3_ADMIN="${X3_ADMIN:-testadmin}"
 X3_ADMIN_PASS="${X3_ADMIN_PASS:-testadmin123}"
 X3_ADMIN_EMAIL="${X3_ADMIN_EMAIL:-admin@test.local}"
-X3_CONF="${X3_CONF:-/data/x3.conf}"
 KEYCLOAK_URL="${KEYCLOAK_URL:-http://keycloak:8080}"
 KEYCLOAK_REALM="${KEYCLOAK_REALM:-testnet}"
 

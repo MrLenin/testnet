@@ -795,9 +795,9 @@ services:
     volumes:
       - x3_data:/x3/data
       # NOTE: x3.conf is generated in-image from x3.conf-dist + X3_* env vars
-      # (.env.local) via dockerentrypoint.sh. Do NOT bind-mount ./data/x3.conf over
-      # it — that static copy is pre-templatization and shadows the env-driven config
-      # (it's how LDAP kept reverting to disabled). LDAP/identity live in .env.local.
+      # (.env.local) via dockerentrypoint.sh; do not bind-mount a static x3.conf over
+      # it (a pre-templatization copy is how LDAP kept reverting to disabled).
+      # LDAP/identity live in .env.local.
       - ./x3cores:/x3/cores  # Core dump directory
     # nefarious's healthcheck is just pgrep, so it goes "healthy" before the S2S port
     # (4496) is listening -> x3 can connect too early and exhaust its uplink retries.

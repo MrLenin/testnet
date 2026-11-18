@@ -25,8 +25,7 @@ import {
  *    etc.) hardcode 'ChanServ' and do NOT work against this bed's bot, so this
  *    file talks to X3 with raw serviceCmd()/send() calls instead of those
  *    helpers. (The container's live x3.conf is generated in-image from
- *    x3.conf-dist + X3_* env vars per docker-compose.yml — the checked-in
- *    data/x3.conf with nick "ChanServ" is NOT what the container runs.) This
+ *    x3.conf-dist + X3_* env vars per docker-compose.yml.) This
  *    is worth folding into x3-client.ts / the x3-services skill later; out of
  *    scope for this suite.
  *  - testadmin (X3_ADMIN) has max_owned=2. This suite is written to hold at
