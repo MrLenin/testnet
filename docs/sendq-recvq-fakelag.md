@@ -26,7 +26,8 @@ direction:
 Clients (`recv_clip()`): bytes past one over a region's cap are dropped as
 they arrive, and `parse_client()` answers the cut line with 417
 `ERR_INPUTTOOLONG` (no label; charged fake lag; an open multiline batch
-fails). The client stays. Only a single line past 64 KiB exits with
+fails). An overlong `AUTHENTICATE` gets SASL's 905 instead, and its
+exchange ends. The client stays. Only a single line past 64 KiB exits with
 `Excess Flood: line too long`.
 
 Servers (`recv_classify()`): overrun exits the link with `Excess Flood: tag
