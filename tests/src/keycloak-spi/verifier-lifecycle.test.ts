@@ -227,3 +227,46 @@ describe('legacy attribute verifiers on a READ_ONLY LDAP-linked user', () => {
     for (const k of X3_SCRAM) expect(attrs[k]).toBeUndefined();
   });
 });
+
+// A password grant proves the password early in its request and derives the verifier after its commit; a password
+// change committing in between must not leave a verifier of the old password served as current.
+describe('logins with the old password racing a password change', () => {
+  const realm = uniqueRealm('race');
+  const ROUNDS = 5;
+  const LOOPS = 6;
+  let t: string;
+  beforeAll(async () => {
+    await createRealm(realm, {passwordPolicy: 'scramSha256'});
+    runRealmSetup(realm, ['--service-client', 'ircd']);
+    t = await ircdToken(realm);
+  });
+  afterAll(async () => { await deleteRealm(realm); });
+
+  it('leave no verifier of the old password behind', async () => {
+    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+    for (let round = 0; round < ROUNDS; round++) {
+      const name = `race${round}`;
+      const oldPw = `Old-Race-Pass-${round}`;
+      const newPw = `New-Race-Pass-${round}`;
+      const id = await createUser(realm, name);
+      expect(await setPassword(realm, id, oldPw)).toBe(204);
+      let stop = false;
+      let granted = 0;
+      const loop = async () => {
+        while (!stop) if ((await passwordGrant(realm, name, oldPw)).status === 200) granted++;
+      };
+      const loops = Array.from({length: LOOPS}, loop);
+      await sleep(400);
+      expect(await setPassword(realm, id, newPw)).toBe(204);
+      await sleep(400);
+      stop = true;
+      await Promise.all(loops);
+      await sleep(300);   // the after-commit jobs of the last grants
+      expect(granted).toBeGreaterThan(0);
+      expect((await passwordGrant(realm, name, oldPw)).status).toBe(401);
+      const s = (await ircCredentials(realm, name, t)).body.scram;
+      expect(verifierMatches(s, oldPw), `round ${round}: the verifier served is one of the old password`).toBe(false);
+      if (s !== undefined) expect(verifierMatches(s, newPw)).toBe(true);
+    }
+  }, 60_000);
+});
