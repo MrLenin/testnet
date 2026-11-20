@@ -50,10 +50,14 @@ async function accountCredentials(realm: string, token: string): Promise<any[]> 
   return r.json();
 }
 
-/** The user's `x509_fingerprints` as the admin API shows it (undefined when absent). */
+/** The user's `x509_fingerprints` as the admin API shows it, sorted (the stored values have no order); undefined when absent. */
 async function mirror(realm: string, userId: string): Promise<string[] | undefined> {
-  return (await getUser(realm, userId)).attributes?.[ATTR];
+  const values: string[] | undefined = (await getUser(realm, userId)).attributes?.[ATTR];
+  return values === undefined ? undefined : [...values].sort();
 }
+
+/** Expected attribute values, in the order `mirror` returns them. */
+const sorted = (...values: string[]): string[] => [...values].sort();
 
 /** The usernames the ircd's login lookup finds for a SHA-256. */
 async function lookup(realm: string, sha256: string): Promise<string[]> {
@@ -224,7 +228,7 @@ describe('certificate credential (irc-certfp)', () => {
 
     // Route (a): the account REST API.  A second certificate shows the removal touches only its own value.
     expect((await certfpAdd(realm, 'owner', { ...C2, name: 'desktop' }, m)).status).toBe(201);
-    expect(await mirror(realm, ownerId)).toEqual([C1.sha256, C2.sha256]);
+    expect(await mirror(realm, ownerId)).toEqual(sorted(C1.sha256, C2.sha256));
     const del = await fetch(`${URL}/realms/${realm}/account/credentials/${entry.userCredentialMetadatas[0].credential.id}`,
       { method: 'DELETE', headers: accountHeaders(token) });
     expect(del.status).toBe(204);
@@ -285,12 +289,36 @@ describe('certificate credential (irc-certfp)', () => {
     expect(await lookup(realm, C7.sha256)).toEqual(['adm']);
   });
 
-  it('the set-up tool declares the attribute: multivalued, seen by user and admin, edited by admin only', async () => {
+  it('the set-up tool declares the attribute: multivalued, seen by user and admin, edited by nobody', async () => {
     const profile = await adminJson('GET', `${realm}/users/profile`);
     const decl = profile.attributes.find((a: any) => a.name === ATTR);
     expect(decl.multivalued).toBe(true);
     expect([...decl.permissions.view].sort()).toEqual(['admin', 'user']);
-    expect(decl.permissions.edit).toEqual(['admin']);
+    expect(decl.permissions.edit).toEqual([]);
+  });
+
+  it('an admin-API user update leaves the attribute alone, and an admin cannot type a value', async () => {
+    const id = await createUser(realm, 'update');
+    const C = cert();
+    expect((await certfpAdd(realm, 'update', { ...C, name: 'laptop' }, m)).status).toBe(201);
+    // A partial update with an empty attribute map, as admin-API clients send when they change another field.
+    const partial = await admin('PUT', `${realm}/users/${id}`, { firstName: 'Changed', attributes: {} });
+    expect(partial.status).toBe(204);
+    expect((await getUser(realm, id)).firstName).toBe('Changed');
+    expect(await mirror(realm, id)).toEqual([C.sha256]);
+    expect(await lookup(realm, C.sha256)).toEqual(['update']);
+    // The full representation sent back with another field changed (what the admin console's save does).
+    expect(await putUser(realm, id, { lastName: 'Saved' })).toBe(204);
+    expect(await mirror(realm, id)).toEqual([C.sha256]);
+    // An attempt to type a value.
+    const rep = await getUser(realm, id);
+    const typed = await admin('PUT', `${realm}/users/${id}`,
+      { ...rep, attributes: { ...rep.attributes, [ATTR]: [CX.sha256] } });
+    expect(typed.status).toBe(400);
+    expect((await typed.json()).errorMessage).toBe('error-user-attribute-read-only');
+    expect(await mirror(realm, id)).toEqual([C.sha256]);
+    expect(await lookup(realm, CX.sha256)).toEqual([]);
+    expect(await lookup(realm, C.sha256)).toEqual(['update']);
   });
 
   it('the set-up tool restores the declaration and the listener, keeping the others, and a further run writes nothing', async () => {
@@ -301,8 +329,19 @@ describe('certificate credential (irc-certfp)', () => {
     runRealmSetup(realm, ['--service-client', 'ircd']);
     const decl = (await adminJson('GET', `${realm}/users/profile`)).attributes.find((a: any) => a.name === ATTR);
     expect([...decl.permissions.view].sort()).toEqual(['admin', 'user']);
-    expect(decl.permissions.edit).toEqual(['admin']);
+    expect(decl.permissions.edit).toEqual([]);
     expect([...(await adminJson('GET', realm)).eventsListeners].sort()).toEqual(['irc-certfp-mirror', 'jboss-logging']);
+    await expectNoWritesOnRerun(realm, ['--service-client', 'ircd']);
+  });
+
+  it('the set-up tool corrects a declaration an earlier version made (edit for admin), then writes nothing', async () => {
+    const profile = await adminJson('GET', `${realm}/users/profile`);
+    profile.attributes.find((a: any) => a.name === ATTR).permissions = { view: ['admin', 'user'], edit: ['admin'] };
+    await adminJson('PUT', `${realm}/users/profile`, profile);
+    runRealmSetup(realm, ['--service-client', 'ircd']);
+    const decl = (await adminJson('GET', `${realm}/users/profile`)).attributes.find((a: any) => a.name === ATTR);
+    expect([...decl.permissions.view].sort()).toEqual(['admin', 'user']);
+    expect(decl.permissions.edit).toEqual([]);
     await expectNoWritesOnRerun(realm, ['--service-client', 'ircd']);
   });
 
@@ -338,12 +377,12 @@ describe('certificate credential: a realm without the irc-certfp-mirror listener
     const del = await fetch(`${URL}/realms/${realm}/account/credentials/${await credentialIdOf(realm, id, C1)}`,
       { method: 'DELETE', headers: accountHeaders(token) });
     expect(del.status).toBe(204);
-    expect(await mirror(realm, id)).toEqual([C1.sha256, C2.sha256]);   // stale
+    expect(await mirror(realm, id)).toEqual(sorted(C1.sha256, C2.sha256));   // stale
     expect(await lookup(realm, C1.sha256)).toEqual(['stale']);          // the index still finds the removed certificate
     expect(await certFingerprints(realm, 'stale')).toEqual([C2.sha256]); // the authority does not list it
 
     expect((await admin('DELETE', `${realm}/users/${id}/credentials/${await credentialIdOf(realm, id, C2)}`)).status).toBe(204);
-    expect(await mirror(realm, id)).toEqual([C1.sha256, C2.sha256]);
+    expect(await mirror(realm, id)).toEqual(sorted(C1.sha256, C2.sha256));
     expect(await certFingerprints(realm, 'stale')).toEqual([]);
   });
 
@@ -406,7 +445,7 @@ describe('certificate credential: a user linked to a READ_ONLY LDAP provider', (
   it('gets a certificate added and mirrored, found by the lookup, and cleared on removal', async () => {
     expect((await certfpAdd(realm, uid, { ...C1, name: 'ldap laptop' }, m)).status).toBe(201);
     expect((await certfpAdd(realm, uid, { ...C2, name: 'ldap desktop' }, m)).status).toBe(201);
-    expect(await mirror(realm, id)).toEqual([C1.sha256, C2.sha256]);
+    expect(await mirror(realm, id)).toEqual(sorted(C1.sha256, C2.sha256));
     expect(await lookup(realm, C1.sha256)).toEqual([uid]);
     expect(await certFingerprints(realm, uid)).toEqual([C1.sha256, C2.sha256]);
 
