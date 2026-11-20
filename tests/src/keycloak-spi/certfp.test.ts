@@ -462,3 +462,65 @@ describe('certificate credential: a user linked to a READ_ONLY LDAP provider', (
     expect(await certFingerprints(realm, uid)).toEqual([]);
   });
 });
+
+describe('certificate credential: duplicates and names set outside the jar', () => {
+  const realm = uniqueRealm('certfp-dup');
+  let m: string;
+  let id: string;
+  const copies = async (c: { sha512: string }) => (await getCredentials(realm, id))
+    .filter((x: any) => x.type === 'irc-certfp' && JSON.parse(x.credentialData).sha512 === c.sha512).length;
+  beforeAll(async () => {
+    await createRealm(realm, { passwordPolicy: 'scramSha256' });
+    runRealmSetup(realm, ['--service-client', 'ircd']);
+    m = await ircdToken(realm);
+    id = await createUser(realm, 'dup');
+    expect(await setPassword(realm, id, 'Pw-dup-1')).toBe(204);
+  });
+  afterAll(async () => { await deleteRealm(realm); });
+
+  it('a certificate stored twice is listed once, and one removal removes every copy', async () => {
+    // Concurrent adds of one certificate by one user can store it more than once (no unique constraint).
+    let C = cert();
+    let stored = 0;
+    for (let attempt = 0; attempt < 6 && stored < 2; attempt++) {
+      C = cert();
+      await Promise.all(Array.from({ length: 8 }, () => certfpAdd(realm, 'dup', { ...C, name: 'twin' }, m)));
+      stored = await copies(C);
+      if (stored < 2) expect((await certfpDelete(realm, 'dup', C.sha512, m)).status).toBe(204);
+    }
+    expect(stored, 'concurrent adds stored the certificate more than once').toBeGreaterThan(1);
+    const listed = (await certfpList(realm, 'dup', m)).body.certificates;
+    expect(listed.map((x: any) => x.sha512)).toEqual([C.sha512]);
+    expect(await certFingerprints(realm, 'dup')).toEqual([C.sha256]);
+    // Concurrent rewrites can leave the attribute holding the value more than once; only that value, though.
+    expect([...new Set(await mirror(realm, id))]).toEqual([C.sha256]);
+
+    expect(await certfpDelete(realm, 'dup', C.sha512, m)).toEqual({ status: 204, body: null });
+    expect(await copies(C)).toBe(0);
+    expect((await certfpList(realm, 'dup', m)).body.certificates).toEqual([]);
+    expect(await certFingerprints(realm, 'dup')).toEqual([]);
+    expect(await mirror(realm, id)).toBeUndefined();
+    expect(await lookup(realm, C.sha256)).toEqual([]);
+  });
+
+  it('a name the jar would refuse, set through the account REST label route, is replied as (invalid name)', async () => {
+    const C = cert();
+    const named = await createUser(realm, 'named');
+    expect(await setPassword(realm, named, 'Pw-named-1')).toBe(204);
+    expect((await certfpAdd(realm, 'named', { ...C, name: 'laptop' }, m)).status).toBe(201);
+    const token = await accountToken(realm, 'named', 'Pw-named-1');
+    const credId = await credentialIdOf(realm, named, C);
+    const evil = 'evil\r\nPRIVMSG #x :' + 'y'.repeat(200);
+    const put = await fetch(`${URL}/realms/${realm}/account/credentials/${credId}/label`, {
+      method: 'PUT', headers: { ...accountHeaders(token), 'Content-Type': 'application/json' }, body: JSON.stringify(evil),
+    });
+    expect(put.status).toBe(204);
+    expect((await getCredentials(realm, named)).find((x: any) => x.id === credId).userLabel).toBe(evil);   // stored as set
+    const listed = (await certfpList(realm, 'named', m)).body.certificates;
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({ sha512: C.sha512, name: '(invalid name)' });
+    const again = await certfpAdd(realm, 'named', { ...C, name: 'laptop' }, m);   // the PUT reply carries the entry too
+    expect(again.status).toBe(200);
+    expect(again.body.name).toBe('(invalid name)');
+  });
+});
