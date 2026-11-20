@@ -39,10 +39,11 @@ describe('IRC credentials endpoint', () => {
 
   it('finds a username that needs percent-encoding', async () => {
     const t = await ircdToken(realm);
-    // Keycloak refuses a backtick in a username (error-username-invalid-character); '@' is accepted and is percent-encoded as %40.
-    await createUser(realm, 'a@b', {email: 'at-sign@spi-it.invalid'});
-    const r = await ircCredentials(realm, 'a@b', t);
-    expect(r.status).toBe(200); expect(r.body.username).toBe('a@b');
+    // A multi-byte UTF-8 name: the segment goes out as jos%C3%A9 / JOS%C3%89 and must be decoded, in two letter cases.
+    const id = await createUser(realm, 'josé', {email: 'jose@spi-it.invalid'});
+    const lower = await ircCredentials(realm, 'josé', t);
+    const upper = await ircCredentials(realm, 'JOSÉ', t);
+    for (const r of [lower, upper]) { expect(r.status).toBe(200); expect(r.body.username).toBe('josé'); expect(r.body.id).toBe(id); }
   });
 
   it('reports disabled and incomplete accounts', async () => {
