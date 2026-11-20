@@ -22,6 +22,7 @@ describe('IRC credentials endpoint', () => {
     const r = await ircCredentials(realm, 'ALICE', t);
     expect(r.status).toBe(200); expect(r.body.username).toBe('alice'); expect(r.body.id).toBe(aliceId);
     expect(r.body.state).toBe('ok'); expect(r.body.reasons).toEqual([]);
+    expect(r.body.certFingerprints).toEqual([]);   // always present; see certfp.test.ts for a user with certificates
     const none = await ircCredentials(realm, 'nobody', t);
     expect(none.status).toBe(404); expect(none.body).toEqual({error: 'user_not_found'});
   });

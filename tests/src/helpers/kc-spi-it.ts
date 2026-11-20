@@ -117,14 +117,69 @@ export async function passwordGrant(realm: string, username: string, password: s
   return { status: r.status, body: await r.json().catch(() => null) };
 }
 
-export async function ircdToken(realm: string): Promise<string> {
+/** A client-credentials token of one of the realm's confidential clients (`ircd`, `reader`). */
+export async function serviceToken(realm: string, clientId: string): Promise<string> {
   const r = await fetch(`${URL}/realms/${realm}/protocol/openid-connect/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'client_credentials', client_id: 'ircd', client_secret: CLIENT_SECRET }),
+    body: new URLSearchParams({ grant_type: 'client_credentials', client_id: clientId, client_secret: CLIENT_SECRET }),
   });
-  if (!r.ok) throw new Error(`ircdToken ${realm}: ${r.status}`);
+  if (!r.ok) throw new Error(`serviceToken ${realm} ${clientId}: ${r.status}`);
   return (await r.json()).access_token;
+}
+
+export async function ircdToken(realm: string): Promise<string> {
+  return serviceToken(realm, 'ircd');
+}
+
+/** Grants the realm role `role` to the service account of the client `clientId`. */
+export async function grantRealmRole(realm: string, clientId: string, role: string): Promise<void> {
+  const token = await adminToken();
+  const get = async (path: string) => {
+    const r = await fetch(`${URL}/admin/realms/${realm}/${path}`, auth(token));
+    if (!r.ok) throw new Error(`grantRealmRole GET ${path}: ${r.status}`);
+    return r.json();
+  };
+  const [client] = await get(`clients?clientId=${encodeURIComponent(clientId)}&search=false`);
+  if (!client) throw new Error(`grantRealmRole: no client ${clientId}`);
+  const account = await get(`clients/${client.id}/service-account-user`);
+  const rep = await get(`roles/${encodeURIComponent(role)}`);
+  const r = await fetch(`${URL}/admin/realms/${realm}/users/${account.id}/role-mappings/realm`,
+    json(token, 'POST', [{ id: rep.id, name: rep.name }]));
+  if (r.status !== 204) throw new Error(`grantRealmRole ${role}: ${r.status} ${await r.text()}`);
+}
+
+/** The admin API's user search with `q` (space-separated `attribute:value` pairs), as the ircd's certificate lookup does it. */
+export async function adminSearch(realm: string, q: string): Promise<any[]> {
+  const r = await fetch(`${URL}/admin/realms/${realm}/users?q=${encodeURIComponent(q)}`, auth(await adminToken()));
+  if (!r.ok) throw new Error(`adminSearch ${q}: ${r.status}`);
+  return r.json();
+}
+
+async function ircCall(method: string, path: string, token?: string, body?: unknown): Promise<{ status: number; body: any }> {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  const r = await fetch(`${URL}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  const text = await r.text();
+  let parsed: any = null;
+  try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
+  return { status: r.status, body: parsed };
+}
+
+/** PUT /realms/{realm}/irc/certfp/{username} with `{sha256, sha512, name}`. */
+export async function certfpAdd(realm: string, username: string, body: object, token?: string): Promise<{ status: number; body: any }> {
+  return ircCall('PUT', `/realms/${realm}/irc/certfp/${encodeURIComponent(username)}`, token, body);
+}
+
+/** DELETE /realms/{realm}/irc/certfp/{username}/{sha512}. */
+export async function certfpDelete(realm: string, username: string, sha512: string, token?: string): Promise<{ status: number; body: any }> {
+  return ircCall('DELETE', `/realms/${realm}/irc/certfp/${encodeURIComponent(username)}/${encodeURIComponent(sha512)}`, token);
+}
+
+/** GET /realms/{realm}/irc/certfp/{username}. */
+export async function certfpList(realm: string, username: string, token?: string): Promise<{ status: number; body: any }> {
+  return ircCall('GET', `/realms/${realm}/irc/certfp/${encodeURIComponent(username)}`, token);
 }
 
 export function uniqueRealm(prefix: string): string {
