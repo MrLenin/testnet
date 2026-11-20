@@ -154,7 +154,7 @@ cd /home/ibutsu/testnet/x3 && git diff src/nickserv.c | head -30
 
 **Symptom**: Keycloak stops sending webhook events (e.g., USER DELETE) after X3 has been unavailable for a period. Earlier webhook errors appear in logs, but no new events are dispatched even after X3 recovers.
 
-**Location**: `keycloak-webhook-spi/src/main/java/net/afternet/keycloak/webhook/WebhookEventListenerProvider.java:305-306`
+**Location**: `keycloak-webhook-spi/src/main/java/io/github/evilnet/keycloak/webhook/WebhookEventListenerProvider.java:305-306`
 
 **Root Cause (theory)**: `sendWebhookAsync()` uses `CompletableFuture.runAsync()` which dispatches to the common `ForkJoinPool`. Each failed webhook triggers exponential backoff retries (1s, 2s, 4s... up to 30s cap, 3 retries default), blocking a pool thread for up to ~33s per event. If X3 is down during a burst of events, retry threads saturate the shared pool, causing subsequent `runAsync()` calls to be silently queued or dropped.
 
