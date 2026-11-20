@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
@@ -6,6 +6,8 @@ export default defineConfig({
     testTimeout: 60000, // X3+Keycloak operations are slow (~8-10s per command)
     hookTimeout: 30000,
     include: ['src/**/*.test.ts'],
+    // SPI integration tests run against a throwaway Keycloak under vitest.spi.config.ts
+    exclude: [...configDefaults.exclude, 'src/keycloak-spi/**'],
     // Setup files run in the same process as tests (unlike globalSetup)
     // This ensures the Keycloak availability check is shared with test files
     setupFiles: ['./src/setup/test-setup.ts'],
