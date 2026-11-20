@@ -82,18 +82,22 @@ export async function setPassword(realm: string, userId: string, password: strin
 
 export async function getUser(realm: string, userId: string): Promise<any> {
   const r = await fetch(`${URL}/admin/realms/${realm}/users/${userId}`, auth(await adminToken()));
+  if (!r.ok) throw new Error(`getUser ${userId}: ${r.status}`);
   return r.json();
 }
 
 export async function putUser(realm: string, userId: string, patch: object): Promise<number> {
   const token = await adminToken();
-  const cur = await (await fetch(`${URL}/admin/realms/${realm}/users/${userId}`, auth(token))).json();
+  const g = await fetch(`${URL}/admin/realms/${realm}/users/${userId}`, auth(token));
+  if (!g.ok) throw new Error(`putUser lookup ${userId}: ${g.status}`);
+  const cur = await g.json();
   const r = await fetch(`${URL}/admin/realms/${realm}/users/${userId}`, json(token, 'PUT', { ...cur, ...patch }));
   return r.status;
 }
 
 export async function getCredentials(realm: string, userId: string): Promise<any[]> {
   const r = await fetch(`${URL}/admin/realms/${realm}/users/${userId}/credentials`, auth(await adminToken()));
+  if (!r.ok) throw new Error(`getCredentials ${userId}: ${r.status}`);
   return r.json();
 }
 
