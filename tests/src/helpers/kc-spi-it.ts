@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { pbkdf2Sync, randomBytes } from 'node:crypto';
+import { createHash, createHmac, pbkdf2Sync, randomBytes } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -142,6 +142,77 @@ export function runRealmSetup(realm: string, args: string[] = []): void {
   execFileSync('python3', [tool, '--url', URL, '--realm', realm, '--admin-user', ADMIN_USER,
     '--admin-pass-env', 'SPI_IT_ADMIN_PASS', ...args],
   { env: { ...process.env, SPI_IT_ADMIN_PASS: ADMIN_PASS }, stdio: 'pipe' });
+}
+
+/** True when `scram` (an endpoint `scram` object) is a verifier of `password`: StoredKey recomputed with its salt and iterations. */
+export function verifierMatches(scram: any, password: string): boolean {
+  if (!scram) return false;
+  const salted = pbkdf2Sync(password, Buffer.from(scram.salt, 'base64'), scram.iterations, 32, 'sha256');
+  const clientKey = createHmac('sha256', salted).update('Client Key').digest();
+  return createHash('sha256').update(clientKey).digest('base64') === scram.storedKey;
+}
+
+// The throwaway directory (container ldap-spi-it); no port is published, so it is driven with docker exec.
+const LDAP_BASE = 'dc=spi-it,dc=invalid';
+const LDAP_USERS = `ou=users,${LDAP_BASE}`;
+const LDAP_ADMIN_DN = `cn=admin,${LDAP_BASE}`;
+const LDAP_ADMIN_PASS = 'spi-it-ldap';
+
+function ldap(tool: string, args: string[], input?: string): void {
+  execFileSync('docker', ['exec', '-i', 'ldap-spi-it', tool, '-x', '-H', 'ldap://localhost',
+    '-D', LDAP_ADMIN_DN, '-w', LDAP_ADMIN_PASS, ...args], { input, stdio: 'pipe' });
+}
+
+function ldapExists(dn: string): boolean {
+  try {
+    ldap('ldapsearch', ['-LLL', '-b', dn, '-s', 'base', 'dn']);
+    return true;
+  } catch (e: any) {
+    if (e.status === 32) return false;   // LDAP noSuchObject
+    throw e;
+  }
+}
+
+/** Adds (or replaces) an inetOrgAnonAccount under ou=users with a complete profile, then sets its password. */
+export function ldapAddUser(uid: string, password: string): void {
+  if (!ldapExists(LDAP_USERS)) {
+    ldap('ldapadd', [], `dn: ${LDAP_USERS}\nobjectClass: organizationalUnit\nou: users\n`);
+  }
+  const dn = `uid=${uid},${LDAP_USERS}`;
+  if (ldapExists(dn)) ldap('ldapdelete', [dn]);
+  ldap('ldapadd', [], `dn: ${dn}\nobjectClass: inetOrgAnonAccount\nuid: ${uid}\ncn: ${uid}\nsn: Test\nmail: ${uid}@spi-it.invalid\n`);
+  ldapSetPassword(uid, password);
+}
+
+/** Changes the password in the directory only (as X3 does): Keycloak is not told. */
+export function ldapSetPassword(uid: string, password: string): void {
+  ldap('ldappasswd', ['-s', password, `uid=${uid},${LDAP_USERS}`]);
+}
+
+/**
+ * Links the realm to the directory (users under ou=users, periodic sync off), runs one full sync, returns the provider id.
+ * Registrations are not synced: users the tests create through Keycloak stay local, and the shared directory
+ * collects no entries that a later run's full sync would import into its fresh realm.
+ */
+export async function addLdapProvider(realm: string, editMode: 'WRITABLE' | 'READ_ONLY'): Promise<string> {
+  const token = await adminToken();
+  const config: Record<string, string> = {
+    connectionUrl: 'ldap://ldap-spi-it:389', usersDn: LDAP_USERS, bindDn: LDAP_ADMIN_DN, bindCredential: LDAP_ADMIN_PASS,
+    authType: 'simple', vendor: 'other', usernameLDAPAttribute: 'uid', rdnLDAPAttribute: 'uid',
+    uuidLDAPAttribute: 'entryUUID', userObjectClasses: 'inetOrgAnonAccount', searchScope: '1', trustEmail: 'true',
+    pagination: 'true', editMode, importEnabled: 'true', syncRegistrations: 'false', enabled: 'true',
+    fullSyncPeriod: '-1', changedSyncPeriod: '-1', cachePolicy: 'NO_CACHE',
+  };
+  const body = {
+    name: 'ldap', providerId: 'ldap', providerType: 'org.keycloak.storage.UserStorageProvider',
+    config: Object.fromEntries(Object.entries(config).map(([k, v]) => [k, [v]])),
+  };
+  const r = await fetch(`${URL}/admin/realms/${realm}/components`, json(token, 'POST', body));
+  if (r.status !== 201) throw new Error(`addLdapProvider ${realm}: ${r.status} ${await r.text()}`);
+  const id = r.headers.get('location')!.split('/').pop()!;
+  const s = await fetch(`${URL}/admin/realms/${realm}/user-storage/${id}/sync?action=triggerFullSync`, json(token, 'POST'));
+  if (!s.ok) throw new Error(`LDAP full sync ${realm}: ${s.status} ${await s.text()}`);
+  return id;
 }
 
 /** A pre-hashed pbkdf2-sha256 password credential representation, as the admin API accepts it. */
