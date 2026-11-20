@@ -106,11 +106,13 @@ export async function getCredentials(realm: string, userId: string): Promise<any
   return r.json();
 }
 
-export async function passwordGrant(realm: string, username: string, password: string): Promise<{ status: number; body: any }> {
+/** The password grant; `extra` adds form parameters (for example `totp`, the one-time code). */
+export async function passwordGrant(realm: string, username: string, password: string,
+  extra: Record<string, string> = {}): Promise<{ status: number; body: any }> {
   const r = await fetch(`${URL}/realms/${realm}/protocol/openid-connect/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'password', client_id: 'probe', username, password }),
+    body: new URLSearchParams({ grant_type: 'password', client_id: 'probe', username, password, ...extra }),
   });
   return { status: r.status, body: await r.json().catch(() => null) };
 }
@@ -269,4 +271,22 @@ export function pbkdf2Cred(password: string): object {
     secretData: JSON.stringify({ value: hash.toString('base64'), salt: salt.toString('base64') }),
     credentialData: JSON.stringify({ hashIterations: 27500, algorithm: 'pbkdf2-sha256' }),
   };
+}
+
+/** An OTP credential representation (TOTP, the realm's default policy: HmacSHA1, 6 digits, 30 s), as the admin API accepts it. */
+export function otpCred(secret: string): object {
+  return {
+    type: 'otp', userLabel: 'test',
+    secretData: JSON.stringify({ value: secret }),
+    credentialData: JSON.stringify({ subType: 'totp', digits: 6, counter: 0, period: 30, algorithm: 'HmacSHA1' }),
+  };
+}
+
+/** The current TOTP code for `secret` under the default policy; Keycloak keys the HMAC with the secret's UTF-8 bytes. */
+export function totp(secret: string, now = Date.now()): string {
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(now / 1000 / 30)));
+  const h = createHmac('sha1', Buffer.from(secret, 'utf8')).update(counter).digest();
+  const o = h[h.length - 1] & 0xf;
+  return String((h.readUInt32BE(o) & 0x7fffffff) % 1_000_000).padStart(6, '0');
 }

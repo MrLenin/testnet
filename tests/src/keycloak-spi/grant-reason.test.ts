@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
-  URL, auth, adminToken, createRealm, deleteRealm, createUser, setPassword, passwordGrant, runRealmSetup, uniqueRealm,
+  URL, auth, adminToken, createRealm, deleteRealm, createUser, setPassword, getUser, passwordGrant, runRealmSetup,
+  uniqueRealm, otpCred, totp, pbkdf2Cred, ircdToken, ircCredentials, verifierMatches,
 } from '../helpers/kc-spi-it';
+
+const OTP_SECRET = 'grant-reason-otp-secret';
 
 async function admin(method: string, path: string, body?: unknown): Promise<any> {
   const r = await fetch(`${URL}/admin/realms/${path}`, {
@@ -31,17 +34,21 @@ function expectNoReason(body: any): void {
   expect(body).not.toHaveProperty('irc_reasons');
 }
 
-// One realm with the defaults (its user profile requires an email, first and last name), the flows from
-// the set-up tool, stored events, and brute-force detection with a high failure limit.
+// One realm with the defaults (its user profile requires an email, first and last name; OTP for a user
+// with an OTP credential), the flows from the set-up tool, stored events, and brute-force detection with
+// a high failure limit.
 describe('password grant: the reason an account was refused', () => {
   const realm = uniqueRealm('grantreason');
   beforeAll(async () => {
     await createRealm(realm, {
       passwordPolicy: 'scramSha256', eventsEnabled: true, bruteForceProtected: true, failureFactor: 30,
     });
-    runRealmSetup(realm);
+    runRealmSetup(realm, ['--service-client', 'ircd']);
   });
   afterAll(async () => { await deleteRealm(realm); });
+
+  const numFailures = async (id: string) =>
+    (await admin('GET', `${realm}/attack-detection/brute-force/users/${id}`)).numFailures;
 
   const cases: [string, object, boolean, string[]][] = [
     ['verify', { emailVerified: false, requiredActions: ['VERIFY_EMAIL'] }, false, ['verify_email']],
@@ -103,6 +110,46 @@ describe('password grant: the reason an account was refused', () => {
     const r = await passwordGrant(realm, 'off', 'Pw-off-1');
     expect(r.status).toBe(400);
     expect(r.body).toEqual({ error: 'invalid_grant', error_description: 'Account disabled' });
+  });
+
+  // The step runs once every factor the flow demands is satisfied: until then a password alone earns no reason.
+  it('a second factor still due: the right password alone gets what a wrong one gets, and changes nothing', async () => {
+    const extra = { requiredActions: ['VERIFY_EMAIL'], credentials: [otpCred(OTP_SECRET)] };
+    const otherId = await createUser(realm, 'otpother', extra);
+    expect(await setPassword(realm, otherId, 'Pw-otpother-1')).toBe(204);
+    const wrong = await passwordGrant(realm, 'otpother', 'wrong');
+
+    const id = await createUser(realm, 'otpinc', extra);
+    expect(await setPassword(realm, id, 'Pw-otpinc-1')).toBe(204);
+    const right = await passwordGrant(realm, 'otpinc', 'Pw-otpinc-1');
+    expect(right.status).toBe(wrong.status);
+    expect(right.body).toEqual(wrong.body);
+    expectNoReason(right.body);
+    expect((await getUser(realm, id)).requiredActions).toEqual(['VERIFY_EMAIL']);
+    // Keycloak's OTP step failed the login and counted it, as it does for a wrong code; the step added nothing.
+    expect(await numFailures(id)).toBe(1);
+
+    const withCode = await passwordGrant(realm, 'otpinc', 'Pw-otpinc-1', { totp: totp(OTP_SECRET) });
+    expect(withCode.status).toBe(400);
+    expect(withCode.body).toEqual({
+      error: 'invalid_grant', error_description: 'Account is not fully set up',
+      irc_state: 'incomplete', irc_reasons: ['verify_email'],
+    });
+    expect(await numFailures(id)).toBe(1);
+  });
+
+  it('a complete account with a second factor: the password alone is refused by Keycloak and makes no verifier', async () => {
+    await createUser(realm, 'otpdone', { credentials: [pbkdf2Cred('Pw-otpdone-1'), otpCred(OTP_SECRET)] });
+    const t = await ircdToken(realm);
+    const alone = await passwordGrant(realm, 'otpdone', 'Pw-otpdone-1');
+    expect(alone.status).toBe(401);
+    expect(alone.body).toEqual({ error: 'invalid_grant', error_description: 'Invalid user credentials' });
+    expect((await ircCredentials(realm, 'otpdone', t)).body.scram).toBeUndefined();
+
+    const withCode = await passwordGrant(realm, 'otpdone', 'Pw-otpdone-1', { totp: totp(OTP_SECRET) });
+    expect(withCode.status).toBe(200);
+    expectNoReason(withCode.body);
+    expect(verifierMatches((await ircCredentials(realm, 'otpdone', t)).body.scram, 'Pw-otpdone-1')).toBe(true);
   });
 
   it('a complete account still gets its token', async () => {

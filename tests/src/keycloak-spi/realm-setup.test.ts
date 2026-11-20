@@ -31,6 +31,39 @@ function expectStepsAfterPassword(ex: any[], password: string, steps: string[]):
   });
 }
 
+const IRC_STEPS = ['irc-account-state', 'irc-credential-sync'];
+
+/** The flow's top-level executions, a sub-flow shown as 'flow'. */
+const topLevel = (ex: any[]) => ex.filter((e: any) => e.level === 0).map((e: any) => (e.authenticationFlow ? 'flow' : e.providerId));
+
+/** The direct-grant copy ends with the IRC steps, each once in the whole flow, REQUIRED. */
+function expectIrcStepsLast(ex: any[], before: string[]): void {
+  expect(topLevel(ex).slice(-(before.length + IRC_STEPS.length))).toEqual([...before, ...IRC_STEPS]);
+  for (const provider of IRC_STEPS) {
+    const found = ex.filter((e: any) => e.providerId === provider);
+    expect(found).toHaveLength(1);
+    expect(found[0].requirement).toBe('REQUIRED');
+  }
+}
+
+/** A run of the tool sends no write: the realm's admin events (which record every admin write) stay as they are. */
+async function expectNoWritesOnRerun(realm: string): Promise<void> {
+  await ok('PUT', realm, {adminEventsEnabled: true});
+  const adminEvents = async () => (await ok('GET', `${realm}/admin-events?max=1000`)).length;
+  const writes = await adminEvents();
+  const flow = await executions(realm, 'irc direct grant');
+  runRealmSetup(realm);
+  expect(await adminEvents()).toBe(writes);
+  expect(await executions(realm, 'irc direct grant')).toEqual(flow);
+}
+
+async function move(realm: string, flow: string, provider: string, direction: 'raise' | 'lower', times = 1): Promise<void> {
+  for (let i = 0; i < times; i++) {
+    const e = (await executions(realm, flow)).find((x: any) => x.providerId === provider);
+    await ok('POST', `${realm}/authentication/executions/${e.id}/${direction}-priority`);
+  }
+}
+
 /** Runs the tool expecting a non-zero exit; returns the exit status and stderr. */
 function runRealmSetupFailing(realm: string): { status: number; stderr: string } {
   try {
@@ -48,7 +81,7 @@ describe('irc_realm_setup.py flows', () => {
   beforeAll(async () => { await createRealm(custom); await createRealm(broken); });
   afterAll(async () => { await deleteRealm(custom); await deleteRealm(broken); });
 
-  it('copies a custom bound direct-grant flow, keeping its difference, with the IRC steps after the password step', async () => {
+  it('copies a custom bound direct-grant flow, keeping its difference, with the IRC steps last', async () => {
     await ok('POST', `${custom}/authentication/flows/${encodeURIComponent('direct grant')}/copy`, {newName: 'custom dg'});
     await ok('POST', `${custom}/authentication/flows/${encodeURIComponent('custom dg')}/executions/execution`,
       {provider: 'allow-access-authenticator'});
@@ -62,38 +95,17 @@ describe('irc_realm_setup.py flows', () => {
     expect(realm.browserFlow).toBe('irc browser');
     const ex = await executions(custom, 'irc direct grant');
     expect(ex.filter((e: any) => e.providerId === 'allow-access-authenticator')).toHaveLength(1);
-    expectStepsAfterPassword(ex, 'direct-grant-validate-password', ['irc-account-state', 'irc-credential-sync']);
+    expectIrcStepsLast(ex, ['flow', 'allow-access-authenticator']);
     // The custom flow itself is left as it was.
-    expect((await executions(custom, 'custom dg')).some((e: any) => ['irc-account-state', 'irc-credential-sync'].includes(e.providerId))).toBe(false);
+    expect((await executions(custom, 'custom dg')).some((e: any) => IRC_STEPS.includes(e.providerId))).toBe(false);
+    await expectNoWritesOnRerun(custom);
   });
 
-  it('puts only the sync step in the browser copy', async () => {
+  it('puts only the sync step in the browser copy, directly after the password form', async () => {
     const ex = await executions(custom, 'irc browser');
     expectStepsAfterPassword(ex, 'auth-username-password-form', ['irc-credential-sync']);
     expect(ex.some((e: any) => e.providerId === 'irc-account-state')).toBe(false);
   });
-
-  it('adds the account-state step to a direct-grant copy an earlier version set up (password, then sync)', async () => {
-    const before = await executions(custom, 'irc direct grant');
-    const state = before.find((e: any) => e.providerId === 'irc-account-state');
-    await ok('DELETE', `${custom}/authentication/executions/${state.id}`);
-    expectStepsAfterPassword(await executions(custom, 'irc direct grant'), 'direct-grant-validate-password',
-      ['irc-credential-sync']);
-
-    runRealmSetup(custom);
-    const after = await executions(custom, 'irc direct grant');
-    expectStepsAfterPassword(after, 'direct-grant-validate-password', ['irc-account-state', 'irc-credential-sync']);
-    expect(after.filter((e: any) => e.providerId === 'allow-access-authenticator')).toHaveLength(1);
-
-    // A further run sends no write: the realm's admin events (which record every admin write) stay as they are.
-    await ok('PUT', custom, {adminEventsEnabled: true});
-    const adminEvents = async () => (await ok('GET', `${custom}/admin-events?max=1000`)).length;
-    const writes = await adminEvents();
-    runRealmSetup(custom);
-    expect(await adminEvents()).toBe(writes);
-    expect(await executions(custom, 'irc direct grant')).toEqual(after);
-  });
-
   it('refuses a bound flow with no password step and changes nothing', async () => {
     await ok('POST', `${broken}/authentication/flows`,
       {alias: 'no password', providerId: 'basic-flow', topLevel: true, builtIn: false});
@@ -113,5 +125,50 @@ describe('irc_realm_setup.py flows', () => {
     expect(aliases).not.toContain('irc browser');
     expect(aliases).not.toContain('irc direct grant');
     expect((await admin('GET', `${broken}/roles/irc-read-credentials`)).status).toBe(404);
+  });
+});
+
+// The built-in direct-grant flow: username, password, then the conditional OTP sub-flow.  The IRC steps go after
+// all of it, from a fresh copy and from the layouts earlier versions of the tool left.
+describe('irc_realm_setup.py direct-grant layout', () => {
+  const realm = uniqueRealm('flowlayout');
+  const DG = 'irc direct grant';
+  const FINAL = ['direct-grant-validate-username', 'direct-grant-validate-password', 'flow', ...IRC_STEPS];
+  beforeAll(async () => { await createRealm(realm); });
+  afterAll(async () => { await deleteRealm(realm); });
+
+  it('fresh: username, password, conditional OTP, then the IRC steps; the browser copy keeps the sync after the form', async () => {
+    runRealmSetup(realm);
+    const ex = await executions(realm, DG);
+    expect(topLevel(ex)).toEqual(FINAL);
+    expectIrcStepsLast(ex, ['flow']);
+    expect(ex.find((e: any) => e.level === 0 && e.authenticationFlow).displayName).toContain('Conditional OTP');
+    expectStepsAfterPassword(await executions(realm, 'irc browser'), 'auth-username-password-form', ['irc-credential-sync']);
+    await expectNoWritesOnRerun(realm);
+  });
+
+  it('from the layout with only the sync step, after the password step (password, sync, OTP)', async () => {
+    const state = (await executions(realm, DG)).find((e: any) => e.providerId === 'irc-account-state');
+    await ok('DELETE', `${realm}/authentication/executions/${state.id}`);
+    await move(realm, DG, 'irc-credential-sync', 'raise');
+    expect(topLevel(await executions(realm, DG))).toEqual(
+      ['direct-grant-validate-username', 'direct-grant-validate-password', 'irc-credential-sync', 'flow']);
+
+    runRealmSetup(realm);
+    expect(topLevel(await executions(realm, DG))).toEqual(FINAL);
+    expectIrcStepsLast(await executions(realm, DG), ['flow']);
+    await expectNoWritesOnRerun(realm);
+  });
+
+  it('from the layout with both steps after the password step (password, state, sync, OTP)', async () => {
+    await move(realm, DG, 'irc-account-state', 'raise');
+    await move(realm, DG, 'irc-credential-sync', 'raise');
+    expect(topLevel(await executions(realm, DG))).toEqual(
+      ['direct-grant-validate-username', 'direct-grant-validate-password', ...IRC_STEPS, 'flow']);
+
+    runRealmSetup(realm);
+    expect(topLevel(await executions(realm, DG))).toEqual(FINAL);
+    expectIrcStepsLast(await executions(realm, DG), ['flow']);
+    await expectNoWritesOnRerun(realm);
   });
 });
