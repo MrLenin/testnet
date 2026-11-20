@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   URL, adminToken, createRealm, deleteRealm, createUser, getCredentials, passwordGrant, ircdToken, ircCredentials,
-  runRealmSetup, uniqueRealm, verifierMatches,
+  runRealmSetup, uniqueRealm, verifierMatches, userIdOf, getUser, ldapAddUser, ldapDeleteUser, addLdapProvider,
 } from '../helpers/kc-spi-it';
 
 const TOOL = resolve(dirname(fileURLToPath(import.meta.url)), '../../../keycloak-webhook-spi/tools/import_ldap_hashes.py');
@@ -120,5 +120,69 @@ describe('LDAP hash import tool', () => {
     } finally {
       await deleteRealm(r2);
     }
+  });
+});
+
+/** `{SSHA}` of `password` with a random salt, as OpenLDAP stores it. */
+function ssha(password: string): string {
+  const s = randomBytes(8);
+  return '{SSHA}' + Buffer.concat([createHash('sha1').update(password).update(s).digest(), s]).toString('base64');
+}
+
+describe('LDAP hash import: users still linked to the directory', () => {
+  const realm = uniqueRealm('himport-ldap');
+  const uid = `hlink${randomBytes(3).toString('hex')}`;
+  const PW = 'Ldap-Orig-Pass-1';
+  let dir: string, ldif: string, token: string, provider: string, id: string;
+  const admin = async (method: string, path: string) =>
+    fetch(`${URL}/admin/realms/${realm}/${path}`, { method, headers: { Authorization: `Bearer ${await adminToken()}` } });
+  // Local password credentials only: for a linked user the list also shows the directory's password, without credentialData.
+  const passwords = async () => (await getCredentials(realm, id)).filter(c => c.type === 'password' && c.credentialData).length;
+
+  beforeAll(async () => {
+    await createRealm(realm, { passwordPolicy: 'scramSha256' });
+    runRealmSetup(realm, ['--service-client', 'ircd']);
+    token = await ircdToken(realm);
+    ldapAddUser(uid, PW);
+    provider = await addLdapProvider(realm, 'WRITABLE');
+    id = await userIdOf(realm, uid);
+    expect((await getUser(realm, id)).federationLink).toBe(provider);
+    dir = mkdtempSync(join(tmpdir(), 'hash-import-ldap-'));
+    ldif = join(dir, 'linked.ldif');
+    writeFileSync(ldif, entry(uid, 'userPassword: ' + ssha(PW)) + '\n');
+  });
+  afterAll(async () => { rmSync(dir, { recursive: true, force: true }); await deleteRealm(realm); ldapDeleteUser(uid); });
+
+  it('a linked user is reported linked and not loaded, dry run and --apply alike; --allow-linked would load it', async () => {
+    const dry = run(realm, ldif);
+    expect(dry.status).toBe(0);
+    expect(dry.counts).toEqual({ linked: 1, 'would-load': 0 });
+    const applied = run(realm, ldif, ['--apply']);
+    expect(applied.status).toBe(0);
+    expect(applied.counts).toEqual({ linked: 1, loaded: 0 });
+    expect(await passwords()).toBe(0);
+    expect(run(realm, ldif, ['--allow-linked']).counts).toEqual({ 'would-load': 1 });
+    expect(await passwords()).toBe(0);
+  });
+
+  it('the documented order: unlink the users, remove the provider, load; the original password logs in', async () => {
+    expect((await passwordGrant(realm, uid, PW)).status).toBe(200);   // while linked: checked against the directory
+    expect(verifierMatches((await ircCredentials(realm, uid, token)).body.scram, PW)).toBe(true);
+
+    expect((await admin('POST', `user-storage/${provider}/unlink-users`)).status).toBe(204);
+    expect((await admin('DELETE', `components/${provider}`)).status).toBe(204);
+    expect((await getUser(realm, id)).federationLink).toBeUndefined();   // same account, same id, no link
+    expect((await passwordGrant(realm, uid, PW)).status).toBe(401);       // no password until the load
+
+    const r = run(realm, ldif, ['--apply']);
+    expect(r.status).toBe(0);
+    expect(r.counts).toEqual({ loaded: 1 });
+    expect(await passwords()).toBe(1);
+    // The loaded hash changes the password fingerprint, so the verifier made while linked is not served ...
+    expect((await ircCredentials(realm, uid, token)).body.scram).toBeUndefined();
+    expect((await passwordGrant(realm, uid, 'wrong')).status).toBe(401);
+    expect((await passwordGrant(realm, uid, PW)).status).toBe(200);
+    // ... until the next password login makes one for the re-hashed password.
+    expect(verifierMatches((await ircCredentials(realm, uid, token)).body.scram, PW)).toBe(true);
   });
 });
