@@ -1,3 +1,8 @@
+import { execFileSync } from 'node:child_process';
+import { pbkdf2Sync, randomBytes } from 'node:crypto';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 // Helpers for the throwaway Keycloak (compose profile spi-it, port 18080).
 // Never points at the bed's Keycloak.
 export const URL: string = process.env.KC_SPI_IT_URL ?? 'http://localhost:18080';
@@ -122,4 +127,30 @@ export async function ircdToken(realm: string): Promise<string> {
 
 export function uniqueRealm(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/** GET /realms/{realm}/irc/credentials/{username}; the username is percent-encoded as one path segment. */
+export async function ircCredentials(realm: string, username: string, token?: string): Promise<{ status: number; body: any }> {
+  const r = await fetch(`${URL}/realms/${realm}/irc/credentials/${encodeURIComponent(username)}`,
+    token ? auth(token) : undefined);
+  return { status: r.status, body: await r.json().catch(() => null) };
+}
+
+/** Runs tools/irc_realm_setup.py against the throwaway Keycloak; the test fails if the tool exits non-zero. */
+export function runRealmSetup(realm: string, args: string[] = []): void {
+  const tool = resolve(dirname(fileURLToPath(import.meta.url)), '../../../keycloak-webhook-spi/tools/irc_realm_setup.py');
+  execFileSync('python3', [tool, '--url', URL, '--realm', realm, '--admin-user', ADMIN_USER,
+    '--admin-pass-env', 'SPI_IT_ADMIN_PASS', ...args],
+  { env: { ...process.env, SPI_IT_ADMIN_PASS: ADMIN_PASS }, stdio: 'pipe' });
+}
+
+/** A pre-hashed pbkdf2-sha256 password credential representation, as the admin API accepts it. */
+export function pbkdf2Cred(password: string): object {
+  const salt = randomBytes(16);
+  const hash = pbkdf2Sync(password, salt, 27500, 64, 'sha256');
+  return {
+    type: 'password',
+    secretData: JSON.stringify({ value: hash.toString('base64'), salt: salt.toString('base64') }),
+    credentialData: JSON.stringify({ hashIterations: 27500, algorithm: 'pbkdf2-sha256' }),
+  };
 }
