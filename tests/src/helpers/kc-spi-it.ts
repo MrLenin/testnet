@@ -249,6 +249,17 @@ export async function addLdapProvider(realm: string, editMode: 'WRITABLE' | 'REA
   return id;
 }
 
+/** Switches an existing LDAP provider's edit mode (for example WRITABLE to READ_ONLY). */
+export async function setLdapEditMode(realm: string, providerId: string, editMode: 'WRITABLE' | 'READ_ONLY'): Promise<void> {
+  const token = await adminToken();
+  const g = await fetch(`${URL}/admin/realms/${realm}/components/${providerId}`, auth(token));
+  if (!g.ok) throw new Error(`setLdapEditMode lookup ${providerId}: ${g.status}`);
+  const component = await g.json();
+  component.config.editMode = [editMode];
+  const r = await fetch(`${URL}/admin/realms/${realm}/components/${providerId}`, json(token, 'PUT', component));
+  if (r.status !== 204) throw new Error(`setLdapEditMode ${providerId}: ${r.status} ${await r.text()}`);
+}
+
 /** A pre-hashed pbkdf2-sha256 password credential representation, as the admin API accepts it. */
 export function pbkdf2Cred(password: string): object {
   const salt = randomBytes(16);

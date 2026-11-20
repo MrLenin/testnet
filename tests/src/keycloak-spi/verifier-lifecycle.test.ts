@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
   URL, auth, adminToken, createRealm, deleteRealm, createUser, setPassword, getUser, putUser, getCredentials,
   passwordGrant, ircdToken, ircCredentials, runRealmSetup, pbkdf2Cred, uniqueRealm, verifierMatches,
-  ldapAddUser, ldapSetPassword, ldapDeleteUser, addLdapProvider, legacyScramAttributes, userIdOf,
+  ldapAddUser, ldapSetPassword, ldapDeleteUser, addLdapProvider, setLdapEditMode, legacyScramAttributes, userIdOf,
 } from '../helpers/kc-spi-it';
 
 const LEGACY_ATTRIBUTES = {
@@ -195,5 +195,35 @@ describe('legacy attribute verifiers (read by IRC servers deployed before the cr
     expect((await scramKeys()).length).toBe(4);
     expect((await passwordGrant(realm, 'legacy-a', 'Legacy-Pass-B')).status).toBe(200);
     expect(await scramKeys()).toEqual([]);
+  });
+});
+
+// The legacy attributes live in Keycloak's own database, not in the directory: a READ_ONLY provider
+// refuses attribute writes through the federated user, and that must neither stop the verifier nor keep them.
+describe('legacy attribute verifiers on a READ_ONLY LDAP-linked user', () => {
+  const realm = uniqueRealm('legro');
+  const X3_SCRAM = ['x3_scram_salt', 'x3_scram_iterations', 'x3_scram_stored_key', 'x3_scram_server_key'];
+  let t: string;
+  beforeAll(async () => {
+    await createRealm(realm, {passwordPolicy: 'scramSha256'});
+    runRealmSetup(realm, ['--service-client', 'ircd']);
+    t = await ircdToken(realm);
+  });
+  afterAll(async () => { await deleteRealm(realm); ldapDeleteUser('rouser'); });
+
+  it('a login stores the verifier, keeps the matching family and removes the other', async () => {
+    ldapAddUser('rouser', 'Ro-Pass-1');
+    const provider = await addLdapProvider(realm, 'WRITABLE');
+    const id = await userIdOf(realm, 'rouser');
+    const matching = legacyScramAttributes('Ro-Pass-1');
+    const other = legacyScramAttributes('Some-Other-Pass', 'x3_scram_');
+    expect(await putUser(realm, id, {attributes: {...(await getUser(realm, id)).attributes, ...matching, ...other}})).toBe(204);
+    await setLdapEditMode(realm, provider, 'READ_ONLY');
+
+    expect((await passwordGrant(realm, 'rouser', 'Ro-Pass-1')).status).toBe(200);
+    expect(verifierMatches((await ircCredentials(realm, 'rouser', t)).body.scram, 'Ro-Pass-1')).toBe(true);
+    const attrs = (await getUser(realm, id)).attributes;
+    expect(attrs).toMatchObject(matching);
+    for (const k of X3_SCRAM) expect(attrs[k]).toBeUndefined();
   });
 });
