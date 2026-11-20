@@ -290,3 +290,85 @@ export function totp(secret: string, now = Date.now()): string {
   const o = h[h.length - 1] & 0xf;
   return String((h.readUInt32BE(o) & 0x7fffffff) % 1_000_000).padStart(6, '0');
 }
+
+// The public client browserAction logs in through; its redirect URI is never fetched, only recognised.
+const BROWSER_CLIENT = 'spi-it-browser';
+const BROWSER_REDIRECT = 'https://spi-it.invalid/callback';
+
+function htmlUnescape(s: string): string {
+  return s.replace(/&(?:#(\d+)|#x([0-9a-f]+)|(amp|quot|apos|lt|gt));/gi, (_, dec, hex, name) =>
+    dec ? String.fromCodePoint(Number(dec)) : hex ? String.fromCodePoint(parseInt(hex, 16))
+      : ({ amp: '&', quot: '"', apos: "'", lt: '<', gt: '>' } as Record<string, string>)[name.toLowerCase()]);
+}
+
+/** The (HTML-unescaped) action URL of the page's first form. */
+function formAction(html: string): string {
+  const m = /<form\b[^>]*\baction="([^"]*)"/i.exec(html);
+  if (!m) throw new Error(`browserAction: no form on the page: ${html.slice(0, 300)}`);
+  return htmlUnescape(m[1]);
+}
+
+/**
+ * Runs the application-initiated action `action` in a browser-like session: an authorization request
+ * with `kc_action`, the login form (the realm's bound browser flow) with `username` / `password`, then the
+ * action's form with `fields`. Cookies are kept by hand and redirects followed one by one. `status` is the
+ * `kc_action_status` of the redirect back to the client, or `form` when the action's form is shown again
+ * (`html` is that page). Adds a public client with the standard flow to the realm if it has none.
+ */
+export async function browserAction(realm: string, username: string, password: string, action: string,
+  fields: Record<string, string>): Promise<{ status: string; html: string }> {
+  const token = await adminToken();
+  const found = await fetch(`${URL}/admin/realms/${realm}/clients?clientId=${BROWSER_CLIENT}&search=false`, auth(token));
+  if (!found.ok) throw new Error(`browserAction client lookup: ${found.status}`);
+  if ((await found.json()).length === 0) {
+    const created = await fetch(`${URL}/admin/realms/${realm}/clients`, json(token, 'POST', {
+      clientId: BROWSER_CLIENT, enabled: true, publicClient: true, standardFlowEnabled: true,
+      directAccessGrantsEnabled: false, redirectUris: [BROWSER_REDIRECT],
+    }));
+    if (created.status !== 201) throw new Error(`browserAction client: ${created.status} ${await created.text()}`);
+  }
+
+  const jar = new Map<string, string>();
+  const send = async (url: string, form?: Record<string, string>): Promise<Response> => {
+    const headers: Record<string, string> = { Cookie: [...jar].map(([k, v]) => `${k}=${v}`).join('; ') };
+    if (form) headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    const r = await fetch(url, { method: form ? 'POST' : 'GET', redirect: 'manual', headers,
+      body: form ? new URLSearchParams(form) : undefined });
+    for (const c of r.headers.getSetCookie()) {
+      const [pair, ...attrs] = c.split(';');
+      const eq = pair.indexOf('=');
+      const name = pair.slice(0, eq).trim();
+      const value = pair.slice(eq + 1).trim();
+      const expires = attrs.map(a => a.trim()).find(a => /^expires=/i.test(a));
+      const gone = value === '' || attrs.some(a => /^\s*max-age=0\s*$/i.test(a))
+        || (expires !== undefined && Date.parse(expires.slice(8)) <= Date.now());
+      if (gone) jar.delete(name); else jar.set(name, value);
+    }
+    return r;
+  };
+  // Follows redirects until a page is shown (its HTML) or Keycloak sends the browser back to the client (that URL).
+  const settle = async (r: Response): Promise<{ back?: globalThis.URL; html?: string }> => {
+    for (let hops = 0; hops < 10; hops++) {
+      if (r.status < 300 || r.status >= 400) {
+        if (r.status !== 200) throw new Error(`browserAction: HTTP ${r.status} at ${r.url}: ${(await r.text()).slice(0, 300)}`);
+        return { html: await r.text() };
+      }
+      const next = new globalThis.URL(r.headers.get('location')!, r.url);
+      if (next.href.startsWith(BROWSER_REDIRECT)) return { back: next };
+      r = await send(next.href);
+    }
+    throw new Error('browserAction: too many redirects');
+  };
+  const done = (back: globalThis.URL) => ({ status: back.searchParams.get('kc_action_status') ?? '', html: '' });
+
+  const start = new globalThis.URL(`${URL}/realms/${realm}/protocol/openid-connect/auth`);
+  start.search = new URLSearchParams({ client_id: BROWSER_CLIENT, redirect_uri: BROWSER_REDIRECT,
+    response_type: 'code', scope: 'openid', kc_action: action }).toString();
+  const login = await settle(await send(start.href));
+  if (login.back) throw new Error(`browserAction: no login form, sent back to ${login.back.href}`);
+  const afterLogin = await settle(await send(formAction(login.html!), { username, password }));
+  if (afterLogin.back) return done(afterLogin.back);
+  if (afterLogin.html!.includes('id="kc-form-login"')) throw new Error(`browserAction: login as ${username} failed`);
+  const after = await settle(await send(formAction(afterLogin.html!), fields));
+  return after.back ? done(after.back) : { status: 'form', html: after.html! };
+}
