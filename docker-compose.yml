@@ -1155,9 +1155,68 @@ services:
       irc_net:
         ipv4_address: 172.29.0.31
 
+  # --- Throwaway Keycloak + LDAP for the keycloak-webhook-spi integration tests ---
+  # Profile spi-it only; own network, never irc_net; nothing shared with the bed.
+  # Bring up: scripts/dc.sh --profile spi-it up -d --force-recreate \
+  #             keycloak-spi-it-build keycloak-spi-it ldap-spi-it
+  keycloak-spi-it-build:
+    logging: *default-logging
+    profiles: ["spi-it"]
+    container_name: keycloak-spi-it-build
+    image: maven:3.9-eclipse-temurin-17
+    networks:
+      - spi_it_net
+    volumes:
+      - ./keycloak-webhook-spi:/src:ro
+      - keycloak_spi_it_providers:/providers
+      - spi-it-m2:/root/.m2
+    command: >
+      sh -c "cp -r /src /build && cd /build && mvn -q package &&
+             rm -f /providers/keycloak-webhook-*.jar /providers/original-*.jar &&
+             cp target/keycloak-webhook-spi-*.jar /providers/ &&
+             echo 'SPI JAR built and copied to spi-it providers'"
+
+  keycloak-spi-it:
+    logging: *default-logging
+    profiles: ["spi-it"]
+    container_name: keycloak-spi-it
+    image: quay.io/keycloak/keycloak:26.4.7
+    command: start-dev
+    environment:
+      - KC_BOOTSTRAP_ADMIN_USERNAME=admin
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=spi-it-admin
+    mem_limit: 1500m
+    ports:
+      - "127.0.0.1:18080:8080"
+    networks:
+      - spi_it_net
+    volumes:
+      - keycloak_spi_it_providers:/opt/keycloak/providers:ro
+    depends_on:
+      keycloak-spi-it-build:
+        condition: service_completed_successfully
+
+  ldap-spi-it:
+    logging: *default-logging
+    profiles: ["spi-it"]
+    container_name: ldap-spi-it
+    hostname: ldap-spi-it
+    build:
+      context: ./docker/openldap
+    environment:
+      - LDAP_ORGANISATION=SPI IT
+      - LDAP_DOMAIN=spi-it.invalid
+      - LDAP_ADMIN_PASSWORD=spi-it-ldap
+    mem_limit: 300m
+    networks:
+      - spi_it_net
+
 volumes:
   keycloak_data:
   keycloak_providers:
+  keycloak_spi_it_providers:
+  spi-it-m2:
+    external: true
   history_data:
   metadata_data:
   history_data2:
@@ -1210,3 +1269,5 @@ networks:
       driver: default
       config:
         - subnet: 172.29.0.0/24
+  spi_it_net:
+    driver: bridge
