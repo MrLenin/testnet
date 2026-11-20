@@ -152,6 +152,31 @@ export function verifierMatches(scram: any, password: string): boolean {
   return createHash('sha256').update(clientKey).digest('base64') === scram.storedKey;
 }
 
+/**
+ * The legacy user-attribute form of a SCRAM-SHA-256 verifier of `password`, under one attribute family
+ * (`scram_sha256_`, `x3_scram_` or `x3_scram_sha256_`): base64 salt/keys, decimal iterations, as the old policy wrote them.
+ */
+export function legacyScramAttributes(password: string, family = 'scram_sha256_'): Record<string, string[]> {
+  const salt = randomBytes(16);
+  const salted = pbkdf2Sync(password, salt, 4096, 32, 'sha256');
+  const storedKey = createHash('sha256').update(createHmac('sha256', salted).update('Client Key').digest()).digest();
+  const serverKey = createHmac('sha256', salted).update('Server Key').digest();
+  return {
+    [`${family}salt`]: [salt.toString('base64')], [`${family}iterations`]: ['4096'],
+    [`${family}stored_key`]: [storedKey.toString('base64')], [`${family}server_key`]: [serverKey.toString('base64')],
+  };
+}
+
+/** The id of the realm's user with exactly this username. */
+export async function userIdOf(realm: string, username: string): Promise<string> {
+  const r = await fetch(`${URL}/admin/realms/${realm}/users?username=${encodeURIComponent(username)}&exact=true`,
+    auth(await adminToken()));
+  if (!r.ok) throw new Error(`userIdOf ${username}: ${r.status}`);
+  const found = await r.json();
+  if (found.length !== 1) throw new Error(`userIdOf ${username}: ${found.length} matches`);
+  return found[0].id;
+}
+
 // The throwaway directory (container ldap-spi-it); no port is published, so it is driven with docker exec.
 const LDAP_BASE = 'dc=spi-it,dc=invalid';
 const LDAP_USERS = `ou=users,${LDAP_BASE}`;
@@ -184,6 +209,12 @@ export function ldapAddUser(uid: string, password: string): void {
   ldapSetPassword(uid, password);
 }
 
+/** Removes the entry if it exists, so a later realm's full sync does not import it. */
+export function ldapDeleteUser(uid: string): void {
+  const dn = `uid=${uid},${LDAP_USERS}`;
+  if (ldapExists(dn)) ldap('ldapdelete', [dn]);
+}
+
 /** Changes the password in the directory only (as X3 does): Keycloak is not told. */
 export function ldapSetPassword(uid: string, password: string): void {
   ldap('ldappasswd', ['-s', password, `uid=${uid},${LDAP_USERS}`]);
@@ -191,10 +222,12 @@ export function ldapSetPassword(uid: string, password: string): void {
 
 /**
  * Links the realm to the directory (users under ou=users, periodic sync off), runs one full sync, returns the provider id.
+ * `validatePasswordPolicy` is the provider's "Validate password policy" switch (Keycloak's default: off).
  * Registrations are not synced: users the tests create through Keycloak stay local, and the shared directory
  * collects no entries that a later run's full sync would import into its fresh realm.
  */
-export async function addLdapProvider(realm: string, editMode: 'WRITABLE' | 'READ_ONLY'): Promise<string> {
+export async function addLdapProvider(realm: string, editMode: 'WRITABLE' | 'READ_ONLY',
+  opts: { validatePasswordPolicy?: boolean } = {}): Promise<string> {
   const token = await adminToken();
   const config: Record<string, string> = {
     connectionUrl: 'ldap://ldap-spi-it:389', usersDn: LDAP_USERS, bindDn: LDAP_ADMIN_DN, bindCredential: LDAP_ADMIN_PASS,
@@ -202,6 +235,7 @@ export async function addLdapProvider(realm: string, editMode: 'WRITABLE' | 'REA
     uuidLDAPAttribute: 'entryUUID', userObjectClasses: 'inetOrgAnonAccount', searchScope: '1', trustEmail: 'true',
     pagination: 'true', editMode, importEnabled: 'true', syncRegistrations: 'false', enabled: 'true',
     fullSyncPeriod: '-1', changedSyncPeriod: '-1', cachePolicy: 'NO_CACHE',
+    validatePasswordPolicy: String(opts.validatePasswordPolicy ?? false),
   };
   const body = {
     name: 'ldap', providerId: 'ldap', providerType: 'org.keycloak.storage.UserStorageProvider',

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
   URL, auth, adminToken, createRealm, deleteRealm, createUser, setPassword, getUser, putUser, getCredentials,
   passwordGrant, ircdToken, ircCredentials, runRealmSetup, pbkdf2Cred, uniqueRealm, verifierMatches,
-  ldapAddUser, ldapSetPassword, addLdapProvider,
+  ldapAddUser, ldapSetPassword, ldapDeleteUser, addLdapProvider, legacyScramAttributes, userIdOf,
 } from '../helpers/kc-spi-it';
 
 const LEGACY_ATTRIBUTES = {
@@ -28,7 +28,7 @@ describe('SCRAM verifier lifecycle (password set, login, LDAP, account page, cle
     t = await ircdToken(realm);
     id = await createUser(realm, 'life');
   });
-  afterAll(async () => { await deleteRealm(realm); });
+  afterAll(async () => { await deleteRealm(realm); ldapDeleteUser('linked'); });
 
   it('a plaintext password set through Keycloak yields a matching verifier at once', async () => {
     expect(await setPassword(realm, id, 'First-Pass-1')).toBe(204);
@@ -108,5 +108,92 @@ describe('SCRAM verifier lifecycle (password set, login, LDAP, account page, cle
     const attrs = (await getUser(realm, legacy)).attributes ?? {};
     expect(Object.keys(attrs).filter(k => k.includes('scram'))).toEqual([]);
     expect(attrs.keep_me).toEqual(['yes']);
+  });
+});
+
+describe('a password changed through Keycloak for an LDAP-linked user (provider validates the password policy)', () => {
+  const realm = uniqueRealm('ldapset');
+  let t: string;
+  beforeAll(async () => {
+    await createRealm(realm, {passwordPolicy: 'scramSha256'});
+    runRealmSetup(realm, ['--service-client', 'ircd']);
+    t = await ircdToken(realm);
+    ldapAddUser('pwset', 'Ldap-Old-1');
+    await addLdapProvider(realm, 'WRITABLE', {validatePasswordPolicy: true});
+  });
+  afterAll(async () => { await deleteRealm(realm); ldapDeleteUser('pwset'); });
+
+  it('the verifier follows the new password at once', async () => {
+    expect((await passwordGrant(realm, 'pwset', 'Ldap-Old-1')).status).toBe(200);
+    expect(verifierMatches((await ircCredentials(realm, 'pwset', t)).body.scram, 'Ldap-Old-1')).toBe(true);
+    expect(await setPassword(realm, await userIdOf(realm, 'pwset'), 'Ldap-New-2')).toBe(204);
+    const s = (await ircCredentials(realm, 'pwset', t)).body.scram;
+    expect(verifierMatches(s, 'Ldap-New-2')).toBe(true);
+    expect(verifierMatches(s, 'Ldap-Old-1')).toBe(false);
+    expect((await passwordGrant(realm, 'pwset', 'Ldap-New-2')).status).toBe(200);   // the directory has it too
+  });
+});
+
+describe('a refused password change', () => {
+  const realm = uniqueRealm('refused');
+  let t: string;
+  beforeAll(async () => {
+    await createRealm(realm, {passwordPolicy: 'scramSha256 and length(12)'});
+    runRealmSetup(realm, ['--service-client', 'ircd']);
+    t = await ircdToken(realm);
+  });
+  afterAll(async () => { await deleteRealm(realm); });
+
+  it('stores nothing for a user without a password', async () => {
+    const id = await createUser(realm, 'nopass');
+    expect(await setPassword(realm, id, 'short-1')).toBe(400);
+    expect((await getCredentials(realm, id)).filter(c => c.type === 'irc-scram-sha256')).toEqual([]);
+  });
+
+  it('leaves an existing verifier as it was', async () => {
+    const id = await createUser(realm, 'keeper');
+    expect(await setPassword(realm, id, 'Long-Enough-Pass-1')).toBe(204);
+    const before = (await ircCredentials(realm, 'keeper', t)).body.scram;
+    expect(verifierMatches(before, 'Long-Enough-Pass-1')).toBe(true);
+    expect(await setPassword(realm, id, 'short-2')).toBe(400);
+    expect((await ircCredentials(realm, 'keeper', t)).body.scram).toEqual(before);
+  });
+});
+
+describe('legacy attribute verifiers (read by IRC servers deployed before the credential)', () => {
+  const realm = uniqueRealm('legattr');
+  const X3_SCRAM = ['x3_scram_salt', 'x3_scram_iterations', 'x3_scram_stored_key', 'x3_scram_server_key'];
+  let id: string;
+  beforeAll(async () => {
+    await createRealm(realm, {passwordPolicy: 'scramSha256'});
+    runRealmSetup(realm);
+    id = await createUser(realm, 'legacy-a');
+    expect(await setPassword(realm, id, 'Legacy-Pass-A')).toBe(204);
+  });
+  afterAll(async () => { await deleteRealm(realm); });
+  const scramKeys = async () => Object.keys((await getUser(realm, id)).attributes ?? {}).filter(k => k.includes('scram'));
+
+  it('a login keeps the families that are verifiers of the password just proven and removes the others', async () => {
+    const forA = legacyScramAttributes('Legacy-Pass-A');
+    const x3ForA = legacyScramAttributes('Legacy-Pass-A', 'x3_scram_sha256_');
+    const x3ForOther = legacyScramAttributes('Some-Other-Pass', 'x3_scram_');
+    expect(await putUser(realm, id, {attributes: {...forA, ...x3ForA, ...x3ForOther}})).toBe(204);
+    expect((await passwordGrant(realm, 'legacy-a', 'Legacy-Pass-A')).status).toBe(200);
+    const attrs = (await getUser(realm, id)).attributes;
+    expect(attrs).toMatchObject({...forA, ...x3ForA});
+    for (const k of X3_SCRAM) expect(attrs[k]).toBeUndefined();
+  });
+
+  it('a password set through Keycloak removes them', async () => {
+    expect((await scramKeys()).length).toBeGreaterThan(0);
+    expect(await setPassword(realm, id, 'Legacy-Pass-B')).toBe(204);
+    expect(await scramKeys()).toEqual([]);
+  });
+
+  it('a login with a different password removes attributes for the old one', async () => {
+    expect(await putUser(realm, id, {attributes: legacyScramAttributes('Legacy-Pass-A')})).toBe(204);
+    expect((await scramKeys()).length).toBe(4);
+    expect((await passwordGrant(realm, 'legacy-a', 'Legacy-Pass-B')).status).toBe(200);
+    expect(await scramKeys()).toEqual([]);
   });
 });
